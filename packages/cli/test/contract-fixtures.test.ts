@@ -169,7 +169,7 @@ describe("contract", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const c = yield* asEntry(yield* connect(layout.socket), repo)
-      const { id } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until((yield* Db).getSession(id), (row) => row?.executionState === "open")
       const worktree = (yield* (yield* Db).sessionDirectory(id))!
       const w = yield* wire
@@ -201,14 +201,14 @@ describe("contract", () => {
         "pi",
         false,
         { runtime: "herdr", address: { machine: "local", id: "w1:p8" } },
-        { projectDirectory: repo },
+        { agent: "coordinator", projectDirectory: repo },
       )
       const entryClient = authed(
         yield* connect(layout.socket),
         sessionHeaders({ sessionId: entry.sessionId, projectId: project }),
       )
       yield* TestClock.adjust("1 second")
-      const { id } = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.executionState === "open")
       yield* settled
       const worktree = (yield* db.sessionDirectory(id))!

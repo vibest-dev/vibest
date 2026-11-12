@@ -1,3 +1,4 @@
+import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -77,6 +78,7 @@ export const node = LayerNode.make({
   layer,
   deps: [
     services,
+    Agents.node,
     Bus.node,
     Db.node,
     Drain.node,

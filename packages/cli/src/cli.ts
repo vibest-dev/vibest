@@ -158,7 +158,7 @@ const run = Command.make(
       Argument.between(1, 2),
       Argument.withMetavar("[<harness>] <prompt>"),
       Argument.withDescription(
-        "The harness (leave it out to use the caller's harness, provider and model: yours, or the entry session's from a plain terminal; name one to switch), then the prompt: literal text, or - to read it from stdin. Put -- before the prompt so text starting with - is not read as an option",
+        "The harness (leave it out to use the caller's harness, provider and model; name one to switch), then the prompt: literal text, or - to read it from stdin. Put -- before the prompt so text starting with - is not read as an option",
       ),
     ),
     title: Flag.String("title").pipe(
@@ -202,6 +202,12 @@ const run = Command.make(
       ),
       Flag.optional,
     ),
+    agent: Flag.String("agent").pipe(
+      Flag.withDescription(
+        "The agent definition the session runs as: its system prompt and tool rules. The registered ids are listed when one is unknown",
+      ),
+      Flag.withDefault("general"),
+    ),
     session: sessionFlag,
   },
   (o) =>
@@ -226,6 +232,7 @@ const run = Command.make(
           return yield* client.Spawn({
             ...(request === undefined ? {} : { request }),
             harness,
+            agent: o.agent,
             prompt,
             name: Option.getOrUndefined(o.title),
             provider: Option.getOrUndefined(o.provider),
@@ -331,6 +338,8 @@ const entryFlags = {
   ),
 }
 
+const ENTRY_AGENT = "coordinator"
+
 const callerEnvOf = (): Record<string, string> =>
   Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
 
@@ -381,6 +390,7 @@ const startEntry =
         const opened = yield* withVibest(claim, (client) =>
           client.Launch({
             argv: again,
+            agent: ENTRY_AGENT,
             focus: !o.headless,
             runtime: placed.place.runtime,
             callerEnv: callerEnvOf(),
@@ -404,6 +414,7 @@ const startEntry =
       const chosen = yield* withVibest(claim, (client) =>
         client["Project.StartEntry"]({
           harness,
+          agent: ENTRY_AGENT,
           provider,
           model,
           runtime: placed.place.runtime,
@@ -416,6 +427,7 @@ const startEntry =
           terminal,
           client["Project.EntrySession"]({
             harness: chosen.harness,
+            agent: ENTRY_AGENT,
             fresh: o.fresh,
             terminal,
             runtime: chosen.runtime,
@@ -714,9 +726,8 @@ const notify = <A>(
   })
 
 const hookSession = Effect.gen(function* () {
-  const agent = yield* nonempty("VIBEST_AGENT")
   const sessionId = yield* nonempty("VIBEST_SESSION_ID")
-  return agent && sessionId ? { agent, sessionId } : undefined
+  return sessionId ? { sessionId } : undefined
 })
 
 export const integrationStop = (harness: string, raw: string) =>
@@ -777,17 +788,16 @@ const ready = hookCommand(
 
 const guard = Command.make("guard", { harness: hookHarness }, (o) =>
   Effect.gen(function* () {
-    const agent = yield* Config.String("VIBEST_AGENT")
     const sessionId = yield* Config.String("VIBEST_SESSION_ID")
     const input = yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin))
     const { answer } = yield* notify(o.harness, sessionId, "guard", (client) =>
-      client["Integration.Guard"]({ harness: o.harness, agent, input }),
+      client["Integration.Guard"]({ harness: o.harness, input }),
     )
     if (answer !== undefined) yield* json(answer)
   }),
 ).pipe(
   Command.withDescription(
-    "Pre-tool hook: reads the harness's pre-tool input on stdin, prints its answer when the rules of the agent in VIBEST_AGENT refuse the call",
+    "Pre-tool hook: reads the harness's pre-tool input on stdin, prints its answer when the rules of the session's agent refuse the call",
   ),
 )
 

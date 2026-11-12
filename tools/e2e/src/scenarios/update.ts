@@ -107,7 +107,7 @@ const olderAgents = async (
     }
   }
   const entryRow = () =>
-    read(`s.agent_type = 'main' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
+    read(`s.agent_type = 'coordinator' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
   const reported = (row: ReturnType<typeof entryRow>, v: string) =>
     row?.version === v && row.harness_session_id !== null && row.pid !== null
 

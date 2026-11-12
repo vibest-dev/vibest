@@ -26,20 +26,16 @@ export const skillsDir = path.join(path.dirname(url.fileURLToPath(import.meta.ur
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-const COORDINATOR = "coordinator"
-
-const guarded = (agent: string, sessionId: string | undefined) =>
+const guarded = (sessionId: string) =>
   Effect.gen(function* () {
     const pi = yield* Pi
     const layout = yield* Layout
     yield* pi.handle("tool_call", (e, ctx) =>
       Effect.gen(function* () {
-        const headers = yield* claimHeaders(
-          sessionId ? { _tag: "session", sessionId, pluginVersion: VERSION } : { _tag: "cli", repositoryRoot: ctx.cwd },
-        )
+        const headers = yield* claimHeaders({ _tag: "session", sessionId, pluginVersion: VERSION })
         const input = encodeJson({ tool_name: e.toolName, tool_input: e.input, cwd: ctx.cwd })
         const exit = yield* hookCall(layout.socket, headers, (client) =>
-          client["Integration.Guard"]({ harness: "pi", agent, input }),
+          client["Integration.Guard"]({ harness: "pi", input }),
         )
         if (Exit.isFailure(exit))
           return {
@@ -151,22 +147,16 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
   yield* pi.handle("agent_end", (_event, ctx) => send(ctx))
 })
 
-const coordinator: Role = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const pi = yield* Pi
-    yield* pi.handle("resources_discover", () => Effect.succeed({ skillPaths: [skillsDir] }))
-    yield* pi.handle("before_agent_start", (e) =>
-      Effect.sync(() => {
-        e.systemPromptOptions.sections = {}
-      }),
-    )
-    yield* pi.load(toolGroups)
-    yield* pi.load(compactUserMessages)
-    const sessionId = yield* Config.option(Config.String("VIBEST_SESSION_ID"))
-    if (Option.isNone(sessionId)) return
-    yield* reportSession(sessionId.value)
-  }),
-)
+const terminal = (sessionId: string): Role =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const pi = yield* Pi
+      yield* pi.handle("resources_discover", () => Effect.succeed({ skillPaths: [skillsDir] }))
+      yield* pi.load(toolGroups)
+      yield* pi.load(compactUserMessages)
+      yield* reportSession(sessionId)
+    }),
+  )
 
 const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role =>
   Layer.effectDiscard(
@@ -270,16 +260,15 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
 
 export const extension = Layer.unwrap(
   Effect.gen(function* () {
-    const agent = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT")))
-    if (!agent) return Layer.empty
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
+    if (!sessionId) return Layer.empty
     const processId = yield* Ref.make(Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROCESS"))))
-    const guarding: Role = Layer.effectDiscard(guarded(agent, sessionId))
-    const guard = sessionId ? Layer.merge(guarding, ready(sessionId, processId)) : guarding
-    const own = sessionId
-      ? Layer.mergeAll(session(sessionId, processId), inbox(sessionId, processId)).pipe(Layer.provideMerge(guard))
-      : guard
-    return agent === COORDINATOR ? coordinator.pipe(Layer.provideMerge(own)) : own
+    const guard: Role = Layer.merge(Layer.effectDiscard(guarded(sessionId)), ready(sessionId, processId))
+    return terminal(sessionId).pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(session(sessionId, processId), inbox(sessionId, processId)).pipe(Layer.provideMerge(guard)),
+      ),
+    )
   }),
 )
 

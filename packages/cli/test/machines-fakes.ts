@@ -193,16 +193,22 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
         })
       })
     const spawn = (call: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>, request = randomId()) =>
-      call(raw["Peer.Spawn"]({ repository: REMOTE, commit: COMMIT, prompt: "do it", request }))
+      call(raw["Peer.Spawn"]({ agent: "general", repository: REMOTE, commit: COMMIT, prompt: "do it", request }))
     return { run, db, raw, cli, as, spawn, spawns, directory, project, layout, id: (yield* run(VibestdIdentity)).id }
   })
 
 export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
   Effect.gen(function* () {
-    const started = yield* stack.db.startEntry(stack.project, "pi", false, {
-      runtime: "fake",
-      address: { machine: "local", id: "main-pane" },
-    })
+    const started = yield* stack.db.startEntry(
+      stack.project,
+      "pi",
+      false,
+      {
+        runtime: "fake",
+        address: { machine: "local", id: "main-pane" },
+      },
+      { agent: "coordinator" },
+    )
     const asEntry = <A, E>(effect: Effect.Effect<A, E>) =>
       RpcClient.withHeaders(
         effect,

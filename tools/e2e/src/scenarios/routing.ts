@@ -75,7 +75,7 @@ const entrySession = async (w: World) => {
   await until(
     "the entry session in vibest ls",
     async () => {
-      entry = (await sessions(w)).find((e) => e.agent === "main")
+      entry = (await sessions(w)).find((e) => e.agent === "coordinator")
       return entry !== undefined
     },
     60_000,

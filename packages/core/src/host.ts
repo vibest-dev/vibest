@@ -1,9 +1,12 @@
 import type {
+  AgentDefinition as PluginAgentDefinition,
+  AgentEditor,
   AgentMove,
   Harness as PluginHarness,
   MachineEvent,
   Runtime as PluginRuntime,
   SubscriptionReport,
+  Transform,
 } from "@vibest/plugin"
 import type { HookFailed, PluginInfo, TraceEntry } from "@vibest/schema/plugin"
 import type { AgentRefused } from "@vibest/schema/plugin"
@@ -15,6 +18,7 @@ import type { FailInput, MachineHook, PluginNote, SpawnDecision, StartInput } fr
 
 export type RuntimeDefinition = PluginRuntime.RuntimeDefinition
 export type HarnessDefinition = PluginHarness.HarnessDefinition
+export type AgentDefinition = PluginAgentDefinition
 
 export type Caller = PluginRuntime.RuntimeCaller & { readonly id: string; readonly name?: string }
 
@@ -34,6 +38,12 @@ export interface HarnessesShape extends PluginHarness.HarnessDomain {
   readonly all: ReadonlyArray<HarnessDefinition>
   readonly get: (id: string) => Effect.Effect<HarnessDefinition, HarnessUnavailable>
   readonly find: (id: string | null | undefined) => HarnessDefinition | undefined
+}
+
+export interface AgentsShape {
+  readonly all: ReadonlyArray<AgentDefinition>
+  readonly find: (id: string | null | undefined) => AgentDefinition | undefined
+  readonly transform: Transform<AgentEditor>
 }
 
 export interface PluginsShape {

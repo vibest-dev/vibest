@@ -21,6 +21,7 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
     (projectId) =>
       ({
         machine: { id: "local" },
+        agent: "general",
         root: repo,
         parentSessionId: "creator",
         projectId,
@@ -51,10 +52,16 @@ export const spawnWorking = (
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-      runtime: RUNTIME,
-      address: { machine: "local", id: "test/coord" },
-    })
+    const entry = yield* db.startEntry(
+      yield* projectOf(repo),
+      "pi",
+      false,
+      {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      },
+      { agent: "coordinator" },
+    )
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),

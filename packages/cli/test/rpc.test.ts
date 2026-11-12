@@ -8,7 +8,7 @@ import { projectRoot } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
 import { Plugin } from "@vibest/plugin"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
-import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
+import { ACCESS, VibestRpcs, VERSION } from "@vibest/protocol/rpc"
 import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effect"
 import { SqlClient } from "effect/sql"
@@ -73,11 +73,17 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       assert.strictEqual((yield* Effect.flip(c.Get({ id: "nothing!" })))._tag, "NoSuchSession")
       assert.deepStrictEqual(yield* c.Send({ id: id.slice(0, 12), message: "more" }), { id })
-      const peer = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "beside it", peer: id.slice(0, 10) })
+      const peer = yield* spawner.Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "beside it",
+        peer: id.slice(0, 10),
+      })
       assert.strictEqual(yield* db.sessionDirectory(peer.id), yield* db.sessionDirectory(id), "--peer takes a prefix")
       const twinWithSameFirst8 = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
       const row = (yield* db.getSession(id))!
@@ -100,9 +106,15 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
-      const first = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it", request: "spawn-1" })
+      const first = yield* spawner.Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "do it",
+        request: "spawn-1",
+      })
       assert.deepStrictEqual(
-        yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it", request: "spawn-1" }),
+        yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it", request: "spawn-1" }),
         first,
       )
       assert.deepStrictEqual(
@@ -144,7 +156,7 @@ describe("vibest.sock", () => {
       const sessions = yield* Sessions
       const c = asCli(raw, yield* makeRepository)
       const spawner = yield* asEntry(raw, yield* makeRepository)
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "cursor", prompt: "work" })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "cursor", prompt: "work" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       yield* TestClock.adjust("2 seconds")
       yield* raw.ExecutionEnd(
@@ -177,8 +189,8 @@ describe("vibest.sock", () => {
       const spawner = yield* asEntry(yield* client, repo)
       const exact = "e".repeat(500)
       const prompt = "p".repeat(501)
-      const fit = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: exact })
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt })
+      const fit = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: exact })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       yield* until(db.getSession(fit.id), (w) => w?.executionState === "open")
       const listed = new Map((yield* c.List({})).sessions.map((w) => [w.id, w]))
@@ -215,7 +227,7 @@ describe("vibest.sock", () => {
       const raw = yield* client
       const c = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       assert.deepStrictEqual(yield* c.Peek({ id }), { text: "pane tail" })
       yield* c.Peek({ id, lines: 100_000 })
@@ -233,6 +245,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const held = yield* runtime.hold("present")
       const launch = yield* c["Project.EntrySession"]({
+        agent: "coordinator",
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
@@ -242,6 +255,7 @@ describe("vibest.sock", () => {
       const saved = yield* Fiber.join(launch)
       assert.isString(saved.sessionId)
       const again = yield* c["Project.EntrySession"]({
+        agent: "coordinator",
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
@@ -259,9 +273,14 @@ describe("vibest.sock", () => {
       const raw = yield* client
       const c = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
-      const launch = yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
+      const launch = yield* c["Project.EntrySession"]({
+        agent: "coordinator",
+        harness: "claude",
+        fresh: false,
+        terminal: "test/p1",
+      })
       yield* raw["Session.Ready"](
         { id: launch.sessionId, conversation: { harness: "claude", id: "s1" } },
         {
@@ -366,7 +385,12 @@ describe("vibest.sock", () => {
         },
       )
       assert.strictEqual(
-        (yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })).harnessSessionId,
+        (yield* c["Project.EntrySession"]({
+          agent: "coordinator",
+          harness: "claude",
+          fresh: false,
+          terminal: "test/p1",
+        })).harnessSessionId,
         "s2",
         "a conversation reported by another harness than the session's is ignored",
       )
@@ -384,29 +408,6 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "an ordinary session whose agent is named entry is not an entry caller: the entry's calls are refused and its conversation payload is ignored",
-    Effect.gen(function* () {
-      const db = yield* Db
-      const repo = yield* makeRepository
-      const raw = yield* client
-      const { id } = yield* (yield* asEntry(raw, repo)).Spawn({
-        callerEnv: {},
-        harness: "pi",
-        prompt: "do it",
-        agent: "entry",
-      })
-      const headers = sessionHeaders({
-        sessionId: id,
-        projectId: (yield* db.getSession(id))!.projectId,
-        pluginVersion: "1.2.3",
-      })
-      assert.strictEqual(failureTag(yield* Effect.exit(raw.List({}, { headers }))), "Forbidden")
-      yield* raw["Session.Ready"]({ id, conversation: { harness: "pi", id: "named-entry" } }, { headers })
-      assert.notStrictEqual((yield* db.getSession(id))!.harnessSessionId, "named-entry")
-    }),
-  )
-
-  test(
     "an entry session manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
     Effect.gen(function* () {
       const db = yield* Db
@@ -415,6 +416,7 @@ describe("vibest.sock", () => {
         Effect.gen(function* () {
           const raw = yield* client
           const launched = yield* asCli(raw, root)["Project.EntrySession"]({
+            agent: "coordinator",
             harness: "pi",
             fresh: false,
             terminal: `test/${paneId}`,
@@ -423,7 +425,7 @@ describe("vibest.sock", () => {
         })
       const a = yield* asEntry(repo, "p1")
       const b = yield* asEntry(yield* makeRepository, "p2")
-      const { id } = yield* a.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         b.Send({ id, message: "x" }),
@@ -434,16 +436,19 @@ describe("vibest.sock", () => {
       for (const call of others) {
         const exit = yield* Effect.exit(call)
         assert.strictEqual(failureTag(exit), "Forbidden")
-        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another entry session/)
+        assert.match(
+          String(Exit.isFailure(exit) && Cause.pretty(exit.cause)),
+          /belongs to another entry session's project|was not started by this session/,
+        )
       }
       assert.deepInclude(yield* b.Get({ id }), { id, agent: "general" })
-      assert.strictEqual((yield* b.List({})).sessions[0]?.agent, "main")
+      assert.strictEqual((yield* b.List({})).sessions[0]?.agent, "coordinator")
       assert.deepStrictEqual(
-        (yield* b.List({ stopped: true })).sessions.filter((s) => s.agent !== "main"),
+        (yield* b.List({ stopped: true })).sessions.filter((s) => s.agent !== "coordinator"),
         [],
       )
       assert.deepStrictEqual(
-        (yield* b.List({})).sessions.filter((s) => s.agent !== "main"),
+        (yield* b.List({})).sessions.filter((s) => s.agent !== "coordinator"),
         [],
       )
       assert.strictEqual(
@@ -476,6 +481,7 @@ describe("vibest.sock", () => {
         Effect.gen(function* () {
           const raw = yield* client
           const launched = yield* asCli(raw, root)["Project.EntrySession"]({
+            agent: "coordinator",
             harness: "pi",
             fresh: false,
             terminal: `test/${paneId}`,
@@ -483,15 +489,15 @@ describe("vibest.sock", () => {
           return yield* asSession(raw, launched.sessionId, root)
         })
       const a = yield* asEntry(repo, "p1")
-      const { id } = yield* a.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       type Client = Effect.Success<typeof client>
       const protectedCalls = (
         c: Client,
       ): ReadonlyArray<readonly [string, Effect.Effect<unknown, { readonly _tag: string }>]> => [
-        ["Spawn", c.Spawn({ callerEnv: {}, harness: "pi", prompt: "more" })],
-        ["Launch", c.Launch({ callerEnv: {}, argv: [], focus: false })],
-        ["Project.StartEntry", c["Project.StartEntry"]({ runtime: "herdr" })],
+        ["Spawn", c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "more" })],
+        ["Launch", c.Launch({ agent: "coordinator", callerEnv: {}, argv: [], focus: false })],
+        ["Project.StartEntry", c["Project.StartEntry"]({ agent: "general", runtime: "herdr" })],
         ["Project.Open", c["Project.Open"]({})],
         ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
@@ -500,7 +506,10 @@ describe("vibest.sock", () => {
         ["Inbox.Take", c["Inbox.Take"](undefined)],
         ["Watch", Stream.runDrain(c.Watch(undefined))],
         ["Session.Seen", c["Session.Seen"]({ id: "x", finished: 0 })],
-        ["Project.EntrySession", c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })],
+        [
+          "Project.EntrySession",
+          c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }),
+        ],
         ["Project.Create", c["Project.Create"]({ directory: "x", from: ["y"] })],
         ["Project.FocusEntry", c["Project.FocusEntry"]({})],
         ["Project.RunningEntry", c["Project.RunningEntry"]({ terminal: "test/p1" })],
@@ -516,12 +525,15 @@ describe("vibest.sock", () => {
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
-        ["Integration.Guard", c["Integration.Guard"]({ harness: "pi", agent: "general", input: "{}" })],
+        ["Integration.Guard", c["Integration.Guard"]({ harness: "pi", input: "{}" })],
         ["Peer.Hello", c["Peer.Hello"]({ id, name: "x", callsMe: "y" })],
         ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
         ["Machine.List", c["Machine.List"]()],
         ["Machine.Remove", c["Machine.Remove"]({ name: "m" })],
-        ["Peer.Spawn", c["Peer.Spawn"]({ repository: "r", commit: "abc1234", prompt: "x", request: "q" })],
+        [
+          "Peer.Spawn",
+          c["Peer.Spawn"]({ agent: "general", repository: "r", commit: "abc1234", prompt: "x", request: "q" }),
+        ],
         ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
         ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
       ]
@@ -530,10 +542,13 @@ describe("vibest.sock", () => {
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
       const w = yield* asSession(yield* client, id)
       for (const [method, call] of protectedCalls(w).filter(
-        ([m]) => m !== "Send" && m !== "Integration.Guard" && m !== "Spawn" && !m.startsWith("Inbox."),
+        ([m]) =>
+          !([] as ReadonlyArray<string>)
+            .concat(ACCESS[m as keyof typeof ACCESS])
+            .some((access) => access === "agent" || access === "session" || access === "open"),
       ))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
-      const child = yield* w.Spawn({ callerEnv: {}, harness: "pi", prompt: "from a session" })
+      const child = yield* w.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "from a session" })
       assert.deepStrictEqual(yield* db.creatorOf(child.id), { local: id })
 
       yield* a["Session.Ready"]({ id: (yield* db.entryOf((yield* db.getSession(id))!.projectId))!.id })
@@ -578,11 +593,15 @@ describe("vibest.sock", () => {
       const raw = yield* client
       const cli = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const session = yield* asSession(raw, id)
-      const entry = (yield* cli["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" }))
-        .sessionId
+      const entry = (yield* cli["Project.EntrySession"]({
+        agent: "coordinator",
+        harness: "claude",
+        fresh: false,
+        terminal: "test/p1",
+      })).sessionId
       yield* session.Send({ id: entry, message: "first" })
       assert.match((yield* db.latestInbox(entry, "send"))!.message, /first/)
       const listed = (yield* cli.List({})).sessions
@@ -723,14 +742,17 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      const first = yield* Effect.flip(c["Project.StartEntry"]({ runtime: "herdr" }))
+      const first = yield* Effect.flip(c["Project.StartEntry"]({ agent: "general", runtime: "herdr" }))
       assert.strictEqual(first._tag, "LaunchFailed")
       assert.match(first.message, /no harness to inherit/)
-      assert.strictEqual((yield* c["Project.StartEntry"]({ runtime: "herdr", harness: "pi" })).harness, "pi")
+      assert.strictEqual(
+        (yield* c["Project.StartEntry"]({ agent: "general", runtime: "herdr", harness: "pi" })).harness,
+        "pi",
+      )
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
-      yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
-      assert.strictEqual((yield* c["Project.StartEntry"]({ runtime: "herdr" })).harness, "claude")
+      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "claude", fresh: false, terminal: "test/p1" })
+      assert.strictEqual((yield* c["Project.StartEntry"]({ agent: "general", runtime: "herdr" })).harness, "claude")
     }),
     {
       plugins: [
@@ -755,13 +777,13 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const pane = "w1:coord"
       yield* herdr.seedAgent(pane)
-      yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: pane })
+      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: pane })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
       yield* until(c.List({}), (list) => list.sessions[0]?.status === "working")
-      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "main", status: "working" })
+      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "working" })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
       yield* until(c.List({}), (list) => list.sessions[0]?.status === "idle")
-      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "main", status: "idle" })
+      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "idle" })
     }),
     { statusEvents: true },
   )
@@ -774,7 +796,7 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       yield* Ref.set(herdr.reachable, false)
       const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
@@ -790,10 +812,16 @@ describe("vibest.sock", () => {
       const path = yield* Path.Path
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.startEntry(projectId, "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "test/main" },
-      })
+      yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "test/main" },
+        },
+        { agent: "coordinator" },
+      )
       const entry = (yield* db.entryOf(projectId))!
       const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: entry.id }))
       assert.strictEqual(failed._tag, "NoSuchSession")
@@ -813,10 +841,16 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       assert.strictEqual(yield* c["Project.FocusEntry"]({}), null)
       const projectId = yield* projectOf(repo)
-      yield* db.startEntry(projectId, "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "test/main" },
-      })
+      yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "test/main" },
+        },
+        { agent: "coordinator" },
+      )
       assert.strictEqual(yield* c["Project.FocusEntry"]({}), null)
       yield* herdr.seedAgent("test/main")
       const focused = yield* c["Project.FocusEntry"]({})
@@ -832,10 +866,16 @@ describe("vibest.sock", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.startEntry(projectId, "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "test/main" },
-      })
+      yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "test/main" },
+        },
+        { agent: "coordinator" },
+      )
       yield* herdr.seedAgent("test/main")
       const focused = yield* asCli(yield* client, repo)["Project.FocusEntry"]({})
       assert.strictEqual(focused?.focused, false)
@@ -850,8 +890,18 @@ describe("vibest.sock", () => {
       const fs = yield* FileSystem.FileSystem
       const a = yield* makeRepository
       const b = yield* makeRepository
-      const one = yield* (yield* asEntry(yield* client, a)).Spawn({ callerEnv: {}, harness: "pi", prompt: "one" })
-      const two = yield* (yield* asEntry(yield* client, b)).Spawn({ callerEnv: {}, harness: "pi", prompt: "two" })
+      const one = yield* (yield* asEntry(yield* client, a)).Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "one",
+      })
+      const two = yield* (yield* asEntry(yield* client, b)).Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "two",
+      })
       const outside = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-outside-" }))
       const db = yield* Db
       const entries = new Set([
@@ -872,13 +922,20 @@ describe("vibest.sock", () => {
       const db = yield* Db
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.startEntry(projectId, "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "test/main" },
-      })
+      yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "test/main" },
+        },
+        { agent: "coordinator" },
+      )
       const before = (yield* db.entryOf(projectId))!.id
       const failed = yield* Effect.flip(
         asCli(yield* client, repo).Launch({
+          agent: "coordinator",
           callerEnv: {},
           argv: ["/bin/vibest", "--harness", "cursor", "--new"],
           focus: false,

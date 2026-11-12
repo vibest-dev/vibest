@@ -19,7 +19,7 @@ import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { FakeGit, harnessesLayer, makeRepository, tempDirectory } from "./fakes.ts"
+import { agentsLayer, FakeGit, harnessesLayer, makeRepository, tempDirectory } from "./fakes.ts"
 import { database } from "./unit-helpers.ts"
 
 layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)), harnessesLayer([pi, claude, cursor])))(
@@ -529,12 +529,14 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
           ) =>
             Launch.entryCommand({
               harness: h,
+              agent: "coordinator",
               root: repo,
               provider,
               model: null,
               session,
             }).pipe(
               Effect.provide(harness),
+              Effect.provide(agentsLayer),
               Effect.provide(
                 ConfigProvider.layerAdd(
                   ConfigProvider.fromUnknown({
@@ -576,7 +578,6 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
               { sessionId: "abcd1234-abcd-4abc-8abc-abcd1234abcd", harnessSessionId: null, projectId: PROJECT }
             ),
           )
-          assert.strictEqual((yield* Effect.flip(run("cursor", null, "", counted)))._tag, "HarnessUnavailable")
           assert.include((yield* Effect.flip(run("pi", null, "", counted))).message, "vibest's pi plugin is missing")
           assert.strictEqual(
             (yield* Effect.flip(run("claude", null, "", counted, "openai")))._tag,

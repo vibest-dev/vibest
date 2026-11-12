@@ -57,10 +57,16 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      const entry = yield* db.startEntry(yield* projectOf(repo), entryHarness, false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        entryHarness,
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* herdr.seedAgent("test/coord")
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), ...input, archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -148,10 +154,16 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      const entry = yield* db.startEntry(yield* projectOf(repo), "pulling-claude", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "pulling-claude",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* db.noteConversation(entry.sessionId, "claude-1")
       yield* herdr.seedAgent("test/coord")
       const sessions = yield* Sessions

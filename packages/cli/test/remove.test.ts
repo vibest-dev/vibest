@@ -36,6 +36,7 @@ const workingSession = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const { id } = yield* sessions.spawn({
+    agent: "general",
     machine: { id: "local" },
     root: repo,
     parentSessionId: "creator",

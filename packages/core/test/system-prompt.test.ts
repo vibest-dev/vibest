@@ -1,12 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
-import { coordinatorSystemPrompt, projectText, sessionSystemPrompt } from "@vibest/core/system-prompt"
+import { projectText, systemPrompt } from "@vibest/core/system-prompt"
 import { Effect, FileSystem, Path } from "effect"
 
 import { tempDirectory } from "./lib/directory.ts"
 import * as Platform from "./platform/bun.ts"
 
 const promptOf = (dir: string, text: { preferences: string; memories: string }) =>
-  sessionSystemPrompt({ id: "a", projectDir: dir, vibest: ["vibest"], ...text })
+  systemPrompt({ system: "You are an agent.\n", id: "a", projectDir: dir, vibest: ["vibest"], ...text })
 
 describe("projectText: preferences.md and the memory index injected into every agent's system prompt", () => {
   it.effect(
@@ -51,10 +51,6 @@ describe("projectText: preferences.md and the memory index injected into every a
         )
         const prompt = promptOf(dir, text)
         assert.include(prompt, "# User preferences\n\nPrefer short diffs.")
-        assert.include(
-          coordinatorSystemPrompt({ projectDir: dir, ...text }),
-          "# User preferences\n\nPrefer short diffs.",
-        )
         assert.include(prompt, "# Project memories\n\n")
         assert.notInclude(prompt, "# Project instructions")
         assert.notInclude(prompt, "instructions.md")

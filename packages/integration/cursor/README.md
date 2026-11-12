@@ -17,7 +17,7 @@ vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`)
 A report that does not reach vibestd fails its hook (never blocking the execution) and appends the error to
 `$VIBEST_HOME/vibestd.log`. Nothing is written to the terminal.
 
-Outside a vibest agent (no `VIBEST_AGENT` in the environment) the hooks do nothing.
+Outside a vibest agent (no `VIBEST_SESSION_ID` in the environment) the hooks do nothing.
 
 ## Use
 

@@ -10,8 +10,7 @@ export const make = Effect.gen(function* () {
   const pullingSession = (method: "Inbox.Subscribe" | "Inbox.Take") =>
     Effect.gen(function* () {
       const c = yield* Caller
-      if (c._tag !== "Entry" && c._tag !== "Session")
-        return yield* new Forbidden({ method, message: `${method} is a session's own` })
+      if (c._tag !== "Session") return yield* new Forbidden({ method, message: `${method} is a session's own` })
       return c.sessionId
     })
   return {

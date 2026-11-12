@@ -28,6 +28,7 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const opened = yield* c.Launch({
+        agent: "coordinator",
         callerEnv: {},
         argv: ["/bin/vibest", "--harness", "pi", "--model", "it's"],
         focus: true,
@@ -183,6 +184,7 @@ describe("vibest.sock", () => {
       const layout = yield* Layout
       const c = asCli(yield* client, repo)
       const started = yield* c["Project.EntrySession"]({
+        agent: "coordinator",
         harness: "pi",
         fresh: true,
         terminal: "test/p1",
@@ -203,7 +205,13 @@ describe("vibest.sock", () => {
       const db = yield* Db
       const c = asCli(yield* client, repo)
       const failed = yield* Effect.flip(
-        c["Project.EntrySession"]({ harness: "pi", fresh: true, terminal: "test/p9", runtime: "herdr" }),
+        c["Project.EntrySession"]({
+          agent: "coordinator",
+          harness: "pi",
+          fresh: true,
+          terminal: "test/p9",
+          runtime: "herdr",
+        }),
       )
       assert.strictEqual(failed._tag, "HarnessUnavailable")
       assert.deepStrictEqual(yield* db.listSessions(), [])
@@ -221,6 +229,7 @@ describe("vibest.sock", () => {
       const socket = JSON.stringify({ socketPath: "/h.sock" })
       const named = JSON.stringify({ session: "other" })
       yield* spawner.Spawn({
+        agent: "general",
         harness: "pi",
         prompt: "do it",
         callerEnv: { HERDR_SOCKET_PATH: "/h.sock", SECRET: "no" },
@@ -228,6 +237,7 @@ describe("vibest.sock", () => {
       yield* until(herdr.callsTo("open"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("open"))[0]?.target, socket)
       yield* c.Launch({
+        agent: "coordinator",
         argv: ["/bin/vibest", "--harness", "pi"],
         focus: false,
         runtime: "herdr",
@@ -260,6 +270,7 @@ describe("vibest.sock", () => {
       const linked = `${yield* tempDirectory("vibest-linked-")}/wt`
       yield* (yield* FakeGit).git.addWorktree(repo, linked)
       yield* asCli(yield* client, linked).Launch({
+        agent: "coordinator",
         callerEnv: {},
         argv: ["/bin/vibest", "--harness", "pi"],
         focus: false,
@@ -281,8 +292,20 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
-      const before = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "in herdr", runtime: "herdr" })
-      const after = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "in hc", runtime: "hc" })
+      const before = yield* spawner.Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "in herdr",
+        runtime: "herdr",
+      })
+      const after = yield* spawner.Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "in hc",
+        runtime: "hc",
+      })
       for (const id of [before.id, after.id]) yield* until(db.getSession(id), (s) => s?.executionState === "open")
       const rows = (yield* c.List({})).sessions
       assert.deepStrictEqual(

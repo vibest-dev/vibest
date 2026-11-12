@@ -28,7 +28,7 @@ describe.concurrent("Sessions", () => {
         "pi",
         false,
         { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
-        { provider: "openai", model: "fake-strong" },
+        { provider: "openai", model: "fake-strong", agent: "coordinator" },
       )
     })
   const chosen = (id: string) =>
@@ -123,7 +123,7 @@ describe.concurrent("Sessions", () => {
       assert.isFalse(yield* fs.exists(path.join(wt, "CLAUDE.md")))
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.project, placed.cwd], [repo, wt])
-      assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
+      assert.deepInclude(placed.env, { VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
       assert.strictEqual(placed.env.VIBEST_PROJECT_DIR, layout.project((yield* (yield* Db).getSession(id))!.projectId))
       const identity = (yield* (yield* Db).sessionIdentity(id))!
       assert.deepInclude(placed.env, { VIBEST_PROJECT_ID: String(identity.projectId), VIBEST_HARNESS: "pi" })
@@ -328,10 +328,16 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), env: { VBT_TOKEN: "s3cret" } })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)

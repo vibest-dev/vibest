@@ -18,7 +18,7 @@ type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
 const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
 
-const byOf = (c: CallerShape) => (c._tag === "Entry" || c._tag === "Session" ? c.sessionId : PEER_BY_USER)
+const byOf = (c: CallerShape) => (c._tag === "Session" ? c.sessionId : PEER_BY_USER)
 
 const peerOf = (method: string) =>
   Effect.flatMap(Caller, (c) => (c._tag === "Peer" ? Effect.succeed(c.peerId) : Effect.fail(notPeer(method))))
@@ -60,7 +60,7 @@ export const remoteHandlers = (
       Effect.gen(function* () {
         const { c, scope } = yield* reach("List")
         if (c === undefined) return { _tag: "Peer", ...scope } satisfies ListScope
-        if (c._tag === "Entry") return { _tag: "Project", id: c.projectId } satisfies ListScope
+        if (c._tag === "Session") return { _tag: "Project", id: c.projectId } satisfies ListScope
         if (all === true) return { _tag: "All" } satisfies ListScope
         return yield* deps.findAt(c.repositoryRoot).pipe(
           Effect.map((row): ListScope => (row === undefined ? { _tag: "Nothing" } : { _tag: "Project", id: row.id })),

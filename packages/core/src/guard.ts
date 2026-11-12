@@ -1,5 +1,7 @@
+import type { GuardCall } from "@vibest/plugin"
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 
+import { Agents } from "./agents.ts"
 import { Harnesses } from "./harness.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { Runtimes } from "./runtimes.ts"
@@ -121,7 +123,7 @@ export const splitCommand = (command: string): ReadonlyArray<ReadonlyArray<strin
   return [...commands.filter((argv) => argv.length > 0), ...nested.flatMap(splitCommand)]
 }
 
-const IDENTITY = /^VIBEST_(?:SESSION_ID|AGENT)(?:=|$)/
+const IDENTITY = /^VIBEST_SESSION_ID(?:=|$)/
 const base = (word: string) => word.slice(word.lastIndexOf("/") + 1)
 const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlyArray<string>>> = {
   env: ["-u", "--unset", "-C", "--chdir", "-S", "--split-string"],
@@ -202,7 +204,6 @@ const vibestArgs = (vibest: ReadonlyArray<string>, argv: ReadonlyArray<string>) 
 
 const RUNTIME_CONTROL = new Set(["agent", "pane", "tab", "workspace", "worktree", "server", "session"])
 const USER_MACHINE_COMMANDS = new Set(["connect", "machine"])
-const GH_UNSAFE = new Set(["alias", "extension", "ext", "config", "auth"])
 const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsWith("-")) ?? ""
 
 const loadedRuntimePrograms = Effect.flatMap(Runtimes, (runtimes) =>
@@ -212,8 +213,6 @@ const loadedRuntimePrograms = Effect.flatMap(Runtimes, (runtimes) =>
 export const shellBlock = (
   command: string,
   vibest: ReadonlyArray<string>,
-  coordinator: boolean,
-  harnessClis: ReadonlySet<string> = new Set(),
   runtimePrograms: ReadonlySet<string> = new Set(),
 ): string | undefined => {
   for (const p of programsOf(command)) {
@@ -221,15 +220,10 @@ export const shellBlock = (
     const name = base(program)
     if (runtimePrograms.has(name) && RUNTIME_CONTROL.has(firstWord(rest)))
       return "Agents must not control a terminal runtime's agents, panes, tabs, workspaces or worktrees; vibest manages them."
-    if (runtimePrograms.has(name) && !coordinator) return "Sessions do not run a terminal runtime; vibest manages it."
-    if (coordinator && harnessClis.has(name))
-      return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its executions as the coordinator's. Start agents with vibest run.`
-    if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest)))
-      return `gh ${firstWord(rest)} changes gh's credentials or what it runs; ask the user to.`
     const args = vibestArgs(vibest, p.argv)
     if (args === undefined) continue
     if (p.identity)
-      return "vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT; a command that changes or clears them is refused."
+      return "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused."
     const words = args.slice(0, args.includes("--") ? args.indexOf("--") : undefined)
     if (USER_MACHINE_COMMANDS.has(firstWord(words)))
       return `vibest ${firstWord(words)} manages connections between machines; only the user runs it.`
@@ -243,6 +237,11 @@ export const shellBlock = (
   }
   return undefined
 }
+
+const programsArgv = (command: string): ReadonlyArray<ReadonlyArray<string>> =>
+  programsOf(command)
+    .map((p) => p.argv)
+    .filter((argv) => argv.length > 0)
 
 const physical = (
   p: string,
@@ -308,22 +307,12 @@ export const toolPath = (raw: string, base: string, home: string) =>
     return path.isAbsolute(p) ? p : `${base}${path.sep}${p}`
   })
 
-export type Rules = (
-  call: ToolCall,
-) => Effect.Effect<
-  string | undefined,
-  Config.ConfigError,
-  Layout | Path.Path | FileSystem.FileSystem | Harnesses | Runtimes
->
-
 const inside = (p: string, dir: string, sep: string) => p === dir || p.startsWith(dir + sep)
 
-const projectDir = Effect.gen(function* () {
-  const own = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROJECT_DIR")))
-  return own ? Option.getOrUndefined(yield* physical(own)) : undefined
-})
+const physicalOption = (p: string) => Effect.map(physical(p), Option.getOrUndefined)
 
 const UNRESOLVED_LINK = "The path is a symlink that refers to itself or whose target cannot be read; refused."
+const BAD_URL = "The call names a file URL vibest cannot read; refused."
 
 const targetsOf = (
   raw: string,
@@ -345,49 +334,20 @@ const targetsOf = (
 const pathArgs = (input: ToolCall["input"]) =>
   [str(input.file_path), str(input.notebook_path), str(input.path)].filter((p): p is string => !!p)
 
-const COORDINATOR_EDITS =
-  "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
-
-export const coordinator: Rules = (call) =>
-  Effect.gen(function* () {
-    const tool = call.tool.toLowerCase()
-    if (SHELL_TOOLS.has(tool)) {
-      const command = shellCommand(call.input)
-      if (command === undefined) return "The shell call has no command string; refused."
-      const clis = new Set((yield* Harnesses).all.map((definition) => definition.binary))
-      return shellBlock(command, yield* VibestCommand, true, clis, yield* loadedRuntimePrograms)
-    }
-    if (!fileWritingTool(call.tool)) return undefined
-    const own = yield* projectDir
-    const raws = pathArgs(call.input)
-    if (own === undefined || raws.length === 0) return COORDINATOR_EDITS
-    const sep = (yield* Path.Path).sep
-    for (const raw of raws) {
-      const targets = yield* targetsOf(raw, call.cwd)
-      if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
-      if (targets === undefined || !targets.every((t) => inside(t, own, sep))) return COORDINATOR_EDITS
-    }
-    return undefined
-  })
-
 const OFF_LIMITS =
   "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
 
 const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
 const SHELL_SEARCH = /(?:^|[\s;&|(])(?:rg|ag|ack|grep|egrep|find|fd|tree|du)\s/
 
-export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCall) {
+const floor = Effect.fn("Guard.floor")(function* (call: ToolCall, projectFolder: string | undefined) {
   const path = yield* Path.Path
   const layout = yield* Layout
-  const projectsOpt = yield* physical(layout.projects)
-  const homeOpt = yield* physical(layout.home)
-  if (Option.isNone(projectsOpt) || Option.isNone(homeOpt)) return OFF_LIMITS
-  const projects = projectsOpt.value
-  const vibestHome = homeOpt.value
-  const own = yield* projectDir
-  const inOwn = (target: string) => own !== undefined && inside(target, own, path.sep)
+  const projects = yield* physicalOption(layout.projects)
+  const vibestHome = yield* physicalOption(layout.home)
+  if (projects === undefined || vibestHome === undefined) return OFF_LIMITS
+  const inOwn = (target: string) => projectFolder !== undefined && inside(target, projectFolder, path.sep)
   const resolve = (raw: string) => targetsOf(raw, call.cwd)
-  const BAD_URL = "The call names a file URL vibest cannot read; refused."
   const blocked = (target: string, search: boolean) =>
     (search && inside(projects, target, path.sep)) || (inside(target, projects, path.sep) && !inOwn(target))
   const tool = call.tool.toLowerCase()
@@ -395,11 +355,11 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   if (SHELL_TOOLS.has(tool)) {
     const command = shellCommand(call.input)
     if (command === undefined) return "The shell call has no command string; refused."
-    const reason = shellBlock(command, yield* VibestCommand, false, new Set<string>(), yield* loadedRuntimePrograms)
+    const reason = shellBlock(command, yield* VibestCommand, yield* loadedRuntimePrograms)
     if (reason) return reason
     const search = SHELL_SEARCH.test(command)
-    const cwd = yield* physical(call.cwd)
-    if (Option.isNone(cwd) || blocked(cwd.value, false)) return OFF_LIMITS
+    const cwd = yield* physicalOption(call.cwd)
+    if (cwd === undefined || blocked(cwd, false)) return OFF_LIMITS
     for (const word of command.match(SHELL_WORDS) ?? []) {
       if (!word.includes("/") && !word.startsWith("~") && !word.includes(".vibest")) continue
       if (word.includes(".vibest") && /[*?[{$]/.test(word)) return OFF_LIMITS
@@ -423,6 +383,18 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   return undefined
 })
 
+const writesOf = Effect.fn("Guard.writesOf")(function* (call: ToolCall) {
+  if (!fileWritingTool(call.tool)) return { writes: undefined }
+  const writes: Array<string> = []
+  for (const raw of pathArgs(call.input)) {
+    const targets = yield* targetsOf(raw, call.cwd)
+    if (targets === UNRESOLVED_LINK) return { refused: UNRESOLVED_LINK }
+    if (targets === undefined) return { refused: BAD_URL }
+    writes.push(...targets)
+  }
+  return { writes }
+})
+
 const decodePreToolUse = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Struct({
@@ -434,14 +406,11 @@ const decodePreToolUse = Schema.decodeUnknownEffect(
   ),
 )
 
-export const COORDINATOR = "coordinator"
-export const GENERAL = "general"
-
-export const rulesOf = (agent: string): Rules => (agent === COORDINATOR ? coordinator : session)
-
-export const check = (agent: string, raw: string) =>
+export const check = (
+  session: { readonly id: string; readonly agent: string; readonly projectDir: string },
+  raw: string,
+) =>
   Effect.gen(function* () {
-    const rules = rulesOf(agent)
     const input = yield* decodePreToolUse(raw)
     const path = yield* Path.Path
     const roots = input.workspace_roots ?? []
@@ -453,6 +422,30 @@ export const check = (agent: string, raw: string) =>
       return yield* Effect.fail(new Error("tool_input.cwd is not a string"))
     const ownPath = own ? yield* toolPath(own, base, yield* Config.String("HOME")) : base
     if (ownPath === undefined) return yield* Effect.fail(new Error("tool_input.cwd is a file URL vibest cannot read"))
-    const cwd = path.normalize(ownPath)
-    return yield* rules({ tool: input.tool_name, input: input.tool_input, cwd })
+    const call: ToolCall = { tool: input.tool_name, input: input.tool_input, cwd: path.normalize(ownPath) }
+    const projectFolder = yield* physicalOption(session.projectDir)
+    const refused = yield* floor(call, projectFolder)
+    if (refused) return refused
+    const definition = (yield* Agents).find(session.agent)
+    if (definition === undefined)
+      return `The agent definition ${session.agent} of session ${session.id} is not registered (its plugin is unloaded or failed to load); tool calls are refused.`
+    const guard = definition.guard
+    if (guard === undefined) return undefined
+    const written = yield* writesOf(call)
+    if ("refused" in written) return written.refused
+    const guardCall: GuardCall = {
+      ...call,
+      programs: SHELL_TOOLS.has(call.tool.toLowerCase()) ? programsArgv(shellCommand(call.input) ?? "") : [],
+      writes: written.writes,
+      session: {
+        id: session.id,
+        projectFolder: projectFolder ?? "",
+        harnessBinaries: new Set((yield* Harnesses).all.map((harness) => harness.binary)),
+        runtimePrograms: yield* loadedRuntimePrograms,
+      },
+    }
+    return yield* Effect.try({
+      try: () => guard(guardCall),
+      catch: (error) => `The guard of agent ${definition.id} failed (${String(error)}); refused.`,
+    }).pipe(Effect.catch((reason) => Effect.succeed(reason)))
   })

@@ -82,8 +82,8 @@ export interface Context {
 
 export interface AgentStartBefore {
   readonly project: string                                    // Project directory; readonly enforced at type level only, not checked at runtime
-  readonly agentType: string                                  // "main" for the Project's main Agent, else the definition
-  readonly parentSessionId: string | undefined                // who asked; undefined for the main Agent
+  readonly agent: string                                      // the agent definition id
+  readonly parentSessionId: string | undefined                // who asked; undefined for the entry session
   readonly access: "read" | "write"
   readonly harnesses: ReadonlyArray<HarnessOption>            // every harness as preflight saw it
   readonly subscriptions: ReadonlyArray<SubscriptionSnapshot> // logins and usage windows, per (harness, provider)

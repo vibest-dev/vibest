@@ -2,7 +2,6 @@ import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { NoSuchSession } from "@vibest/core/sessions"
 import {
-  AGENT_HEADER,
   CALLER_HEADER,
   CWD_HEADER,
   HARNESS_HEADER,
@@ -165,17 +164,12 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
         return yield* bad(
           `${method} claims project ${who.project}; session ${who.row.id} is in project ${who.row.projectId}`,
         )
-      const row = who.row
-      if (row.entry) {
-        return {
-          _tag: "Entry",
-          sessionId: row.id,
-          projectId: row.projectId,
-          ...(repository._tag === "Some" ? { repositoryRoot: repository.value } : {}),
-        } satisfies CallerShape
-      }
-      if (repository._tag === "Some") return yield* bad(`${method} is a session; a repository is not its identity`)
-      return { _tag: "Session", sessionId: row.id, projectId: row.projectId } satisfies CallerShape
+      return {
+        _tag: "Session",
+        sessionId: who.row.id,
+        projectId: who.row.projectId,
+        ...(repository._tag === "Some" ? { repositoryRoot: repository.value } : {}),
+      } satisfies CallerShape
     }
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })
@@ -197,7 +191,6 @@ const noteIntegration = (db: Db["Service"], read: Read): Effect.Effect<void> =>
         `session ${sessionId} runs integration ${integration.version} (protocol ${integration.protocol})`,
       ).pipe(
         Effect.annotateLogs({
-          agent: read(AGENT_HEADER) ?? "",
           harness: read(HARNESS_HEADER) ?? "",
           cwd: decodeURIComponent(read(CWD_HEADER) ?? ""),
           runtime: read(RUNTIME_HEADER) ?? "",

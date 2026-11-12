@@ -88,7 +88,7 @@ const claudeEntry = async (
       ...settings,
       permissions: {
         ...settings.permissions,
-        allow: [...(settings.permissions?.allow ?? []), `Bash(${binary} run:*)`],
+        allow: [...(settings.permissions?.allow ?? []), "Bash"],
       },
     }),
   )
@@ -104,7 +104,7 @@ const claudeEntry = async (
     async () => {
       entryId =
         (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
-          (e) => e.agent === "main",
+          (e) => e.agent === "coordinator",
         )?.id ?? ""
       return entryId !== ""
     },
@@ -512,7 +512,7 @@ const checks: ReadonlyArray<Check> = [
         })
         const entryRows = async () =>
           (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).filter(
-            (e) => e.agent === "main",
+            (e) => e.agent === "coordinator",
           )
         await until("the entry session in vibest ls", async () => (await entryRows()).length === 1, 30_000)
         const reached = (what: string, marker: string) =>
