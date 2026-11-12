@@ -1,4 +1,4 @@
-import { ExecutionAccepted, type InboxKind } from "@vibest/schema/event"
+import { ExecutionAccepted, ExecutionRetyped, type InboxKind } from "@vibest/schema/event"
 import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
@@ -327,6 +327,10 @@ export const inboxMethods = (store: Store) => {
         Effect.gen(function* () {
           if ((yield* openExecution(sessionId)) !== execution || (yield* acceptedAt(sessionId, execution)) !== null)
             return undefined
+          const [handed] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM event
+            WHERE aggregate = ${sessionId} AND type = 'execution.retyped' AND json_extract(data, '$.execution') = ${execution}`
+          if (handed!.n > 0) return undefined
+          yield* emit(ExecutionRetyped, { sessionId, data: { execution } })
           return yield* inbox(
             sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = 'delivered' AND m.execution_id = ${execution}`,
           )

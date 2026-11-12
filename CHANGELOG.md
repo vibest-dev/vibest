@@ -20,8 +20,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   after an Esc until someone types), the plugin reports the refusal for that execution and vibestd types the same batch
   into the pane, so the execution stays one and the batch is delivered once. A pulled batch is accepted only when the harness reports it (never from the runtime's working or blocked state), so a
   batch the harness never accepts ends `not_started` after the confirmation timeout whatever state the runtime
-  reports; the fallback typing of a refused batch happens once per execution and only while that execution is open and
-  unaccepted.
+  reports; the catalog adds `execution.retyped` (no read-model change; an older vibest cannot read a log that holds it),
+  recorded in the same transaction that reads a refused batch, so a refusal reported again, also to a restarted
+  vibestd, does not type it again while that execution is open and unaccepted.
 - **`vibest run` runs only inside a session** (users, scripts): a `vibest run` in a plain terminal is refused with a
   pointer to bare `vibest`, which opens a session. Every session `vibest run` starts, here or on another machine, records
   the session that ran it as its creator; `NoCallingSession` is the new error. Any session, not only the entry

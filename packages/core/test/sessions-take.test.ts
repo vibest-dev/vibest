@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
+import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -105,6 +106,25 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
+    "a refusal reported again to a restarted vibestd types the batch no second time",
+    Effect.gen(function* () {
+      const { sessions, inbox, entryId } = yield* entryAsked
+      const herdr = yield* FakeRuntime
+      const { execution } = (yield* inbox.take(entryId, undefined))!
+      yield* sessions.typeTaken(entryId, execution)
+      const restarted = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      )
+      yield* restarted.typeTaken(entryId, execution)
+      const typed = yield* herdr.callsTo("send")
+      assert.lengthOf(
+        typed.filter((c) => c.text?.includes("a question")),
+        1,
+      )
+    }),
+  )
+
+  test(
     "a batch accepted and closed before the fallback send is not typed, and typing opens no second execution",
     Effect.gen(function* () {
       const { db, sessions, inbox, entryId } = yield* entryAsked
@@ -145,7 +165,6 @@ describe.concurrent("an idle session takes its next batch", () => {
         yield* herdr.updateAgent("test/coord", (agent) => ({ ...agent, status, seq: agent.seq + 1 }))
         yield* sessions.check(entryId)
         assert.isFalse(yield* db.executionAccepted(entryId))
-        if (status === "blocked") return
         yield* TestClock.adjust("9 seconds")
         yield* sessions.check(entryId)
         yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")

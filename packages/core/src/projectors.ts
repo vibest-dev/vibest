@@ -231,6 +231,7 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
     sql`UPDATE execution SET accepted_at = ${fact.at}
       WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.execution} AND outcome IS NULL
         AND accepted_at IS NULL`,
+  "execution.retyped": () => Effect.void,
   "execution.ended": (fact, sql) =>
     Effect.andThen(
       sql`UPDATE execution SET outcome = ${fact.data.outcome}, reply = ${fact.data.reply ?? null},

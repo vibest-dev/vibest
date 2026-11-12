@@ -451,18 +451,6 @@ export class Sessions extends Context.Service<
           if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
           return
         }
-        if (s === "blocked") {
-          if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && !session.entry) {
-            const since = new Date(yield* Clock.currentTimeMillis)
-            const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
-            yield* notice(
-              session,
-              `${shortId(id)} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${shortId(id)} to see the request.`,
-            )
-          }
-          return
-        }
-        yield* Ref.set(r.blockedNotified, false)
         const worked = yield* db.executionTaken(id)
         const idle = s === "idle"
         const ended = idle && worked
@@ -482,6 +470,18 @@ export class Sessions extends Context.Service<
           return
         }
         if (unstarted) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
+        if (s === "blocked") {
+          if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && !session.entry) {
+            const since = new Date(yield* Clock.currentTimeMillis)
+            const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
+            yield* notice(
+              session,
+              `${shortId(id)} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${shortId(id)} to see the request.`,
+            )
+          }
+          return
+        }
+        yield* Ref.set(r.blockedNotified, false)
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
@@ -597,10 +597,8 @@ export class Sessions extends Context.Service<
             const session = yield* db.getSession(id)
             if (session === undefined) return
             const r = yield* track(id)
-            if ((yield* Ref.get(r.retyped)) === execution) return
             const rows = yield* db.unacceptedBatch(id, execution)
             if (rows === undefined || rows.length === 0) return
-            yield* Ref.set(r.retyped, execution)
             const h = yield* live(session)
             yield* Ref.set(r.prompting, true).pipe(
               Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
