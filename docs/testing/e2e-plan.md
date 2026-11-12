@@ -240,7 +240,7 @@ it; the install beside `pi` is the one to use.
 The capabilities are specified in [docs/features](../features/), one file per area, in plain language: each has an id
 and says when it counts as working. Those files are for the agent that leads a verification (the `verify-features`
 skill, `.agents/skills/verify-features/SKILL.md`); no script reads them. Each E2E check carries the id of the capability
-it is about in its name (`S10-start` and `S10-pi` are about `S10`) and lists in `covers` the other ids it also proves;
+it is about in its name (`S10-launch` and `S10-pi` are about `S10`) and lists in `covers` the other ids it also proves;
 `bun tools/e2e/src/main.ts --list` prints every check's id, tier and covers as JSON. I6 is the runner's own check after
 every run.
 

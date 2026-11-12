@@ -77,7 +77,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a later send whose Enter is swallowed gets Enter again: the previous execution's start is no pickup",
+    "a later send whose Enter is swallowed gets Enter again: the previous execution's start is no pickup; never started, it fails and its sender gets a notice with the text",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* spawnWorking(yield* makeRepository)
@@ -93,6 +93,16 @@ describe.concurrent("Sessions", () => {
         return at >= 0 && calls.length > at + 1
       })
       assert.deepStrictEqual(sends[sends.findIndex((c) => c.text === "next") + 1]!.keys, ["enter"])
+      const db = yield* Db
+      yield* untilVirtual(db.inboxWithStatus(id, "failed"), (rows) => rows.length === 1, "1 second")
+      assert.deepStrictEqual(
+        (yield* db.inboxWithStatus(id, "failed")).map((r) => r.message),
+        ["next"],
+      )
+      assert.match(
+        (yield* sqlNotices(id)).at(-1)!,
+        new RegExp(`^A message to ${id} was not delivered: task_not_started: .*\\n\\nnext$`, "s"),
+      )
     }),
     { hooked: ["pi"] },
   )
