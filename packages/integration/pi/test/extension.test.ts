@@ -167,6 +167,25 @@ const cli = Effect.gen(function* () {
   return authed(yield* connect((yield* Layout).socket), cliHeaders(root))
 })
 
+const idleRow = <H extends "pi" | "claude">(harnessId: H) => ({
+  agent: "general",
+  name: "n",
+  harnessId,
+  provider: null,
+  model: null,
+  harnessSessionId: null,
+  runtime: "herdr",
+  address: { machine: "local", id: "test/p0" },
+  status: "idle" as const,
+  startedAt: 1,
+  exitedAt: 1,
+  executionState: "none" as const,
+  executionPromptedAt: 0,
+  metadata: {},
+  createdAt: 1,
+  lastActive: 1,
+})
+
 describe("pi-vibest", () => {
   it.effect(
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
@@ -177,24 +196,7 @@ describe("pi-vibest", () => {
         const fs = yield* FileSystem.FileSystem
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
-        const row = {
-          agent: "general",
-          name: "n",
-          harnessId: "pi" as const,
-          provider: null,
-          model: null,
-          harnessSessionId: null,
-          runtime: "herdr",
-          address: { machine: "local", id: "test/p0" },
-          status: "idle" as const,
-          startedAt: 1,
-          exitedAt: 1,
-          executionState: "none" as const,
-          executionPromptedAt: 0,
-          metadata: {},
-          createdAt: 1,
-          lastActive: 1,
-        }
+        const row = idleRow("pi")
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
         const coord = yield* db.startEntry(
           yield* projectOf("r"),
@@ -248,28 +250,7 @@ describe("pi-vibest", () => {
         const layout = yield* Layout
         const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const project = yield* projectOf("r")
-        yield* db.insertSession(
-          {
-            id,
-            agent: "general",
-            name: "n",
-            harnessId: "pi",
-            provider: null,
-            model: null,
-            harnessSessionId: null,
-            runtime: "herdr",
-            address: { machine: "local", id: "test/p0" },
-            status: "idle",
-            startedAt: 1,
-            exitedAt: 1,
-            executionState: "none",
-            executionPromptedAt: 0,
-            metadata: {},
-            createdAt: 1,
-            lastActive: 1,
-          },
-          project,
-        )
+        yield* db.insertSession({ id, ...idleRow("pi") }, project)
         const s = yield* session({
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: id,
@@ -296,24 +277,7 @@ describe("pi-vibest", () => {
         const layout = yield* Layout
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
-        const row = {
-          agent: "general",
-          name: "n",
-          harnessId: "claude" as const,
-          provider: null,
-          model: null,
-          harnessSessionId: null,
-          runtime: "herdr",
-          address: { machine: "local", id: "test/p0" },
-          status: "idle" as const,
-          startedAt: 1,
-          exitedAt: 1,
-          executionState: "none" as const,
-          executionPromptedAt: 0,
-          metadata: {},
-          createdAt: 1,
-          lastActive: 1,
-        }
+        const row = idleRow("claude")
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
         const coord = yield* db.startEntry(
           yield* projectOf("r"),
@@ -440,24 +404,7 @@ describe("pi-vibest", () => {
       const inbox = yield* Inbox
       const db = yield* Db
       yield* runtime.addPane("w1:p7", "ws", "/")
-      const row = {
-        agent: "general",
-        name: "n",
-        harnessId: "pi" as const,
-        provider: null,
-        model: null,
-        harnessSessionId: null,
-        runtime: "herdr",
-        address: { machine: "local", id: "test/p0" },
-        status: "idle" as const,
-        startedAt: 1,
-        exitedAt: 1,
-        executionState: "none" as const,
-        executionPromptedAt: 0,
-        metadata: {},
-        createdAt: 1,
-        lastActive: 1,
-      }
+      const row = idleRow("pi")
       yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
       yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
       const coord = yield* db.startEntry(
@@ -544,24 +491,7 @@ describe("pi-vibest", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const sql = yield* SqlClient.SqlClient
-      const row = {
-        agent: "general",
-        name: "n",
-        harnessId: "pi" as const,
-        provider: null,
-        model: null,
-        harnessSessionId: null,
-        runtime: "herdr",
-        address: { machine: "local", id: "test/p0" },
-        status: "idle" as const,
-        startedAt: 1,
-        exitedAt: 1,
-        executionState: "none" as const,
-        executionPromptedAt: 0,
-        metadata: {},
-        createdAt: 1,
-        lastActive: 1,
-      }
+      const row = idleRow("pi")
       yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
       const coord = yield* db.startEntry(
         yield* projectOf("r"),
