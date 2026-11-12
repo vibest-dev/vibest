@@ -30,10 +30,6 @@ copy of the user's settings; only the model is fake.
 | Releases      | `npm_config_registry` and `VIBEST_DOWNLOAD_URL` point at a local stand-in that names this checkout's version as the latest, so `vibest update` and the update notice never reach npm or GitHub and never install into the user's global npm                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Secrets       | values of secret-looking login variables and `VIBEST_E2E_ENV` values, and the user's model, provider and account values (Claude `model`, Pi `defaultProvider`/`defaultModel`, Cursor model fields and account ids), are shown as `<redacted>` in output and evidence; the run fails if evidence still holds one                                                                                                                                                                                                                                                                                                                                |
 
-A test that starts the built vibestd itself (`test/plugin-binary.test.ts`) asks it over its socket, never through the
-`vibest` CLI: the CLI starts a vibestd of its own when a Ping is slow and would leave a second, untracked one behind. It
-gives vibestd a `PATH` of the system directories only, so vibestd does not poll the harnesses the user installed.
-
 Every process a test or a check starts that could outlive it is recorded in the run's reap file
 (`<tmpdir>/vibest-reap-<run pid>` or `vibest-reap-e2e-<run pid>`, `tools/reap.ts`) with its command and start time:
 herdr servers, vibestd daemons, herdr-core cores and, under `pnpm test`, every Bun process a test starts (vitest's setup
@@ -218,10 +214,6 @@ above it the checks run nearly one at a time; that is the price of not flaking u
 CPU seconds over 60 idle seconds. It seeds the sessions in a temp home under a runtime kind that is not registered, so no
 runtime is called. `vibest ls` prints JSON already; it has no `--json` flag.
 
-In `pnpm test`, `cli.test.ts` starts a fresh Bun process for each `vibest` (about 0.3 s, several seconds on a loaded
-machine), up to twenty per test, so its tests run one at a time: run together they share the CPU, and on a two-core CI
-runner they cost twice as much (23 s for the file against 12 s in execution).
-
 The unit fakes (`packages/cli/test/fakes.ts`): `until` polls up to 2000 times 10 ms, about 20 s, under the 30 s test
 timeout. `withStdin` feeds a command from a file, not a pipe, so a command that exits without reading raises no EPIPE.
 Each node layer of a process chain gets a `-` filler argument, which Bun running as node drops. The test layer gives
@@ -273,9 +265,9 @@ Notes on particular checks:
   under HOME. H4 puts a sentinel Cursor CLI on PATH and fails if it runs; when a World changes HOME it removes the
   inherited SSH session variables, which H4 checks in a spawned process.
 - The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
-  `vibest integration guard` fails with no answer (`cli.test.ts`). Cursor's deny and allow answers through vibestd are
+  `vibest integration guard` fails with no answer. Cursor's deny and allow answers through vibestd are
   `guard.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
-  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; an entry session restarting through
+  drains the same way) is `stop.test.ts`; an entry session restarting through
   `VIBEST_COMMAND` (I11) is `restart.test.ts`.
 - The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,
   which runs the line with B's environment; agents on both sides run in isolated hc cores on fake models.

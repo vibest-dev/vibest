@@ -81,15 +81,6 @@ export const replyOf = (id: string) =>
     return row?.reply ?? undefined
   })
 
-export const sentBy = (id: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    return yield* sql<{ id: number }>`SELECT id FROM inbox WHERE sender_session_id = ${id} ORDER BY id`.pipe(
-      Effect.map((rows) => rows.map((r) => r.id)),
-      Effect.orDie,
-    )
-  })
-
 export const lastSentBy = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient

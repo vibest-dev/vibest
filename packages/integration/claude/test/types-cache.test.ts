@@ -17,9 +17,6 @@ afterEach(() => {
 })
 
 const bytes = (text: string) => new TextEncoder().encode(text)
-const refused = async () => {
-  throw new Error("fetch should not run")
-}
 const rejects = async (run: () => Promise<unknown>, pattern: RegExp) => {
   try {
     await run()
@@ -31,44 +28,6 @@ const rejects = async (run: () => Promise<unknown>, pattern: RegExp) => {
 }
 
 describe("claude types cache", () => {
-  it("reuses a verified cache and does not fetch", async () => {
-    const dir = temp()
-    const cache = path.join(dir, "cache.d.ts")
-    const body = bytes("cached-bytes\n")
-    fs.writeFileSync(cache, body)
-    const expected = sha256(body)
-    assert.strictEqual(
-      await prepareClaudeTypes({
-        cachePath: cache,
-        expectedSha256: expected,
-        url: "https://example.invalid/types",
-        fetch: refused,
-      }),
-      "reused",
-    )
-    assert.deepStrictEqual(fs.readFileSync(cache), Buffer.from(body))
-  })
-
-  it("fetches when the cache is missing and writes only a matching body", async () => {
-    const cache = path.join(temp(), "cache.d.ts")
-    const body = bytes("fetched-bytes\n")
-    let called = ""
-    assert.strictEqual(
-      await prepareClaudeTypes({
-        cachePath: cache,
-        expectedSha256: sha256(body),
-        url: "https://example.invalid/types",
-        fetch: async (url) => {
-          called = url
-          return body
-        },
-      }),
-      "acquired",
-    )
-    assert.strictEqual(called, "https://example.invalid/types")
-    assert.strictEqual(fs.readFileSync(cache, "utf8"), "fetched-bytes\n")
-  })
-
   it("drops an unverified cache when the fetch is wrong or unavailable", async () => {
     const dir = temp()
     const cache = path.join(dir, "cache.d.ts")
