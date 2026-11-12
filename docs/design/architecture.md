@@ -94,17 +94,18 @@ subagents. Everything else in this list is planned; each item says what runs tod
   natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
   is kept and read with `vibest inbox`. A harness that polls (Claude) or subscribes (Pi) pulls its batches when idle;
   any other harness (Cursor) is typed into, whichever session it runs. A row with no session to go to is dropped.
-- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the agent that started it, and sessions it started. An execution end writes only `execution.ended`, which carries the reply
+- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, and sessions it started; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
-  not say itself, and go to its creator (its living parent, else the entry session, else `origin_session` through the
-  outbox): its harness exited, its execution ended in an error, it never started, it waits on a permission. An
+  not say itself, and go to its nearest living creator (its parent, else the parent's parent and so on; a creator on another machine through the
+  outbox; none left, only the user reads it): its harness exited, its execution ended in an error, it never started, it waits on a permission. An
   undeliverable message goes back to its sender. Completed and interrupted executions send nothing, and nothing says an
   agent went idle.
 
-- **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
-  and where a new terminal opens (beside its spawner), never routing. It never decides routing.
+- **Provenance by parent.** `parent_session_id` records who spawned whom. It is the creator link: a session
+  may send only to its creator and to sessions it started, notices and sends to an ended creator go to the nearest
+  living one above it, management belongs to the nearest living creator, and a new terminal opens beside the live creator.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
-  bare `vibest` reopens, and the fallback when a recipient has ended. It is not identity. "One entry session per
+  bare `vibest` reopens. It is not identity, and no message falls back to it. "One entry session per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
 - **Harnesses registered by plugins**: a plugin adds a `HarnessDefinition` with
   `context.harness.transform((editor) => editor.add(definition))`, like a runtime with `context.runtime.transform`.
@@ -124,8 +125,8 @@ subagents. Everything else in this list is planned; each item says what runs tod
 ### 1.1 Orchestration
 
 The coordinator mode is the configuration of the default plugin `@vibest/plugin-coordinator` (planned as its own
-package; today the same behaviour is built into core and the builtin skills): a `main` definition (spawn,
-message children, inspect tools, entry), a `worker` definition, the `delegate` and `pipeline` skills,
+package; today the same behaviour is built into core and the builtin skills): a `coordinator` definition (spawn,
+message children, inspect tools), a `general` definition, the `delegate` and `pipeline` skills,
 archive-on-idle, and the notice policy. In `agent.start.before` it sets `reportTo` to the entry session
 when the user runs `vibest run` in a project that has one.
 
@@ -139,7 +140,7 @@ Every other mode is configuration of the same engine (planned):
 | Fan-out and gather                | a parent spawns N sessions and every result comes back to it (the default). Waiting for all N is a skill or a plugin; the engine does not gather                                                                                                                                               |
 | Reviewer loop                     | the implementer's `report_to` is the reviewer; the reviewer sends changes with `send`, and the implementer's result goes back to it by rule 1. A skill or a plugin counts the reviews                                                                                                          |
 | A person with a few agents        | no entry session is needed to run work, but `vibest run` is run by a session, so the person opens one with bare `vibest`. Results and notices are rows for the user, read with `vibest inbox` and the unread count in `ls`                                                                     |
-| Nested coordinator                | a `lead` definition (spawn, message children). main spawns a lead, the lead spawns workers; workers answer the lead, the lead answers main (its `report_to`). Management rights follow ancestry                                                                                                |
+| Nested coordinator                | a `lead` definition (spawn, message children). a coordinator spawns a lead, the lead spawns workers; workers answer the lead, the lead answers its creator. Management rights follow ancestry                                                                                                  |
 
 **Left to plugins and skills**, never the engine: gathering several results, loop and iteration limits, conditional
 routing, teams and shared task lists, and handoff between agents. The engine only guarantees that an execution woken by a

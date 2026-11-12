@@ -83,6 +83,9 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
+    sendToPeer: (sender: string, peer: string, session: string, message: string) =>
+      tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message })).pipe(Effect.orDie),
+
     queuedBy: (sessionId: string, request: string) =>
       queuedBy(sessionId, request).pipe(
         Effect.map((id) => id !== undefined),

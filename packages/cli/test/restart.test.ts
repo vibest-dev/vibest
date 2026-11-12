@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
 import { VibestCommand } from "@vibest/core/paths"
-import { noticeEnvelope, unwrapped } from "@vibest/core/replies"
+import { noticeEnvelope } from "@vibest/core/replies"
 import { CONTINUE, continueText, type Restarted } from "@vibest/core/restart"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
@@ -173,7 +173,7 @@ describe("restart in place", () => {
   )
 
   test(
-    "a Pi entry session (inbox subscribe) after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then its inbox holds one continue notice",
+    "a Pi entry session (inbox subscribe) with an open execution, after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then the continue notice is typed into the execution it continues",
     Effect.gen(function* () {
       const { db, sessions, id: sub, pid } = yield* busyPiSubagent
       const processes = yield* FakeProcesses
@@ -184,6 +184,9 @@ describe("restart in place", () => {
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
       yield* db.noteConversation(entryId, "conversation-1")
       yield* db.patchLive(entryId, { pid: 400 })
+      yield* db.startObserved(entryId, "work in flight", 1)
+      const interrupted = yield* db.openExecution(entryId)
+      assert.isDefined(interrupted)
       yield* herdr.endExecution(sub)
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([entryId, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
@@ -205,9 +208,13 @@ describe("restart in place", () => {
           [entryId, true],
         ],
       )
-      const notices = (yield* entryPending(db, projectId)).filter((r) => r.kind === "notice")
-      assert.lengthOf(notices, 1)
-      assert.strictEqual(unwrapped(notices[0]!.message), continueText(VERSION))
+      assert.deepStrictEqual(yield* entryPending(db, projectId), [], "the continuation waits behind nothing")
+      assert.strictEqual(yield* db.openExecution(entryId), interrupted, "the interrupted execution stays open")
+      assert.include(
+        (yield* herdr.callsTo("send")).map((c) => c.text),
+        noticeEnvelope(continueText(VERSION)),
+        "the continuation is typed into the execution it continues",
+      )
       const entryArgv = (yield* herdr.callsTo("run")).map((c) => c.argv).find((argv) => argv[0] === "env")
       assert.ok(entryArgv, "the entry session is restarted by typing env")
       assert.ok(entryArgv!.includes(`VIBEST_SESSION_ID=${entryId}`))
@@ -249,6 +256,7 @@ describe("restart in place", () => {
       const id = (yield* db.entryOf(projectId))!.id
       yield* db.noteConversation(id, "conversation-1")
       yield* db.patchLive(id, { pid: 400 })
+      yield* db.startObserved(id, "work in flight", 1)
       yield* processes.setTree(400, [400, 900])
       const held = yield* herdr.hold("run")
       yield* Effect.forkChild(sessions.restartLater([id], 900))
@@ -256,11 +264,10 @@ describe("restart in place", () => {
       yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* db.patchLive(id, { ready: 2, pid: 500 })
       yield* held.release()
-      const notices = yield* untilVirtual(
-        entryPending(db, projectId).pipe(Effect.map((rows) => rows.filter((row) => row.kind === "notice"))),
-        (rows) => rows.length > 0,
+      yield* untilVirtual(herdr.callsTo("send").pipe(Effect.map((calls) => calls.map((c) => c.text))), (texts) =>
+        texts.includes(noticeEnvelope(continueText(VERSION))),
       )
-      assert.strictEqual(unwrapped(notices[0]!.message), continueText(VERSION))
+      assert.deepStrictEqual(yield* entryPending(db, projectId), [])
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
   )
 

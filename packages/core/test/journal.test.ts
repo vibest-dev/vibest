@@ -541,6 +541,7 @@ describe("journal projectors", () => {
           id: ITEM_2,
           seq: queued!.seq,
           peerId: PEER,
+          recipient: null,
           sessionId: REMOTE,
           kind: "send",
           content: "archived",

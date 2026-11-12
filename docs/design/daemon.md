@@ -101,9 +101,13 @@ matches and before the protocol check, so an agent left on an old integration is
 it; the `vibest` CLI an agent runs sends no plugin version and records nothing. The harness conversation id is taken
 from the session's own harness only, latest wins (a `/clear` changes it): a process of another harness under the same
 session id (an old entry session after a switch) changes nothing. ACCESS roles: `open` (protocol only), `session` (a
-subagent), `agent` (an entry session or the command line), `coordinator`, `owner` (an entry session of the session's Project,
-or the command line) and `self` (a subagent's own terminal for its own id, or the command line at the Project root for
-its entry session, its start after a restart). One entry session per Project: every start passes one check that holds the
+session with an inbox), `agent` (a session or the command line), `owner` (the session that started the target, or the command
+line; a forwarded call from another machine passes the same rule for the session that made it) and `self` (a session's
+own terminal for its own id, or the command line at the Project root for its entry session, its start after a restart).
+A session sends only to the session that started it and to sessions it started; when the creator it names has ended,
+vibestd hands the message to the nearest session above it that is still running, on this machine or another, and when none
+is left the send is refused (the user reads the last reply). It manages (interrupts, removes) the sessions whose nearest
+living creator it is. One entry session per Project: every start passes one check that holds the
 Project's lock through the launch, as a stop does, so two starts at once cannot both pass; the check fails open
 (nothing running) when the runtime cannot be reached or cannot tell, and an entry session that `vibest update` is
 restarting counts as running. A stop of an entry session that is restarting is refused rather than waited for, since its

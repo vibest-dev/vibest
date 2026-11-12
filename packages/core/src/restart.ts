@@ -266,16 +266,17 @@ export const sessionRestart = (deps: {
         locked: (effect) => effect,
         reconcile: deps.checkLater(id),
         hint: "",
-        onBack: () =>
+        onBack: (h) =>
           Effect.gen(function* () {
-            const restarted: Restarted = {
-              id,
-              projectId,
-              ok: true,
-              message: `${label} restarted${interrupted ? "; its interrupted execution continues" : ""}`,
-            }
-            if (interrupted) yield* db.insertNoticeTo(id, continueText(VERSION))
-            return restarted
+            if (!interrupted) return { id, projectId, ok: true, message: `${label} restarted` } satisfies Restarted
+            const row = yield* db.getSession(id)
+            const missed =
+              row === undefined
+                ? "it is gone"
+                : yield* deps.prompt(h, row, entry.address!, noticeEnvelope(continueText(VERSION)))
+            return missed === undefined
+              ? { id, projectId, ok: true, message: `${label} restarted; its interrupted execution continues` }
+              : { id, projectId, ok: false, message: `${label} restarted, but ${missed}` }
           }),
       })
     })
@@ -292,48 +293,60 @@ export const sessionRestart = (deps: {
   const reports = (harness: HarnessId) => harnesses.find(harness)?.ready === "integration"
 
   const outdated = Effect.gen(function* () {
-    const agents = (yield* db.listSessions()).filter(
-      (row) =>
-        !row.entry &&
-        reports(row.harnessId) &&
-        !current(row.metadata.integration) &&
-        !(row.metadata.archived || row.metadata.removed) &&
-        row.startedAt !== null &&
-        row.address.id !== "",
-    )
-    const entries: Array<Outdated> = []
-    for (const entry of yield* db.entrySessions) {
-      if (!reports(entry.harnessId) || current(entry.integration)) continue
-      const seen = yield* entryRunning(entry)
-      if (seen === undefined) continue
-      entries.push({
-        id: entry.id,
-        agent: entry.agent,
-        harness: entry.harnessId,
-        integration: entry.integration?.version ?? null,
-        working: stateOf(seen) === "working",
-        blocked:
-          blockedOf(harnesses.find(entry.harnessId), yield* routed(entry.runtime), entry.pid, entry.harnessSessionId) ??
-          null,
-      })
-    }
-    const subs: Array<Outdated> = []
-    for (const row of agents)
-      subs.push({
+    const sessions = (yield* db.listSessions())
+      .filter(
+        (row) =>
+          !row.entry &&
+          reports(row.harnessId) &&
+          !current(row.metadata.integration) &&
+          !(row.metadata.archived || row.metadata.removed) &&
+          row.startedAt !== null &&
+          row.address.id !== "",
+      )
+      .map((row) => ({
         id: row.id,
         agent: row.agent,
-        harness: row.harnessId,
-        integration: row.metadata.integration?.version ?? null,
-        working: row.executionState === "open",
+        harnessId: row.harnessId,
+        integration: row.metadata.integration,
+        runtime: row.runtime,
+        pid: row.metadata.pid,
+        harnessSessionId: row.harnessSessionId,
+        working: Effect.succeed<boolean | undefined>(row.executionState === "open"),
+      }))
+    const entries = (yield* db.entrySessions)
+      .filter((entry) => reports(entry.harnessId) && !current(entry.integration))
+      .map((entry) => ({
+        id: entry.id,
+        agent: entry.agent,
+        harnessId: entry.harnessId,
+        integration: entry.integration,
+        runtime: entry.runtime,
+        pid: entry.pid,
+        harnessSessionId: entry.harnessSessionId,
+        working: entryRunning(entry).pipe(
+          Effect.map((seen) => (seen === undefined ? undefined : stateOf(seen) === "working")),
+        ),
+      }))
+    const listed: Array<Outdated> = []
+    for (const candidate of [...sessions, ...entries]) {
+      const working = yield* candidate.working
+      if (working === undefined) continue
+      listed.push({
+        id: candidate.id,
+        agent: candidate.agent,
+        harness: candidate.harnessId,
+        integration: candidate.integration?.version ?? null,
+        working,
         blocked:
           blockedOf(
-            harnesses.find(row.harnessId),
-            yield* routed(row.runtime),
-            row.metadata.pid,
-            row.harnessSessionId,
+            harnesses.find(candidate.harnessId),
+            yield* routed(candidate.runtime),
+            candidate.pid,
+            candidate.harnessSessionId,
           ) ?? null,
       })
-    return [...subs, ...entries]
+    }
+    return listed
   })
 
   const restart = (ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>

@@ -375,7 +375,7 @@ export const makeStore = Effect.gen(function* () {
 
   const queueForPeer = (
     peer: string,
-    originSession: string | null,
+    recipientSession: string | null,
     row: {
       readonly sessionId: string
       readonly content: string
@@ -384,11 +384,18 @@ export const makeStore = Effect.gen(function* () {
     },
   ) =>
     Effect.gen(function* () {
-      if (originSession === null) return false
+      if (recipientSession === null) return false
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
       yield* emit(OutboxQueued, {
         ...(row.at === undefined ? {} : { at: row.at }),
-        data: { id: randomId(), peer, session: row.sessionId, kind: row.kind, content: row.content },
+        data: {
+          id: randomId(),
+          peer,
+          session: row.sessionId,
+          recipient: recipientSession,
+          kind: row.kind,
+          content: row.content,
+        },
       })
       yield* notify({ type: "live.outbox", peerId: peer })
       return true

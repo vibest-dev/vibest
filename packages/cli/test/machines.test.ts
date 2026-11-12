@@ -30,6 +30,7 @@ import {
   entryOn,
   Net,
   onB,
+  peerSession,
   REMOTE,
   REPOSITORY,
   repoStack,
@@ -554,6 +555,40 @@ describe("another machine's vibestd runs agents here", () => {
         assert.include(sent[0]!.content, `<agent-id>${A_ENTRY}</agent-id>`)
         assert.strictEqual(sent[1]!.content, "from the user")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("a forwarded session sends only to what it started and manages the nearest living ones below it", () =>
+    Effect.gen(function* () {
+      const b = yield* peerB
+      const a = randomId()
+      const x = yield* b.as(a, "aproj")
+      const { session } = yield* b.spawn(x)
+      const grandchild = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+      yield* b.db.insertSession(
+        { ...peerSession, id: grandchild, name: "grand", createdAt: 1, lastActive: 1 },
+        b.project,
+        { parentSessionId: session },
+      )
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Send({ id: grandchild, message: "skipping a level" })))),
+        "Forbidden",
+      )
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Interrupt({ id: grandchild })))),
+        "Forbidden",
+        "its parent is alive and manages it",
+      )
+      yield* b.db.updateSession(session, { metadata: { archived: true, removed: true } })
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Send({ id: grandchild, message: "still not its child" })))),
+        "Forbidden",
+      )
+      assert.notStrictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Interrupt({ id: grandchild })))),
+        "Forbidden",
+        "the nearest living manager is now the forwarded session",
+      )
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   it.effect("archive drops the session's rows; a peer may not call Machine.*", () =>

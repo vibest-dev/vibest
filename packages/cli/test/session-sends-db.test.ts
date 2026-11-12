@@ -166,6 +166,65 @@ describe("sends from sessions", () => {
     ),
   )
 
+  it.effect(
+    "a send to the nearest living creator on another machine reaches that machine's outbox from any depth",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const { db, project } = yield* setup
+          const peer = "11111111-1111-4111-8111-111111111111"
+          const reportTo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+          yield* db.notePeer({ id: peer, name: "other" })
+          yield* db.insertSession(session(B), project, {
+            cwd: "/w",
+            task: "b",
+            origin: { peer, project: "p", reportTo },
+          })
+          yield* db.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: B })
+          yield* db.updateSession(B, { metadata: { archived: true, removed: true } })
+          const heir = yield* db.nearestAlive(X)
+          assert.deepStrictEqual(heir, { peer, session: reportTo })
+          assert.isTrue(yield* db.sendToPeer(X, peer, reportTo, "report"))
+          const out = yield* db.outboxOf(peer)
+          assert.deepInclude(out[0]!, { kind: "send", content: "report", reportTo })
+          assert.isFalse(yield* db.sendToPeer(X, "22222222-2222-4222-8222-222222222222", reportTo, "report"))
+        }),
+      ),
+  )
+
+  it.effect(
+    "an item for an ended session whose nearest living creator is on another machine goes on to that machine, once",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { db, project } = yield* setup
+        const peer = "11111111-1111-4111-8111-111111111111"
+        const reportTo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const middle = B
+        const ended = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        yield* db.notePeer({ id: peer, name: "other" })
+        yield* db.insertSession(session(middle), project, { origin: { peer, project: "p", reportTo } })
+        yield* db.insertSession(session(ended), project, { parentSessionId: middle })
+        yield* db.updateSession(middle, { metadata: { archived: true, removed: true } })
+        yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
+        const item = {
+          id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
+          recipient: ended,
+          kind: "send" as const,
+          sender: "mb/cccccccc",
+          content: "report",
+        }
+        assert.strictEqual(yield* db.receivePeerItem(item), "queued")
+        assert.strictEqual(yield* db.receivePeerItem(item), "duplicate")
+        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE session_id = ${ended}`, [
+          { status: "dropped" },
+        ])
+        const out = yield* db.outboxOf(peer)
+        assert.lengthOf(out, 1)
+        assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
+      }).pipe(memory),
+  )
+
   it.effect("a send to a creator on a machine vibestd does not know writes nothing and says so", () =>
     memory(
       Effect.gen(function* () {

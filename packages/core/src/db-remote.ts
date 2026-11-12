@@ -29,7 +29,17 @@ export type OutboxRow = {
   readonly reportTo: string
 }
 
-export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, currentProcess, nearestAlive }: Store) => {
+export const remoteQueries = ({
+  sql,
+  reads,
+  tx,
+  emit,
+  queueInbox,
+  queueForPeer,
+  placed,
+  currentProcess,
+  nearestAlive,
+}: Store) => {
   const machineColumns = sql`name, target, vibestd_id, connected_at, created_at`
   const machineNamed = (name: string) =>
     sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(Effect.map((rows) => rows[0]))
@@ -101,6 +111,26 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
             if (route === undefined) return "unknown" as const
             if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
             const heir = route.alive === 1 ? { local: item.recipient } : yield* nearestAlive(item.recipient)
+            const content =
+              item.kind === "send"
+                ? sessionEnvelope({ id: item.sender }, item.content)
+                : noticeEnvelope(`${item.sender}: ${item.content}`)
+            if (heir !== undefined && "peer" in heir) {
+              yield* queueInbox({
+                recipient: item.recipient,
+                kind: item.kind,
+                sender: null,
+                content,
+                status: "dropped",
+                peerItem: item.id,
+              })
+              yield* queueForPeer(heir.peer, heir.session, {
+                sessionId: item.recipient,
+                kind: item.kind,
+                content: `${item.sender}: ${item.content}`,
+              })
+              return "queued" as const
+            }
             const target = heir !== undefined && "local" in heir ? heir.local : undefined
             const here =
               target !== undefined && (target !== route.entry || placed(route.project, yield* currentProcess(target)))
@@ -108,10 +138,7 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
               recipient: target ?? item.recipient,
               kind: item.kind,
               sender: null,
-              content:
-                item.kind === "send"
-                  ? sessionEnvelope({ id: item.sender }, item.content)
-                  : noticeEnvelope(`${item.sender}: ${item.content}`),
+              content,
               status: here ? "pending" : "dropped",
               peerItem: item.id,
             })
