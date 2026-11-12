@@ -774,7 +774,7 @@ export class Sessions extends Context.Service<
         scope,
         locked: (id) => locked(id),
         checkLater: (id) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid),
-        launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
+        launchArgv,
         entryArgv: (entry) =>
           Effect.gen(function* () {
             yield* db.patchLive(entry.id, { ready: null })
@@ -834,7 +834,7 @@ export class Sessions extends Context.Service<
             const prompting = yield* Ref.get((yield* track(id)).prompting)
             yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
           }),
-        republish: republish().pipe(Effect.provideContext(platform)),
+        republish: republish(),
         inMemory: Effect.gen(function* () {
           return { tracked: (yield* sessionLive.size).tracked, locks: locks.size(), reconciles }
         }),
