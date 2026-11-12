@@ -257,6 +257,37 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a spawn with no creator is refused before anything is made",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const { parentSessionId: _, ...input } = yield* spawnInput(repo)
+      assert.strictEqual((yield* Effect.flip(sessions.spawn(input)))._tag, "NoCallingSession")
+      assert.strictEqual(
+        (yield* Effect.flip(sessions.spawn({ ...input, origin: { peer: "a".repeat(32), project: "p" } })))._tag,
+        "NoCallingSession",
+      )
+      assert.strictEqual(yield* herdr.callCount, 0)
+    }),
+  )
+
+  test(
+    "the session that ran vibest run is the creator, local or from another machine",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const { parentSessionId: _, ...input } = yield* spawnInput(repo)
+      const local = yield* sessions.spawn({ ...input, parentSessionId: "creator" })
+      assert.deepStrictEqual(yield* db.creatorOf(local.id), { local: "creator" })
+      const peer = "a".repeat(32)
+      const remote = yield* sessions.spawn({ ...input, origin: { peer, project: "p", reportTo: "away" } })
+      assert.deepStrictEqual(yield* db.creatorOf(remote.id), { peer, session: "away" })
+    }),
+  )
+
+  test(
     "spawn refuses a model the harness does not list, naming the choices",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

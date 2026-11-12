@@ -25,9 +25,8 @@ does not carry SSH session settings into a home it switches to.
 
 ## H5. A run inherits the caller's harness
 
-`vibest run` without a harness takes the caller's harness, provider and model: from the entry session itself, and from a
-plain terminal in a project that has an entry session, the new session has the entry session's three. Naming a harness drops
-the provider and model. With nothing to inherit, it fails saying there is no harness to inherit.
+`vibest run` without a harness takes the caller's harness, provider and model: from the session that runs it. Naming a
+harness drops the provider and model.
 
 ## H6. `vibest` reuses the entry session's last harness
 

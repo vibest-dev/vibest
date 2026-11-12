@@ -22,6 +22,7 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
       ({
         machine: { id: "local" },
         root: repo,
+        parentSessionId: "creator",
         projectId,
         name: "task",
         prompt: "do it",

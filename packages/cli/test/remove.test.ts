@@ -38,6 +38,7 @@ const workingSession = Effect.gen(function* () {
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
+    parentSessionId: "creator",
     projectId: yield* projectOf(repo),
     name: "task",
     prompt: "do it",

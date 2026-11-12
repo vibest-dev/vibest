@@ -244,7 +244,7 @@ describe.concurrent("Sessions", () => {
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
-      assert.deepStrictEqual(failSeen, [{ parent: undefined, attempts: [["pi", "limited"]] }])
+      assert.deepStrictEqual(failSeen, [{ parent: "creator", attempts: [["pi", "limited"]] }])
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "cursor", { error: "rate_limit" })
       yield* sessions.check(id)

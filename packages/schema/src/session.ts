@@ -102,6 +102,11 @@ export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
   id: Schema.String,
   message: Schema.String,
 }) {}
+export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("NoCallingSession", {}) {
+  override get message() {
+    return "vibest run is run by an agent in a session; to start working, run vibest in a terminal"
+  }
+}
 export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
   override get message() {
     return "no harness to inherit: name one, for example `vibest run claude -- <prompt>`"

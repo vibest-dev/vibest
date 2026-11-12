@@ -18,6 +18,7 @@ const spawnInput = (repo: string) =>
   Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
     root: repo,
+    parentSessionId: "creator",
     projectId,
     name: "task",
     prompt: "do it",

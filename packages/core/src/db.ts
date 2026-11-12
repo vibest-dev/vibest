@@ -263,6 +263,19 @@ const make = Effect.gen(function* () {
       }),
 
     creatorOf: (id: string) =>
+      sql<{ parent: string | null; peer: string | null; session: string | null }>`SELECT
+          parent_session_id AS parent, origin_peer AS peer, origin_session AS session
+        FROM session WHERE id = ${id}`.pipe(
+        Effect.map(([row]) => {
+          if (row === undefined) return undefined
+          if (row.peer !== null && row.session !== null) return { peer: row.peer, session: row.session }
+          if (row.parent !== null) return { local: row.parent }
+          return undefined
+        }),
+        Effect.orDie,
+      ),
+
+    creatorLabel: (id: string) =>
       Effect.gen(function* () {
         const creator = yield* addressedCreator(id)
         if (creator === undefined) return undefined

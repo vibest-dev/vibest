@@ -28,6 +28,7 @@ import {
   untilVirtual,
   writeEnd,
 } from "./fakes.ts"
+import { asEntry } from "./rpc-helpers.ts"
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
 
@@ -164,8 +165,9 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const db = yield* Db
       const repo = yield* makeRepository
       const user = yield* cli(repo)
+      const spawner = yield* asEntry(yield* client, repo)
       const held = yield* herdr.hold("open")
-      const { id } = yield* user.Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
+      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
       yield* held.reached
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
@@ -189,7 +191,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const held = yield* herdr.hold("open")
-      yield* (yield* cli(repo)).Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
+      yield* (yield* asEntry(yield* client, repo)).Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
       yield* held.reached
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
@@ -204,7 +206,11 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const raw = yield* client
-      const { id } = yield* (yield* cli(repo)).Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
+      const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
+        callerEnv: {},
+        harness: "pi",
+        prompt: "work",
+      })
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
@@ -270,7 +276,11 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      const { id } = yield* (yield* cli(repo)).Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
+      const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
+        callerEnv: {},
+        harness: "pi",
+        prompt: "work",
+      })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)

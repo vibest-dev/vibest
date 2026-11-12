@@ -26,8 +26,7 @@ assigns to the event it is given instead of returning its decision.
 
 ## G5. A routing plugin picks the harness
 
-A plugin can pick the harness for `vibest run`. Without it, a run that names no harness and has nothing to inherit
-fails saying there is no harness to inherit; with a plugin that picks Pi, the same run starts a Pi session, `vibest ls`
+A plugin can pick the harness for `vibest run`. With a plugin that picks Pi, a run that names no harness starts a Pi session, `vibest ls`
 names the plugin as the one that decided the harness (the `routing` field of `vibest ls` and `vibest result`; `vibest
 run` itself prints only `{"id":"<session id>"}`), and the result arrives.
 

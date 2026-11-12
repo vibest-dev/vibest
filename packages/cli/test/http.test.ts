@@ -74,6 +74,7 @@ const project = Effect.gen(function* () {
   const { id: worker } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
+    parentSessionId: "creator",
     projectId: key,
     name: "Fix the guard",
     prompt: "do it",
@@ -394,6 +395,7 @@ describe("vibestd's HTTP API", () => {
       const { id } = yield* sessions.spawn({
         machine: { id: "local" },
         root: repo,
+        parentSessionId: "creator",
         projectId: key,
         name: "Named entry",
         prompt: "do it",

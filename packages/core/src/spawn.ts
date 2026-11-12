@@ -2,6 +2,7 @@ import { newId } from "@vibest/schema/id"
 import {
   AllocationFailed,
   LimitReached,
+  NoCallingSession,
   NoHarnessChosen,
   NoRuntime,
   NoSuchSession,
@@ -149,6 +150,8 @@ export const sessionSpawn = (deps: {
     })
 
   const spawn = Effect.fn("Sessions.spawn")(function* (input: SpawnInput) {
+    if (input.parentSessionId === undefined && input.origin?.reportTo === undefined)
+      return yield* new NoCallingSession()
     const root = input.root
     const agent = input.agent ?? "general"
     const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)

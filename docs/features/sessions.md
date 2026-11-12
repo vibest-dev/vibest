@@ -5,10 +5,12 @@ counts as working.
 
 ## S1. Running a session
 
-`vibest run`, run by the entry session or another session, starts a session in a new worktree: a linked worktree of the
+`vibest run`, run by an agent in a session (the entry session or another one), starts a session in a new worktree: a linked worktree of the
 repository, detached, at its HEAD. Its options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
 never stored, `--session` picks the herdr session it opens in, and `--peer` runs a second session in the same worktree
-in another pane. `vibest ls` shows the title, harness, provider, model and where it runs.
+in another pane. `vibest ls` shows the title, harness, provider, model and where it runs. The started session records the session that ran
+it as its creator. `vibest run` in a terminal that is not a session is refused and says to open a session with bare
+`vibest`: no worktree or pane is made.
 
 ## S5. Reading sessions
 
@@ -54,3 +56,9 @@ environment, and terminals it opens later pass it on, so `vibest` there counts a
 refused there names the agent session the shell carries and the way out for a human: run it as
 `env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest <command>`, or open a terminal that was not started from an agent;
 that form then works. An agent that changes or clears those variables before running `vibest` is still refused.
+
+## S41. Who started a session
+
+`vibest run` in a terminal that is not a session is refused with `NoCallingSession`, which says to run `vibest` to open
+a session; no worktree or pane is made. A session started by `vibest run` records the session that ran it as its creator,
+whether the creator is the entry session or another session, and on another machine it records the session there.

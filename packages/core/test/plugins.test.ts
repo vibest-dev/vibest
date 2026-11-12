@@ -27,6 +27,7 @@ const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: st
   Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
     root: repo,
+    parentSessionId: "creator",
     projectId,
     name: "task",
     prompt: extra.prompt ?? "do it",

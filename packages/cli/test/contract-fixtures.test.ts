@@ -27,6 +27,7 @@ import {
   until,
   wire,
 } from "./fakes.ts"
+import { asEntry } from "./rpc-helpers.ts"
 
 const FIXTURES = path.join(import.meta.dirname, "..", "..", "..", "packages", "protocol", "contract", "fixtures")
 const RECORD = process.env["VIBEST_RECORD_FIXTURES"] === "1"
@@ -166,7 +167,7 @@ describe("contract", () => {
     Effect.gen(function* () {
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const c = authed(yield* connect(layout.socket), cliHeaders(repo))
+      const c = yield* asEntry(yield* connect(layout.socket), repo)
       const { id } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until((yield* Db).getSession(id), (row) => row?.executionState === "open")
       const worktree = (yield* (yield* Db).sessionDirectory(id))!
