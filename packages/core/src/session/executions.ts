@@ -2,7 +2,7 @@ import { NotReady } from "@vibest/schema/session"
 import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type EngineEvent } from "../bus.ts"
-import { Db, type SessionRow } from "../db.ts"
+import { Db, type SessionRow, harnessIdOf } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harness.ts"
 import type { HarnessDefinition } from "../host.ts"
@@ -156,7 +156,7 @@ const make = Effect.gen(function* () {
     session: SessionRow,
     terminal: Terminal,
   ) => {
-    const key = harnesses.find(session.harnessId)?.interruptKey
+    const key = harnesses.find(harnessIdOf(session))?.interruptKey
     return settleAfterInterrupt(
       h,
       session,
@@ -173,7 +173,7 @@ const make = Effect.gen(function* () {
     onHandover: Effect.Effect<void> = Effect.void,
   ) {
     const kept = yield* db.openExecution(session.id)
-    const adapter = yield* harnesses.get(session.harnessId)
+    const adapter = yield* harnesses.get(harnessIdOf(session))
     const state = yield* awaitReady(h, terminal, adapter, session.id)
     const open = yield* db.openExecution(session.id)
     if (open !== undefined && open !== kept) return undefined

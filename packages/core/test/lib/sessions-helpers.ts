@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, executionStateOf, exitedAt, type SessionRow } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
@@ -73,7 +73,7 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { r
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
     })
-    yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+    yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
     yield* sessions.check(id)
     yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
@@ -119,9 +119,9 @@ export const slowTest = <E>(
   options?: TestOptions,
 ) => it.effect(name, () => program.pipe(Effect.provide(sessionFrom(options))), { timeout: SPAWN_HEAVY_TEST_TIMEOUT })
 
-export const pick = (w: { readonly status: string; readonly executionState: string } | undefined) => ({
+export const pick = (w: SessionRow | undefined) => ({
   status: w?.status,
-  executionState: w?.executionState,
+  executionState: w === undefined ? undefined : executionStateOf(w),
 })
 export const executionAndSentCounts = (sessionId: string) =>
   Effect.gen(function* () {

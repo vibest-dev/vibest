@@ -163,7 +163,7 @@ describe("Watch", () => {
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
       const terminal = (yield* herdr.terminalOf(id))!
       yield* herdr.endExecution(id)
-      yield* db.updateSession(id, { status: "idle" })
+      yield* db.setStatus(id, "idle")
       const isProject = (activity: string) => (e: WatchEvent) =>
         e._tag === "Project" && e.project.id === project && e.project.activity === activity
       yield* next((e): e is WatchEvent => isSession("idle", 0)(e))

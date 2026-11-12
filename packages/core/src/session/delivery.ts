@@ -3,7 +3,7 @@ import { Cause, Clock, Context, Duration, Effect, Exit, FileSystem, Layer, Optio
 
 import { nextBatch } from "../batch.ts"
 import { Bus, type EngineEvent } from "../bus.ts"
-import { Db, type SessionRow } from "../db.ts"
+import { Db, type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf, archived } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import * as Engine from "../engine.ts"
@@ -18,7 +18,7 @@ import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
 export const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
-  Effect.fail(new RuntimeUnreachable({ session: session.runtime, message: e.message }))
+  Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
 
 const make = Effect.gen(function* () {
   const db = yield* Db
@@ -42,7 +42,7 @@ const make = Effect.gen(function* () {
   ) {
     const task = yield* db.untakenTask(session.id)
     if (task !== undefined) return yield* handTask(h, session, terminal, task)
-    if (inbox.pulls(session.harnessId)) return
+    if (inbox.pulls(harnessIdOf(session))) return
     const pending = yield* db.pendingInbox(session.id)
     if (pending.length === 0) return
     const batch = nextBatch(pending)
@@ -87,7 +87,7 @@ const make = Effect.gen(function* () {
                     : undelivered(
                         session,
                         batch.filter((r) => claimed.includes(r.id)),
-                        `the connection to ${session.runtime} broke after the message was handed over (${e.message}); it may have reached the session`,
+                        `the connection to ${runtimeOf(session)} broke after the message was handed over (${e.message}); it may have reached the session`,
                       ),
                 ),
               )
@@ -122,25 +122,24 @@ const make = Effect.gen(function* () {
 
   const deliver = Effect.fn("Delivery.deliver")(function* (id: string) {
     const session = yield* getRow(id)
-    if (session.metadata.archived || session.metadata.removed)
-      return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
+    if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
     if (
       session.entry ||
-      session.executionState === "open" ||
+      executionStateOf(session) === "open" ||
       session.status === "blocked" ||
-      (session.startedAt === null && session.exitedAt === null) ||
+      ((session.process?.placedAt ?? null) === null && exitedAt(session) === null) ||
       (yield* sessionLive.restarting.has(id))
     )
       return
-    const h = yield* runtimes.route(session.runtime)
-    const terminal = session.address
+    const h = yield* runtimes.route(runtimeOf(session))
+    const terminal = terminalOf(session)
     const seen = yield* agentState(h, terminal)
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
     if (state !== undefined && busy(state)) return
     if (state === undefined && !(yield* alive(h, terminal))) {
-      if (session.exitedAt === null) return yield* exits.settle(h, id)
+      if (exitedAt(session) === null) return yield* exits.settle(h, id)
       if ((yield* db.pendingInbox(id)).length === 0) return
-      if (!(yield* harnesses.get(session.harnessId)).ownSessionId && !session.harnessSessionId)
+      if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && !(session.process?.conversation ?? null))
         return yield* new NoSuchSession({
           id,
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
@@ -148,14 +147,14 @@ const make = Effect.gen(function* () {
       yield* resume(h, session)
     }
     const fresh = (yield* db.getSession(id)) ?? session
-    yield* deliverQueued(h, fresh, fresh.address)
+    yield* deliverQueued(h, fresh, terminalOf(fresh))
   })
 
   const send = Effect.fn("Delivery.send")(function* (id: string, message: string, request?: string, sender?: string) {
     const session = yield* getRow(id)
     if (request !== undefined && (yield* db.queuedBy(id, request))) return
     const worktree = yield* worktreeOf(session)
-    if (session.metadata.archived || session.metadata.removed || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
+    if (archived(session) || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
       return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
     const row = yield* db.insertSend(id, message, request, sender)
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
@@ -190,8 +189,8 @@ const make = Effect.gen(function* () {
     return yield* locked(id)(
       Effect.gen(function* () {
         const session = yield* getRow(id)
-        const h = yield* runtimes.route(session.runtime)
-        const terminal = session.address
+        const h = yield* runtimes.route(runtimeOf(session))
+        const terminal = terminalOf(session)
         const execution = yield* db.openExecution(id)
         if (execution === undefined)
           return {
@@ -237,9 +236,9 @@ const make = Effect.gen(function* () {
         const r = yield* sessionLive.track(id)
         const rows = yield* db.unacceptedBatch(id, execution)
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
-        const h = yield* runtimes.route(session.runtime)
+        const h = yield* runtimes.route(runtimeOf(session))
         yield* Ref.set(r.prompting, true).pipe(
-          Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
+          Effect.andThen(h.send(terminalOf(session), { text: inboxText(rows) })),
           Effect.ensuring(Ref.set(r.prompting, false)),
           Effect.ignore,
         )

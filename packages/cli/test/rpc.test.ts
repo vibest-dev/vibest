@@ -2,7 +2,7 @@ import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, incompatibleDaemon, protocolHeaders, withVibest } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
+import { Db, executionStateOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { projectRoot } from "@vibest/core/project-create"
 import { unwrapped } from "@vibest/core/replies"
@@ -17,6 +17,7 @@ import { TestClock } from "effect/testing"
 
 import { authed, FakeRuntime, makeRepository, tempDirectory, until, writeEnd, projectOf } from "./fakes.ts"
 import { served, test, client, asCli, asEntry, asSession, failureTag } from "./rpc-helpers.ts"
+import { session as draftSession } from "./unit-helpers.ts"
 
 describe("vibest.sock", () => {
   test(
@@ -75,7 +76,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       assert.strictEqual((yield* Effect.flip(c.Get({ id: "nothing!" })))._tag, "NoSuchSession")
       assert.deepStrictEqual(yield* c.Send({ id: id.slice(0, 12), message: "more" }), { id })
       const sharer = yield* spawner.Spawn({
@@ -92,7 +93,7 @@ describe("vibest.sock", () => {
       )
       const twinWithSameFirst8 = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
       const row = (yield* db.getSession(id))!
-      yield* db.insertSession({ ...row, id: twinWithSameFirst8 }, row.projectId)
+      yield* db.insertSession(draftSession(twinWithSameFirst8), row.projectId)
       const ambiguous = yield* Effect.flip(c.Get({ id: id.slice(0, 8) }))
       assert.strictEqual(ambiguous._tag, "AmbiguousSession")
       assert.include(ambiguous.message, id)
@@ -132,7 +133,7 @@ describe("vibest.sock", () => {
         [path.basename(worktree)],
         "the repeat's reserved worktree directory went again",
       )
-      yield* until(db.getSession(first.id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(first.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       const queued = (request: string) =>
         sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'inbox.queued'
           AND json_extract(data, '$.request') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
@@ -162,7 +163,7 @@ describe("vibest.sock", () => {
       const c = asCli(raw, yield* makeRepository)
       const spawner = yield* asEntry(raw, yield* makeRepository)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "cursor", prompt: "work" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* TestClock.adjust("2 seconds")
       yield* raw.ExecutionEnd(
         {
@@ -173,7 +174,10 @@ describe("vibest.sock", () => {
         { headers: protocolHeaders() },
       )
       yield* herdr.endExecution(id)
-      yield* until(sessions.check(id).pipe(Effect.andThen(db.getSession(id))), (w) => w?.executionState === "completed")
+      yield* until(
+        sessions.check(id).pipe(Effect.andThen(db.getSession(id))),
+        (w) => (w ? executionStateOf(w) : undefined) === "completed",
+      )
       const [execution] = yield* sql<{
         reply: string | null
       }>`SELECT reply FROM execution WHERE session_id = ${id}`
@@ -196,8 +200,8 @@ describe("vibest.sock", () => {
       const prompt = "p".repeat(501)
       const fit = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: exact })
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
-      yield* until(db.getSession(fit.id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.getSession(fit.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       const listed = new Map((yield* c.List({})).sessions.map((w) => [w.id, w]))
       const cut = `${"p".repeat(499)}…`
       const open = { status: "working", summary: "", endedAt: null } as const
@@ -233,11 +237,11 @@ describe("vibest.sock", () => {
       const c = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       assert.deepStrictEqual(yield* c.Peek({ id }), { text: "pane tail" })
       yield* c.Peek({ id, lines: 100_000 })
       assert.deepInclude((yield* herdr.callsTo("read")).at(-1), { lines: 500 })
-      yield* db.updateSession(id, { exitedAt: 1 })
+      yield* db.endProcess(id, "exited")
       assert.strictEqual(failureTag(yield* Effect.exit(c.Peek({ id }))), "NoSuchSession")
     }),
   )
@@ -279,7 +283,7 @@ describe("vibest.sock", () => {
       const c = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       const launch = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "claude",
@@ -303,7 +307,7 @@ describe("vibest.sock", () => {
         { headers: sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }) },
       )
       assert.deepStrictEqual(
-        (yield* db.getSession(id))?.metadata.integration,
+        (yield* db.getSession(id))?.process?.integration,
         { version: "1.2.3", protocol: PROTOCOL },
         "an integration's version is recorded even when its protocol is refused",
       )
@@ -314,7 +318,7 @@ describe("vibest.sock", () => {
         ),
         "ProtocolRejected",
       )
-      assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.0.0", protocol: 1 })
+      assert.deepStrictEqual((yield* db.getSession(id))?.process?.integration, { version: "1.0.0", protocol: 1 })
 
       assert.strictEqual(
         failureTag(
@@ -338,14 +342,14 @@ describe("vibest.sock", () => {
       const as = (harness: string, harnessSessionId: string) =>
         authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
       yield* as("pi", "pi-1").Send({ id: launch.sessionId, message: "one" })
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
+      assert.strictEqual((yield* db.getSession(id))!.process?.conversation ?? null, "pi-1")
       yield* as("claude", "other").Send({ id: launch.sessionId, message: "two" })
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
+      assert.strictEqual((yield* db.getSession(id))!.process?.conversation ?? null, "pi-1")
       yield* raw.ExecutionEnd(
         { sessionId: id, harness: "pi", event: "{}" },
         { headers: sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }) },
       )
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-2")
+      assert.strictEqual((yield* db.getSession(id))!.process?.conversation ?? null, "pi-2")
       const w = yield* asSession(yield* client, id)
       yield* w.Send({ id: launch.sessionId, message: "half way" })
       const sent = yield* db.latestInbox(launch.sessionId, "send")
@@ -353,7 +357,7 @@ describe("vibest.sock", () => {
         sent!.message,
         /^<agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<title>[^<]*<\/title>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
       )
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "open")
       assert.deepStrictEqual(yield* c.Send({ id: launch.sessionId, message: "from the user" }), {
         id: launch.sessionId,
       })
@@ -405,7 +409,7 @@ describe("vibest.sock", () => {
         { headers: sessionHeaders({ sessionId: id, projectId: worker.projectId, pluginVersion: "1.2.3" }) },
       )
       assert.notStrictEqual(
-        (yield* db.getSession(id))!.harnessSessionId,
+        (yield* db.getSession(id))!.process?.conversation ?? null,
         "worker-report",
         "a conversation reported by a session that is not its project's entry is ignored",
       )
@@ -431,7 +435,7 @@ describe("vibest.sock", () => {
       const a = yield* asEntry(repo, "p1")
       const b = yield* asEntry(yield* makeRepository, "p2")
       const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         b.Send({ id, message: "x" }),
         b.Interrupt({ id }),
@@ -461,7 +465,7 @@ describe("vibest.sock", () => {
         "NoSuchSession",
       )
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "open")
       yield* a.Send({ id, message: "from its own entry session" })
       const user = asCli(yield* client, repo)
       yield* user.Send({ id, message: "from the user" })
@@ -495,7 +499,7 @@ describe("vibest.sock", () => {
         })
       const a = yield* asEntry(repo, "p1")
       const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       type Client = Effect.Success<typeof client>
       const protectedCalls = (
         c: Client,
@@ -568,7 +572,7 @@ describe("vibest.sock", () => {
       yield* a["Session.Ready"]({ id: (yield* db.entryOf((yield* db.getSession(id))!.projectId))!.id })
       yield* w["Session.Ready"]({ id, pid: 4242 })
       assert.isDefined(yield* db.readyAt(id))
-      assert.strictEqual((yield* db.getSession(id))!.metadata.pid, 4242)
+      assert.strictEqual((yield* db.getSession(id))!.process?.pid, 4242)
 
       yield* bare.Plugins(undefined, { headers: protocolHeaders() })
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
@@ -608,7 +612,7 @@ describe("vibest.sock", () => {
       const cli = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       const session = yield* asSession(raw, id)
       const entry = (yield* cli["Project.EntrySession"]({
         agent: "coordinator",
@@ -811,7 +815,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* Ref.set(herdr.reachable, false)
       const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
       assert.strictEqual(failed._tag, "RuntimeUnreachable")

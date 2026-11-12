@@ -19,8 +19,8 @@ import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus, type EngineEvent, type LiveEvent } from "./bus.ts"
 import {
+  archived,
   SessionRow,
-  type SessionPatch,
   type NewInboxRow,
   type RepositoryRow,
   type ProcessStart,
@@ -28,7 +28,7 @@ import {
   type ExecutionEnd,
 } from "./db-rows.ts"
 import { makeJournal } from "./journal.ts"
-import { entryRow, decodeEntrySessions, decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
+import { decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
 import { Routing } from "./plugins.ts"
 import { noticeEnvelope, sessionEnvelope } from "./replies.ts"
 import { SessionLive } from "./session/live.ts"
@@ -98,10 +98,8 @@ export const makeStore = Effect.gen(function* () {
   const now = Clock.currentTimeMillis
   const sessionLive = yield* SessionLive
   const moving = new Set<string>()
-  const remember = (row: Pick<SessionRow, "id" | "status" | "metadata">) =>
-    row.metadata.archived || row.metadata.removed
-      ? sessionLive.ended(row.id)
-      : sessionLive.setStatus(row.id, row.status)
+  const remember = (row: Pick<SessionRow, "id" | "status" | "entry" | "endedAt">) =>
+    archived(row) ? sessionLive.ended(row.id) : sessionLive.setStatus(row.id, row.status)
 
   const projectPrefixTaken = (short: string) =>
     sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
@@ -155,15 +153,14 @@ export const makeStore = Effect.gen(function* () {
     current !== undefined && current.ended === null && current.terminal !== null && !moving.has(projectIdValue)
 
   const findEntrySessions = (project?: string) =>
-    reads.entryRows(project).pipe(
-      Effect.flatMap((rows) =>
-        Effect.forEach(rows, (row) =>
-          sessionLive
-            .integration(row.id)
-            .pipe(Effect.map((integration) => entryRow(row, { integration, moving: moving.has(row.project) }))),
+    selectSessions(project === undefined ? [] : [sql`s.project_id = ${project}`], sql`entry = 1`).pipe(
+      Effect.map((rows) =>
+        rows.map((row) =>
+          moving.has(row.projectId) && row.process !== null
+            ? { ...row, process: { ...row.process, terminal: null } }
+            : row,
         ),
       ),
-      Effect.flatMap(decodeEntrySessions),
     )
 
   const inbox = reads.inboxWhere
@@ -307,6 +304,17 @@ export const makeStore = Effect.gen(function* () {
       return seq
     })
 
+  const ensureProcess = (id: string, start: ProcessStart) =>
+    Effect.gen(function* () {
+      const live = yield* liveProcess(id)
+      if (live !== undefined && live.terminal === null && sameChoice(live, start)) {
+        if (start.resume && start.resume !== live.conversation)
+          yield* emit(ProcessConversation, { sessionId: id, data: { process: live.id, conversation: start.resume } })
+        return live.id
+      }
+      return yield* startProcess(id, start)
+    })
+
   const placeProcess = (id: string, terminal: string, pid?: number, at?: number) =>
     Effect.gen(function* () {
       const live = yield* liveProcess(id)
@@ -411,7 +419,7 @@ export const makeStore = Effect.gen(function* () {
       if (route === undefined) return false
       if (route.entry === id) return placed(route.project, yield* currentProcess(id))
       const session = yield* findSession(id)
-      return session !== undefined && !session.metadata.archived && !session.metadata.removed
+      return session !== undefined && !archived(session)
     })
 
   const renderedSend = (sender: string | undefined, message: string) =>
@@ -501,69 +509,6 @@ export const makeStore = Effect.gen(function* () {
           sender,
           `A message to ${recipient} was not delivered: ${reason}\n\n${group.map((s) => s.content).join("\n\n")}`,
         )
-      }
-    })
-
-  const updateSession = (id: string, patch: SessionPatch) =>
-    Effect.gen(function* () {
-      if (Object.keys(patch).length === 0) return
-      const current = yield* findSession(id)
-      if (current === undefined) return
-      const next = { ...current, ...patch }
-      yield* remember(next)
-      yield* notify({ type: "live.session", sessionId: id })
-      if (patch.name !== undefined && patch.name !== current.name) yield* rename(id, patch.name)
-      const ending = !!(next.metadata.archived || next.metadata.removed)
-      if (ending && !(current.metadata.archived || current.metadata.removed)) yield* archive(id)
-      const p = yield* currentProcess(id)
-      const routing = patch.metadata?.routing
-      const choicePatched =
-        (patch.harnessId !== undefined && patch.harnessId !== current.harnessId) ||
-        (patch.provider !== undefined && patch.provider !== current.provider) ||
-        (patch.model !== undefined && patch.model !== current.model) ||
-        (patch.metadata !== undefined && JSON.stringify(routing) !== JSON.stringify(current.metadata.routing))
-      const opened =
-        (patch.startedAt !== undefined && patch.startedAt !== null) ||
-        (patch.address !== undefined &&
-          (patch.address.id !== current.address.id || patch.address.machine !== current.address.machine))
-      if (p === undefined || choicePatched || opened) {
-        const harnessChanged = next.harnessId !== current.harnessId
-        const resume =
-          patch.harnessSessionId !== undefined
-            ? patch.harnessSessionId
-            : harnessChanged
-              ? null
-              : current.harnessSessionId
-        const nextRouting = patch.metadata !== undefined ? routing : current.metadata.routing
-        yield* startProcess(
-          id,
-          {
-            harness: next.harnessId,
-            ...(next.provider ? { provider: next.provider } : {}),
-            ...(next.model ? { model: next.model } : {}),
-            ...(nextRouting === undefined ? {} : { routing: nextRouting }),
-            runtime: current.runtime,
-            terminal: next.address.id,
-            ...(resume ? { resume } : {}),
-          },
-          patch.startedAt ?? undefined,
-        )
-      } else if (patch.harnessSessionId !== undefined && patch.harnessSessionId !== null)
-        yield* noteConversation(id, patch.harnessSessionId)
-      if (patch.exitedAt !== undefined && patch.exitedAt !== null && current.exitedAt === null)
-        yield* endProcess(id, patch.end ?? "exited", patch.exitedAt)
-      if (patch.executionState === "open") {
-        if ((yield* openExecution(id)) === undefined)
-          yield* startExecution(id, next.executionPromptedAt || (yield* now))
-      } else if (
-        patch.executionState !== undefined &&
-        patch.executionState !== "none" &&
-        current.executionState === "open"
-      ) {
-        const open = yield* openExecution(id)
-        if (open !== undefined) {
-          yield* emit(ExecutionEnded, { sessionId: id, data: { execution: open, outcome: patch.executionState } })
-        }
       }
     })
 
@@ -687,9 +632,9 @@ export const makeStore = Effect.gen(function* () {
     linkTask,
     endProcess,
     startProcess,
+    ensureProcess,
     endExecution,
     insertInboxRow,
-    updateSession,
     setStatus,
     dropWaiting,
     sessionAt,

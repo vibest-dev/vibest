@@ -14,7 +14,16 @@ import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
 import { Agents, unknownAgent } from "../agents.ts"
-import { Db, type NewSession, type PeerStart, type SessionRow } from "../db.ts"
+import {
+  Db,
+  type NewSession,
+  type PeerStart,
+  type SessionRow,
+  harnessIdOf,
+  runtimeOf,
+  terminalOf,
+  archived,
+} from "../db.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
@@ -151,10 +160,10 @@ const sessionSpawn = (deps: {
       const p = yield* db.getSession(id)
       if (!p) return yield* refuse(`no session ${id}`)
       if (p.projectId !== input.projectId) return yield* refuse("it belongs to another project")
-      if (p.metadata.archived || p.metadata.removed) return yield* refuse("it was archived")
-      if (p.runtime !== runtime || p.address.machine !== machineId)
+      if (archived(p)) return yield* refuse("it was archived")
+      if (runtimeOf(p) !== runtime || terminalOf(p).machine !== machineId)
         return yield* refuse(
-          `ineligible: it runs in ${p.runtime} on ${p.address.machine}, not ${runtime} on ${machineId}`,
+          `ineligible: it runs in ${runtimeOf(p)} on ${terminalOf(p).machine}, not ${runtime} on ${machineId}`,
         )
       const worktree = yield* worktreeOf(p).pipe(Effect.mapError((e) => refuse(e.message)))
       if (!(yield* fs.exists(worktree).pipe(Effect.orDie)))
@@ -174,15 +183,12 @@ const sessionSpawn = (deps: {
     const agent = input.agent
     if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
     const parent = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
-    const parentRuntime = parent?.runtime || undefined
+    const parentRuntime = parent === undefined ? undefined : runtimeOf(parent) || undefined
     const from = input.harness !== undefined ? undefined : parent
     const namedShare =
       input.runtime === undefined && input.share !== undefined ? yield* db.getSession(input.share) : undefined
     const followedShare =
-      namedShare !== undefined &&
-      namedShare.projectId === input.projectId &&
-      !namedShare.metadata.archived &&
-      !namedShare.metadata.removed
+      namedShare !== undefined && namedShare.projectId === input.projectId && !archived(namedShare)
         ? namedShare
         : undefined
     const decision = yield* plugins.start({
@@ -190,16 +196,16 @@ const sessionSpawn = (deps: {
       agent,
       parentSessionId: input.parentSessionId,
       prompt: input.prompt,
-      harness: input.harness ?? from?.harnessId,
-      provider: input.provider ?? from?.provider ?? undefined,
-      model: input.model ?? from?.model ?? undefined,
+      harness: input.harness ?? (from === undefined ? undefined : harnessIdOf(from)),
+      provider: input.provider ?? from?.process?.provider ?? undefined,
+      model: input.model ?? from?.process?.model ?? undefined,
       harnesses: yield* harnessOptions.pipe(
         Effect.provideService(Harness, harness),
         Effect.provideService(Harnesses, harnesses),
       ),
       attempts: [],
-      machine: { id: followedShare?.address.machine ?? input.machine.id },
-      runtime: followedShare?.runtime ?? input.runtime,
+      machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
+      runtime: followedShare === undefined ? input.runtime : runtimeOf(followedShare),
       parentRuntime,
       machines: yield* machinesListing,
     })
@@ -214,7 +220,7 @@ const sessionSpawn = (deps: {
     const target = input.machine.id === decision.machine.id ? input.machine.target : undefined
     const runtimeKind = rt.id
     const inheritedFrom =
-      from !== undefined && Object.keys(decision.decidedBy).length === 0 && decision.harness === from.harnessId
+      from !== undefined && Object.keys(decision.decidedBy).length === 0 && decision.harness === harnessIdOf(from)
         ? from.id
         : undefined
     const routed = (e: HarnessUnavailable) =>
@@ -308,7 +314,7 @@ const sessionSpawn = (deps: {
           exitedAt: null,
           executionState: "none",
           executionPromptedAt: 0,
-          metadata: { routing },
+          ...(routing === undefined ? {} : { routing }),
           createdAt: now,
           lastActive: now,
         }

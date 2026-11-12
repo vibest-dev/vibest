@@ -1,6 +1,15 @@
 import { projectActivity, unseenDone } from "@vibest/core/activity"
 import { type EngineEvent } from "@vibest/core/bus"
-import { Db, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
+import {
+  Db,
+  executionStateOf,
+  exitedAt,
+  harnessIdOf,
+  runtimeOf,
+  type RuntimeAddress,
+  type SessionBrief,
+  terminalOf,
+} from "@vibest/core/db"
 import type { ListScope } from "@vibest/core/remote"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Sessions } from "@vibest/core/sessions"
@@ -15,20 +24,20 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   id: session.id,
   name: session.name,
   agent: session.agent,
-  harness: session.harnessId,
-  provider: session.provider,
-  model: session.model,
+  harness: harnessIdOf(session),
+  provider: session.process?.provider ?? null,
+  model: session.process?.model ?? null,
   status: session.status,
-  startedAt: session.startedAt,
-  exitedAt: session.exitedAt,
-  executionState: session.executionState,
+  startedAt: session.process?.placedAt ?? null,
+  exitedAt: exitedAt(session),
+  executionState: executionStateOf(session),
   projectId: session.projectId,
-  runtime: session.runtime,
-  address: session.address,
+  runtime: runtimeOf(session),
+  address: terminalOf(session),
   worktree: session.worktree,
   repositoryRoot: session.repositoryRoot ?? null,
   git: session.git ?? null,
-  ...(session.metadata.routing ? { routing: session.metadata.routing } : {}),
+  ...(session.process?.routing ? { routing: session.process.routing } : {}),
   createdAt: session.createdAt,
   lastActive: session.lastActive,
   task: brief?.task ?? null,
@@ -93,7 +102,7 @@ export const sessionListing = (deps: {
     Effect.gen(function* () {
       return yield* Effect.forEach(
         yield* db.listSessions({ projectId: id, stopped: false }),
-        (s) => Effect.map(seenAt(s.runtime, s.address), (seen) => unseenDone(s.status, seen)),
+        (s) => Effect.map(seenAt(runtimeOf(s), terminalOf(s)), (seen) => unseenDone(s.status, seen)),
         { concurrency: "unbounded" },
       )
     })
@@ -104,7 +113,7 @@ export const sessionListing = (deps: {
       if (identity === undefined) return []
       const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
       const row = yield* db.getSession(id)
-      if (row === undefined || row.exitedAt !== null) return [ended]
+      if (row === undefined || exitedAt(row) !== null) return [ended]
       const view = yield* sessions
         .get(id)
         .pipe(
@@ -132,7 +141,9 @@ export const sessionListing = (deps: {
       return rows
         .filter(
           (row) =>
-            row.runtime === runtime && row.address.machine === terminal.machine && row.address.id === terminal.id,
+            runtimeOf(row) === runtime &&
+            terminalOf(row).machine === terminal.machine &&
+            terminalOf(row).id === terminal.id,
         )
         .map((row) => row.id)
     })

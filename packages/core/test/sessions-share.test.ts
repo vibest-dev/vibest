@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, terminalOf, exitedAt } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { shareAdmitPause } from "@vibest/core/sessions"
 import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
@@ -115,7 +115,7 @@ describe.concurrent("Sessions", () => {
       }).pipe(Effect.ensuring(split.release().pipe(Effect.ignore)))
       yield* until(
         owner.db.getSession((yield* sharersOfDirectory(owner.id))[0]!.id),
-        (w) => !!w && (w.startedAt !== null || w.exitedAt !== null),
+        (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
     }),
   )
@@ -130,10 +130,14 @@ describe.concurrent("Sessions", () => {
       const owner = yield* idleSession(repo)
       const worktree = yield* sessionWorktree(owner.id)
       const mid = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
-      yield* until(owner.db.getSession(mid.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* until(
+        owner.db.getSession(mid.id),
+        (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
+      )
       const midPane = (yield* herdr.agent(mid.id))!.terminal
       yield* herdr.runtime.close({ id: midPane })
-      yield* owner.db.updateSession(mid.id, { status: "unknown", exitedAt: 1 })
+      yield* owner.db.endProcess(mid.id, "exited")
+      yield* owner.db.setStatus(mid.id, "unknown")
       const parked = yield* parkAdmitBeforeInsert
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
@@ -154,7 +158,9 @@ describe.concurrent("Sessions", () => {
         )
         if (listed) {
           yield* parked.release
-          yield* until(sharersOfDirectory(owner.id), (rows) => rows.some((s) => s.id !== mid.id && s.exitedAt === null))
+          yield* until(sharersOfDirectory(owner.id), (rows) =>
+            rows.some((s) => s.id !== mid.id && exitedAt(s) === null),
+          )
           yield* cwd.release()
           const archived = (yield* Fiber.join(archiving))!
           assert.fail(
@@ -190,7 +196,7 @@ describe.concurrent("Sessions", () => {
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo, "claude")), share: owner.id })
       yield* held.reached
       yield* held.release("failed")
-      yield* until(owner.db.getSession(id), (w) => !!w && w.exitedAt !== null)
+      yield* until(owner.db.getSession(id), (w) => !!w && exitedAt(w) !== null)
       const newCloses = (yield* herdr.callsTo("close"))
         .map((c) => c.terminal)
         .filter((pane) => !closesBefore.includes(pane))
@@ -202,7 +208,7 @@ describe.concurrent("Sessions", () => {
       yield* owner.sessions.send(id, "start again")
       const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === created + 2)
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
-      yield* until(owner.db.getSession(id), (w) => w?.exitedAt === null && w.address.id !== "")
+      yield* until(owner.db.getSession(id), (w) => w !== undefined && exitedAt(w) === null && terminalOf(w).id !== "")
       assert.strictEqual(yield* owner.db.currentProcessId(id), reporter)
       assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
     }),

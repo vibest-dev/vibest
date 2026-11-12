@@ -1,7 +1,7 @@
 import { Clock, Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 
 import { Agents } from "./agents.ts"
-import { Db } from "./db.ts"
+import { Db, runtimeOf, terminalOf } from "./db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import * as Guard from "./guard.ts"
@@ -41,9 +41,9 @@ const make = Effect.gen(function* () {
   const terminalClosed = (id: string) =>
     Effect.gen(function* () {
       const session = yield* db.getSession(id)
-      if (session === undefined || session.address.id === "") return false
-      const runtime = yield* runtimes.route(session.runtime).pipe(Effect.option)
-      return Option.isSome(runtime) && !(yield* alive(runtime.value, session.address))
+      if (session === undefined || terminalOf(session).id === "") return false
+      const runtime = yield* runtimes.route(runtimeOf(session)).pipe(Effect.option)
+      return Option.isSome(runtime) && !(yield* alive(runtime.value, terminalOf(session)))
     })
 
   const executionEnd = Effect.fn("Integration.executionEnd")(function* (who: HookCaller, raw: string) {

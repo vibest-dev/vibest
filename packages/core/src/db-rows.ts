@@ -8,28 +8,6 @@ import { Routing } from "./plugins.ts"
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
 export const encodeAddress = Schema.encodeSync(AddressJson)
 
-const Live = {
-  integration: Schema.optional(Schema.Struct({ version: Schema.String, protocol: Schema.Number })),
-  pid: Schema.optional(Schema.Number),
-  ready: Schema.optional(Schema.Number),
-}
-
-const Metadata = Schema.Struct({
-  ...Live,
-  routing: Schema.optional(Routing),
-  archived: Schema.optional(Schema.Boolean),
-  removed: Schema.optional(Schema.Boolean),
-  attempts: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        harness: Schema.String,
-        provider: Schema.optional(Schema.String),
-        outcome: Schema.Literal("limited"),
-        at: Schema.Number,
-      }),
-    ),
-  ),
-})
 const NewSessionFields = {
   id: Schema.String,
   projectId: Schema.String,
@@ -46,7 +24,7 @@ const NewSessionFields = {
   exitedAt: Schema.NullOr(Schema.Number),
   executionState: ExecutionState,
   executionPromptedAt: Schema.Number,
-  metadata: Schema.fromJsonString(Metadata),
+  routing: Schema.optional(Routing),
   createdAt: Schema.Number,
   lastActive: Schema.Number,
 }
@@ -91,7 +69,13 @@ export const LastExecution = Schema.Struct({
 })
 
 export const SessionRow = Schema.Struct({
-  ...NewSessionFields,
+  id: Schema.String,
+  projectId: Schema.String,
+  agent: Schema.String,
+  name: Schema.String,
+  status: AgentStatus,
+  createdAt: Schema.Number,
+  lastActive: Schema.Number,
   endedAt: Schema.NullOr(Schema.Number),
   parentId: Schema.NullOr(Schema.String),
   entry: Schema.Boolean,
@@ -101,29 +85,59 @@ export const SessionRow = Schema.Struct({
 })
 export type SessionRow = typeof SessionRow.Type
 
-export const sessionEnded = (row: SessionRow | undefined) =>
-  row === undefined || row.exitedAt !== null || !!row.metadata.archived || !!row.metadata.removed
+export const archived = (row: Pick<SessionRow, "entry" | "endedAt">) => !row.entry && row.endedAt !== null
 
-export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent" | "createdAt" | "runtime">> & {
-  readonly end?: ProcessEndReason
+export const exitedAt = (row: Pick<SessionRow, "entry" | "endedAt" | "process">) =>
+  row.entry ? row.endedAt : (row.process?.endedAt ?? null)
+
+export const sessionEnded = (row: SessionRow | undefined) =>
+  row === undefined || exitedAt(row) !== null || archived(row)
+
+export const terminalOf = (row: Pick<SessionRow, "process">): RuntimeAddress => ({
+  machine: "local",
+  id: row.process?.terminal ?? "",
+})
+
+export const runtimeOf = (row: Pick<SessionRow, "process">) => row.process?.runtime ?? ""
+
+export const harnessIdOf = (row: Pick<SessionRow, "process">) => row.process?.harness ?? ""
+
+export const placedTerminal = (row: Pick<SessionRow, "process">) => {
+  const process = row.process
+  return process === null || process.endedAt !== null || process.terminal === null || process.runtime === ""
+    ? undefined
+    : { runtime: process.runtime, address: { machine: "local", id: process.terminal } }
 }
 
-export const EntryRow = Schema.Struct({
-  id: Schema.String,
-  agent: Schema.String,
-  projectId: Schema.String,
-  harnessId: Schema.String,
-  harnessSessionId: Schema.NullOr(Schema.String),
-  runtime: Schema.NullOr(Schema.String),
-  address: Schema.NullOr(AddressJson),
-  projectDirectory: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
-  provider: Schema.NullOr(Schema.String),
-  model: Schema.NullOr(Schema.String),
-  routing: Schema.optional(Routing),
-  ...Live,
-})
-export type EntryRow = typeof EntryRow.Type
+export const startOf = (row: Pick<SessionRow, "process">): ProcessStart => {
+  const process = row.process
+  return {
+    harness: process?.harness ?? "",
+    ...(process?.provider ? { provider: process.provider } : {}),
+    ...(process?.model ? { model: process.model } : {}),
+    ...(process?.routing ? { routing: process.routing } : {}),
+    runtime: process?.runtime ?? "",
+    terminal: "",
+    ...(process?.conversation ? { resume: process.conversation } : {}),
+  }
+}
+
+export const pidOf = (row: Pick<SessionRow, "process">) => row.process?.pid ?? undefined
+
+export const reportedOf = (row: SessionRow | undefined) =>
+  row?.process == null
+    ? undefined
+    : {
+        pid: row.process.pid ?? undefined,
+        ready: row.process.readyAt ?? undefined,
+        integration: row.process.integration ?? undefined,
+      }
+
+export const executionStateOf = (row: Pick<SessionRow, "openExecution" | "lastExecution">) =>
+  row.openExecution !== null ? "open" : (row.lastExecution?.outcome ?? "none")
+
+export const executionStartedAt = (row: Pick<SessionRow, "openExecution" | "lastExecution">) =>
+  row.openExecution?.startedAt ?? row.lastExecution?.startedAt ?? 0
 
 export type NewInboxRow = {
   readonly sessionId: string

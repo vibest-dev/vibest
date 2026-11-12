@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
+import { Db, exitedAt, executionStateOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import {
@@ -306,7 +306,7 @@ describe("multi-repository isolated workspace", () => {
       )
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = JSON.parse(spawned.stdout) as { id: string }
-      yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
       yield* sessions.check(id)
       const row = (yield* db.getSession(id))!
       const workspace = (yield* db.sessionDirectory(row.id))!
@@ -329,7 +329,7 @@ describe("multi-repository isolated workspace", () => {
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
 
       yield* fakeGit.checkout(sdkWt, { state: { branch: "feat/sdk", pushed: false, saved: true, why: "" } })
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: false, why: "uncommitted changes" } })
@@ -370,7 +370,10 @@ describe("multi-repository isolated workspace", () => {
         raw,
         sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
       ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
+      yield* until(
+        db.getSession(id),
+        (row) => !!row && ((row.process?.placedAt ?? null) !== null || exitedAt(row) !== null),
+      )
       const row = (yield* db.getSession(id))!
       assert.strictEqual(row.projectId, (yield* db.projectAt(root))?.id)
       const workspace = (yield* db.sessionDirectory(row.id))!
@@ -406,7 +409,7 @@ describe("multi-repository isolated workspace", () => {
         raw,
         sessionHeaders({ sessionId, repositoryRoot: workspace, projectId: String(projectId) }),
       ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (row) => row?.executionState === "open")
+      yield* until(db.getSession(id), (row) => (row ? executionStateOf(row) : undefined) === "open")
       assert.strictEqual((yield* db.getSession(id))!.projectId, (yield* db.projectAt(root))?.id)
       assert.isUndefined(yield* db.projectAt(workspace))
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.project, root)
@@ -423,7 +426,7 @@ describe("multi-repository isolated workspace", () => {
       yield* sessions.check(id)
       yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
       yield* sessions.check(id)
-      yield* until(db.getSession(id), (row) => row?.exitedAt != null)
+      yield* until(db.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
       const before = (yield* herdr.callsTo("open")).length
       yield* sessions.send(id, "again")
       const places = yield* until(herdr.callsTo("open"), (calls) => calls.length > before)

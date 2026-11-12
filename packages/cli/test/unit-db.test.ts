@@ -4,7 +4,7 @@ import url from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
-import { APPLICATION_ID, Db } from "@vibest/core/db"
+import { APPLICATION_ID, Db, executionStateOf } from "@vibest/core/db"
 import { makeJournal } from "@vibest/core/journal"
 import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { noticeEnvelope } from "@vibest/core/replies"
@@ -37,6 +37,12 @@ const memoryDb = () =>
   )
 
 const ENTRY = { agent: "coordinator" } as const
+
+const complete = (db: Db["Service"], id: string) =>
+  Effect.gen(function* () {
+    const open = yield* db.openExecution(id)
+    if (open !== undefined) yield* db.closeExecution(id, open, "completed")
+  })
 
 describe("Db", () => {
   const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
@@ -128,10 +134,10 @@ describe("Db", () => {
             parentSessionId: parent.sessionId,
             since: 1,
           })
-          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
+          yield* complete(db, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           yield* db.startExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2)
           assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).working, "")
-          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
+          yield* complete(db, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "",
             delivered: "a notice",
@@ -150,22 +156,13 @@ describe("Db", () => {
             task: "do it",
             parentSessionId: parent.sessionId,
           })
-          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", {
-            executionState: "open",
-            executionPromptedAt: 1,
-          })
-          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { executionState: "completed" })
-          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", {
-            executionState: "open",
-            executionPromptedAt: 3,
-          })
+          yield* db.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 1)
+          yield* complete(db, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+          yield* db.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 3)
           const follow = yield* db.insertSend("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "add tests")
           yield* db.setInboxStatus("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", [follow!.id], "delivered")
-          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { executionState: "completed" })
-          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", {
-            executionState: "open",
-            executionPromptedAt: 5,
-          })
+          yield* complete(db, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+          yield* db.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 5)
           const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
             fact("inbox.queued", {
               sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -213,10 +210,7 @@ describe("Db", () => {
             cwd: "/w",
             task: "do it",
           })
-          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-            executionState: "open",
-            executionPromptedAt: 5,
-          })
+          yield* db.startExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 5)
           assert.strictEqual(
             (yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))[0]!.inboxId,
             null,
@@ -229,21 +223,15 @@ describe("Db", () => {
           const [opened] = yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.strictEqual(opened!.inboxId, task!.id)
           assert.strictEqual(opened!.input, "do it")
-          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
-          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-            executionState: "open",
-            executionPromptedAt: 9,
-          })
+          yield* complete(db, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+          yield* db.startExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 9)
           const [again] = yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.isNull(again!.inboxId)
           assert.strictEqual(again!.input, "")
 
           yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
           const sent = yield* db.insertSend("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "ping")
-          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", {
-            executionState: "open",
-            executionPromptedAt: 3,
-          })
+          yield* db.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 3)
           yield* db.setInboxStatus("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", [sent!.id], "delivered")
           const [sendExecution] = yield* execution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
           assert.strictEqual(sendExecution!.inboxId, sent!.id)
@@ -252,20 +240,14 @@ describe("Db", () => {
           yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
           const first = yield* db.insertSend("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "add a test")
           const second = yield* db.insertSend("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "also update the readme")
-          yield* db.updateSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", {
-            executionState: "open",
-            executionPromptedAt: 4,
-          })
+          yield* db.startExecution("cccccccc-cccc-4ccc-8ccc-cccccccccccc", 4)
           yield* db.setInboxStatus("cccccccc-cccc-4ccc-8ccc-cccccccccccc", [first!.id, second!.id], "delivered")
           const [merged] = yield* execution("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           assert.strictEqual(merged!.inboxId, second!.id)
           assert.strictEqual(merged!.input, "add a test\n\nalso update the readme")
-          yield* db.updateSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { executionState: "completed" })
+          yield* complete(db, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           const third = yield* db.insertSend("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "and the docs")
-          yield* db.updateSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", {
-            executionState: "open",
-            executionPromptedAt: 6,
-          })
+          yield* db.startExecution("cccccccc-cccc-4ccc-8ccc-cccccccccccc", 6)
           yield* db.setInboxStatus("cccccccc-cccc-4ccc-8ccc-cccccccccccc", [third!.id], "delivered")
           const [next] = yield* execution("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           assert.strictEqual(next!.inboxId, third!.id)
@@ -329,13 +311,10 @@ describe("Db", () => {
           [{ kind: "task", content: "do it", status: "delivered" }],
         )
         assert.deepStrictEqual(yield* db.pendingInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), [])
-        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.executionState, "none")
+        assert.strictEqual(executionStateOf((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!), "none")
         assert.isFalse(yield* db.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "no open execution")
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-          status: "working",
-          executionState: "open",
-          executionPromptedAt: 5,
-        })
+        yield* db.startExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 5)
+        yield* db.setStatus("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "working")
         assert.isFalse(yield* db.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "task not handed over yet")
         assert.strictEqual(yield* db.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "do it")
         yield* db.linkTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -357,20 +336,25 @@ describe("Db", () => {
             ?.status,
           "working",
         )
-        assert.deepInclude(yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
-          status: "working",
-          executionState: "open",
-          executionPromptedAt: 5,
-        })
+        const working = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!
+        assert.strictEqual(working.status, "working")
+        assert.strictEqual(executionStateOf(working), "open")
+        assert.strictEqual(working.openExecution?.startedAt, 5)
         yield* db.endExecution(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { outcome: "completed", failure: { message: "late" } },
           undefined,
         )
-        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.executionState, "completed")
+        assert.strictEqual(
+          executionStateOf((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!),
+          "completed",
+        )
         const ended = (yield* db.latestReply("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.execution
         assert.isFalse(yield* db.closeExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ended, "interrupted"))
-        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.executionState, "completed")
+        assert.strictEqual(
+          executionStateOf((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!),
+          "completed",
+        )
         assert.notProperty(
           (yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0],
           "status",
@@ -402,15 +386,15 @@ describe("Db", () => {
           )
         const execution = (summary: string) =>
           Effect.gen(function* () {
-            yield* db.updateSession(child, { executionState: "open", executionPromptedAt: 1 })
+            yield* db.startExecution(child, 1)
             yield* db.endExecution(child, { outcome: "failed", failure: { message: summary } }, summary)
           })
         yield* execution("one")
         assert.deepStrictEqual(yield* recipientOf("one"), [parent])
-        yield* db.updateSession(parent, { metadata: { archived: true, removed: true } })
+        yield* db.archive(parent)
         yield* execution("two")
         assert.deepStrictEqual(yield* recipientOf("two"), [grand])
-        yield* db.updateSession(grand, { metadata: { archived: true, removed: true } })
+        yield* db.archive(grand)
         yield* execution("three")
         assert.deepStrictEqual(yield* recipientOf("three"), [])
       }).pipe(Effect.provide(memoryDb())),
@@ -427,7 +411,7 @@ describe("Db", () => {
         const creator = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         yield* db.insertSession(session(creator), project)
         yield* db.insertSession(session(ended), project, { parentSessionId: creator })
-        yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
+        yield* db.archive(ended)
         const item = (id: string) => ({
           id,
           recipient: ended,
@@ -443,7 +427,7 @@ describe("Db", () => {
         assert.strictEqual(yield* db.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
         assert.strictEqual(yield* db.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "duplicate")
         assert.deepStrictEqual(yield* rows(), [{ recipient: creator, status: "pending" }])
-        yield* db.updateSession(creator, { metadata: { archived: true, removed: true } })
+        yield* db.archive(creator)
         assert.strictEqual(yield* db.receivePeerItem(item("8c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
         assert.deepStrictEqual(yield* rows(), [
           { recipient: creator, status: "pending" },
@@ -487,10 +471,7 @@ describe("Db", () => {
         task: "do it",
       })
       yield* db.insertSession(session("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"), yield* projectOf("r"))
-      yield* db.updateSession("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", {
-        executionState: "open",
-        executionPromptedAt: 5,
-      })
+      yield* db.startExecution("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", 5)
       yield* db.insertSession(session("ffffffff-ffff-4fff-8fff-ffffffffffff"), yield* projectOf("r"))
       yield* execution("ffffffff-ffff-4fff-8fff-ffffffffffff", 3, {
         at: 7,
@@ -951,8 +932,8 @@ describe("Db", () => {
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
           yield* db.insertSession(session(id, { harnessId: "claude", harnessSessionId: "pre" }), yield* projectOf("r"))
           assert.isFalse(yield* db.canResumeConversation(id, "pre"))
-          yield* db.updateSession(id, { executionState: "open", executionPromptedAt: 1 })
-          yield* db.updateSession(id, { executionState: "completed" })
+          yield* db.startExecution(id, 1)
+          yield* complete(db, id)
           assert.isTrue(yield* db.canResumeConversation(id, "pre"))
           const entry = yield* db.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)
           assert.isFalse(yield* db.canResumeConversation(entry.sessionId, "c1"))

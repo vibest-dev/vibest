@@ -4,7 +4,18 @@ import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path
 
 import { Agents } from "../agents.ts"
 import { awaitEvent, Bus, type EngineEvent } from "../bus.ts"
-import { type EntryRow, Db, type SessionRow } from "../db.ts"
+import {
+  archived,
+  Db,
+  executionStateOf,
+  harnessIdOf,
+  pidOf,
+  placedTerminal,
+  reportedOf,
+  runtimeOf,
+  type SessionRow,
+  terminalOf,
+} from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Harness, type HarnessId, Harnesses } from "../harness.ts"
@@ -105,7 +116,7 @@ const sessionRestart = (deps: {
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly checkLater: (id: string) => Effect.Effect<void>
   readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
-  readonly entryArgv: (entry: EntryRow) => Effect.Effect<ReadonlyArray<string>, unknown>
+  readonly entryArgv: (entry: SessionRow) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly awaitReady: (
     h: Runtime,
     terminal: Terminal,
@@ -197,26 +208,26 @@ const sessionRestart = (deps: {
     )
   }
 
-  const againArgv = (session: SessionRow) => deps.launchArgv(session, session.harnessSessionId !== null)
+  const againArgv = (session: SessionRow) => deps.launchArgv(session, (session.process?.conversation ?? null) !== null)
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
       const session = yield* db.getSession(id)
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
-      const interrupted = session.executionState === "open"
+      const interrupted = executionStateOf(session) === "open"
       return yield* inPlace({
         id,
         projectId: session.projectId,
         label: id,
-        adapter: harnesses.find(session.harnessId),
-        h: yield* routed(session.runtime),
-        terminal: session.address,
-        pid: session.metadata.pid,
-        harnessSessionId: session.harnessSessionId,
+        adapter: harnesses.find(harnessIdOf(session)),
+        h: yield* routed(runtimeOf(session)),
+        terminal: terminalOf(session),
+        pid: pidOf(session),
+        harnessSessionId: session.process?.conversation ?? null,
         interrupted,
         argv: againArgv(session),
-        liveNow: db.getSession(id).pipe(Effect.map((row) => row?.metadata)),
+        liveNow: db.getSession(id).pipe(Effect.map(reportedOf)),
         locked: deps.locked(id),
         reconcile: deps.checkLater(id),
         hint: `; ${peekHint(id)}`,
@@ -227,7 +238,7 @@ const sessionRestart = (deps: {
             const missed = yield* deps.prompt(
               h,
               (yield* db.getSession(id)) ?? session,
-              session.address,
+              terminalOf(session),
               noticeEnvelope(continueText(VERSION)),
             )
             return missed === undefined
@@ -237,32 +248,33 @@ const sessionRestart = (deps: {
       })
     })
 
-  const restartEntry = (entry: EntryRow, wasWorking: boolean) =>
+  const restartEntry = (entry: SessionRow, wasWorking: boolean) =>
     Effect.gen(function* () {
       const { id, projectId } = entry
       const label = `${id} (entry session)`
-      if (!entry.runtime || !entry.address || entry.address.id === "")
+      const place = placedTerminal(entry)
+      if (place === undefined)
         return { id, projectId, ok: false, message: `${label} not restarted: it has no terminal` } satisfies Restarted
-      const h = yield* routed(entry.runtime)
+      const h = yield* routed(place.runtime)
       const seen =
         h === undefined
           ? "unknown"
-          : yield* agentState(h, entry.address).pipe(Effect.orElseSucceed((): AgentSeen => "unknown"))
+          : yield* agentState(h, place.address).pipe(Effect.orElseSucceed((): AgentSeen => "unknown"))
       const interrupted = wasWorking || stateOf(seen) === "working"
       return yield* inPlace({
         id,
         projectId,
         label,
-        adapter: harnesses.find(entry.harnessId),
+        adapter: harnesses.find(harnessIdOf(entry)),
         h,
-        terminal: entry.address,
-        pid: entry.pid,
-        harnessSessionId: entry.harnessSessionId,
+        terminal: place.address,
+        pid: pidOf(entry),
+        harnessSessionId: entry.process?.conversation ?? null,
         interrupted,
         argv: deps.entryArgv(entry),
         liveNow: Effect.gen(function* () {
           const row = yield* db.entryOf(projectId)
-          return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined
+          return row?.id === id ? reportedOf(row) : undefined
         }),
         locked: (effect) => effect,
         reconcile: deps.checkLater(id),
@@ -274,7 +286,7 @@ const sessionRestart = (deps: {
             const missed =
               row === undefined
                 ? "it is gone"
-                : yield* deps.prompt(h, row, entry.address!, noticeEnvelope(continueText(VERSION)))
+                : yield* deps.prompt(h, row, place.address, noticeEnvelope(continueText(VERSION)))
             return missed === undefined
               ? { id, projectId, ok: true, message: `${label} restarted; its interrupted execution continues` }
               : { id, projectId, ok: false, message: `${label} restarted, but ${missed}` }
@@ -282,12 +294,13 @@ const sessionRestart = (deps: {
       })
     })
 
-  const entryRunning = (entry: EntryRow) =>
+  const entryRunning = (entry: SessionRow) =>
     Effect.gen(function* () {
-      if (!entry.runtime || !entry.address || entry.address.id === "") return undefined
-      const h = yield* routed(entry.runtime)
+      const place = placedTerminal(entry)
+      if (place === undefined) return undefined
+      const h = yield* routed(place.runtime)
       if (h === undefined) return undefined
-      const seen = yield* agentState(h, entry.address).pipe(Effect.option)
+      const seen = yield* agentState(h, place.address).pipe(Effect.option)
       return Option.isNone(seen) || seen.value === "absent" ? undefined : seen.value
     })
 
@@ -298,32 +311,32 @@ const sessionRestart = (deps: {
       .filter(
         (row) =>
           !row.entry &&
-          reports(row.harnessId) &&
-          !current(row.metadata.integration) &&
-          !(row.metadata.archived || row.metadata.removed) &&
-          row.startedAt !== null &&
-          row.address.id !== "",
+          reports(harnessIdOf(row)) &&
+          !current(row.process?.integration ?? undefined) &&
+          !archived(row) &&
+          (row.process?.placedAt ?? null) !== null &&
+          terminalOf(row).id !== "",
       )
       .map((row) => ({
         id: row.id,
         agent: row.agent,
-        harnessId: row.harnessId,
-        integration: row.metadata.integration,
-        runtime: row.runtime,
-        pid: row.metadata.pid,
-        harnessSessionId: row.harnessSessionId,
-        working: Effect.succeed<boolean | undefined>(row.executionState === "open"),
+        harnessId: harnessIdOf(row),
+        integration: row.process?.integration ?? undefined,
+        runtime: runtimeOf(row),
+        pid: pidOf(row),
+        harnessSessionId: row.process?.conversation ?? null,
+        working: Effect.succeed<boolean | undefined>(executionStateOf(row) === "open"),
       }))
     const entries = (yield* db.entrySessions)
-      .filter((entry) => reports(entry.harnessId) && !current(entry.integration))
+      .filter((entry) => reports(harnessIdOf(entry)) && !current(entry.process?.integration ?? undefined))
       .map((entry) => ({
         id: entry.id,
         agent: entry.agent,
-        harnessId: entry.harnessId,
-        integration: entry.integration,
-        runtime: entry.runtime,
-        pid: entry.pid,
-        harnessSessionId: entry.harnessSessionId,
+        harnessId: harnessIdOf(entry),
+        integration: entry.process?.integration ?? undefined,
+        runtime: placedTerminal(entry)?.runtime,
+        pid: pidOf(entry),
+        harnessSessionId: entry.process?.conversation ?? null,
         working: entryRunning(entry).pipe(
           Effect.map((seen) => (seen === undefined ? undefined : stateOf(seen) === "working")),
         ),
@@ -365,10 +378,12 @@ const sessionRestart = (deps: {
       return outcomes
     })
 
-  const runningTheCommand = (entry: EntryRow, command: number) =>
-    entry.pid === undefined
+  const runningTheCommand = (entry: SessionRow, command: number) => {
+    const pid = pidOf(entry)
+    return pid === undefined
       ? Effect.succeed(false)
-      : processes.tree(entry.pid).pipe(Effect.map((tree) => tree?.includes(command) === true))
+      : processes.tree(pid).pipe(Effect.map((tree) => tree?.includes(command) === true))
+  }
 
   const restartLater = (ids: ReadonlyArray<string>, after: number | undefined) =>
     Effect.gen(function* () {
@@ -415,22 +430,23 @@ const make = Effect.gen(function* () {
   const reconcile = yield* Reconcile
   const vibestCommand = yield* VibestCommand
 
-  const entryArgv = (entry: EntryRow) =>
+  const entryArgv = (entry: SessionRow) =>
     Effect.gen(function* () {
       yield* db.patchLive(entry.id, { ready: null })
-      const root = entry.projectDirectory ?? (yield* db.projectDirectory(entry.projectId)) ?? ""
-      const savedId = entry.harnessSessionId
+      const root = (yield* db.projectDirectory(entry.projectId)) || (yield* db.sessionDirectory(entry.id)) || ""
+      const savedId = entry.process?.conversation ?? null
+      const place = placedTerminal(entry)
       const command = yield* entryCommand({
-        harness: entry.harnessId,
+        harness: harnessIdOf(entry),
         agent: entry.agent,
         root,
-        provider: entry.provider,
-        model: entry.model,
+        provider: entry.process?.provider ?? null,
+        model: entry.process?.model ?? null,
         session: Effect.succeed({
           sessionId: entry.id,
           harnessSessionId: savedId !== null && (yield* db.canResumeConversation(entry.id, savedId)) ? savedId : null,
           projectId: entry.projectId,
-          ...(entry.runtime && entry.address ? { runtime: runtimeEnv(entry.runtime, entry.address) } : {}),
+          ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
         }),
       })
       return restartArgv(command)

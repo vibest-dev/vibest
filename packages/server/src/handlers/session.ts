@@ -1,6 +1,6 @@
 import { raisesSeen } from "@vibest/core/activity"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
+import { Db, runtimeOf, terminalOf, archived } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import { Runtimes } from "@vibest/core/runtimes"
@@ -103,7 +103,7 @@ export const make = (
           })
         })
         const session = yield* db.getSession(id)
-        const stopped = !session || session.metadata.archived || session.metadata.removed
+        const stopped = !session || archived(session)
         yield* allowed
         const to = yield* Effect.gen(function* () {
           if (!(stopped && mine === id)) return { local: id }
@@ -277,9 +277,9 @@ export const make = (
           const identity = yield* db.sessionIdentity(id)
           if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
           const at = yield* db.getSession(id)
-          if (at === undefined || !at.runtime || at.address.id === "") return
-          const address = at.address
-          const rt = runtimes.find(at.runtime)
+          if (at === undefined || !runtimeOf(at) || terminalOf(at).id === "") return
+          const address = terminalOf(at)
+          const rt = runtimes.find(runtimeOf(at))
           if (rt === undefined || rt.seen === undefined || rt.see === undefined) return
           const see = rt.see
           const unreachable = (e: { readonly message: string }) =>
@@ -288,7 +288,7 @@ export const make = (
           yield* Effect.gen(function* () {
             const now = yield* seen(address).pipe(Effect.mapError(unreachable))
             if (raisesSeen(now, finished)) yield* see(address, finished).pipe(Effect.mapError(unreachable))
-          }).pipe(seenLocked.withLock(`${at.runtime}\n${address.machine}\n${address.id}`))
+          }).pipe(seenLocked.withLock(`${runtimeOf(at)}\n${address.machine}\n${address.id}`))
         }),
 
       "Session.Ready": ({ id, pid, conversation }, { headers }) =>

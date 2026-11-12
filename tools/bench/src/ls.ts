@@ -100,7 +100,6 @@ const seed = (file: string, directory: string, n: number) =>
           exitedAt: null,
           executionState: "none",
           executionPromptedAt: 0,
-          metadata: {},
           createdAt: now,
           lastActive: now,
         },

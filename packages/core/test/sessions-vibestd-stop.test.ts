@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, executionStateOf, exitedAt, harnessIdOf, runtimeOf, terminalOf } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
@@ -86,7 +86,9 @@ describe.concurrent("after a vibestd stop", () => {
         assert.deepStrictEqual(yield* sqlNotices(id), [
           `${id} never finished starting (vibestd stopped while it started); its worktree was removed.`,
         ])
-        assert.deepInclude(yield* db.getSession(id), { startedAt: null, status: "unknown" })
+        const row = (yield* db.getSession(id))!
+        assert.isNull(row.process?.placedAt ?? null)
+        assert.strictEqual(row.status, "unknown")
       }),
     ),
   )
@@ -120,12 +122,15 @@ describe.concurrent("after a vibestd stop", () => {
         id,
         sessions.send(id, "next").pipe(Effect.orDie),
         Effect.gen(function* () {
-          assert.isNull((yield* db.getSession(id))!.startedAt)
+          assert.isNull((yield* db.getSession(id))!.process?.placedAt ?? null)
           const cutOff = (texts: ReadonlyArray<string>) => texts.find((t) => t.includes("never finished starting"))
           yield* nextVibestd(Effect.map(sqlNotices(id), (n) => cutOff(n) !== undefined))
           assert.deepStrictEqual(yield* processEnds(id), ["exited", "launch_failed"])
           const after = (yield* db.getSession(id))!
-          assert.deepStrictEqual([after.address, after.startedAt], [before.address, before.startedAt])
+          assert.deepStrictEqual(
+            [terminalOf(after), after.process?.placedAt ?? null],
+            [terminalOf(before), before.process?.placedAt ?? null],
+          )
           assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
           assert.strictEqual(
             cutOff(yield* sqlNotices(id)),
@@ -241,7 +246,13 @@ describe.concurrent("after a vibestd stop", () => {
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
         const db = yield* Db
-        yield* db.updateSession(id, { harnessId: "claude", provider: null, model: null })
+        const row = (yield* db.getSession(id))!
+        yield* db.startProcess(id, {
+          harness: "claude",
+          runtime: runtimeOf(row),
+          terminal: terminalOf(row).id,
+          ...(row.process?.routing ? { routing: row.process.routing } : {}),
+        })
         const successor = yield* db.currentProcessId(id)
         yield* (yield* Integration).ready(id, undefined)
         const handed = Effect.map(herdr.callsTo("send"), (calls) =>
@@ -267,13 +278,16 @@ describe.concurrent("after a vibestd stop", () => {
         const herdr = yield* FakeRuntime
         const db = yield* Db
         yield* db.endProcess(id, "limited")
-        assert.notStrictEqual((yield* db.getSession(id))!.exitedAt, null)
+        assert.notStrictEqual(exitedAt((yield* db.getSession(id))!), null)
         yield* nextVibestd(Effect.map(herdr.callsTo("open"), (calls) => calls.length === 2))
         assert.deepStrictEqual(
           (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
           ["pi", "claude"],
         )
-        yield* until(db.getSession(id), (row) => row?.harnessId === "claude" && row.executionState === "open")
+        yield* until(
+          db.getSession(id),
+          (row) => row !== undefined && harnessIdOf(row) === "claude" && executionStateOf(row) === "open",
+        )
       }),
     ),
     { plugins: [chooseNext] },

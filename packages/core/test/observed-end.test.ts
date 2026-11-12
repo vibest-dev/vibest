@@ -1,4 +1,5 @@
 import { assert, describe } from "@effect/vitest"
+import { exitedAt, executionStateOf, harnessIdOf } from "@vibest/core/db"
 import { Harnesses } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
@@ -45,7 +46,7 @@ describe("observed execution end", () => {
       assert.deepStrictEqual(yield* ends(id), [])
       assert.strictEqual(yield* db.endObserved(id, yield* observedEnd("pi", { text: "new" }), current), "completed")
       yield* db.startObserved(id, "typed into the old process", yield* Clock.currentTimeMillis, earlier)
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
     }),
     { hooked: ["pi"] },
   )
@@ -62,8 +63,8 @@ describe("observed execution end", () => {
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
       )
       const row = (yield* db.getSession(id))!
-      assert.strictEqual(row.executionState, "failed")
-      assert.isNotNull(row.exitedAt)
+      assert.strictEqual(executionStateOf(row), "failed")
+      assert.isNotNull(exitedAt(row))
       assert.deepStrictEqual(
         (yield* db.inboxWithStatus(id, "failed")).map((r) => r.message),
         ["queued"],
@@ -84,7 +85,7 @@ describe("observed execution end", () => {
         { id, entry: false, harness: "pi" },
         JSON.stringify({ type: "agent_settled", text: "done while locked" }),
       )
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
       assert.strictEqual(yield* replyOf(id), "done while locked")
       yield* held.release()
       yield* Fiber.join(checking)
@@ -132,7 +133,7 @@ describe("observed execution end", () => {
       yield* Fiber.join(checking)
       assert.isDefined(typed)
       assert.strictEqual(yield* db.openExecution(id), typed)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "pi")
+      assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "pi")
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
       assert.isEmpty(yield* sqlNotices(id))
     }),
@@ -154,7 +155,7 @@ describe("observed execution end", () => {
       yield* held.release()
       yield* Fiber.join(removing)
       assert.isUndefined(yield* db.openExecution(id))
-      assert.notStrictEqual((yield* db.getSession(id))!.executionState, "open")
+      assert.notStrictEqual(executionStateOf((yield* db.getSession(id))!), "open")
       yield* sessions.userPrompt(id, "typed after the archive")
       assert.isUndefined(yield* db.openExecution(id))
     }),
@@ -174,7 +175,7 @@ describe("observed execution end", () => {
       yield* held.release()
       const result = yield* Fiber.join(interrupting)
       assert.include(result.message, "finished its execution before the interrupt took effect")
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
       assert.strictEqual(yield* replyOf(id), "finished first")
     }),
     { hooked: ["pi"] },

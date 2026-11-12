@@ -2,7 +2,16 @@ import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
 import { Bus, type EngineEvent } from "../bus.ts"
-import { Db, type SessionRow, sessionEnded } from "../db.ts"
+import {
+  Db,
+  type SessionRow,
+  sessionEnded,
+  runtimeOf,
+  terminalOf,
+  exitedAt,
+  executionStateOf,
+  archived,
+} from "../db.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
@@ -34,7 +43,7 @@ const make = Effect.gen(function* () {
   const archives = yield* FiberSet.make()
   const { locked } = locks
   const logged = Engine.logFailure
-  const live = (session: SessionRow) => runtimes.route(session.runtime)
+  const live = (session: SessionRow) => runtimes.route(runtimeOf(session))
   const dropQueue = inbox.dropQueue
   const getRow = (id: string) =>
     db
@@ -73,7 +82,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       let session = yield* getRow(id)
       const h = yield* live(session)
-      const terminal = session.address
+      const terminal = terminalOf(session)
       const seen = yield* agentState(h, terminal)
       const reasons: Array<string> = []
       const working = busyOf(seen)
@@ -91,7 +100,7 @@ const make = Effect.gen(function* () {
         if (execution !== undefined) yield* db.closeExecution(id, execution, "interrupted")
         session = yield* getRow(id)
       }
-      if (!(session.metadata.archived || session.metadata.removed)) {
+      if (!archived(session)) {
         if (options.unlessPending) {
           if (!(yield* db.archiveIfNoPending(id))) return undefined
         } else {
@@ -104,12 +113,12 @@ const make = Effect.gen(function* () {
         removal.release({
           h,
           session,
-          terminal: session.exitedAt === null ? terminal : undefined,
+          terminal: exitedAt(session) === null ? terminal : undefined,
           keepWorktree: options.keepWorktree,
           reasons,
         }),
       )
-      yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+      yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
       return out
     })
 
@@ -128,7 +137,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (!(yield* sessionLive.archivesOnIdle(id))) return
       const owner = yield* db.getSession(id)
-      if (owner === undefined || owner.metadata.archived || owner.metadata.removed) return
+      if (owner === undefined || archived(owner)) return
       yield* locked(
         id,
         true,
@@ -138,15 +147,15 @@ const make = Effect.gen(function* () {
           if (yield* Ref.getAndSet(r.stopping, true)) return
           yield* Effect.gen(function* () {
             const session = yield* getRow(id)
-            if (session.metadata.archived || session.metadata.removed) return
+            if (archived(session)) return
             const tell = (message: string) =>
               Ref.getAndSet(r.archiveTold, true).pipe(
                 Effect.flatMap((told) => (told ? Effect.void : notice(session, message))),
               )
             const skip = (why: string) => tell(`${id} not archived (vibest run --archive-on-idle): ${why}`)
-            if (session.executionState !== "completed") return yield* Ref.set(r.archiveTold, false)
+            if (executionStateOf(session) !== "completed") return yield* Ref.set(r.archiveTold, false)
             const h = yield* live(session)
-            const terminal = session.address
+            const terminal = terminalOf(session)
             const seen = yield* agentState(h, terminal)
             if (seen !== "absent") {
               const settled = yield* settleAfterInterrupt(h, session, terminal)
@@ -191,12 +200,12 @@ const make = Effect.gen(function* () {
     locked(id)(
       Effect.gen(function* () {
         const session = yield* getRow(id)
-        if (!(session.metadata.archived || session.metadata.removed) || session.exitedAt !== null) return
+        if (!archived(session) || exitedAt(session) !== null) return
         const h = yield* live(session)
         const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
-          removal.release({ h, session, terminal: session.address, keepWorktree: true, reasons: [] }),
+          removal.release({ h, session, terminal: terminalOf(session), keepWorktree: true, reasons: [] }),
         )
-        yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+        yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
         if (out.processes !== "exited")
           yield* notice(
             session,

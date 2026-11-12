@@ -3,7 +3,16 @@ import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } fr
 
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
-import { AddressJson, Db, encodeAddress, type RuntimeAddress } from "../db.ts"
+import {
+  AddressJson,
+  Db,
+  encodeAddress,
+  harnessIdOf,
+  pidOf,
+  placedTerminal,
+  type RuntimeAddress,
+  type SessionRow,
+} from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { addPluginHint, Harness, harnessOptions, Harnesses, HarnessUnavailable, type HarnessId } from "../harness.ts"
@@ -30,19 +39,9 @@ const placeOf = (runtime: { readonly id: string; readonly name?: string }, addre
   return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
 }
 
-export const sameEntry = (
-  current: { readonly runtime: string | null; readonly address: RuntimeAddress | null } | undefined,
-  runtime: string,
-  address: string,
-) => {
-  const place = current?.address
-  return (
-    current?.runtime === runtime &&
-    place !== null &&
-    place !== undefined &&
-    place.id !== "" &&
-    encodeAddress(place) === address
-  )
+export const sameEntry = (current: SessionRow | undefined, runtime: string, address: string) => {
+  const place = current === undefined ? undefined : placedTerminal(current)
+  return place !== undefined && place.runtime === runtime && encodeAddress(place.address) === address
 }
 
 const ENTRY_FIRST_INPUT =
@@ -91,7 +90,7 @@ const make = Effect.gen(function* () {
   const decide = (input: {
     readonly root: string
     readonly agent: string
-    readonly current: { readonly harnessId: string; readonly runtime: string | null } | undefined
+    readonly current: SessionRow | undefined
     readonly harness: string | undefined
     readonly provider: string | undefined
     readonly model: string | undefined
@@ -104,34 +103,33 @@ const make = Effect.gen(function* () {
         agent: input.agent,
         parentSessionId: undefined,
         prompt: "",
-        harness: input.harness ?? input.current?.harnessId,
+        harness: input.harness ?? (input.current === undefined ? undefined : harnessIdOf(input.current)),
         provider: input.provider,
         model: input.model,
         harnesses: yield* withHarness(harnessOptions),
         attempts: [],
         machine: { id: input.machine },
         runtime: input.runtime,
-        parentRuntime: input.current?.runtime ?? undefined,
+        parentRuntime: input.current === undefined ? undefined : placedTerminal(input.current)?.runtime,
         machines: yield* machinesListing(runtimes, harnessIds()).pipe(Effect.orElseSucceed(() => [])),
       })
     })
 
   const running = Effect.fn("EntrySession.running")(function* (projectId: string, terminal: string) {
     const entry = yield* db.entryOf(projectId)
-    if (!entry?.address || entry.address.id === "" || !entry.runtime) return null
-    const runtimeId = entry.runtime
-    if (entry.address.id === terminal) return null
-    const found = runtimes.find(runtimeId)
+    const place = entry === undefined ? undefined : placedTerminal(entry)
+    if (entry === undefined || place === undefined || place.address.id === terminal) return null
+    const found = runtimes.find(place.runtime)
     if (!(yield* restarting.has(entry.id))) {
       if (found === undefined) return null
-      const presence = yield* entryIdle(found, entry.address).pipe(Effect.option)
+      const presence = yield* entryIdle(found, place.address).pipe(Effect.option)
       if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
     }
     return {
-      harness: entry.harnessId,
-      place: placeOf(found ?? { id: runtimeId }, entry.address),
-      runtime: runtimeId,
-      address: encodeAddress(entry.address),
+      harness: harnessIdOf(entry),
+      place: placeOf(found ?? { id: place.runtime }, place.address),
+      runtime: place.runtime,
+      address: encodeAddress(place.address),
     }
   })
 
@@ -391,8 +389,8 @@ const make = Effect.gen(function* () {
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
         const entry = yield* db.entryOf(projectId)
-        const place = entry?.address
-        if (!entry?.runtime || !place || place.id === "" || !sameEntry(entry, runtime, address))
+        const place = entry === undefined ? undefined : placedTerminal(entry)
+        if (entry === undefined || place === undefined || !sameEntry(entry, runtime, address))
           return { result: "moved" as const }
         if (yield* restarting.has(entry.id))
           return {
@@ -400,10 +398,10 @@ const make = Effect.gen(function* () {
             reason: "vibest update is restarting it there; run vibest again once it is ready",
           }
         const h = yield* runtimes.route(runtime)
-        return yield* stopAgent(h, place, {
-          pid: entry.pid,
-          detach: db.detachEntry(projectId, runtime, place),
-          reattach: db.reattachEntry(projectId, runtime, place),
+        return yield* stopAgent(h, place.address, {
+          pid: pidOf(entry),
+          detach: db.detachEntry(projectId, runtime, place.address),
+          reattach: db.reattachEntry(projectId, runtime, place.address),
           wait: HARNESS_EXIT_WAIT,
         }).pipe(Effect.provideService(Bus, bus), Effect.provideService(Processes, processes))
       }),

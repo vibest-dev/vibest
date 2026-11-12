@@ -253,7 +253,6 @@ layer(Platform.services)(
                 exitedAt: 1,
                 executionState: "completed",
                 executionPromptedAt: 0,
-                metadata: {},
                 createdAt: 1,
                 lastActive: 1,
               },

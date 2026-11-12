@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, exitedAt, archived, executionStateOf } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
@@ -69,7 +69,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       )
       yield* herdr.seedAgent("test/coord")
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), ...input, archive: true })
-      yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
       yield* sessions.check(id)
       yield* settled
       return { id, sessions, db, herdr, entryId: entry.sessionId, projectId: (yield* db.getSession(id))!.projectId }
@@ -95,7 +95,8 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       return yield* until(inbox.take(w.entryId, undefined), (taken) => taken !== undefined)
     })
 
-  const archived = (db: Db["Service"], id: string) => db.getSession(id).pipe(Effect.map((w) => !!w?.metadata.archived))
+  const archivedRow = (db: Db["Service"], id: string) =>
+    db.getSession(id).pipe(Effect.map((w) => w !== undefined && archived(w)))
   const letForkedArchiveRun = TestClock.withLive(Effect.sleep("100 millis"))
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
 
@@ -109,9 +110,9 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* askEntry(w)
       yield* finishExecution(w, "status: completed\nsummary: found it")
       yield* entryTakes(w)
-      yield* until(archived(w.db, w.id), (a) => a)
+      yield* until(archivedRow(w.db, w.id), (a) => a)
       yield* until(fs.exists(yield* sessionWorktree(w.id)), (e) => !e)
-      yield* until(w.db.getSession(w.id), (r) => r!.exitedAt !== null)
+      yield* until(w.db.getSession(w.id), (r) => exitedAt(r!) !== null)
       yield* letForkedArchiveRun
       const rows = yield* sql<{
         kind: string
@@ -125,7 +126,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       )
       assert.strictEqual(rows[0]!.status, "delivered")
       assert.include(yield* replyOf(w.id), "found it")
-      assert.isNotNull((yield* w.db.getSession(w.id))!.exitedAt)
+      assert.isNotNull(exitedAt((yield* w.db.getSession(w.id))!))
     }),
   )
 
@@ -138,11 +139,11 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* finishExecution(a, "status: completed")
       yield* letForkedArchiveRun
       assert.strictEqual((yield* lastSentBy(a.id))!.status, "pending")
-      assert.isFalse(yield* archived(a.db, a.id))
+      assert.isFalse(yield* archivedRow(a.db, a.id))
       const b = yield* archiveSession(repo)
       yield* b.herdr.updateAgent("test/coord", (c) => ({ ...c, alive: false }))
       yield* finishExecution(b, "status: completed")
-      yield* until(archived(b.db, b.id), (a) => a)
+      yield* until(archivedRow(b.db, b.id), (a) => a)
     }),
   )
 
@@ -157,11 +158,11 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       assert.strictEqual(row!.status, "delivered")
       assert.include(row!.message, "execution ended with an error: model_error")
       yield* letForkedArchiveRun
-      assert.isFalse(yield* archived(b.db, b.id))
+      assert.isFalse(yield* archivedRow(b.db, b.id))
       yield* b.sessions.send(b.id, "the first one")
-      yield* until(b.db.getSession(b.id), (w) => w?.executionState === "open")
+      yield* until(b.db.getSession(b.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* finishExecution(b, "status: completed")
-      yield* until(archived(b.db, b.id), (x) => x)
+      yield* until(archivedRow(b.db, b.id), (x) => x)
     }),
     { hooked: ["pi"] },
   )
@@ -174,7 +175,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* finishExecution(w, "status: completed")
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
-      assert.isFalse(yield* archived(w.db, w.id))
+      assert.isFalse(yield* archivedRow(w.db, w.id))
       yield* w.sessions.check(w.id)
       yield* until(w.db.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
     }),
@@ -193,7 +194,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* held.release()
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
-      assert.isFalse(yield* archived(w.db, w.id))
+      assert.isFalse(yield* archivedRow(w.db, w.id))
       assert.lengthOf(yield* w.db.inboxWithStatus(w.id, "failed"), 0)
       yield* until(w.db.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
     }),
@@ -218,8 +219,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
         [],
       )
       const row = (yield* w.db.getSession(w.id))!
-      assert.isUndefined(row.metadata.archived)
-      assert.isUndefined(row.metadata.removed)
+      assert.isFalse(archived(row))
       assert.lengthOf(yield* w.herdr.callsTo("close"), 0)
       yield* w.herdr.endExecution(w.id)
       yield* w.sessions.send(w.id, "next")
@@ -242,7 +242,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
         `${w.id} was archived; run a new session`,
       )
       yield* held.release()
-      yield* until(w.db.getSession(w.id), (r) => r!.exitedAt !== null)
+      yield* until(w.db.getSession(w.id), (r) => exitedAt(r!) !== null)
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* w.db.inboxWithStatus(w.id, "failed"), [])
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
@@ -256,7 +256,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const a = yield* archiveSession(repo)
       assert.isDefined(yield* a.db.insertSend(a.id, "first"))
       assert.isFalse(yield* a.db.archiveIfNoPending(a.id))
-      assert.isFalse(yield* archived(a.db, a.id))
+      assert.isFalse(yield* archivedRow(a.db, a.id))
       const sender = yield* archiveSession(repo)
       yield* askEntry(sender)
       yield* finishExecution(sender, "status: completed")
@@ -276,9 +276,9 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* w.sessions.check(w.id)
       yield* writeEnd(w.id, "pi", { text: "status: completed" })
       yield* w.sessions.check(w.id)
-      assert.isFalse(yield* archived(w.db, w.id))
+      assert.isFalse(yield* archivedRow(w.db, w.id))
       yield* entryTakes(w)
-      yield* until(archived(w.db, w.id), (a) => a)
+      yield* until(archivedRow(w.db, w.id), (a) => a)
       yield* letForkedArchiveRun
       const notices = yield* sqlNotices(w.id)
       assert.lengthOf(notices, 1)
@@ -324,7 +324,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const w = yield* archiveSession(yield* makeRepository)
       const first = yield* firstArchiveWaiting(w)
       yield* first.release
-      yield* until(archived(w.db, w.id), (a) => a)
+      yield* until(archivedRow(w.db, w.id), (a) => a)
       yield* assertArchivesDone(w)
       assert.lengthOf(yield* w.herdr.callsTo("close"), 1)
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
@@ -340,7 +340,10 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const repo = yield* makeRepository
       const owner = yield* archiveSession(repo)
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
-      yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* until(
+        owner.db.getSession(id),
+        (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
+      )
       yield* askEntry(owner)
       yield* finishExecution(owner, "status: completed")
       yield* entryTakes(owner)

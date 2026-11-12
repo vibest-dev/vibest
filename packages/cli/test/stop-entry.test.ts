@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
-import { Db, encodeAddress } from "@vibest/core/db"
+import { Db, encodeAddress, harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
@@ -92,7 +92,7 @@ const workingPiEntry = Effect.gen(function* () {
   yield* db.noteConversation(started.sessionId, "conversation-1")
   const projectId = yield* projectOf(repo)
   const entry = (yield* db.entryOf(projectId))!
-  const origin = { runtime: entry.runtime!, address: entry.address! }
+  const origin = { runtime: runtimeOf(entry), address: terminalOf(entry) }
   const address = encodeAddress(origin.address)
   yield* db.insertSession(
     {
@@ -110,7 +110,6 @@ const workingPiEntry = Effect.gen(function* () {
       exitedAt: null,
       executionState: "none",
       executionPromptedAt: 0,
-      metadata: {},
       createdAt: 1,
       lastActive: 1,
     },
@@ -179,8 +178,8 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       const moved = yield* s.startAt("test/p2")
       assert.deepInclude(moved, { sessionId: s.started.sessionId, harnessSessionId: "conversation-1" })
       const row = (yield* s.db.entryOf(s.projectId))!
-      assert.strictEqual(row.address?.id, "test/p2")
-      assert.strictEqual(row.pid, 5151)
+      assert.strictEqual(terminalOf(row)?.id, "test/p2")
+      assert.strictEqual(row.process?.pid, 5151)
       assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
     }),
     { statusEvents: true },
@@ -195,7 +194,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
         sessionId: s.started.sessionId,
         harnessSessionId: null,
       })
-      assert.strictEqual((yield* s.db.entryOf(s.projectId))!.harnessId, "claude")
+      assert.strictEqual(harnessIdOf((yield* s.db.entryOf(s.projectId))!), "claude")
     }),
   )
 
@@ -210,7 +209,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
       assert.deepInclude(yield* s.stop, { result: "unsupported" })
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual((yield* s.db.entryOf(s.projectId))!.address?.id, s.paneId)
+      assert.strictEqual(terminalOf((yield* s.db.entryOf(s.projectId))!)?.id, s.paneId)
     }),
   )
 
@@ -227,8 +226,8 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "running" })
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
       const row = (yield* s.db.entryOf(s.projectId))!
-      assert.strictEqual(row.address?.id, s.paneId)
-      assert.strictEqual(row.harnessSessionId, "conversation-1")
+      assert.strictEqual(terminalOf(row)?.id, s.paneId)
+      assert.strictEqual(row.process?.conversation ?? null, "conversation-1")
       assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))
@@ -271,9 +270,12 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       const s = yield* workingPiEntry
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
-      yield* untilVirtual(s.db.entryOf(s.projectId), (row) => row?.runtime === null)
+      yield* untilVirtual(s.db.entryOf(s.projectId), (row) => row !== undefined && placedTerminal(row) === undefined)
       yield* Fiber.interrupt(stopping)
-      yield* untilVirtual(s.db.entryOf(s.projectId), (row) => row?.address?.id === s.paneId)
+      yield* untilVirtual(
+        s.db.entryOf(s.projectId),
+        (row) => row !== undefined && placedTerminal(row)?.address.id === s.paneId,
+      )
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
       assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
       const refused = yield* Effect.exit(s.startAt("test/p2"))
@@ -312,7 +314,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       assert.strictEqual(unseen.result, "unsupported")
       assert.include(unseen.reason, "does not see its harness")
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual((yield* s.db.entryOf(s.projectId))!.address?.id, s.paneId)
+      assert.strictEqual(terminalOf((yield* s.db.entryOf(s.projectId))!)?.id, s.paneId)
       yield* s.processes.set(HARNESS, "exited")
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
       assert.deepStrictEqual(yield* s.processes.signaled, [])
