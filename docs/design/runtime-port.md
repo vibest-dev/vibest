@@ -117,8 +117,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   another runtime's variables the shell inherited.
 - A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. With
   `--share` and no `--runtime`, it runs in the shared session's runtime on its machine instead: it shares that session's
-  worktree and splits a pane off it, so the default choice must not replace the peer. An explicit `--runtime` is kept,
-  and a peer on another runtime or machine is still refused. The parent lookup includes the entry session, because
+  worktree and splits a pane off it, so the default choice must not replace the shared session's. An explicit `--runtime` is kept,
+  and a shared session on another runtime or machine is still refused. The parent lookup includes the entry session, because
   `getSession` leaves the live entry row out. If the runtime that was chosen is not online, the start fails with the
   runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
   already set stands.
