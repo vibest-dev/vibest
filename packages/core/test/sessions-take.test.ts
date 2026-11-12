@@ -41,12 +41,15 @@ const inboxStatuses = (sender: string) =>
     ),
   )
 
-const acceptedFacts = Effect.flatMap(SqlClient.SqlClient, (sql) =>
-  sql<{ n: number }>`SELECT COUNT(*) AS n FROM event WHERE type = 'execution.accepted'`.pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0]!.n),
-  ),
-)
+const acceptedFacts = (session: string) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    sql<{
+      n: number
+    }>`SELECT COUNT(*) AS n FROM event WHERE type = 'execution.accepted' AND aggregate LIKE ${`%${session}%`}`.pipe(
+      Effect.orDie,
+      Effect.map((rows) => rows[0]!.n),
+    ),
+  )
 
 describe.concurrent("an idle session takes its next batch", () => {
   test(
@@ -67,7 +70,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       const { execution } = (yield* inbox.take(entryId, undefined))!
       assert.isTrue(yield* db.acceptExecution(entryId, execution))
       assert.isTrue(yield* db.acceptExecution(entryId, execution))
-      assert.strictEqual(yield* acceptedFacts, 1)
+      assert.strictEqual(yield* acceptedFacts(entryId), 1)
       yield* db.closeExecution(entryId, execution, "completed", {})
       assert.isFalse(yield* db.acceptExecution(entryId, execution))
       assert.isUndefined(yield* db.openExecution(entryId))
@@ -85,6 +88,37 @@ describe.concurrent("an idle session takes its next batch", () => {
       yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
       assert.isUndefined(yield* db.openExecution(entryId))
       assert.isFalse(yield* db.acceptExecution(entryId, execution))
+    }),
+  )
+
+  test(
+    "a batch Claude refused is typed into the pane once, and typing does not open a second execution",
+    Effect.gen(function* () {
+      const { db, sessions, inbox, entryId } = yield* entryAsked
+      const herdr = yield* FakeRuntime
+      const { execution } = (yield* inbox.take(entryId, undefined))!
+      const typed = Effect.map(herdr.callsTo("send"), (calls) => calls.filter((c) => c.text?.includes("a question")))
+      yield* sessions.typeTaken(entryId, execution)
+      assert.lengthOf(yield* typed, 1)
+      yield* sessions.userPrompt(entryId, "a question")
+      yield* sessions.typeTaken(entryId, execution)
+      assert.lengthOf(yield* typed, 1)
+      assert.deepStrictEqual(yield* db.openExecution(entryId), execution)
+      assert.isTrue(yield* db.executionAccepted(entryId))
+    }),
+  )
+
+  test(
+    "a taken batch the harness never accepts ends not_started whatever state the runtime reports",
+    Effect.gen(function* () {
+      const { db, sessions, inbox, entryId, sender } = yield* entryAsked
+      const herdr = yield* FakeRuntime
+      yield* inbox.take(entryId, undefined)
+      yield* herdr.updateAgent("test/coord", (agent) => ({ ...agent, status: "unknown" }))
+      yield* TestClock.adjust("9 seconds")
+      yield* sessions.check(entryId)
+      yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+      assert.isUndefined(yield* db.openExecution(entryId))
     }),
   )
 })

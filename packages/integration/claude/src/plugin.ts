@@ -227,7 +227,12 @@ export function register(on: On, _options?: unknown) {
           draining = false
           if (r.drop !== undefined) {
             forget(batch.line, batch.execution)
-            queue.unshift(batch)
+            void report(host, hookRoute("claude", "prompt"), {
+              hook_event_name: "PromptSubmit",
+              origin: "vibest",
+              execution: batch.execution,
+              refused: true,
+            })
           }
           if (queue.length > 0) host.redraw()
         },

@@ -36,7 +36,7 @@ import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
 import { sessionExecutions } from "./executions.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
-import { Inbox } from "./inbox.ts"
+import { Inbox, text as inboxText } from "./inbox.ts"
 import { entryCommand, restartArgv } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
@@ -153,6 +153,7 @@ export class Sessions extends Context.Service<
     readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
     readonly check: (id: string) => Effect.Effect<void>
     readonly userPrompt: (id: string, text: string, at?: number, process?: number) => Effect.Effect<void>
+    readonly typeTaken: (id: string, execution: number) => Effect.Effect<void>
     readonly republish: Effect.Effect<number>
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
@@ -467,7 +468,8 @@ export class Sessions extends Context.Service<
         const ended = idle && worked
         const now = yield* Clock.currentTimeMillis
         const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.executionPromptedAt)
-        if (idle && !ended && unconfirmed <= 0) {
+        const unstarted = !worked && (idle || inbox.pulls(session.harnessId))
+        if (unstarted && unconfirmed <= 0) {
           const reason = `vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected)`
           const closed =
             execution !== undefined &&
@@ -479,7 +481,7 @@ export class Sessions extends Context.Service<
           if (closed) yield* deliverQueued(h, { ...session, executionState: "not_started" }, terminal)
           return
         }
-        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
+        if (unstarted) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
@@ -588,6 +590,24 @@ export class Sessions extends Context.Service<
           const row = yield* db.insertSend(id, message, request, sender)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
         })
+
+      const typeTaken = (id: string, execution: number) =>
+        locks.withLock(id)(
+          Effect.gen(function* () {
+            const session = yield* db.getSession(id)
+            if (session === undefined || (yield* db.openExecution(id)) !== execution) return
+            if (yield* db.executionAccepted(id)) return
+            const rows = yield* db.deliveredIn(id, execution)
+            if (rows.length === 0) return
+            const h = yield* live(session)
+            const r = yield* track(id)
+            yield* Ref.set(r.prompting, true).pipe(
+              Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
+              Effect.ensuring(Ref.set(r.prompting, false)),
+              Effect.ignore,
+            )
+          }).pipe(Effect.provideContext(platform)),
+        )
 
       const queued = (id: string, inboxId: number | undefined) =>
         Effect.gen(function* () {
@@ -882,6 +902,7 @@ export class Sessions extends Context.Service<
         get,
         list,
         check: checkLocked,
+        typeTaken,
         userPrompt: (id: string, text: string, at?: number, process?: number) =>
           Effect.gen(function* () {
             const now = at ?? (yield* Clock.currentTimeMillis)

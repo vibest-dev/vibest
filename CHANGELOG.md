@@ -16,7 +16,10 @@ release. Each release lists what broke, who is affected and how to migrate under
   are gone, `Inbox.Subscribe` only wakes the session, and its access level is `session`. Entry executions are recorded
   like any other (an entry execution can be judged `lost`), and `vibest ls` shows the entry as an ordinary row. A
   session with no creator (the entry session) does not switch harness on a usage limit. The protocol number is
-  unchanged; the contract snapshot is regenerated.
+  unchanged; the contract snapshot is regenerated. When Claude refuses the plugin's submit of a taken batch (it does
+  after an Esc until someone types), the plugin reports the refusal for that execution and vibestd types the same batch
+  into the pane, so the execution stays one and the batch is delivered once. A taken batch the harness never accepts
+  ends `not_started` after the confirmation timeout whatever state the runtime reports.
 - **`vibest run` runs only inside a session** (users, scripts): a `vibest run` in a plain terminal is refused with a
   pointer to bare `vibest`, which opens a session. Every session `vibest run` starts, here or on another machine, records
   the session that ran it as its creator; `NoCallingSession` is the new error. Any session, not only the entry
