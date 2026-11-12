@@ -5,7 +5,7 @@ import { COORDINATOR } from "@vibest/core/guard"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
-import { ACK_ROUTE, HARNESS_HEADER, parseHookRoute, POLL_ROUTE, PROJECT_HEADER } from "@vibest/protocol/protocol"
+import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -26,9 +26,6 @@ export type Reply = { readonly status: number; readonly body?: unknown }
 const failure = (status: number, error: string): Reply => ({ status, body: { error } })
 const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { status: 200, body })
 
-const AckBody = Schema.fromJsonString(
-  Schema.Struct({ ids: Schema.Array(Schema.Number), release: Schema.optional(Schema.Array(Schema.Number)) }),
-)
 const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
 export const make = Effect.gen(function* () {
@@ -66,18 +63,9 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const who = yield* caller(request.headers)
       if ("status" in who) return who
-      if (request.path === POLL_ROUTE || request.path === ACK_ROUTE) {
-        if (!who.entry) return failure(403, `session ${who.id} is not its project's entry session`)
-        if (harnesses.find(who.harness)?.inbox !== "poll")
-          return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
-        if (request.path === POLL_ROUTE) return ok(yield* inbox.poll(who.projectId))
-        const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
-        if (Option.isNone(body)) return failure(400, "the body is not { ids: number[], release?: number[] }")
-        return yield* admitted(
-          "inbox ack",
-          true,
-          Effect.map(inbox.ack(who.projectId, body.value.ids, body.value.release), (acked) => ok({ acked })),
-        )
+      if (request.path === TAKE_ROUTE) {
+        if (!inbox.pulls(who.harness)) return failure(403, `session ${who.id} runs ${who.harness}, which does not pull`)
+        return ok(yield* inbox.take(who.id, who.process))
       }
       if (request.path === "/session/ready") {
         const pid = Option.getOrUndefined(

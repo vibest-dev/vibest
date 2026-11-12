@@ -2,7 +2,6 @@ import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
 import { Db, encodeAddress } from "@vibest/core/db"
-import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
@@ -16,6 +15,7 @@ import * as Platform from "#platform"
 
 import {
   authed,
+  entryPending,
   FakeProcesses,
   FakeRuntime,
   makeRepository,
@@ -121,7 +121,7 @@ const workingPiEntry = Effect.gen(function* () {
   const stop = c["Project.StopEntry"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
     c["Project.EntrySession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
-  const pending = Effect.map(db.entryPending(projectId), (rows) => rows.map((r) => r.message))
+  const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => r.message))
   return { db, herdr, processes, c, paneId, origin, projectId, started, stop, startAt, pending }
 })
 
@@ -171,7 +171,6 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       assert.deepStrictEqual(yield* s.herdr.callsTo("send"), [])
       assert.isTrue(HashMap.has(yield* s.herdr.panes, s.paneId))
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
-      yield* (yield* Inbox).deliver(s.projectId)
       yield* untilVirtual(s.pending, (rows) => rows.length === 1)
       assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
       const moved = yield* s.startAt("test/p2")

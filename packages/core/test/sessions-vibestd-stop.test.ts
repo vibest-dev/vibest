@@ -10,6 +10,7 @@ import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { CLAUDE, CURSOR, PI } from "./lib/harnesses.ts"
 import { EXECUTIONS, until, untilVirtual, processEnds, writeEnd } from "./lib/observe.ts"
 import { makeRepository, type TestServices } from "./lib/session.ts"
 import {
@@ -129,7 +130,7 @@ describe.concurrent("after a vibestd stop", () => {
         }),
       )
     }),
-    { hooked: ["pi"] },
+    { hooked: ["pi"], harnesses: [{ ...PI, inbox: "subscribe" }, CLAUDE, CURSOR] },
   )
 
   const waitingForReady = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>

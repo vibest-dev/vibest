@@ -47,8 +47,7 @@ describe("subagent runtime", () => {
   test(
     "a subagent of the entry session inherits the entry session runtime",
     Effect.gen(function* () {
-      const { db, repo, projectId, sessions, parent } = yield* entryId
-      assert.strictEqual(yield* db.getSession(parent), undefined)
+      const { repo, projectId, sessions, parent } = yield* entryId
       const spawned = yield* sessions.spawn(input(repo, projectId, { parentSessionId: parent }))
       assert.strictEqual(spawned.runtime, "herdr")
       assert.strictEqual(spawned.decidedBy.runtime, "runtime-choice")

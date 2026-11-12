@@ -76,11 +76,10 @@ const make = Effect.gen(function* () {
     projectPrefixTaken,
     repositoriesOf,
     changedRepositories,
-    notEntry,
     running,
     selectRaw,
     selectSessions,
-    readSession,
+    findSession,
     currentProcess,
     findEntrySessions,
     queueInbox,
@@ -316,7 +315,7 @@ const make = Effect.gen(function* () {
             if (before !== undefined) return before
           }
           if (max !== undefined) {
-            const n = (yield* selectRaw([notEntry, sql`s.ended_at IS NULL`], running)).length
+            const n = (yield* selectRaw([sql`s.agent != 'main'`, sql`s.ended_at IS NULL`], running)).length
             if (n >= max) return false
           }
           const stopped = row.metadata.archived || row.metadata.removed
@@ -432,7 +431,7 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    getSession: (id: string) => readSession(id).pipe(Effect.orDie),
+    getSession: (id: string) => findSession(id).pipe(Effect.orDie),
 
     updateSession: (id: string, patch: SessionPatch) => tx(updateSession(id, patch)).pipe(Effect.orDie),
 
@@ -442,7 +441,6 @@ const make = Effect.gen(function* () {
           ...(filter.projectId === undefined ? [] : [sql`s.project_id = ${filter.projectId}`]),
           ...(filter.peer === undefined ? [] : [remote.ofPeer(sql`s.id`, filter.peer)]),
         ],
-        filter.stopped === true,
         filter.stopped ? undefined : running,
       ).pipe(Effect.orDie),
 

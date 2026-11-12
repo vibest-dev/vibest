@@ -109,7 +109,11 @@ export const sessionPlacement = (deps: {
   const liveCount = (projectId: string) =>
     db
       .listSessions({ projectId })
-      .pipe(Effect.map((rows) => rows.filter((row) => !(row.metadata.archived || row.metadata.removed)).length))
+      .pipe(
+        Effect.map(
+          (rows) => rows.filter((row) => !row.entry && !(row.metadata.archived || row.metadata.removed)).length,
+        ),
+      )
 
   const show = (h: Runtime, session: SessionRow, terminal: Terminal, root: string) =>
     Effect.gen(function* () {
@@ -295,7 +299,7 @@ export const sessionPlacement = (deps: {
     const h = runtimes.find(kind)
     if (h === undefined) return
     const rows = (yield* db.listSessions({ projectId })).filter(
-      (row) => row.runtime === kind && !(row.metadata.archived || row.metadata.removed),
+      (row) => !row.entry && row.runtime === kind && !(row.metadata.archived || row.metadata.removed),
     )
     const stored = yield* storedDirectory(projectId)
     let shown = false
@@ -342,7 +346,7 @@ export const sessionPlacement = (deps: {
 
   const republish = Effect.fn("Sessions.republish")(function* () {
     const rows = (yield* db.listSessions()).filter(
-      (row) => !(row.metadata.archived || row.metadata.removed) && row.address.id !== "",
+      (row) => !row.entry && !(row.metadata.archived || row.metadata.removed) && row.address.id !== "",
     )
     const labelled = yield* Effect.forEach(rows, (session) =>
       Effect.gen(function* () {

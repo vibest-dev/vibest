@@ -478,7 +478,20 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, NoRuntime, RuntimeUnreachable, ...LINE_ERRORS]),
     }),
   ),
-  scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
+  scoped(Rpc.make("Inbox.Subscribe", { success: Schema.Null, error: Schema.Union([Forbidden]), stream: true })),
+  scoped(
+    Rpc.make("Inbox.Take", {
+      success: Schema.NullOr(
+        Schema.Struct({
+          execution: Schema.Number,
+          ids: Schema.Array(Schema.Number),
+          line: Schema.String,
+          text: Schema.String,
+        }),
+      ),
+      error: Schema.Union([Forbidden]),
+    }),
+  ),
   scoped(Rpc.make("Watch", { success: WatchEvent, error: Schema.Union([Forbidden, WatchLagged]), stream: true })),
   scoped(
     admitted(
@@ -809,7 +822,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
 ) {}
 
-type Access = "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self" | "peer"
+type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "peer"
 
 export const ACCESS = {
   Ping: ["open", "peer"],
@@ -825,7 +838,8 @@ export const ACCESS = {
   Launch: "agent",
   List: ["agent", "peer"],
   Get: ["agent", "peer"],
-  "Inbox.Subscribe": "coordinator",
+  "Inbox.Subscribe": "session",
+  "Inbox.Take": "session",
   Watch: "cli",
   "Session.Seen": "cli",
   "Project.Open": "cli",

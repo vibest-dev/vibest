@@ -1,4 +1,4 @@
-import { ACK_ROUTE, hookRoute, isPolled, POLL_ROUTE, type Polled, sessionHeaders } from "@vibest/protocol/protocol"
+import { hookRoute, isTaken, sessionHeaders, TAKE_ROUTE, type Taken } from "@vibest/protocol/protocol"
 import type { EngineInterface, On, Register } from "claude-code"
 
 declare const VIBEST_PLUGIN_VERSION: string
@@ -102,11 +102,9 @@ const errorOf = (body: unknown) =>
     : undefined
 
 export function register(on: On, _options?: unknown) {
-  const queue: Array<Polled> = []
-  const seen = new Set<number>()
-  const full = new Map<string, Array<string>>()
-  let unacked: Array<number> = []
-  let release: Array<number> = []
+  const queue: Array<Taken> = []
+  const full = new Map<string, Array<{ readonly text: string; readonly execution: number }>>()
+  let idle = false
   let polling = false
   let draining = false
   let failures = 0
@@ -167,33 +165,17 @@ export function register(on: On, _options?: unknown) {
   }
 
   const tick = async (host: Host) => {
-    if (polling) return
+    if (polling || !idle || draining || queue.length > 0) return
     polling = true
     try {
-      if (unacked.length > 0 || release.length > 0) {
-        const r = await post(host, ACK_ROUTE, { ids: unacked, release }, REPORT_TRY_MS)
-        if (r.status === 200) {
-          unacked = []
-          release = []
-        }
-      }
-      const r = await post(host, POLL_ROUTE, {}, REPORT_TRY_MS)
+      const r = await post(host, TAKE_ROUTE, {}, REPORT_TRY_MS)
       if (r.status === 409) return
-      if (r.status !== 200 || !isPolled(r.body)) throw new Error(errorOf(r.body) ?? `poll answered ${r.status}`)
+      if (r.status !== 200 && r.status !== 204) throw new Error(errorOf(r.body) ?? `take answered ${r.status}`)
       if (failures >= POLL_FAILURES_SHOWN) host.status(undefined)
       failures = 0
-      const batch = r.body
-      if (batch.ids.length === 0) return
-      const queued = (id: number) => queue.some((b) => b.ids.includes(id))
-      for (const id of batch.ids) if (seen.has(id) && !queued(id) && !unacked.includes(id)) unacked.push(id)
-      const fresh = batch.ids.filter((id) => !seen.has(id))
-      if (fresh.length === 0) return
-      if (fresh.length < batch.ids.length) {
-        release.push(...fresh)
-        return
-      }
-      for (const id of batch.ids) seen.add(id)
-      queue.push(batch)
+      if (r.status === 204) return
+      if (!isTaken(r.body)) throw new Error("take answered an unknown shape")
+      queue.push(r.body)
       host.redraw()
     } catch {
       failures += 1
@@ -203,15 +185,15 @@ export function register(on: On, _options?: unknown) {
     }
   }
 
-  const keep = (line: string, text: string) => {
+  const keep = (line: string, taken: { readonly text: string; readonly execution: number }) => {
     const list = full.get(line)
-    if (list) list.push(text)
-    else full.set(line, [text])
+    if (list) list.push(taken)
+    else full.set(line, [taken])
     while (full.size > FULL_MAX) full.delete(full.keys().next().value!)
   }
-  const forget = (line: string, text: string) => {
+  const forget = (line: string, execution: number) => {
     const list = full.get(line)
-    const at = list?.lastIndexOf(text) ?? -1
+    const at = list?.findLastIndex((taken) => taken.execution === execution) ?? -1
     if (list && at >= 0) list.splice(at, 1)
     if (list?.length === 0) full.delete(line)
   }
@@ -225,7 +207,8 @@ export function register(on: On, _options?: unknown) {
         if (typeof current === "number") processId = String(current)
       })
     }
-    if (timer === undefined && (await identity(host))?.agent === "coordinator") {
+    idle = true
+    if (timer === undefined && (await identity(host))) {
       timer = host.every(POLL_MS, () => void tick(host))
       void tick(host)
     }
@@ -238,19 +221,19 @@ export function register(on: On, _options?: unknown) {
       const host = nativeHost($)
       draining = true
       queue.shift()
-      keep(batch.line, batch.text)
+      keep(batch.line, batch)
       await host.submit(batch.line).then(
         (r) => {
           draining = false
           if (r.drop !== undefined) {
-            forget(batch.line, batch.text)
+            forget(batch.line, batch.execution)
             queue.unshift(batch)
-          } else unacked.push(...batch.ids)
+          }
           if (queue.length > 0) host.redraw()
         },
         () => {
           draining = false
-          forget(batch.line, batch.text)
+          forget(batch.line, batch.execution)
           queue.unshift(batch)
           host.redraw()
         },
@@ -263,7 +246,8 @@ export function register(on: On, _options?: unknown) {
     if (event.agentId === undefined) {
       const host = nativeHost($)
       const who = await identity(host).catch(() => undefined)
-      if (who && who.agent !== "coordinator")
+      idle = true
+      if (who)
         void report(host, hookRoute("claude", "execution-end"), {
           hook_event_name: "ExecutionComplete",
           session_id: await host.conversation().catch(() => ""),
@@ -277,15 +261,22 @@ export function register(on: On, _options?: unknown) {
 
   on("prompt.submit", async ($, event, next) => {
     const host = nativeHost($)
+    idle = false
     if (event.origin.kind === "plugin" && event.origin.name === host.plugin()) {
       const list = full.get(event.text)
-      const text = list?.shift()
+      const taken = list?.shift()
       if (list?.length === 0) full.delete(event.text)
-      if (text === undefined || event.text.trimEnd().endsWith(text.trim())) return next(event)
-      return next({ ...event, context: [...(event.context ?? []), text] })
+      if (taken === undefined) return next(event)
+      await report(host, hookRoute("claude", "prompt"), {
+        hook_event_name: "PromptSubmit",
+        origin: "vibest",
+        execution: taken.execution,
+      })
+      if (event.text.trimEnd().endsWith(taken.text.trim())) return next(event)
+      return next({ ...event, context: [...(event.context ?? []), taken.text] })
     }
     const who = await identity(host).catch(() => undefined)
-    if (who && who.agent !== "coordinator")
+    if (who)
       await report(host, hookRoute("claude", "prompt"), {
         hook_event_name: "PromptSubmit",
         text: event.text,

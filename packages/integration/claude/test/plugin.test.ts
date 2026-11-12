@@ -34,16 +34,16 @@ const settle = async () => {
 type Request = { url: string; socketPath: string; headers: Record<string, string>; body: unknown }
 type Answer = { status: number; body?: unknown } | Error
 
-const COORDINATOR = {
-  VIBEST_AGENT: "coordinator",
+const SESSION = {
+  VIBEST_AGENT: "general",
   VIBEST_SESSION_ID: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1",
   VIBEST_PROJECT_ID: "7",
   VIBEST_HOME: "/vh",
   VIBEST_RUNTIME: '{"runtime":"herdr"}',
 }
-const WORKER = { ...COORDINATOR, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+const WORKER = { ...SESSION, VIBEST_SESSION_ID: "w1" }
 
-const host = (env: Record<string, string> = COORDINATOR) => {
+const host = (env: Record<string, string> = SESSION) => {
   const hooks: Record<string, Function> = {}
   const catches: Record<string, Function> = {}
   const on = (event: string, a: unknown, b?: unknown) => {
@@ -58,7 +58,7 @@ const host = (env: Record<string, string> = COORDINATOR) => {
   const state = {
     conversation: "c1",
     redraws: 0,
-    answer: (_r: Request): Answer => ({ status: 200, body: { ids: [], line: "", text: "" } }),
+    answer: (_r: Request): Answer => ({ status: 204 }),
     submit: async (_text: string): Promise<{ text: string; drop?: undefined } | { drop: string }> => ({ text: "x" }),
   }
   const $ = {
@@ -136,11 +136,14 @@ const host = (env: Record<string, string> = COORDINATOR) => {
   }
 }
 
-const batch = (ids: number[], line: string, text: string) => ({ status: 200, body: { ids, line, text } })
+const batch = (execution: number, line: string, text: string) => ({
+  status: 200,
+  body: { execution, ids: [execution], line, text },
+})
 const ownSubmit = { kind: "plugin", name: "vibest" }
 
 describe("Claude plugin requests", () => {
-  it("does nothing outside VIBEST: no poll, no report, tool calls pass", async () => {
+  it("does nothing outside VIBEST: no take, no report, tool calls pass", async () => {
     const h = host({})
     await h.start()
     await h.executionComplete({ reason: "answer", answer: "x" })
@@ -149,30 +152,26 @@ describe("Claude plugin requests", () => {
     assert.deepStrictEqual([h.requests, h.every], [[], []])
   })
 
-  it("a worker reports its execution end and the person's prompt, and polls nothing", async () => {
+  it("a session reports its execution end and the person's prompt", async () => {
     const h = host(WORKER)
     await h.start()
-    assert.deepStrictEqual(h.every, [])
     await h.executionComplete({ reason: "answer", answer: "done" })
     await h.executionComplete({ reason: "answer", answer: "sub", agentId: "a1" })
     await h.prompt("next", { kind: "composer" })
     await settle()
-    assert.deepStrictEqual(h.paths(), ["/session/ready", "/hooks/claude/execution-end", "/hooks/claude/prompt"])
-    assert.deepStrictEqual(h.requests[1]!.body, {
+    assert.deepStrictEqual(h.paths(), [
+      "/session/ready",
+      "/inbox/take",
+      "/hooks/claude/execution-end",
+      "/hooks/claude/prompt",
+    ])
+    assert.deepStrictEqual(h.requests[2]!.body, {
       hook_event_name: "ExecutionComplete",
       session_id: "c1",
       reason: "answer",
       last_assistant_message: "done",
     })
-    assert.deepStrictEqual(h.requests[2]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
-  })
-
-  it("the entry session's execution end is not reported", async () => {
-    const h = host()
-    h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([], "", "") : { status: 204 })
-    await h.executionComplete({ reason: "answer", answer: "x" })
-    await settle()
-    assert.deepStrictEqual(h.paths(), [])
+    assert.deepStrictEqual(h.requests[3]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
   })
 
   it("a report vibestd did not take is tried again later", async () => {
@@ -190,31 +189,42 @@ describe("Claude plugin requests", () => {
 })
 
 describe("Claude plugin inbox", () => {
-  it("a poll only queues; each draw submits one batch's line; its own submit gets the full text as context, unless the line already ends with it; acked on the next poll", async () => {
+  it("takes only while idle; each draw submits one batch's line; its own submit reports the accepted execution and gets the full text as context, unless the line already ends with it", async () => {
     const h = host()
-    const polls = [
-      batch([1], 'General Agent "A" completed (w1)', "full A"),
-      batch([2], "Notice: x", "full B"),
-      batch([3], "Notice: w1 exited.", "w1 exited."),
+    const takes = [
+      batch(1, 'General Agent "A" completed (w1)', "full A"),
+      batch(2, "Notice: x", "full B"),
+      batch(3, "Notice: w1 exited.", "w1 exited."),
     ]
-    h.state.answer = (r) =>
-      r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: { acked: [] } }
+    h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
     await h.start()
     await h.tick()
-    assert.deepStrictEqual(h.submitted, [], "the poll does not submit")
-    assert.strictEqual(h.state.redraws, 2)
+    assert.deepStrictEqual(h.submitted, [], "the take does not submit")
+    assert.strictEqual(h.state.redraws, 1)
+    assert.lengthOf(
+      h.requests.filter((r) => r.url.endsWith("/take")),
+      1,
+      "no second take while a batch waits",
+    )
     assert.strictEqual(await h.draw(), "drawn", "draws nothing of its own")
     assert.deepStrictEqual(h.submitted, ['General Agent "A" completed (w1)'])
     const own = await h.prompt('General Agent "A" completed (w1)', ownSubmit)
     assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
+    assert.deepStrictEqual(h.requests.at(-1)!.body, { hook_event_name: "PromptSubmit", origin: "vibest", execution: 1 })
+    await h.tick()
+    assert.lengthOf(
+      h.requests.filter((r) => r.url.endsWith("/take")),
+      1,
+      "no take while the execution runs",
+    )
+    await h.executionComplete({ reason: "answer", answer: "done" })
+    await h.tick()
     await h.draw()
     assert.deepStrictEqual(h.submitted.at(-1), "Notice: x")
     assert.notProperty(await h.prompt("Notice: x", { kind: "composer" }), "context")
     assert.deepStrictEqual(((await h.prompt("Notice: x", ownSubmit)) as { context: string[] }).context, ["full B"])
+    await h.executionComplete({ reason: "answer", answer: "done" })
     await h.tick()
-    const ack = h.requests.find((r) => r.url.endsWith("/ack"))
-    assert.deepStrictEqual(ack?.body, { ids: [1, 2], release: [] })
-    assert.isTrue(h.paths().indexOf("/inbox/ack") < h.paths().lastIndexOf("/inbox/poll"), "ack, then poll")
     await h.draw()
     assert.deepStrictEqual(h.submitted.at(-1), "Notice: w1 exited.")
     assert.notProperty(
@@ -224,61 +234,25 @@ describe("Claude plugin inbox", () => {
     )
   })
 
-  it("a dropped submit goes back to the front of the queue; two batches with one line keep their texts in order", async () => {
+  it("a dropped submit goes back to the front of the queue and is submitted again", async () => {
     const h = host()
-    const polls = [batch([1], "same", "first"), batch([2], "same", "second")]
-    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    const takes = [batch(1, "same", "first")]
+    h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
     await h.start()
     await h.tick()
     h.state.submit = async () => ({ drop: "busy" })
     await h.draw()
     h.state.submit = async () => ({ text: "x" })
     await h.draw()
-    await h.draw()
-    assert.deepStrictEqual(h.submitted, ["same", "same", "same"])
+    assert.deepStrictEqual(h.submitted, ["same", "same"])
     assert.deepStrictEqual(((await h.prompt("same", ownSubmit)) as { context: string[] }).context, ["first"])
-    assert.deepStrictEqual(((await h.prompt("same", ownSubmit)) as { context: string[] }).context, ["second"])
     assert.notProperty(await h.prompt("same", ownSubmit), "context")
-  })
-
-  it("a batch handed out again after its lease ran out is shown once; once submitted it is acked again", async () => {
-    const h = host()
-    h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([5], "L", "T") : { status: 200, body: {} })
-    await h.start()
-    await h.tick()
-    assert.strictEqual(h.state.redraws, 1)
-    await h.draw()
-    await h.draw()
-    assert.deepStrictEqual(h.submitted, ["L"])
-    await h.tick()
-    await h.tick()
-    const acks = h.requests.filter((r) => r.url.endsWith("/ack")).map((r) => r.body)
-    assert.deepStrictEqual(acks, [
-      { ids: [5], release: [] },
-      { ids: [5], release: [] },
-    ])
-  })
-
-  it("a batch mixing a row already shown with a new one: the old one is acked, the new one given back, nothing shown twice", async () => {
-    const h = host()
-    const polls = [batch([5], "L", "T"), batch([5, 6], "M", "T + U"), batch([6], "N", "U")]
-    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
-    await h.start()
-    await h.draw()
-    await h.tick()
-    await h.draw()
-    assert.deepStrictEqual(h.submitted, ["L"], "the mixed batch is not shown")
-    await h.tick()
-    const ack = h.requests.filter((r) => r.url.endsWith("/ack")).at(-1)
-    assert.deepStrictEqual(ack?.body, { ids: [5], release: [6] })
-    await h.draw()
-    assert.deepStrictEqual(h.submitted, ["L", "N"])
   })
 
   it("says so once vibestd stops answering, and clears it when it answers again", async () => {
     const h = host()
     let down = true
-    h.state.answer = () => (down ? new Error("ENOENT") : batch([], "", ""))
+    h.state.answer = () => (down ? new Error("ENOENT") : { status: 204 })
     await h.start()
     for (let i = 1; i < plugin.POLL_FAILURES_SHOWN; i++) await h.tick()
     assert.lengthOf(h.statuses, 1)
@@ -299,10 +273,10 @@ describe("Claude plugin protocol mismatch", () => {
     action: "vibest update",
   }
 
-  it("a 409 puts vibestd's message and action on the status line, polls on quietly, and clears once it goes through", async () => {
+  it("a 409 puts vibestd's message and action on the status line, takes on quietly, and clears once it goes through", async () => {
     const h = host()
     let refused = true
-    h.state.answer = () => (refused ? { status: 409, body: mismatch } : batch([], "", ""))
+    h.state.answer = () => (refused ? { status: 409, body: mismatch } : { status: 204 })
     await h.start()
     for (let i = 0; i < plugin.POLL_FAILURES_SHOWN + 1; i++) await h.tick()
     assert.isTrue(h.statuses.every((t) => t === `VIBEST: ${mismatch.error}`))

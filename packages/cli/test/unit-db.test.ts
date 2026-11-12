@@ -4,7 +4,7 @@ import url from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
-import { APPLICATION_ID, Db, encodeAddress } from "@vibest/core/db"
+import { APPLICATION_ID, Db } from "@vibest/core/db"
 import { makeJournal } from "@vibest/core/journal"
 import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { SessionLive } from "@vibest/core/session/live"
@@ -571,13 +571,8 @@ describe("Db", () => {
           message: "hi",
         })
         assert.strictEqual(row.status, "pending")
-        const guard = {
-          projectId: (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId,
-          runtime: RUNTIME,
-          address: encodeAddress(place.address),
-        }
-        assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id], guard), [row.id])
-        assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id], guard), [])
+        assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id]), [row.id])
+        assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id]), [])
         yield* db.setInboxStatus(row.recipient!, [row.id], "delivered", "delivering")
         assert.strictEqual(yield* noticeStatus("hi"), "delivered")
         yield* db.insertInbox({

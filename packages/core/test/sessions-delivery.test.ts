@@ -8,7 +8,7 @@ import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
+import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { CURSOR } from "./lib/harnesses.ts"
 import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd } from "./lib/observe.ts"
@@ -620,9 +620,9 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       yield* settled
       const prompts = (yield* herdr.callsTo("send")).length
-      const notices = db
-        .entryPending((yield* db.getSession(id))!.projectId)
-        .pipe(Effect.map((rows) => rows.filter((r) => r.kind === "notice")))
+      const notices = entryPending(db, (yield* db.getSession(id))!.projectId).pipe(
+        Effect.map((rows) => rows.filter((r) => r.kind === "notice")),
+      )
 
       const held = yield* herdr.hold("state", id)
       yield* sessions.send(id, "first")

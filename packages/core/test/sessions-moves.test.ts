@@ -213,7 +213,7 @@ describe.concurrent("Sessions", () => {
       yield* held.reached
       yield* held.release("rate_limit")
       yield* Fiber.join(spawning)
-      const id = (yield* db.listSessions())[0]!.id
+      const id = (yield* db.listSessions()).find((s) => !s.entry)!.id
       yield* until(db.getSession(id), (w) => !!w && w.harnessId === "claude" && w.executionState === "open")
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "do it")

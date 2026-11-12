@@ -81,6 +81,17 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
       const reply = yield* Ref.make({ text: "", error: "" })
       yield* pi.handle("session_start", (_e, ctx) => Ref.set(root, ctx.mode === "tui"))
       yield* pi.handle("agent_end", (e) => Ref.set(reply, lastReply(e.messages)))
+      yield* pi.handle("message_start", (e, ctx) =>
+        Effect.gen(function* () {
+          const message = e.message
+          if (message.role !== "custom" || message.customType !== "vibest") return
+          const details = message.details as { readonly execution?: unknown } | undefined
+          if (typeof details?.execution !== "number") return
+          const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
+          const event = encodeJson({ type: "accepted", execution: details.execution })
+          yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
+        }),
+      )
       yield* pi.handle("input", (e, ctx) =>
         Effect.gen(function* () {
           if (e.source === "extension" || e.text.trim() === "") return
@@ -154,50 +165,70 @@ const coordinator: Role = Layer.effectDiscard(
     const sessionId = yield* Config.option(Config.String("VIBEST_SESSION_ID"))
     if (Option.isNone(sessionId)) return
     yield* reportSession(sessionId.value)
-    const started = yield* Deferred.make<ExtensionContext>()
-    yield* pi.handle("session_start", (_e, ctx) =>
-      ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
-    )
-    const subscribe = (ctx: ExtensionContext) =>
-      withVibest(
-        {
-          _tag: "session",
-          sessionId: sessionId.value,
-          harnessSessionId: ctx.sessionManager.getSessionId(),
-          pluginVersion: VERSION,
-        },
-        (client) =>
-          client["Inbox.Subscribe"](undefined).pipe(
-            Stream.runForEach((content) =>
-              pi.sendMessage(
-                { customType: "vibest", content, display: false },
-                { triggerTurn: true, deliverAs: "followUp" },
-              ),
-            ),
-            Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
-          ),
-        { start: false },
-      ).pipe(
-        Effect.retry({
-          while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
-          schedule: Schedule.spaced("2 seconds"),
-        }),
-        Effect.repeat(Schedule.spaced("2 seconds")),
-      )
-    yield* Deferred.await(started).pipe(
-      Effect.flatMap((ctx) =>
-        subscribe(ctx).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.sync(() => ctx.ui.notify(`vibest: inbox subscription ended: ${Cause.pretty(cause)}`, "error")),
-          ),
-        ),
-      ),
-      Effect.forkScoped,
-    )
   }),
 )
+
+const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const pi = yield* Pi
+      const started = yield* Deferred.make<ExtensionContext>()
+      yield* pi.handle("session_start", (_e, ctx) =>
+        ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
+      )
+      const identity = (ctx: ExtensionContext) =>
+        Effect.map(Ref.get(processId), (current) => ({
+          _tag: "session" as const,
+          sessionId,
+          harnessSessionId: ctx.sessionManager.getSessionId(),
+          pluginVersion: VERSION,
+          ...(current === undefined ? {} : { process: current }),
+        }))
+      const takeNext = (ctx: ExtensionContext) =>
+        Effect.gen(function* () {
+          if (!ctx.isIdle()) return
+          const taken = yield* withVibest(yield* identity(ctx), (client) => client["Inbox.Take"](undefined), {
+            start: false,
+          })
+          if (taken === null) return
+          yield* pi.sendMessage(
+            { customType: "vibest", content: taken.text, display: false, details: { execution: taken.execution } },
+            { triggerTurn: true },
+          )
+        }).pipe(Effect.ignore)
+      yield* pi.handle("agent_settled", (_e, ctx) => takeNext(ctx))
+      const subscribe = (ctx: ExtensionContext) =>
+        Effect.flatMap(identity(ctx), (who) =>
+          withVibest(
+            who,
+            (client) =>
+              client["Inbox.Subscribe"](undefined).pipe(
+                Stream.runForEach(() => takeNext(ctx)),
+                Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
+              ),
+            { start: false },
+          ),
+        ).pipe(
+          Effect.retry({
+            while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
+            schedule: Schedule.spaced("2 seconds"),
+          }),
+          Effect.repeat(Schedule.spaced("2 seconds")),
+        )
+      yield* Deferred.await(started).pipe(
+        Effect.flatMap((ctx) =>
+          subscribe(ctx).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.void
+                : Effect.sync(() => ctx.ui.notify(`vibest: inbox subscription ended: ${Cause.pretty(cause)}`, "error")),
+            ),
+          ),
+        ),
+        Effect.forkScoped,
+      )
+    }),
+  )
 
 const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role =>
   Layer.effectDiscard(
@@ -245,8 +276,10 @@ export const extension = Layer.unwrap(
     const processId = yield* Ref.make(Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROCESS"))))
     const guarding: Role = Layer.effectDiscard(guarded(agent, sessionId))
     const guard = sessionId ? Layer.merge(guarding, ready(sessionId, processId)) : guarding
-    if (agent === COORDINATOR) return coordinator.pipe(Layer.provideMerge(guard))
-    return sessionId ? session(sessionId, processId).pipe(Layer.provideMerge(guard)) : guard
+    const own = sessionId
+      ? Layer.mergeAll(session(sessionId, processId), inbox(sessionId, processId)).pipe(Layer.provideMerge(guard))
+      : guard
+    return agent === COORDINATOR ? coordinator.pipe(Layer.provideMerge(own)) : own
   }),
 )
 

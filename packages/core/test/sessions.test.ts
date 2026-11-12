@@ -2,7 +2,6 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harnesses } from "@vibest/core/harness"
-import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
@@ -12,7 +11,7 @@ import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
+import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
@@ -309,7 +308,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
-      assert.deepStrictEqual(yield* db.entryPending((yield* db.getSession(id))!.projectId), [])
+      assert.deepStrictEqual(yield* entryPending(db, (yield* db.getSession(id))!.projectId), [])
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { executionState: "lost", exitedAt: null })
@@ -381,7 +380,6 @@ describe.concurrent("Sessions", () => {
       yield* sessions.remove(id)
       assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
-      assert.strictEqual(yield* (yield* Inbox).locks, 0)
     }),
     { hooked: ["pi"] },
   )

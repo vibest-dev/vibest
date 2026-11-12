@@ -351,15 +351,14 @@ E2E runs it on every world's database at the end of each check.
 
 ## Memory
 
-- One-shot timers (engine): a session's execution-end grace and missed-execution check, a polling entry session's away timer, and
-  one lease timer per row a poll handed out. Lost with the process; the start-up reconcile and `recoverDelivering`
-  stand in for them.
+- One-shot timers (engine): a session's execution-end grace and missed-execution check. Lost with the process; the
+  start-up reconcile and `recoverDelivering` stand in for them.
 - Live status: from the integration's events (working between `execution.started` and `execution.ended`, plus `blocked`), and
   from the runtime only for a harness with no integration.
-- Poll leases: on start, `recoverDelivering` (one transaction) moves `delivering` rows of polling entry sessions back
-  to `pending` and the other entry session rows to `failed`, each with an `inbox.moved`; the plugin acks by row id and
-  skips rows it showed. A session may see one message twice after a vibestd restart. A subagent's `delivering` rows
-  fail with one notice ("may or may not have arrived") and are not delivered again.
+- On start, `recoverDelivering` (one transaction) moves every `delivering` row (a message vibestd was typing when it
+  stopped) to `failed`, each with an `inbox.moved`, and tells its sender once ("may or may not have arrived"); it is not
+  delivered again. A pulled batch is `delivered` and attached to its execution by `take`, so it has no `delivering`
+  state; a batch the harness never took up is settled by the execution's confirmation timeout (`not_started`).
 - Restarting mark: the end events are written after SIGTERM, so a crash before it leaves the old process running,
   and a crash after it leaves an unended process with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an

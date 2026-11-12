@@ -2,7 +2,8 @@ import { ExecutionAccepted, type InboxKind } from "@vibest/schema/event"
 import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
-import { encodeAddress, failureOf, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
+import { nextBatch } from "./batch.ts"
+import { failureOf, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
 import { envelope, type ObservedEnd } from "./replies.ts"
 
@@ -17,15 +18,12 @@ export const inboxMethods = (store: Store) => {
     liveRecipient,
     queueSend,
     tellSender,
-    tellSendersOf,
     queueForPeer,
     origins,
     currentProcess,
-    findEntrySessions,
     inbox,
     inboxIn,
     findSend,
-    entryIdOf,
     openExecution,
     startExecution,
     moveInbox,
@@ -34,15 +32,12 @@ export const inboxMethods = (store: Store) => {
     endExecution,
     updateSession,
     setStatus,
-    dropWaiting,
     emit,
     currentProcessId,
   } = store
   const queuedBy = reads.queuedBy
   const observable = (id: string) =>
-    sql<{ ok: number }>`SELECT 1 AS ok FROM session s
-      WHERE s.id = ${id} AND s.agent != 'main' AND s.ended_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`.pipe(
+    sql<{ ok: number }>`SELECT 1 AS ok FROM session s WHERE s.id = ${id} AND s.ended_at IS NULL`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
   const acceptedAt = (id: string, execution: number) =>
@@ -55,6 +50,8 @@ export const inboxMethods = (store: Store) => {
         yield* emit(ExecutionAccepted, { sessionId: id, data: { execution } })
       return true
     })
+  const isEntry = (id: string) =>
+    sql`SELECT 1 FROM project WHERE entry_session_id = ${id}`.pipe(Effect.map((rows) => rows.length > 0))
   const fromOldProcess = (id: string, process: number | undefined) =>
     Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
   return {
@@ -96,19 +93,6 @@ export const inboxMethods = (store: Store) => {
             ),
           })
           return written
-        }),
-      ).pipe(Effect.orDie),
-
-    failLeased: (sessionId: string, ids: ReadonlyArray<number>) =>
-      tx(
-        Effect.gen(function* () {
-          const leased = sql`session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'delivering'`
-          yield* moveInbox(sql`${leased} AND kind = 'send' AND sender_session_id IS NULL`, "pending")
-          const failed = yield* moveInbox(leased, "failed")
-          yield* tellSendersOf(
-            failed,
-            "the entry session stopped before it took the message; it may or may not have arrived",
-          )
         }),
       ).pipe(Effect.orDie),
 
@@ -186,7 +170,8 @@ export const inboxMethods = (store: Store) => {
           if ((yield* openExecution(id)) !== execution) return false
           const failure = failureOf(options.failure)
           yield* endExecution(id, { outcome: status, ...(failure === undefined ? {} : { failure }) })
-          if (options.notice !== undefined) yield* insertInboxRow({ sessionId: id, message: options.notice })
+          if (options.notice !== undefined && !(yield* isEntry(id)))
+            yield* insertInboxRow({ sessionId: id, message: options.notice })
           return true
         }),
       ).pipe(Effect.orDie),
@@ -272,7 +257,7 @@ export const inboxMethods = (store: Store) => {
             end.at,
           )
           yield* setStatus(id, "idle")
-          if (end.status === "failed" && !end.limited)
+          if (end.status === "failed" && !end.limited && !(yield* isEntry(id)))
             yield* insertInboxRow(
               { sessionId: id, message: `${id}'s execution ended with an error: ${end.failure}` },
               end.at,
@@ -294,63 +279,9 @@ export const inboxMethods = (store: Store) => {
 
     inboxWithStatus: (sessionId: string, status: InboxStatus) => findSend(sessionId, status).pipe(Effect.orDie),
 
-    entryPending: (projectIdValue: string) =>
-      inbox(sql`m.kind != 'task' AND m.status = 'pending' AND m.session_id = ${entryIdOf(projectIdValue)}`).pipe(
-        Effect.orDie,
-      ),
-
-    releaseLeased: (projectIdValue: string, ids: ReadonlyArray<number>) =>
-      ids.length === 0
-        ? Effect.succeed([] as ReadonlyArray<number>)
-        : moveInbox(
-            sql`${sql.in("id", ids)} AND status = 'delivering' AND session_id = ${entryIdOf(projectIdValue)}`,
-            "pending",
-          ).pipe(
-            Effect.map((keys) => keys.map((k) => k.id)),
-            Effect.orDie,
-          ),
-
-    settleLeased: (projectIdValue: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
+    recoverDelivering: (notice: (sessionId: string, messages: ReadonlyArray<string>) => string) =>
       tx(
         Effect.gen(function* () {
-          const entry = entryIdOf(projectIdValue)
-          if (release.length > 0)
-            yield* moveInbox(
-              sql`${sql.in("id", release)} AND status = 'delivering' AND session_id = ${entry}`,
-              "pending",
-            )
-          if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
-          const done = yield* moveInbox(
-            sql`${sql.in("id", ids)} AND status IN ('delivering', 'pending') AND session_id = ${entry}`,
-            "delivered",
-          )
-          return done.length === 0
-            ? []
-            : yield* inboxIn(
-                done[0]!.session,
-                done.map((k) => k.id),
-              )
-        }),
-      ).pipe(Effect.orDie),
-
-    recoverDelivering: (
-      pollHarnesses: ReadonlyArray<string>,
-      notice: (sessionId: string, messages: ReadonlyArray<string>) => string,
-    ) =>
-      tx(
-        Effect.gen(function* () {
-          const polling = sql`session_id IN (SELECT s.id FROM session s
-              JOIN project q ON q.entry_session_id = s.id
-              JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-              WHERE ${pollHarnesses.length === 0 ? sql`0` : sql`p.harness IN ${sql.in(pollHarnesses)}`})`
-          const toEntry = sql`EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = inbox.session_id)`
-          const claimed = sql`status = 'delivering' AND ${toEntry}`
-          yield* moveInbox(sql`${claimed} AND (${polling} OR (kind = 'send' AND sender_session_id IS NULL))`, "pending")
-          const lost = yield* moveInbox(claimed, "failed")
-          yield* tellSendersOf(
-            lost,
-            "vibestd stopped while handing it to the entry session; it may or may not have arrived",
-          )
           const cut = yield* sql<{
             id: number
             recipient: string
@@ -358,7 +289,7 @@ export const inboxMethods = (store: Store) => {
             content: string
           }>`SELECT id, session_id AS recipient,
               CASE WHEN kind = 'send' THEN sender_session_id END AS sender, content FROM inbox
-            WHERE status = 'delivering' AND NOT ${toEntry} ORDER BY session_id, id`
+            WHERE status = 'delivering' ORDER BY session_id, id`
           const bySenderAndSession = new Map<string, Array<(typeof cut)[number]>>()
           for (const row of cut) {
             const key = `${row.sender ?? ""}\n${row.recipient}`
@@ -388,47 +319,41 @@ export const inboxMethods = (store: Store) => {
       Effect.orDie,
     ),
 
-    pendingProjects: sql<{
-      project: string
-    }>`SELECT DISTINCT s.project_id AS project FROM inbox m JOIN session s ON s.id = m.session_id
-      WHERE m.status = 'pending' AND m.kind != 'task'
-        AND m.session_id = (SELECT entry_session_id FROM project WHERE id = s.project_id)`.pipe(
-      Effect.map((rows) => rows.map((r) => r.project)),
-      Effect.orDie,
-    ),
-
-    dropWaiting: (projectIdValue: string, guard?: { readonly runtime: string; readonly address: string } | "absent") =>
-      tx(dropWaiting(projectIdValue, guard)).pipe(Effect.asVoid, Effect.orDie),
-
-    claim: (
-      sessionId: string,
-      ids: ReadonlyArray<number>,
-      guard?: {
-        readonly projectId: string
-        readonly runtime: string
-        readonly address: string
-        readonly harnessId?: string
-      },
-    ) =>
+    claim: (sessionId: string, ids: ReadonlyArray<number>) =>
       Effect.gen(function* () {
         if (ids.length === 0) return [] as ReadonlyArray<number>
-        if (guard) {
-          const [entry] = yield* findEntrySessions(guard.projectId)
-          if (
-            !entry?.runtime ||
-            !entry.address ||
-            entry.runtime !== guard.runtime ||
-            encodeAddress(entry.address) !== guard.address ||
-            (guard.harnessId !== undefined && guard.harnessId !== "" && entry.harnessId !== guard.harnessId)
-          )
-            return [] as ReadonlyArray<number>
-        }
         const claimed = yield* moveInbox(
           sql`session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
           "delivering",
         )
         return claimed.map((k) => k.id)
       }).pipe(Effect.orDie),
+
+    deliveredIn: (sessionId: string, execution: number) =>
+      inbox(
+        sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = 'delivered' AND m.execution_id = ${execution}`,
+      ).pipe(Effect.orDie),
+
+    takeInbox: (sessionId: string, process: number | undefined) =>
+      tx(
+        Effect.gen(function* () {
+          if (!(yield* observable(sessionId)) || (yield* fromOldProcess(sessionId, process))) return undefined
+          if ((yield* openExecution(sessionId)) !== undefined) return undefined
+          const pending = yield* findSend(sessionId, "pending")
+          if (pending.length === 0) return undefined
+          const batch = nextBatch(pending)
+          const execution = yield* startExecution(sessionId, yield* now)
+          yield* moveInbox(
+            sql`session_id = ${sessionId} AND ${sql.in(
+              "id",
+              batch.map((r) => r.id),
+            )}`,
+            "delivered",
+            execution,
+          )
+          return { execution, rows: batch }
+        }),
+      ).pipe(Effect.orDie),
 
     setInboxStatus: (
       sessionId: string,

@@ -46,8 +46,7 @@ export const peerHeaders = (peer: string, project?: string): Record<string, stri
   ...(project === undefined ? {} : { [PEER_PROJECT_HEADER]: project }),
 })
 
-export const POLL_ROUTE = "/inbox/poll"
-export const ACK_ROUTE = "/inbox/ack"
+export const TAKE_ROUTE = "/inbox/take"
 export type HookKind = "execution-end" | "prompt" | "guard"
 export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
 export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
@@ -55,15 +54,19 @@ export const parseHookRoute = (path: string): { readonly harness: string; readon
   return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
 }
 
-export type Polled = { readonly ids: ReadonlyArray<number>; readonly line: string; readonly text: string }
-export const isPolled = (body: unknown): body is Polled =>
+export type Taken = {
+  readonly execution: number
+  readonly ids: ReadonlyArray<number>
+  readonly line: string
+  readonly text: string
+}
+export const isTaken = (body: unknown): body is Taken =>
   typeof body === "object" &&
   body !== null &&
-  Array.isArray((body as Polled).ids) &&
-  typeof (body as Polled).line === "string" &&
-  typeof (body as Polled).text === "string"
-
-export type AckBody = { readonly ids: ReadonlyArray<number>; readonly release?: ReadonlyArray<number> }
+  typeof (body as Taken).execution === "number" &&
+  Array.isArray((body as Taken).ids) &&
+  typeof (body as Taken).line === "string" &&
+  typeof (body as Taken).text === "string"
 
 export type SessionIdentity = {
   readonly sessionId: string

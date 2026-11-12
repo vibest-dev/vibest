@@ -12,18 +12,17 @@ vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibe
   the person submitted (`composer`, or `bridge` for Remote Control).
 - `tool.call` posts each tool call, a subagent's included, to `/hooks/claude/guard` and returns `{ deny }` when vibest
   refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is refused.
-- The **entry session inbox**: from `session.start`, an entry session polls `/inbox/poll` every second. A batch comes as
+- The **inbox**: from `session.start`, a session asks `/inbox/take` every second while it is idle (after `session.start`
+  and `turn.complete`, never while an execution runs). A batch comes with its execution id as
   one short line (`<Type> Agent "<title>" completed (<id>) · +N more`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`
-  hook attaches the full text as context. An accepted submit is acked by row id (`/inbox/ack`) on the next tick; a
+  hook attaches the full text as context. This module's own `prompt.submit` hook reports the batch's execution as accepted
+  (`PromptSubmit` with `origin: "vibest"` and the execution id) before the prompt goes on; a
   `drop` puts the batch back at the front of the queue. The submit has to come from inside a hook's call stack: a
   submit from a clock callback would skip this module's own `prompt.submit` hook as re-entry. The render hook awaits
   the submit before it returns: Claude Code reads the call against the hooks still running when it arrives, and under
   load a hook that returned at once had often settled first, so its own `prompt.submit` hook was skipped the same way
-  and the line went out without its full text. The module remembers the
-  row ids it has taken, so a batch handed out again after its lease ran out or vibestd restarted is not shown twice:
-  in a batch that mixes taken rows with new ones, the taken ones are acked and the new ones given back, so they come
-  alone. Full texts wait for `prompt.submit` for at most the last 100 lines. A one-line notice is its own full text and
+  and the line went out without its full text. Full texts wait for `prompt.submit` for at most the last 100 lines. A one-line notice is its own full text and
   is not attached again. Using the AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
 
 Reports (execution end, prompt) retry in the background after 1, 2, 4, 8, 15 and 30 s while vibestd does not take them.
