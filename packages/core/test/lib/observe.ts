@@ -3,7 +3,7 @@ import { Harnesses } from "@vibest/core/harness"
 import { executionEndFrom } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
-import { Clock, Effect, Path, Predicate, Schema } from "effect"
+import { Clock, Duration, Effect, Path, Predicate, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -45,8 +45,11 @@ export const settled = Effect.gen(function* () {
   yield* until(sessions.inMemory, (m) => m.locks === 0)
 })
 
-export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>
-  poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("100 millis"))), 1000, "untilVirtual")
+export const untilVirtual = <A, E, R>(
+  f: Effect.Effect<A, E, R>,
+  done: Predicate.Predicate<A>,
+  step: Duration.Input = "100 millis",
+) => poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust(step))), 1000, "untilVirtual")
 
 export const settleEntry = (sessions: Sessions["Service"], entryId: string) => sessions.check(entryId)
 

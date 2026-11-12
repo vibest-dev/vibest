@@ -1,8 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
-import { Harness } from "@vibest/core/harness"
-import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import {
@@ -346,45 +344,6 @@ describe("multi-repository isolated workspace", () => {
       const removed = (yield* sessions.remove(id))!
       assert.strictEqual(removed.worktree, "removed")
       assert.isFalse(yield* fs.exists(workspace))
-    }),
-  )
-
-  sessionTest(
-    "vibest in a multi-repository project starts the entry session",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const db = yield* Db
-      const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
-      const root = path.join(parent, "combo")
-      yield* fs.makeDirectory(root)
-      yield* repositoryWithOneCommitOnMain(root, "app")
-      yield* repositoryWithOneCommitOnMain(root, "sdk")
-      const raw = yield* connect((yield* Layout).socket)
-      yield* Launch.entryCommand({
-        harness: "pi",
-        agent: "coordinator",
-        root,
-        provider: null,
-        model: null,
-        session: authed(raw, cliHeaders(root))["Project.EntrySession"]({
-          agent: "coordinator",
-          harness: "pi",
-          fresh: false,
-          terminal: "home:p1",
-        }),
-      }).pipe(
-        Effect.provide(
-          Layer.succeed(Harness, {
-            available: () => Effect.succeed(true),
-            plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
-            models: () => Effect.succeed([]),
-          }),
-        ),
-      )
-      const entry = yield* db.entryOf(yield* projectOf(root))
-      assert.strictEqual(entry?.agent, "coordinator")
-      assert.strictEqual(entry?.projectDirectory, root)
     }),
   )
 

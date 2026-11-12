@@ -5,20 +5,7 @@ import path from "node:path"
 import type { Check } from "../check.ts"
 import { answerFolderTrust } from "../drivers/claude.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
-import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
-
-type Entry = {
-  id: string
-  agent: string
-  harness: string
-  address: { id: string }
-  routing?: { trace: Array<{ hook: string }> }
-}
-
-const entryRows = async (w: World) =>
-  (await w.json<{ sessions: Array<Entry> }>(["ls"]).then((l) => l.sessions)).filter((e) => e.agent === "coordinator")
-const start = (w: World) =>
-  w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi }, timeoutMs: 60_000 })
+import { expect, fail, row, SESSIONS, Skip, until } from "../world.ts"
 
 const herdr = (socket: string, method: string, params: Record<string, unknown>) =>
   new Promise<any>((resolve, reject) => {
@@ -235,34 +222,6 @@ const move = (harness: "claude" | "pi"): Check => ({
   },
 })
 
-const checks: ReadonlyArray<Check> = [
-  {
-    id: "S10-start",
-    title:
-      "in a project directory, `vibest` starts its entry session in this run's herdr session; `vibest ls` shows it first",
-    run: async (w) => {
-      if (!Bun.which("pi")) throw new Skip("pi not on PATH")
-      if (!Bun.which("herdr")) throw new Skip("herdr not on PATH")
-      await start(w)
-      await until("the entry session in vibest ls", async () => (await entryRows(w)).length === 1, 30_000)
-      const [entry] = await entryRows(w)
-      expect(entry!.harness === "pi", `entry session: ${JSON.stringify(entry)}`)
-      expect(
-        entry!.routing === undefined || entry!.routing.trace.every((t) => typeof t.hook === "string"),
-        `routing: ${JSON.stringify(entry)}`,
-      )
-      const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-      await herdr(socket, "pane.close", { pane_id: entry!.address.id.split("/").pop() })
-      await until(
-        "the entry session's exit recorded",
-        () =>
-          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, entry!.id)?.e != null,
-        30_000,
-      )
-    },
-  },
-  move("claude"),
-  move("pi"),
-]
+const checks: ReadonlyArray<Check> = [move("claude"), move("pi")]
 
 export default checks

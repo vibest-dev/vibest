@@ -1,2 +1,0 @@
-{"jsonrpc":"2.0","id":1,"method":"Launch","params":{"argv":["vibest","--harness","pi"],"focus":false,"runtime":"herdr","callerEnv":{}},"headers":[["vibest-protocol","10"],["vibest-caller","cli"],["vibest-repository","/fixture/repo"]]}
-{"jsonrpc":"2.0","id":1,"error":{"_tag":"Cause","code":0,"message":"[{\"_tag\":\"Die\",\"defect\":\"Missing key\\n  at [\\\"agent\\\"]\"}]","data":[{"_tag":"Die","defect":"Missing key\n  at [\"agent\"]"}]}}

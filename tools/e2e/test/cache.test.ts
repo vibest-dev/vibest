@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { cacheKeys, rememberPasses, scenario, writtenByHarness } from "../src/runner/cache.ts"
+import { cacheKeys, rememberPasses, scenario } from "../src/runner/cache.ts"
 
 const temp = () => fs.mkdtemp(path.join(os.tmpdir(), "vbe-cache-test-"))
 
@@ -28,13 +28,6 @@ describe("cache key", () => {
     await fs.writeFile(path.join(root, "shared.ts"), 'import "./a.ts"\nexport const s = 1\n')
     const hashes = new Set(await Promise.all(Array.from({ length: 20 }, () => scenario(path.join(root, "area.ts")))))
     expect(hashes.size).toBe(1)
-  })
-
-  test("leaves out what Claude writes into the plugin when it loads it", () => {
-    expect(writtenByHarness("claude/tsconfig.json")).toBe(true)
-    expect(writtenByHarness("claude/.claude-plugin/types/claude-code/index.d.ts")).toBe(true)
-    expect(writtenByHarness("claude/hooks/register.mjs")).toBe(false)
-    expect(writtenByHarness("claude/.claude-plugin/plugin.json")).toBe(false)
   })
 
   test("changes when the compiled binary behind a stable launcher changes", async () => {

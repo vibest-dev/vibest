@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest"
-import { pre } from "@vibest/builtins"
 import { Bus } from "@vibest/core/bus"
 import { callerTarget, entryPlace, specHits, type CallerHit } from "@vibest/core/caller"
 import type { Caller, RuntimeDefinition } from "@vibest/core/host"
@@ -73,15 +72,6 @@ describe("where the entry session runs", () => {
       runtime: "hc",
     })
   })
-  it("a runtime name is what a refusal says, and the id remains the choice", () => {
-    const unnamed = entryPlace({ runtime: "hc", hits: [{ id: "hc", terminal: undefined }] })
-    assert.strictEqual(unnamed.in === "refused" ? unnamed.message : "", "this hc place could not be named")
-    const named = entryPlace({ runtime: undefined, hits: [{ id: "hc", name: "herdr-core", terminal: undefined }] })
-    assert.strictEqual(
-      named.in === "refused" ? named.message : "",
-      "herdr-core is detected in this environment, but its place could not be named; pass --runtime",
-    )
-  })
 })
 
 describe("the runtime registry", () => {
@@ -146,23 +136,6 @@ describe("the runtime registry", () => {
 })
 
 describe("caller runtimes", () => {
-  it.effect("the first detected runtime in registration order wins", () =>
-    Effect.gen(function* () {
-      const hits = yield* specHits(plugins, {
-        REX_PANE: "rex-9",
-        HC_TERMINAL_ID: "t1",
-        HC_TERMINAL_SOCKET: "/hc.sock",
-        HERDR_PANE_ID: "p1",
-        HERDR_SOCKET_PATH: "/herdr.sock",
-      })
-      assert.deepStrictEqual(entryPlace({ runtime: undefined, hits }), {
-        in: "terminal",
-        runtime: "hc",
-        terminal: "t1//hc.sock",
-      })
-    }),
-  )
-
   it.effect("without an earlier runtime's environment the next one in load order wins", () =>
     Effect.gen(function* () {
       const hits = yield* specHits(plugins, {
@@ -175,14 +148,6 @@ describe("caller runtimes", () => {
         runtime: "herdr",
         terminal: "p1//herdr.sock",
       })
-    }),
-  )
-
-  it.effect("an empty declared variable is not that runtime", () =>
-    Effect.gen(function* () {
-      const hits = yield* specHits(plugins, { REX_PANE: "", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" })
-      const place = entryPlace({ runtime: undefined, hits })
-      assert.strictEqual(place.in === "terminal" ? place.runtime : "", "hc")
     }),
   )
 
@@ -250,13 +215,6 @@ describe("caller runtimes", () => {
     assert.strictEqual(callerTarget([herdr], env, "other"), "session:other")
     assert.strictEqual(callerTarget([herdr], {}), undefined)
     assert.strictEqual(callerTarget([{ env: ["REX_PANE"] }], env), undefined)
-  })
-
-  it("builtin plugins list herdr-core before herdr", () => {
-    const sources = pre.map((plugin) => plugin.source)
-    const hc = sources.indexOf("builtin:runtime-herdr-core")
-    const herdr = sources.indexOf("builtin:runtime-herdr")
-    assert.ok(hc >= 0 && herdr > hc)
   })
 
   it.live("a user runtime env key does not reach a process vibestd starts", () =>

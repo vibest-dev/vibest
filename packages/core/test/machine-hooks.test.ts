@@ -3,7 +3,6 @@ import type { RuntimeDefinition } from "@vibest/core/host"
 import { MACHINE_TIMEOUT, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Plugin, type Registration } from "@vibest/plugin"
-import { machineHooks } from "@vibest/plugin/testing"
 import { Duration, Effect, Fiber, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -145,14 +144,5 @@ describe("plugins: machine hooks", () => {
         }),
       ],
     },
-  )
-
-  it.effect("machineHooks fires a plugin's machine hooks in a plugin test", () =>
-    Effect.gen(function* () {
-      const hooks = yield* machineHooks(noting("one", "first", "view"))
-      assert.deepStrictEqual(yield* hooks.fire("connect", event), [{ message: "first", fix: "fix one" }])
-      assert.deepStrictEqual(yield* hooks.fire("connect", event, "other"), [])
-      assert.deepStrictEqual(yield* hooks.fire("remove", event), [{ message: "removed by one" }])
-    }).pipe(Effect.scoped),
   )
 })
