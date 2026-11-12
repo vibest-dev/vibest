@@ -769,6 +769,45 @@ describe("plugins: supervisor", () => {
   )
 
   it.effect(
+    "an agent start during a periodic reload that found a change waits for the new revision's hooks",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        const file = path.join(dir, "plugins", "a.ts")
+        yield* fs.writeFileString(file, pluginFile("a", "gated-a", `"a1"`))
+        watchGate.hold = true
+        const gate = { entered: false, release: () => {} }
+        const released = new Promise<void>((resolve) => (gate.release = resolve))
+        Object.assign(globalThis, { __vibestGate: { gate, released } })
+        const { clocked, rescanned } = yield* timers
+        const service = yield* clocked(supervise(dir))
+        assert.strictEqual((yield* service.start(event)).model, "a1")
+        yield* fs.writeFileString(
+          file,
+          `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: (ctx) => Effect.promise(() => { globalThis.__vibestGate.gate.entered = true; return globalThis.__vibestGate.released }).pipe(Effect.andThen(ctx.agent.hook("start.before", () => Effect.succeed({ model: "a2" })))) })\n`,
+        )
+        yield* rescanned(
+          Effect.sync(() => gate.entered),
+          (entered) => entered,
+          "the new revision's setup",
+        )
+        const starting = yield* Effect.forkChild(service.start(event))
+        yield* TestClock.withLive(Effect.sleep("200 millis"))
+        assert.isUndefined(starting.pollUnsafe(), "the start waits while the new revision sets up")
+        gate.release()
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        assert.strictEqual(started.model, "a2")
+      }).pipe(
+        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
+    20_000,
+  )
+
+  it.effect(
     "P19: a change during a stuck activation keeps readiness closed until that change is active too",
     () =>
       Effect.gen(function* () {

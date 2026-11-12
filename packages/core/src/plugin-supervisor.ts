@@ -1,7 +1,7 @@
 import { Duration, Effect, type Latch, Queue, Stream } from "effect"
 
 import { logFailure } from "./engine.ts"
-import { type Candidate, makeSources, makeWatcher } from "./plugin-sources.ts"
+import { type Candidate, keyOf, makeSources, makeWatcher } from "./plugin-sources.ts"
 
 export const DEBOUNCE = Duration.millis(100)
 export const RECHECK = Duration.seconds(1)
@@ -53,12 +53,18 @@ export const supervise = Effect.fnUntraced(function* (
     Queue.offerUnsafe(triggers, undefined)
   }
   const watcher = yield* makeWatcher(notify)
+  let activated: string | undefined
   const reload = Effect.gen(function* () {
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
     let resolved = yield* resolve(sources)
     while (yield* watcher.update(resolved.watched)) resolved = yield* resolve(sources)
-    yield* host.activate([...builtins, ...resolved.candidates])
+    const candidates = [...builtins, ...resolved.candidates]
+    const revisions = candidates.map(keyOf).join("\n")
+    if (revisions === activated) return
+    host.ready.closeUnsafe()
+    yield* host.activate(candidates)
+    activated = revisions
   }).pipe(logFailure("plugins: reload failed"))
   yield* Queue.offer(triggers, undefined).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
   yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(

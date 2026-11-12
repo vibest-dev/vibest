@@ -28,6 +28,8 @@ export interface Candidate {
   readonly plugin: VibestPlugin.Plugin.Plugin | { readonly error: string }
 }
 
+export const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options])
+
 export interface Watched {
   readonly paths: ReadonlySet<string>
   readonly listings: ReadonlySet<string>
