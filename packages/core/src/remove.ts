@@ -1,6 +1,6 @@
 import { RemoveOutcome } from "@vibest/schema/remove"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import { Clock, Duration, Effect, FileSystem, Option } from "effect"
+import { Clock, Duration, Effect, FileSystem, Option, Path } from "effect"
 
 import { awaitOn, Bus } from "./bus.ts"
 import { Db, type SessionRow } from "./db.ts"
@@ -85,12 +85,14 @@ export const make = Effect.gen(function* () {
   const db = yield* Db
   const layout = yield* Layout
   const processes = yield* Processes
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const git = yield* Git
 
   const release = (input: ReleaseInput) =>
     Effect.gen(function* () {
       const { h, session } = input
       const id = session.id
-      const fs = yield* FileSystem.FileSystem
       const reasons = [...input.reasons]
       const directory = yield* db.sessionDirectory(id)
       if (!directory) {
@@ -258,7 +260,11 @@ export const make = Effect.gen(function* () {
         branch,
         reasons,
       }
-    })
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(Git, git),
+    )
 
   return { release }
 })

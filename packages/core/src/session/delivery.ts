@@ -8,11 +8,9 @@ import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import * as Engine from "../engine.ts"
 import { Harnesses } from "../harness.ts"
-import { Inbox } from "../inbox.ts"
+import { Inbox, text as inboxText } from "../inbox.ts"
 import { errorMessage } from "../plugins.ts"
 import { alive, agentState, type Runtime, Runtimes, RuntimeError, stateOf, type Terminal } from "../runtimes.ts"
-import type { Platform } from "../session-types.ts"
-import { Git } from "../worktree.ts"
 import { busy, Executions, STOP_WAIT } from "./executions.ts"
 import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
@@ -33,7 +31,6 @@ const make = Effect.gen(function* () {
   const { prompt, interruptAgent } = yield* Executions
   const exits = yield* Exits
   const { worktreeOf, handTask, resume } = yield* Placement
-  const platform = yield* Effect.context<Platform>()
   const engine = yield* Engine.make
   const { locked } = locks
   const { undelivered } = inbox
@@ -183,12 +180,10 @@ const make = Effect.gen(function* () {
           if (session !== undefined) yield* inbox.undelivered(session, [row], errorMessage(cause))
         })
       yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
-    }).pipe(Effect.provideContext(platform))
+    })
 
   const deliverNext = (id: string) =>
-    locked(id)(db.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe(
-      Effect.provideContext(platform),
-    )
+    locked(id)(db.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe()
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
@@ -220,7 +215,7 @@ const make = Effect.gen(function* () {
           }
         return { message: `${id} interrupted; its terminal, worktree and session are kept` }
       }),
-    ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) }), Effect.provideContext(platform))
+    ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) }))
   })
 
   const userPrompt = Effect.fn("Delivery.userPrompt")(function* (
@@ -232,6 +227,24 @@ const make = Effect.gen(function* () {
     const now = at ?? (yield* Clock.currentTimeMillis)
     const prompting = yield* Ref.get((yield* sessionLive.track(id)).prompting)
     yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
+  })
+
+  const typeTaken = Effect.fn("Delivery.typeTaken")(function* (id: string, execution: number) {
+    yield* locks.withLock(id)(
+      Effect.gen(function* () {
+        const session = yield* db.getSession(id)
+        if (session === undefined) return
+        const r = yield* sessionLive.track(id)
+        const rows = yield* db.unacceptedBatch(id, execution)
+        if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
+        const h = yield* runtimes.route(session.runtime)
+        yield* Ref.set(r.prompting, true).pipe(
+          Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
+          Effect.ensuring(Ref.set(r.prompting, false)),
+          Effect.ignore,
+        )
+      }).pipe(Effect.catchTag("NoRuntime", () => Effect.void)),
+    )
   })
 
   const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
@@ -252,7 +265,7 @@ const make = Effect.gen(function* () {
       `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
-  return { deliverQueued, send, interrupt, userPrompt }
+  return { deliverQueued, send, interrupt, userPrompt, typeTaken }
 })
 
 export class Delivery extends Context.Service<Delivery, Effect.Success<typeof make>>()("vibest/Delivery") {
@@ -274,11 +287,7 @@ export class Delivery extends Context.Service<Delivery, Effect.Success<typeof ma
       Runtimes.node,
       SessionLive.node,
       SessionLocks.node,
-      Git.node,
-      PlatformNode.childProcessSpawner,
-      PlatformNode.crypto,
       PlatformNode.fileSystem,
-      PlatformNode.path,
     ],
   })
 }

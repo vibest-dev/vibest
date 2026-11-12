@@ -13,7 +13,6 @@ import { errorMessage } from "../plugins.ts"
 import { Processes } from "../processes.ts"
 import * as Remove from "../remove.ts"
 import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
-import type { Platform } from "../session-types.ts"
 import { Git } from "../worktree.ts"
 import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
@@ -31,7 +30,6 @@ const make = Effect.gen(function* () {
   const sessionLive = yield* SessionLive
   const { notice, recount } = yield* Placement
   const { interruptAgent, settleAfterInterrupt } = yield* Executions
-  const platform = yield* Effect.context<Platform>()
   const engine = yield* Engine.make
   const archives = yield* FiberSet.make()
   const { locked } = locks
@@ -63,7 +61,7 @@ const make = Effect.gen(function* () {
       kept = undefined
     }
     yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
-  }, Effect.provideContext(platform))
+  })
 
   const release = (id: string) =>
     db.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
@@ -124,7 +122,6 @@ const make = Effect.gen(function* () {
       return out
     },
     Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
-    Effect.provideContext(platform),
   )
 
   const archiveIfIdle = (id: string) =>
@@ -206,21 +203,14 @@ const make = Effect.gen(function* () {
             `${id} was being archived when vibestd stopped: its terminal was ${out.pane === "kept" ? "not closed" : "closed"}, but its processes are ${out.processes === "alive" ? "still working in its worktree" : "not confirmed gone"}; run vibest archive ${id} again to check.`,
           )
       }),
-    ).pipe(logged(`archive ${id}`), Effect.provideContext(platform)),
+    ).pipe(logged(`archive ${id}`)),
   )
 
   const archiveSoon = (ids: ReadonlyArray<string>) =>
     Effect.forEach(
       ids,
       (id) =>
-        FiberSet.run(
-          archives,
-          drain.work(
-            `archive ${id}`,
-            archiveIfIdle(id).pipe(logged(`archive ${id}`), Effect.provideContext(platform)),
-            true,
-          ),
-        ),
+        FiberSet.run(archives, drain.work(`archive ${id}`, archiveIfIdle(id).pipe(logged(`archive ${id}`)), true)),
       { discard: true },
     )
 
@@ -270,8 +260,6 @@ export class Archive extends Context.Service<Archive, Effect.Success<typeof make
       SessionLive.node,
       SessionLocks.node,
       Git.node,
-      PlatformNode.childProcessSpawner,
-      PlatformNode.crypto,
       PlatformNode.fileSystem,
       PlatformNode.layout,
       PlatformNode.path,
