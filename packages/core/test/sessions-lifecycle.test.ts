@@ -1,5 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { Integration } from "@vibest/core/integration"
 import { Layout } from "@vibest/core/paths"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Placement } from "@vibest/core/session/placement"
@@ -206,7 +207,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a resume whose start fails closes the pane it placed",
+    "a resume whose start fails closes the pane it placed; the next resume on the same harness starts a process whose terminal report is accepted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
@@ -222,6 +223,13 @@ describe.concurrent("Sessions", () => {
         rows.some((message) => message.includes("A message to") && message.includes("again")),
       )
       assert.include(notice.at(-1)!, "open: failed")
+      yield* sessions.send(id, "once more")
+      const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 2)
+      const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
+      const db = yield* Db
+      assert.strictEqual(yield* db.currentProcessId(id), reporter)
+      yield* until(db.getSession(id), (row) => row?.exitedAt === null && row.address.id !== "")
+      assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
     }),
     { hooked: ["pi"] },
   )
