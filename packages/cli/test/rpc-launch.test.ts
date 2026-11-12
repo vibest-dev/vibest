@@ -16,7 +16,7 @@ import {
   projectOf,
   systemPromptFile,
 } from "./fakes.ts"
-import { test, client, asCli } from "./rpc-helpers.ts"
+import { test, client, asCli, asEntry } from "./rpc-helpers.ts"
 
 describe("vibest.sock", () => {
   test(
@@ -216,10 +216,11 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
+      const spawner = yield* asEntry(yield* client, repo)
       const herdr = yield* FakeRuntime
       const socket = JSON.stringify({ socketPath: "/h.sock" })
       const named = JSON.stringify({ session: "other" })
-      yield* c.Spawn({
+      yield* spawner.Spawn({
         harness: "pi",
         prompt: "do it",
         callerEnv: { HERDR_SOCKET_PATH: "/h.sock", SECRET: "no" },
@@ -277,9 +278,11 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
-      const c = asCli(yield* client, yield* makeRepository)
-      const before = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in herdr", runtime: "herdr" })
-      const after = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in hc", runtime: "hc" })
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const spawner = yield* asEntry(yield* client, repo)
+      const before = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "in herdr", runtime: "herdr" })
+      const after = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "in hc", runtime: "hc" })
       for (const id of [before.id, after.id]) yield* until(db.getSession(id), (s) => s?.executionState === "open")
       const rows = (yield* c.List({})).sessions
       assert.deepStrictEqual(

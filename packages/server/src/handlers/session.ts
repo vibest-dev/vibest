@@ -6,7 +6,7 @@ import { keyedLock } from "@vibest/core/keyed-lock"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Sessions } from "@vibest/core/sessions"
 import { Caller, type CallerShape, Forbidden, type PayloadOf, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
-import { RuntimeUnreachable } from "@vibest/schema/session"
+import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Queue, Stream } from "effect"
 
 import { integrationOf, processOf, reader } from "../gates.ts"
@@ -17,7 +17,7 @@ import type { RemoteHandlers } from "./remote.ts"
 export const WATCH_BACKLOG = 10_000
 
 export const make = (
-  { agent, projectOf, machineFromCaller, cliOnly, self }: Checks,
+  { projectOf, machineFromCaller, cliOnly, self }: Checks,
   { reach, routed, spawnOn }: RemoteHandlers,
   { listed, watched, snapshotProjects, watchDeltas }: Listing,
 ) =>
@@ -113,14 +113,15 @@ export const make = (
     return {
       Spawn: (input) =>
         Effect.gen(function* () {
-          const c = yield* agent("Spawn")
+          const c = yield* Caller
+          if (c._tag !== "Entry" && c._tag !== "Session") return yield* new NoCallingSession()
           if (input.agent === "coordinator" || input.agent === "main")
             return yield* new Forbidden({
               method: "Spawn",
               message: `${input.agent} is reserved for the entry session (vibest)`,
             })
           const project = yield* projectOf(c, "Spawn")
-          if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c, project.id)
+          if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
           return yield* sessions.spawn({
             machine: yield* machineFromCaller(input),
             root: project.directory,
@@ -135,7 +136,7 @@ export const make = (
             peer: input.peer === undefined ? undefined : yield* db.resolveSession(input.peer),
             archive: input.archive,
             runtime: input.runtime,
-            parentSessionId: c._tag === "Entry" ? c.sessionId : undefined,
+            parentSessionId: c.sessionId,
             request: input.request,
           })
         }),

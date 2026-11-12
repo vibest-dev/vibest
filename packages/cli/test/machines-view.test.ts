@@ -1,11 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders } from "@vibest/client/client"
 import { REPAIR_PAUSE } from "@vibest/core/machines"
 import { MACHINE_TIMEOUT } from "@vibest/core/plugins"
 import type { SpawnInput } from "@vibest/core/sessions"
 import { type MachineEvent, Plugin } from "@vibest/plugin"
 import { Duration, Effect, Fiber, PubSub, Stream } from "effect"
-import { RpcClient } from "effect/rpc"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -120,9 +118,8 @@ const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late
     net.route("b-host", b.layout.socket)
     const added = yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
     yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-    const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(a.directory))
-    const { asEntry } = yield* entryOn(a)
-    const spawn = (runtime = "view") => asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, runtime }))
+    const { asEntry: here } = yield* entryOn(a)
+    const spawn = (runtime = "view") => here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, runtime }))
     const listed = (id: string) => Effect.map(here(a.raw.List({})), (r) => r.sessions.find((row) => row.id === id)!)
     return { net, A, B, a, b, added, here, spawn, listed, spawned }
   })

@@ -1,5 +1,5 @@
 import type { PipeClient } from "@vibest/client/pipe"
-import { PEER_BY_USER, peerHeaders } from "@vibest/protocol/protocol"
+import { peerHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { type ListedMachine, MachineFailed } from "@vibest/schema/machine"
@@ -161,11 +161,7 @@ const make = Effect.gen(function* () {
         }
       }),
 
-    spawn: (
-      machine: string,
-      input: PayloadOf<"Spawn">,
-      from: { readonly project: string; readonly coordinator?: string },
-    ) =>
+    spawn: (machine: string, input: PayloadOf<"Spawn">, from: { readonly project: string; readonly session: string }) =>
       Effect.gen(function* () {
         const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
           ([, flag]) => flag,
@@ -192,7 +188,6 @@ const make = Effect.gen(function* () {
           )
         const identity = yield* repositoryIdentity(remote)
         const entry = yield* db.entryOf(from.project)
-        const reportTo = from.coordinator ?? entry?.id
         const runtime =
           input.runtime ??
           callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv) ??
@@ -202,7 +197,7 @@ const make = Effect.gen(function* () {
           viewer?.locate === undefined || runtime === undefined
             ? undefined
             : yield* machines.ensure(machine, runtime, new Map(), true)
-        const spawned = yield* call(machine, from.project, reportTo ?? PEER_BY_USER, (client, headers) =>
+        const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
           client["Peer.Spawn"](
             {
               repository: remote,

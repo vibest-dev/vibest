@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel } from "../fake-model.ts"
+import { ask, heldModel, reply, sseHeaders, text, toolCall, type Message } from "../fake-model.ts"
 import { alive, expect, expectReplied, expectFacts, row, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
@@ -64,6 +64,25 @@ const git = async (w: World, cwd: string, ...args: Array<string>) => {
 
 const archive = async (w: World, p: Project, id: string, ...flags: Array<string>) =>
   JSON.parse(await w.ok(["archive", id, ...flags], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })) as Removed
+
+const spawningModel = (child: string, flags: string) => {
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (req) => {
+      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+      const vibest = /run `([^`]+) send [0-9a-f-]{36} -- '<message>'`/.exec(system)?.[1]
+      const last = messages.at(-1)
+      const answer =
+        vibest !== undefined && last?.role === "user" && text(last).includes("spawn-child")
+          ? toolCall("call-run", "bash", { command: `${vibest} run pi ${flags} -- '${ask(child)}'` })
+          : reply(text(last).includes(`done-${child}`) ? `done-${child}\nstatus: completed` : "ok")
+      return new Response(answer, { headers: sseHeaders })
+    },
+  })
+  return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
+}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -349,6 +368,63 @@ const checks: ReadonlyArray<Check> = [
         await answered(w, p, three, "three")
         await expectReplied(w, three)
       } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S41",
+    title:
+      "vibest run in a plain terminal is refused and leaves no worktree or pane; a session the entry session started runs vibest run and the session it starts records it as its creator",
+    run: async (w) => {
+      const p = await piProject(w, "s41")
+      const subDir = path.join(w.root, "pi-s41-sub")
+      const spawning = spawningModel("s41c", `--env PI_CODING_AGENT_DIR=${subDir}`)
+      try {
+        p.model.release()
+        await piShadow(subDir, w.profile, { fake: { baseUrl: spawning.url } })
+        const before = await git(w, p.repo, "worktree", "list", "--porcelain")
+        const listed = (await ls(w, p)).length
+        const refused = await w.vibest(["run", "pi", "--", ask("s41x")], { cwd: p.repo, env: p.env })
+        const said = `${refused.stdout}${refused.stderr}`
+        expect(
+          refused.code !== 0 && said.includes("NoCallingSession") && said.includes("run vibest in a terminal"),
+          `a plain-terminal run exited ${refused.code}: ${said}`,
+        )
+        expect(
+          (await git(w, p.repo, "worktree", "list", "--porcelain")) === before && (await ls(w, p)).length === listed,
+          "the refused run left a worktree or a session",
+        )
+        const a = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--session",
+                `${w.herdrSession}-s41`,
+                "--env",
+                `PI_CODING_AGENT_DIR=${subDir}`,
+                "--",
+                ask("spawn-child"),
+              ],
+              { cwd: p.repo, env: p.env, timeoutMs: 90_000 },
+            ),
+          ) as { id: string }
+        ).id
+        const entry = await w.entryOf(p.repo)
+        await until(
+          "the session the first session started",
+          () => row(w, "SELECT id FROM session WHERE parent_session_id = ?", a) !== undefined,
+          90_000,
+        )
+        expect(
+          row<{ parent: string }>(w, "SELECT parent_session_id AS parent FROM session WHERE id = ?", a)?.parent ===
+            entry,
+          `the first session's creator is not the entry session ${entry}`,
+        )
+      } finally {
+        spawning.stop()
         await p.close()
       }
     },

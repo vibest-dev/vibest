@@ -6358,6 +6358,9 @@
                 "$ref": "#/$defs/HarnessUnavailableEncoded"
               },
               {
+                "$ref": "#/$defs/NoCallingSessionEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoHarnessChosenEncoded"
               },
               {
@@ -6580,6 +6583,21 @@
               "_tag",
               "harness",
               "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoCallingSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoCallingSession"
+                ]
+              }
+            },
+            "required": [
+              "_tag"
             ],
             "additionalProperties": true
           },
@@ -12873,6 +12891,9 @@
                 "$ref": "#/$defs/ProjectMovedEncoded"
               },
               {
+                "$ref": "#/$defs/NoCallingSessionEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoHarnessChosenEncoded"
               },
               {
@@ -13235,6 +13256,21 @@
               "projectId",
               "from",
               "to"
+            ],
+            "additionalProperties": true
+          },
+          "NoCallingSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoCallingSession"
+                ]
+              }
+            },
+            "required": [
+              "_tag"
             ],
             "additionalProperties": true
           },

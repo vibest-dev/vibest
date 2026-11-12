@@ -45,6 +45,16 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
 const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
   agent === "coordinator" && args[0] === "update"
 
+const asEntryEnv = (
+  env: Record<string, string>,
+  entry: { readonly sessionId: string; readonly projectId: string },
+) => ({
+  ...env,
+  VIBEST_AGENT: "coordinator",
+  VIBEST_SESSION_ID: entry.sessionId,
+  VIBEST_PROJECT_ID: String(entry.projectId),
+})
+
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
   test(
@@ -53,11 +63,12 @@ describe("vibest CLI", () => {
       const db = yield* Db
       const layout = yield* Layout
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "claude", false, {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "claude", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
-      const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
+      const run = (args: ReadonlyArray<string>) =>
+        vibest(repo, asEntryEnv({ HOME: layout.home, VIBEST_HOME: layout.home }, entry), args)
       const inherited = yield* run(["run", "--runtime", "herdr", "--", "do it"])
       assert.strictEqual(inherited.code, 0, inherited.stderr)
       const { id } = decodeJson(inherited.stdout) as { id: string }
@@ -81,11 +92,17 @@ describe("vibest CLI", () => {
       const db = yield* Db
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const run = (args: ReadonlyArray<string>, stdin?: string) =>
-        vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args, stdin)
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const user = { HOME: layout.home, VIBEST_HOME: layout.home }
+      const run = (args: ReadonlyArray<string>, stdin?: string) => vibest(repo, user, args, stdin)
+      const runAsEntry = (args: ReadonlyArray<string>, stdin?: string) =>
+        vibest(repo, asEntryEnv(user, entry), args, stdin)
 
       const task = `it's "$HOME" and \`x\`\nsecond line`
-      const spawned = yield* run(["run", "--runtime", "herdr", "pi", "-"], task)
+      const spawned = yield* runAsEntry(["run", "--runtime", "herdr", "pi", "-"], task)
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = decodeJson(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
@@ -104,13 +121,16 @@ describe("vibest CLI", () => {
         machines: Array<unknown>
       }
       assert.deepStrictEqual(machines, [])
-      assert.deepInclude(listed[0], {
-        id,
-        executionState: "open",
-        task,
-        latest: { status: "working", summary: "", endedAt: null },
-      })
-      assert.include(live, listed[0]!.status)
+      assert.deepInclude(
+        listed.find((w) => w.id === id),
+        {
+          id,
+          executionState: "open",
+          task,
+          latest: { status: "working", summary: "", endedAt: null },
+        },
+      )
+      assert.include(live, listed.find((w) => w.id === id)!.status)
       assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), {
         id,
         executionState: "open",
@@ -147,7 +167,9 @@ describe("vibest CLI", () => {
       assert.strictEqual((yield* run(["frobnicate"])).code, 2)
       assert.strictEqual((yield* run(["status", id])).code, 2)
 
-      const { id: other } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "-"], "other")).stdout) as {
+      const { id: other } = decodeJson(
+        (yield* runAsEntry(["run", "--runtime", "herdr", "pi", "-"], "other")).stdout,
+      ) as {
         id: string
       }
       yield* until(db.getSession(other), (w) => w?.executionState === "open")
@@ -155,7 +177,10 @@ describe("vibest CLI", () => {
       const ids = (args: ReadonlyArray<string>) =>
         run(args).pipe(
           Effect.map((r) =>
-            (decodeJson(r.stdout) as { sessions: Array<{ id: string }> }).sessions.map((w) => w.id).sort(),
+            (decodeJson(r.stdout) as { sessions: Array<{ id: string }> }).sessions
+              .map((w) => w.id)
+              .filter((w) => w !== entry.sessionId)
+              .sort(),
           ),
         )
       assert.deepStrictEqual(yield* ids(["ls"]), [other])
@@ -180,7 +205,13 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const printed = decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "do it"])).stdout) as {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const printed = decodeJson(
+        (yield* vibest(repo, asEntryEnv(cli, entry), ["run", "--runtime", "herdr", "pi", "do it"])).stdout,
+      ) as {
         id: string
       }
       assert.deepStrictEqual(Object.keys(printed), ["id"])
@@ -200,11 +231,14 @@ describe("vibest CLI", () => {
           ),
         )
 
-      for (const args of [["ls"], ["interrupt", id], ["run", "pi", "x"], ["project", "info"]]) {
+      for (const args of [["ls"], ["interrupt", id], ["project", "info"]]) {
         const r = yield* asSession(id, args)
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))
       }
+      const started = yield* asSession(id, ["run", "--runtime", "herdr", "pi", "x"])
+      assert.strictEqual(started.code, 0, started.stderr)
+      assert.deepStrictEqual(yield* db.creatorOf((decodeJson(started.stdout) as { id: string }).id), { local: id })
       assert.match(
         (yield* asSession("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", ["send", id, "x"])).stderr,
         /^NoSuchSession: /,
@@ -326,7 +360,13 @@ describe("vibest CLI", () => {
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
-      const { id } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "do it"])).stdout) as { id: string }
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const { id } = decodeJson(
+        (yield* vibest(repo, asEntryEnv(cli, entry), ["run", "--runtime", "herdr", "pi", "do it"])).stdout,
+      ) as { id: string }
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const finding = "status: completed\nsummary: kept finding"
       yield* writeEnd(id, "pi", { text: finding })
@@ -603,7 +643,19 @@ describe("vibest CLI without vibestd", () => {
         Effect.callback<void>((resume) => void server.listen(`${home}/vibest.sock`, () => resume(Effect.void))),
         () => Effect.sync(() => server.close()),
       )
-      return { calls, run: vibest(home, { HOME: home, VIBEST_HOME: home }, args) }
+      return {
+        calls,
+        run: vibest(
+          home,
+          {
+            HOME: home,
+            VIBEST_HOME: home,
+            VIBEST_AGENT: "general",
+            VIBEST_SESSION_ID: "dcba4321-dcba-4abc-8abc-dcba4321dcba",
+          },
+          args,
+        ),
+      }
     })
 
   it.effect(

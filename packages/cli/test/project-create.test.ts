@@ -284,19 +284,22 @@ describe("multi-repository isolated workspace", () => {
       yield* fs.makeDirectory(root)
       const app = yield* repositoryWithOneCommitOnMain(root, "app")
       const sdk = yield* repositoryWithOneCommitOnMain(root, "sdk")
-      yield* db.startEntry(yield* projectOf(root), "pi", false, {
+      const entry = yield* db.startEntry(yield* projectOf(root), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
 
-      const spawned = yield* runVibest(root, { HOME: layout.home, VIBEST_HOME: layout.home }, [
-        "run",
-        "--runtime",
-        "herdr",
-        "pi",
-        "--",
-        "do it",
-      ])
+      const spawned = yield* runVibest(
+        root,
+        {
+          HOME: layout.home,
+          VIBEST_HOME: layout.home,
+          VIBEST_AGENT: "coordinator",
+          VIBEST_SESSION_ID: entry.sessionId,
+          VIBEST_PROJECT_ID: String(entry.projectId),
+        },
+        ["run", "--runtime", "herdr", "pi", "--", "do it"],
+      )
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = JSON.parse(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -425,8 +428,15 @@ describe("multi-repository isolated workspace", () => {
       yield* createIsolatedWorktrees((yield* listProjectRepositories(root))!, workspace)
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
-      yield* cli["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "coord" })
-      const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { sessionId, projectId } = yield* cli["Project.EntrySession"]({
+        harness: "pi",
+        fresh: false,
+        terminal: "coord",
+      })
+      const { id } = yield* authed(
+        raw,
+        sessionHeaders({ sessionId, repositoryRoot: workspace, projectId: String(projectId) }),
+      ).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.executionState === "open")
       assert.strictEqual((yield* db.getSession(id))!.projectId, (yield* db.projectAt(root))?.id)
       assert.isUndefined(yield* db.projectAt(workspace))

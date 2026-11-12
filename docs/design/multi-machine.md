@@ -97,8 +97,8 @@ refused), checks that the checkout has `commit`
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
-`origin_*` columns (`reportTo` as `origin_session`): the session in `vibest-peer-by`. `Peer.Spawn` for the user
-(`vibest-peer-by: user`) is refused with `Forbidden`. The forwarded `request` finds the session
+`origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
+`vibest-peer-by`. `Peer.Spawn` for the user (`vibest-peer-by: user`) is refused with `Forbidden`. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
@@ -136,9 +136,9 @@ their case; either gives `NoProject`.
 
 ## A: remote sessions
 
-`vibest run --machine <name>` (the user or the entry session) sends `Peer.Spawn` over the machine's connection with
+`vibest run --machine <name>` (a session, the entry session included) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
-calling session (the entry session) as `reportTo` and as `vibest-peer-by`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused by B.
+calling session as `vibest-peer-by`, which B records as the creator; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
 `--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket

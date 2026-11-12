@@ -122,17 +122,12 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before picks the harness: without it `vibest run -- <task>` with nothing to inherit fails; with it the run starts Pi, ls names the plugin as the harness's decider, and its answer arrives",
+      "a routing plugin's agent.start.before picks the harness: with it the run starts Pi, ls names the plugin as the harness's decider, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
-        const before = await w.vibest(["run", "--", ask("unrouted")], { timeoutMs: 60_000 })
-        expect(
-          before.code !== 0 && before.stderr.includes("no harness to inherit"),
-          `run without a router: ${before.code} ${before.stderr}`,
-        )
         await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
         await writePlugin(
           w,
@@ -187,17 +182,12 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H5",
     title:
-      "`vibest run` without a harness takes the harness, provider and model of the entry session that runs it; a named harness drops provider and model; with nothing to inherit it fails `no harness to inherit`",
+      "`vibest run` without a harness takes the harness, provider and model of the entry session that runs it; a named harness drops provider and model",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "inherit")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
-        const nothing = await w.vibest(["run", "--", ask("nothing")], { timeoutMs: 60_000 })
-        expect(
-          nothing.code !== 0 && nothing.stderr.includes("no harness to inherit"),
-          `run with nothing to inherit: ${nothing.code} ${nothing.stderr}`,
-        )
         await w.startEntry({
           harness: "pi",
           extra: ["--provider", "second", "--model", "m2"],

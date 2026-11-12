@@ -22,16 +22,7 @@ import * as Platform from "#platform"
 
 import { teardown } from "../src/cli.ts"
 import { pipeStdio } from "../src/connect.ts"
-import {
-  callerPlugin,
-  FakeGit,
-  makeRepository,
-  runVibest,
-  tempDirectory,
-  until,
-  untilVirtual,
-  yieldToIo,
-} from "./fakes.ts"
+import { callerPlugin, FakeGit, runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "./fakes.ts"
 import {
   A_ENTRY,
   COMMIT,
@@ -593,23 +584,6 @@ describe("vibest run --machine and remote sessions", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("run --machine by the user, outside any session, is refused by B and starts nothing there", () =>
-    Effect.gen(function* () {
-      const net = new Net()
-      const a = yield* repoStack(net)
-      const b = yield* repoStack(net)
-      net.route("b-host", b.layout.socket)
-      yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
-      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-      const checkout = yield* a.run(makeRepository)
-      yield* (yield* a.run(FakeGit)).update(checkout, REPOSITORY)
-      const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(checkout))
-      const refused = yield* Effect.flip(here(a.raw.Spawn({ machine: "mb", prompt: "alone", callerEnv: {} })))
-      assert.strictEqual(refused._tag, "Forbidden")
-      assert.lengthOf(b.spawns, 0)
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-  )
-
   it.effect(
     "B finds a checkout cloned with another URL form; A resolves its own ssh alias; NoProject names the URL",
     () =>
@@ -653,19 +627,40 @@ describe("vibest run --machine and remote sessions", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("a session another machine started may not start agents", () =>
+  it.effect("run --machine with no calling session is refused here without contacting B", () =>
+    Effect.gen(function* () {
+      const { a, b } = yield* twoMachines()
+      const refused = yield* Effect.flip(a.cli(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} })))
+      assert.strictEqual(refused._tag, "NoCallingSession")
+      assert.lengthOf(b.spawns, 0)
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("run --machine by a session that is not the entry session reports to that session", () =>
+    Effect.gen(function* () {
+      const { a, b, asEntry } = yield* twoMachines()
+      const local = yield* asEntry(a.raw.Spawn({ prompt: "x", callerEnv: {} }))
+      const asSession = <A, E>(effect: Effect.Effect<A, E>) =>
+        RpcClient.withHeaders(effect, sessionHeaders({ sessionId: local.id, projectId: a.project }))
+      const spawned = yield* asSession(a.raw.Spawn({ machine: "mb", prompt: "y", callerEnv: {} }))
+      assert.deepStrictEqual(yield* b.db.creatorOf(onB(spawned.id)), {
+        peer: a.id,
+        session: local.id,
+      })
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("a session another machine started starts agents like any session and is their creator", () =>
     Effect.gen(function* () {
       const b = yield* peerB
       const call = yield* b.as(randomId(), "aproj")
       const { session } = yield* b.spawn(call)
-      const refused = yield* Effect.flip(
-        RpcClient.withHeaders(
-          b.raw.Spawn({ prompt: "more", callerEnv: {} }),
-          sessionHeaders({ sessionId: session, projectId: b.project }),
-        ),
+      yield* RpcClient.withHeaders(
+        b.raw.Spawn({ prompt: "more", callerEnv: {} }),
+        sessionHeaders({ sessionId: session, projectId: b.project }),
       )
-      assert.strictEqual(refused._tag, "Forbidden")
-      assert.lengthOf(b.spawns, 1)
+      assert.lengthOf(b.spawns, 2)
+      assert.strictEqual(b.spawns[1]!.parentSessionId, session)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

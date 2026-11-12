@@ -43,6 +43,6 @@ next `vibest ls`; `vibest machine rm` removes them.
 
 ## M7. B's herdr sessions on A
 
-`vibest run --machine`, run by A's entry session, opens in B's default herdr session (`default`), which `vibest machine add` saves on A and which
+`vibest run --machine`, run by a session on A, opens in B's default herdr session (`default`), which `vibest machine add` saves on A and which
 still works after B's vibestd restarts it; a plain herdr server on B is refused with a note to restart it; a prompt
 typed there gives one message notice; `vibest ls` adds a removed entry back and `vibest machine rm` removes it.

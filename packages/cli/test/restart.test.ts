@@ -53,6 +53,7 @@ const busyPiSubagent = Effect.gen(function* () {
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
+    parentSessionId: "creator",
     projectId: key,
     name: "t",
     prompt: "do it",

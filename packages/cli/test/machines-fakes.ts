@@ -204,7 +204,10 @@ export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
       address: { machine: "local", id: "main-pane" },
     })
     const asEntry = <A, E>(effect: Effect.Effect<A, E>) =>
-      RpcClient.withHeaders(effect, sessionHeaders({ sessionId: started.sessionId, projectId: stack.project }))
+      RpcClient.withHeaders(
+        effect,
+        sessionHeaders({ sessionId: started.sessionId, projectId: stack.project, repositoryRoot: stack.directory }),
+      )
     return { entryId: started.sessionId, asEntry }
   })
 

@@ -24,6 +24,7 @@ const input = (
 ) => ({
   machine: { id: "local" as const },
   root: repo,
+  parentSessionId: "creator",
   projectId,
   name: "task",
   prompt: "do it",

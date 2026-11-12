@@ -43,12 +43,13 @@ export const make = Effect.gen(function* () {
   const resolveAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => resolveProject(db, at)))
   const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.projectAt(at.root)))
 
-  const projectOf = (c: Agent, method: string) =>
+  const projectOf = (c: Agent | Extract<CallerShape, { readonly _tag: "Session" }>, method: string) =>
     Effect.gen(function* () {
       if (c._tag === "Cli") return yield* resolveAt(c.repositoryRoot)
       const directory = yield* db.projectDirectory(c.projectId)
       if (directory !== undefined) return { id: c.projectId, directory }
-      if (c.repositoryRoot === undefined) return yield* new NotInRepository({ path: `project ${c.projectId}` })
+      if (c._tag === "Session" || c.repositoryRoot === undefined)
+        return yield* new NotInRepository({ path: `project ${c.projectId}` })
       const here = yield* resolveAt(c.repositoryRoot)
       if (here.id !== c.projectId)
         return yield* new Forbidden({
