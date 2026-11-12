@@ -14,14 +14,13 @@ import { alive, agentState, type Runtime, Runtimes, RuntimeError, stateOf, type 
 import type { Platform } from "../session-types.ts"
 import { Git } from "../worktree.ts"
 import { busy, Executions, STOP_WAIT } from "./executions.ts"
+import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
 export const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
   Effect.fail(new RuntimeUnreachable({ session: session.runtime, message: e.message }))
-
-type Check = (id: string) => Effect.Effect<unknown, unknown, Platform>
 
 const make = Effect.gen(function* () {
   const db = yield* Db
@@ -32,12 +31,12 @@ const make = Effect.gen(function* () {
   const sessionLive = yield* SessionLive
   const locks = yield* SessionLocks
   const { prompt, interruptAgent } = yield* Executions
+  const exits = yield* Exits
   const { worktreeOf, handTask, resume } = yield* Placement
   const platform = yield* Effect.context<Platform>()
   const engine = yield* Engine.make
   const { locked } = locks
   const { undelivered } = inbox
-  const checker = yield* Ref.make<Check>(() => Effect.die("Delivery has no check bound"))
 
   const deliverQueued = Effect.fn("Delivery.deliverQueued")(function* (
     h: Runtime,
@@ -142,7 +141,7 @@ const make = Effect.gen(function* () {
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
     if (state !== undefined && busy(state)) return
     if (state === undefined && !(yield* alive(h, terminal))) {
-      if (session.exitedAt === null) return yield* (yield* Ref.get(checker))(id)
+      if (session.exitedAt === null) return yield* exits.settle(h, session)
       if ((yield* db.pendingInbox(id)).length === 0) return
       if (!(yield* harnesses.get(session.harnessId)).ownSessionId && !session.harnessSessionId)
         return yield* new NoSuchSession({
@@ -253,9 +252,7 @@ const make = Effect.gen(function* () {
       `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
-  const useCheck = (check: Check) => Ref.set(checker, check)
-
-  return { deliverQueued, send, interrupt, userPrompt, useCheck }
+  return { deliverQueued, send, interrupt, userPrompt }
 })
 
 export class Delivery extends Context.Service<Delivery, Effect.Success<typeof make>>()("vibest/Delivery") {
@@ -270,6 +267,7 @@ export class Delivery extends Context.Service<Delivery, Effect.Success<typeof ma
       Bus.node,
       Db.node,
       Executions.node,
+      Exits.node,
       Harnesses.node,
       Inbox.node,
       Placement.node,

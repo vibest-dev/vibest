@@ -110,7 +110,7 @@ const make = Effect.gen(function* () {
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
       checkout: (yield* db.sessionIdentity(session.id))?.entry,
-      peer: yield* db.earlierSharer(session.id),
+      sharer: yield* db.earlierSharer(session.id),
       creator: yield* db.creatorLabel(session.id),
       projectDir: layout.project(session.projectId),
       vibest,
@@ -252,17 +252,17 @@ const make = Effect.gen(function* () {
     return terminal
   }, provided)
 
-  const peerRow = (session: SessionRow, splitFrom: string) =>
+  const shareRow = (session: SessionRow, splitFrom: string) =>
     Effect.gen(function* () {
-      const peer = yield* db.getSession(splitFrom)
-      if (peer === undefined)
-        return yield* new NoSuchSession({ id: splitFrom, message: `--peer ${splitFrom}: no session ${splitFrom}` })
-      if (peer.address.id === "")
+      const sharedFrom = yield* db.getSession(splitFrom)
+      if (sharedFrom === undefined)
+        return yield* new NoSuchSession({ id: splitFrom, message: `--share ${splitFrom}: no session ${splitFrom}` })
+      if (sharedFrom.address.id === "")
         return yield* new NoSuchSession({
           id: splitFrom,
-          message: `--peer ${splitFrom}: it has no terminal in the runtime to open beside`,
+          message: `--share ${splitFrom}: it has no terminal in the runtime to open beside`,
         })
-      return peer
+      return sharedFrom
     })
 
   const launchRaw = Effect.fnUntraced(function* (
@@ -274,8 +274,8 @@ const make = Effect.gen(function* () {
     { splitFrom, env, commit, onOwnLimit }: LaunchOptions,
   ) {
     const folders = yield* listProjectRepositories(root)
-    const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
-    const near = peer?.address
+    const sharedFrom = splitFrom !== undefined ? yield* shareRow(session, splitFrom) : undefined
+    const near = sharedFrom?.address
     yield* fs.makeDirectory(layout.artifacts(session.projectId), { recursive: true })
     const openOrMove = (
       open: Effect.Effect<
@@ -302,7 +302,7 @@ const make = Effect.gen(function* () {
         Effect.map((outcome) => (Option.isOption(outcome) ? outcome : Option.some<Terminal>(outcome))),
       )
     const worktree = yield* worktreeOf(session)
-    if (peer === undefined) {
+    if (sharedFrom === undefined) {
       yield* undoOnFailure(Effect.void, () =>
         fs.readDirectory(worktree).pipe(
           Effect.flatMap((left) => (left.length === 0 ? fs.remove(worktree, { recursive: true }) : Effect.void)),
@@ -326,7 +326,7 @@ const make = Effect.gen(function* () {
         env,
         endedByCaller: true,
         ...(near !== undefined ? { near } : {}),
-        ...(peer !== undefined ? { split: true } : {}),
+        ...(sharedFrom !== undefined ? { split: true } : {}),
       }),
     )
     if (Option.isNone(terminal)) return

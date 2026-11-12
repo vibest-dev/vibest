@@ -179,7 +179,7 @@ const run = Command.make(
       ),
       Flag.optional,
     ),
-    peer: Flag.String("peer").pipe(
+    share: Flag.String("share").pipe(
       Flag.withDescription(
         "A session id (or a unique prefix of at least 8 characters): run in its directory, on its runtime and machine, in a pane split from its pane, instead of a new worktree (the directory goes with the archive of the last live session in it)",
       ),
@@ -193,7 +193,7 @@ const run = Command.make(
     ),
     runtime: Flag.String("runtime").pipe(
       Flag.withDescription(
-        "The terminal runtime for this session. Default: the --peer session's, otherwise its parent's",
+        "The terminal runtime for this session. Default: the --share session's, otherwise its parent's",
       ),
       Flag.optional,
     ),
@@ -239,7 +239,7 @@ const run = Command.make(
             provider: Option.getOrUndefined(o.provider),
             model: Option.getOrUndefined(o.model),
             env: Option.getOrUndefined(o.env),
-            peer: Option.getOrUndefined(o.peer),
+            share: Option.getOrUndefined(o.share),
             archive: o.archive || undefined,
             runtime: Option.getOrUndefined(o.runtime),
             machine: Option.getOrUndefined(o.machine),

@@ -78,14 +78,18 @@ describe("vibest.sock", () => {
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       assert.strictEqual((yield* Effect.flip(c.Get({ id: "nothing!" })))._tag, "NoSuchSession")
       assert.deepStrictEqual(yield* c.Send({ id: id.slice(0, 12), message: "more" }), { id })
-      const peer = yield* spawner.Spawn({
+      const sharer = yield* spawner.Spawn({
         agent: "general",
         callerEnv: {},
         harness: "pi",
         prompt: "beside it",
-        peer: id.slice(0, 10),
+        share: id.slice(0, 10),
       })
-      assert.strictEqual(yield* db.sessionDirectory(peer.id), yield* db.sessionDirectory(id), "--peer takes a prefix")
+      assert.strictEqual(
+        yield* db.sessionDirectory(sharer.id),
+        yield* db.sessionDirectory(id),
+        "--share takes a prefix",
+      )
       const twinWithSameFirst8 = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
       const row = (yield* db.getSession(id))!
       yield* db.insertSession({ ...row, id: twinWithSameFirst8 }, row.projectId)

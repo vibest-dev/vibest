@@ -28,7 +28,7 @@ import {
 
 const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
   Effect.gen(function* () {
-    const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
+    const next = yield* Sessions.make.pipe(
       Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
       Effect.provideServiceEffect(Placement, Placement.make),
     )
@@ -183,7 +183,7 @@ describe.concurrent("after a vibestd stop", () => {
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
         yield* Ref.set(herdr.skipPromptUpdates, 2)
-        const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        const next = yield* Sessions.make.pipe(
           Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
           Effect.provideServiceEffect(Placement, Placement.make),
         )
@@ -221,7 +221,7 @@ describe.concurrent("after a vibestd stop", () => {
       yield* Effect.gen(function* () {
         assert.isUndefined(yield* db.untakenTask(id))
         assert.isFalse(yield* db.executionAccepted(id))
-        yield* Sessions.make({ maxSessions: undefined }).pipe(
+        yield* Sessions.make.pipe(
           Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
           Effect.provideServiceEffect(Placement, Placement.make),
         )

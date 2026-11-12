@@ -17,10 +17,12 @@ import { Archive } from "@vibest/core/session/archive"
 import { Delivery } from "@vibest/core/session/delivery"
 import { EntrySession } from "@vibest/core/session/entry"
 import { Executions } from "@vibest/core/session/executions"
+import { Exits } from "@vibest/core/session/exits"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Move } from "@vibest/core/session/move"
 import { Placement } from "@vibest/core/session/placement"
+import { Spawn } from "@vibest/core/session/spawn"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 
@@ -42,8 +44,10 @@ export const services = LayerNode.group([
   Executions.node,
   Placement.node,
   Move.node,
+  Spawn.node,
   Archive.node,
   Delivery.node,
+  Exits.node,
   Sessions.node,
   Integration.node,
   Peers.node,
