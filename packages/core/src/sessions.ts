@@ -606,7 +606,10 @@ export class Sessions extends Context.Service<
               Effect.ensuring(Ref.set(r.prompting, false)),
               Effect.ignore,
             )
-          }).pipe(Effect.provideContext(platform)),
+          }).pipe(
+            Effect.catchTag("NoRuntime", () => Effect.void),
+            Effect.provideContext(platform),
+          ),
         )
 
       const queued = (id: string, inboxId: number | undefined) =>
