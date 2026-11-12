@@ -33,6 +33,7 @@ import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessId } from "./harness.ts"
+import type { PeerScope } from "./remote.ts"
 import { SessionLive } from "./session/live.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
@@ -58,7 +59,7 @@ export { APPLICATION_ID, DatabaseOpenFailed, SchemaMismatch, inspectSchema } fro
 export type SessionFilter = {
   readonly projectId?: string
   readonly stopped?: boolean
-  readonly peer?: { readonly peer: string; readonly project: string } | undefined
+  readonly peer?: PeerScope | undefined
 }
 
 const make = Effect.gen(function* () {
@@ -392,7 +393,7 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    resolveSession: (input: string, scope?: { readonly peer: string; readonly project: string }) =>
+    resolveSession: (input: string, scope?: PeerScope) =>
       Effect.gen(function* () {
         if (!/^[0-9a-f-]{8,36}$/.test(input))
           return yield* new NoSuchSession({

@@ -28,7 +28,7 @@ export const address = (input: string): Address => {
 
 export type At = Extract<Address, { readonly _tag: "Remote" }>
 
-export type PeerScope = { readonly peer: string; readonly project: string }
+export type PeerScope = { readonly peer: string; readonly project: string; readonly session?: string }
 
 export type ListScope =
   | { readonly _tag: "All" }
@@ -96,21 +96,22 @@ const make = Effect.gen(function* () {
   const call = <A, E>(
     machine: string,
     project: string,
+    by: string,
     f: (client: PipeClient, headers: Record<string, string>) => Effect.Effect<A, E>,
-  ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, peerHeaders(self.id, project))))
+  ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, peerHeaders(self.id, project, by))))
 
-  const relay = <A, E>(at: At, project: string, f: Forwarded<A, E>) =>
-    call(at.machine, project, (client, headers) => f(client, at, { headers }))
+  const relay = <A, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
+    call(at.machine, project, by, (client, headers) => f(client, at, { headers }))
 
   return {
     relay,
 
-    forward: <A extends { readonly id: string } | null, E>(at: At, project: string, f: Forwarded<A, E>) =>
-      Effect.map(relay(at, project, f), (row): A =>
+    forward: <A extends { readonly id: string } | null, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
+      Effect.map(relay(at, project, by, f), (row): A =>
         row === null ? row : { ...row, id: addressed(at.machine, row.id) },
       ),
 
-    list: (scope: ListScope, stopped: boolean | undefined) =>
+    list: (scope: ListScope, by: string, stopped: boolean | undefined) =>
       Effect.gen(function* () {
         if (scope._tag === "Peer") return { sessions: [], machines: [] }
         const each = yield* Effect.forEach(
@@ -121,7 +122,7 @@ const make = Effect.gen(function* () {
               : link
                   .call(
                     link.client.List(stopped === undefined ? {} : { stopped }, {
-                      headers: peerHeaders(self.id, scope.id),
+                      headers: peerHeaders(self.id, scope.id, by),
                     }),
                   )
                   .pipe(
@@ -140,15 +141,15 @@ const make = Effect.gen(function* () {
         return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
       }),
 
-    get: (at: At, project: string, p: PayloadOf<"Get">) =>
-      relay(at, project, (c, { id }, o) => c.Get({ ...p, id }, o)).pipe(
+    get: (at: At, project: string, by: string, p: PayloadOf<"Get">) =>
+      relay(at, project, by, (c, { id }, o) => c.Get({ ...p, id }, o)).pipe(
         Effect.flatMap((row) => Effect.map(view(at.machine, [row]), (rows) => rows[0]!)),
       ),
 
-    peek: (at: At, project: string, p: PayloadOf<"Peek">) =>
+    peek: (at: At, project: string, by: string, p: PayloadOf<"Peek">) =>
       Effect.gen(function* () {
-        const { text } = yield* relay(at, project, (c, { id }, o) => c.Peek({ ...p, id }, o))
-        const row = yield* relay(at, project, (c, { id }, o) => c.Get({ id }, o)).pipe(
+        const { text } = yield* relay(at, project, by, (c, { id }, o) => c.Peek({ ...p, id }, o))
+        const row = yield* relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
           Effect.flatMap((row) => view(at.machine, [row])),
           Effect.map((rows) => rows[0]),
           Effect.orElseSucceed(() => undefined),
@@ -196,7 +197,7 @@ const make = Effect.gen(function* () {
           viewer?.locate === undefined || runtime === undefined
             ? undefined
             : yield* machines.ensure(machine, runtime, new Map(), true)
-        const spawned = yield* call(machine, from.project, (client, headers) =>
+        const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
           client["Peer.Spawn"](
             {
               repository: remote,
@@ -208,7 +209,6 @@ const make = Effect.gen(function* () {
               ...(input.model === undefined ? {} : { model: input.model }),
               ...(input.name === undefined ? {} : { title: input.name }),
               ...(runtime === undefined ? {} : { runtime }),
-              reportTo: from.session,
               request: input.request ?? randomId(),
             },
             { headers },

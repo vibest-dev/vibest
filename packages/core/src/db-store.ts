@@ -376,14 +376,19 @@ export const makeStore = Effect.gen(function* () {
   const queueForPeer = (
     peer: string,
     originSession: string | null,
-    row: { readonly sessionId: string; readonly content: string; readonly at?: number },
+    row: {
+      readonly sessionId: string
+      readonly content: string
+      readonly kind: "send" | "notice"
+      readonly at?: number
+    },
   ) =>
     Effect.gen(function* () {
       if (originSession === null) return false
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
       yield* emit(OutboxQueued, {
         ...(row.at === undefined ? {} : { at: row.at }),
-        data: { id: randomId(), peer, session: row.sessionId, content: row.content },
+        data: { id: randomId(), peer, session: row.sessionId, kind: row.kind, content: row.content },
       })
       yield* notify({ type: "live.outbox", peerId: peer })
       return true
@@ -463,6 +468,7 @@ export const makeStore = Effect.gen(function* () {
         yield* queueForPeer(origin.peer, origin.session, {
           sessionId: row.sessionId,
           content: row.message,
+          kind: "notice",
           ...(at === undefined ? {} : { at }),
         })
         return queued!
@@ -480,6 +486,7 @@ export const makeStore = Effect.gen(function* () {
 
   const tellSender = (sender: string, content: string) =>
     Effect.gen(function* () {
+      if ((yield* sql`SELECT 1 FROM session WHERE id = ${sender}`).length === 0) return
       if (yield* noticeTo(sender, content)) return
       yield* insertInboxRow({ sessionId: sender, message: content })
     })

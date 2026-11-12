@@ -447,7 +447,13 @@ describe("Db", () => {
       yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), project)
       yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), project)
       yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
-      const item = { id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f", recipient: ended, content: "done on mb" }
+      const item = {
+        id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
+        recipient: ended,
+        kind: "notice" as const,
+        sender: "mb/aaaaaaaa",
+        content: "done on mb",
+      }
       yield* fact("project.entry_changed", {
         projectId: project,
         data: { session: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },

@@ -19,7 +19,7 @@ import { repositoryIdentity } from "./repository-url.ts"
 import { defaultSessionName, Sessions } from "./sessions.ts"
 
 export const outboxItem = (row: OutboxRow): OutboxItem => {
-  const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: "notice" as const }
+  const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
   const { read } = new TextEncoder().encodeInto(row.content, new Uint8Array(OUTBOX_ITEM_MAX))
   return read === row.content.length
     ? { ...base, content: row.content }
@@ -34,7 +34,7 @@ const make = Effect.gen(function* () {
   const git = yield* Git
 
   return {
-    spawn: (peer: string, project: string, input: PayloadOf<"Peer.Spawn">) =>
+    spawn: (peer: string, project: string, reportTo: string, input: PayloadOf<"Peer.Spawn">) =>
       Effect.gen(function* () {
         const bytes = new TextEncoder().encode(input.prompt).length
         if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
@@ -78,7 +78,7 @@ const make = Effect.gen(function* () {
             runtime: input.runtime,
             request: input.request,
             commit: input.commit,
-            origin: { peer, project, reportTo: input.reportTo },
+            origin: { peer, project, reportTo },
           })
           .pipe(Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })))
         return {

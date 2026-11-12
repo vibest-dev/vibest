@@ -150,10 +150,8 @@ describe("sends from sessions", () => {
         })
         assert.isUndefined(yield* db.sendToOrigin(B, "eeeeeeee", "hi"))
         assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi"))
-        const out = yield* sql<{ content: string }>`SELECT content FROM outbox`
-        assert.lengthOf(out, 1)
-        assert.include(out[0]!.content, "<agent-message>")
-        assert.include(out[0]!.content, "hi")
+        const out = yield* sql<{ kind: string; content: string }>`SELECT kind, content FROM outbox`
+        assert.deepStrictEqual(out, [{ kind: "send", content: "hi" }])
       }),
     ),
   )

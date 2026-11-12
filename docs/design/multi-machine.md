@@ -45,7 +45,11 @@ the ordinary RPC protocol (`packages/client/src/pipe.ts`: a socket over the chil
 
 Every request on the pipe carries `vibest-caller: peer`, `vibest-peer: <A's identity id>` and, when it acts for a
 project, `vibest-peer-project: <A's project id>`. B refuses every peer request except `Ping` and `Peer.Hello` until
-that id has a `peer` row, and refuses every method not in `PEER_CALLS` (`packages/protocol/src/rpc.ts`). This
+that id has a `peer` row, and refuses every method not in `PEER_CALLS` (`packages/protocol/src/rpc.ts`). A forwarded
+call (`FORWARDED_CALLS`: `Get`, `List`, `Send`, `Interrupt`, `Remove`, `Peek`) also carries `vibest-peer-by`, which is
+`user` or the id of the session on A that made the call, and B refuses it without that header. A session `X` reaches
+on B only the sessions whose `origin_session` is `X` (`List`, `Get`, `Send`, `Interrupt`, `Remove`, `Peek`), and what it
+sends them is signed with `X`; `user` reaches every session A's project started there. This
 scopes by mistake, not by trust: whoever can run the ssh command already acts as that user on B.
 
 `Peer.Hello { id, name, callsMe }` answers B's `{ id, name, version }` and upserts the `peer` row with `id` and `name`
@@ -92,12 +96,13 @@ refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
-started it is the `origin` of its `session.created` fact (peer, project, reportTo?), kept in the session's
-`origin_*` columns (`reportTo` as `origin_session`); `reportTo` is always the session on A that ran `vibest run --machine`. The forwarded `request` finds the session
+started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
+`origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
+`vibest-peer-by`. `Peer.Spawn` for the user (`vibest-peer-by: user`) is refused with `Forbidden`. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every notice of a peer session with a `reportTo`, and every `vibest send` it makes to that creator, goes to B's `outbox` as a `notice`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
+Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to that creator as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
 B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
@@ -133,7 +138,7 @@ their case; either gives `NoProject`.
 
 `vibest run --machine <name>` (a session, the entry session included) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
-calling session as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted.
+calling session as `vibest-peer-by`, which B records as the creator; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
 `--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
@@ -144,7 +149,7 @@ loaded; loaded: …`) when it does not have it. With none of the three, B's own 
 An address `<name>/<id>` is resolved once, at the entry of each method, into a local id or a machine and an id; a
 bare id is always local and nothing is searched across machines. `vibest result|send|interrupt|archive|peek
 <name>/<id>` forward `Get`, `Send`, `Interrupt`, `Remove` and `Peek` with `vibest-peer-project` set to the caller's
-project. `List` (and `vibest ls`) answers `{ sessions, machines }`, as `hc ls` does: `sessions` has the local rows and
+project and `vibest-peer-by` set to the calling session, or `user`. `List` (and `vibest ls`) answers `{ sessions, machines }`, as `hc ls` does: `sessions` has the local rows and
 each connected machine's rows (ids `<name>/<id>`, `machine` set), asked of all machines at once; `machines` lists every
 added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`; a connected
 machine whose `List` fails is shown `unreachable` with that failure as its `reason`. The code is
@@ -161,9 +166,9 @@ and passes `PromptTooLarge` through.
 
 After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
 recipient's project (none: logged and acknowledged); an inbox row whose `peer_item` is the outbox id (found: only
-acknowledged); otherwise an `inbox.queued` `notice` with no sender and `peerItem` set, routed to the recipient while it
-has not ended, else to the project's entry session, `pending` when that one is present, else `dropped`, with content
-`<name>/<id8>: <text>` (and a pointer to `vibest result` when the item was cut). Then `Peer.Ack`. A pipe that drops
+acknowledged); otherwise an `inbox.queued` with no sender and `peerItem` set, routed to the recipient while it
+has not ended, else to the project's entry session, `pending` when that one is present, else `dropped`. A `notice` has content
+`<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Peer.Ack`. A pipe that drops
 between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
 copy was routed. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
 down.
@@ -296,8 +301,9 @@ CREATE TABLE outbox (              -- B: what this vibestd still has to deliver 
   id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.peer_item)
   seq        INTEGER NOT NULL,     -- its outbox.queued in the ledger aggregate: the order it is sent in
   peer_id    TEXT NOT NULL,
-  session_id TEXT NOT NULL,        -- the peer session it is about; every item is a notice
-  content    TEXT NOT NULL,        -- rendered on B
+  session_id TEXT NOT NULL,        -- the peer session it is about and that sends it
+  kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
+  content    TEXT NOT NULL,        -- the text, rendered on A by kind
   created_at INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX outbox_peer ON outbox (peer_id, seq);
