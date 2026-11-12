@@ -2,7 +2,7 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 7
+export const PROJECTION_VERSION = 8
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
