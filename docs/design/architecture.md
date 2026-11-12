@@ -872,7 +872,7 @@ runs), under `--safe-mode` so no hooks or plugins run (`--bare` would skip OAuth
 **Cursor: hook files.** `@vibest/cursor` is the plugin as files that vibest writes into its home; cursor-agent
 (checked against 2026.10.22) runs a plugin directory's `hooks/hooks.json` like `~/.cursor/hooks.json`, with the plugin
 root as the hook's working directory; `afterAgentResponse` carries the reply as `text`, `stop` only a status. The hook
-script acts only for a vibest agent (`VIBEST_AGENT`). The guard hook is fail-closed: a crash, timeout or missing answer
+script acts only for a vibest session (`VIBEST_SESSION_ID`). The guard hook is fail-closed: a crash, timeout or missing answer
 refuses the call, which Cursor would otherwise let through, so the guard always answers explicitly; `allow` only lets the
 call go on to Cursor's own permission checks. Every hook input carries `conversation_id`. A resume is one argument,
 `--resume=<id>`: `--resume` takes an optional value, so a separate id starting with `-` would read as a flag.

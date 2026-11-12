@@ -109,7 +109,6 @@ layer(Platform.services)("claude integration stop", (it) => {
         [PROTOCOL_HEADER]: String(PROTOCOL),
         "vibest-caller": "session",
         "vibest-session-id": "w1",
-        "vibest-agent": "general",
       })
     }),
   )
@@ -177,15 +176,14 @@ layer(Platform.services)("claude integration stop", (it) => {
   )
 
   it.effect(
-    "without VIBEST_AGENT and VIBEST_SESSION_ID nothing is sent; with them every event goes to vibestd verbatim, which decides what it is",
+    "without VIBEST_SESSION_ID nothing is sent; with it every event goes to vibestd verbatim, which decides what it is",
     () =>
       Effect.gen(function* () {
         const path = yield* Path.Path
         const home = yield* tempDirectory("s-")
         const lines: string[] = []
         yield* listen(path.join(home, "vibest.sock"), lines)
-        for (const env of [{}, { VIBEST_AGENT: "general" }, { VIBEST_SESSION_ID: "w1" }])
-          yield* stopAt(home, env, JSON.stringify(event))
+        for (const env of [{}, { VIBEST_AGENT: "general" }]) yield* stopAt(home, env, JSON.stringify(event))
         assert.deepStrictEqual(lines, [])
         const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
         const raws = ["not json", JSON.stringify({ ...event, hook_event_name: "Stop" })]

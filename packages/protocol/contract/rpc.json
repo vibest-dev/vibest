@@ -2561,16 +2561,12 @@
           "harness": {
             "type": "string"
           },
-          "agent": {
-            "type": "string"
-          },
           "input": {
             "type": "string"
           }
         },
         "required": [
           "harness",
-          "agent",
           "input"
         ],
         "additionalProperties": true
@@ -3167,7 +3163,7 @@
       }
     },
     "Launch": {
-      "access": "agent",
+      "access": "cli",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3178,6 +3174,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "agent": {
+            "type": "string"
           },
           "focus": {
             "type": "boolean"
@@ -3211,6 +3210,7 @@
         },
         "required": [
           "argv",
+          "agent",
           "focus",
           "callerEnv"
         ],
@@ -3286,6 +3286,9 @@
               },
               {
                 "$ref": "#/$defs/AgentRefusedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               }
             ]
           },
@@ -3457,6 +3460,45 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },
@@ -6337,6 +6379,9 @@
           "commit": {
             "type": "string"
           },
+          "agent": {
+            "type": "string"
+          },
           "prompt": {
             "type": "string"
           },
@@ -6397,6 +6442,7 @@
         "required": [
           "repository",
           "commit",
+          "agent",
           "prompt",
           "request"
         ],
@@ -6598,6 +6644,9 @@
               },
               {
                 "$ref": "#/$defs/AgentRefusedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -6885,6 +6934,45 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },
@@ -8133,13 +8221,16 @@
       }
     },
     "Project.EntrySession": {
-      "access": "agent",
+      "access": "cli",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "harness": {
+            "type": "string"
+          },
+          "agent": {
             "type": "string"
           },
           "fresh": {
@@ -8333,6 +8424,7 @@
         },
         "required": [
           "harness",
+          "agent",
           "fresh",
           "terminal"
         ],
@@ -8431,6 +8523,9 @@
               },
               {
                 "$ref": "#/$defs/LaunchFailedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               }
             ]
           },
@@ -8629,6 +8724,45 @@
             "required": [
               "_tag",
               "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },
@@ -10118,7 +10252,7 @@
       }
     },
     "Project.StartEntry": {
-      "access": "agent",
+      "access": "cli",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -10133,6 +10267,9 @@
                 "type": "null"
               }
             ]
+          },
+          "agent": {
+            "type": "string"
           },
           "provider": {
             "anyOf": [
@@ -10165,6 +10302,9 @@
             ]
           }
         },
+        "required": [
+          "agent"
+        ],
         "additionalProperties": true
       },
       "success": {
@@ -10350,6 +10490,9 @@
               },
               {
                 "$ref": "#/$defs/LaunchFailedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               }
             ]
           },
@@ -10559,6 +10702,45 @@
             ],
             "additionalProperties": true
           },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
+            ],
+            "additionalProperties": true
+          },
           "NoSuchSessionEncoded": {
             "type": "object",
             "properties": {
@@ -10653,7 +10835,7 @@
       }
     },
     "Project.StopEntry": {
-      "access": "agent",
+      "access": "cli",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12797,14 +12979,7 @@
             ]
           },
           "agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "string"
           },
           "callerEnv": {
             "type": "object",
@@ -12875,6 +13050,7 @@
         },
         "required": [
           "prompt",
+          "agent",
           "callerEnv"
         ],
         "additionalProperties": true
@@ -13131,6 +13307,9 @@
               },
               {
                 "$ref": "#/$defs/AgentRefusedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -13558,6 +13737,45 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },

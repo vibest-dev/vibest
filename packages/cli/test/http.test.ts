@@ -56,13 +56,20 @@ const project = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
-  const entry = yield* db.startEntry(key, "claude", false, {
-    runtime: RUNTIME,
-    address: { machine: "local", id: "test/coord" },
-  })
+  const entry = yield* db.startEntry(
+    key,
+    "claude",
+    false,
+    {
+      runtime: RUNTIME,
+      address: { machine: "local", id: "test/coord" },
+    },
+    { agent: "coordinator" },
+  )
   yield* herdr.seedAgent("test/coord")
   const sessions = yield* Sessions
   const { id: worker } = yield* sessions.spawn({
+    agent: "general",
     machine: { id: "local" },
     root: repo,
     parentSessionId: "creator",
@@ -127,10 +134,16 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual((yield* call(TAKE_ROUTE, { sessionId: entryId, projectId: "999" })).status, 403)
       assert.strictEqual((yield* call(TAKE_ROUTE, { sessionId: entryId })).status, 204)
       assert.strictEqual((yield* call("/nope", { sessionId: entryId })).status, 404)
-      yield* db.startEntry(projectId, "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* db.noteConversation(entryId, "pi-conversation")
       const old = yield* call(TAKE_ROUTE, { sessionId: entryId, harnessSessionId: "claude-conversation" })
       assert.strictEqual(old.status, 403)
@@ -321,30 +334,6 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual(plan, { status: 200, body: {} })
       const bad = yield* call("/hooks/claude/guard", { sessionId: worker }, "not json")
       assert.isString((bad.body as { deny?: string }).deny)
-    }),
-  )
-
-  test(
-    "an ordinary session whose agent is named entry gets the session guard rules, not the entry session's",
-    Effect.gen(function* () {
-      const { call, repo, key, sessions } = yield* project
-      const { id } = yield* sessions.spawn({
-        machine: { id: "local" },
-        root: repo,
-        parentSessionId: "creator",
-        projectId: key,
-        name: "Named entry",
-        prompt: "do it",
-        runtime: "herdr",
-        harness: "claude",
-        agent: "entry",
-      })
-      const write = JSON.stringify({
-        tool_name: "Write",
-        tool_input: { file_path: "/tmp/x", content: "x" },
-        cwd: "/tmp",
-      })
-      assert.deepStrictEqual(yield* call("/hooks/claude/guard", { sessionId: id }, write), { status: 200, body: {} })
     }),
   )
 })

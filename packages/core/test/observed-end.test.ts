@@ -167,7 +167,7 @@ describe("observed execution end", () => {
       const checking = yield* Effect.forkChild(sessions.check(id))
       yield* held.reached
       yield* (yield* Integration).executionEnd(
-        { id, agent: "general", entry: false, harness: "pi" },
+        { id, entry: false, harness: "pi" },
         JSON.stringify({ type: "agent_settled", text: "done while locked" }),
       )
       assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")

@@ -29,12 +29,19 @@ const working = Effect.gen(function* () {
   const db = yield* Db
   const repo = yield* makeRepository
   const projectId = yield* projectOf(repo)
-  yield* db.startEntry(projectId, "pi", false, {
-    runtime: RUNTIME,
-    address: { machine: "local", id: "test/coord" },
-  })
+  yield* db.startEntry(
+    projectId,
+    "pi",
+    false,
+    {
+      runtime: RUNTIME,
+      address: { machine: "local", id: "test/coord" },
+    },
+    { agent: "coordinator" },
+  )
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
+    agent: "general",
     root: repo,
     parentSessionId: "creator",
     projectId,
@@ -73,13 +80,20 @@ describe("session handlers", () => {
         const herdr = yield* FakeRuntime
         const repo = yield* makeRepository
         const projectId = yield* projectOf(repo)
-        yield* db.startEntry(projectId, "pi", false, {
-          runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
-        })
+        yield* db.startEntry(
+          projectId,
+          "pi",
+          false,
+          {
+            runtime: RUNTIME,
+            address: { machine: "local", id: "test/coord" },
+          },
+          { agent: "coordinator" },
+        )
         const held = yield* herdr.hold("send")
         const { id } = yield* sessions.spawn({
           machine: { id: "local" },
+          agent: "general",
           root: repo,
           parentSessionId: "creator",
           projectId,

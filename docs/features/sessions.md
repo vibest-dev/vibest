@@ -54,11 +54,19 @@ reason.
 A program started from inside an agent session (a GUI app, a terminal server) inherits that agent's `VIBEST_*`
 environment, and terminals it opens later pass it on, so `vibest` there counts as that agent. A user-only command
 refused there names the agent session the shell carries and the way out for a human: run it as
-`env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest <command>`, or open a terminal that was not started from an agent;
-that form then works. An agent that changes or clears those variables before running `vibest` is still refused.
+`env -u VIBEST_SESSION_ID vibest <command>`, or open a terminal that was not started from an agent;
+that form then works. An agent that changes or clears that variable before running `vibest` is still refused.
 
 ## S41. Who started a session
 
 `vibest run` in a terminal that is not a session is refused with `NoCallingSession`, which says to run `vibest` to open
 a session; no worktree or pane is made. A session started by `vibest run` records the session that ran it as its creator,
 whether the creator is the entry session or another session, and on another machine it records the session there.
+
+## S42. Agent definitions
+
+Every session runs as an agent definition: an id, a description and a system prompt, optionally with a guard that adds
+rules to the ones every agent has. Bare `vibest` opens the entry session as `coordinator`; `vibest run` starts a
+`general` session unless `--agent` names another registered id, and on another machine the same id is looked up there. An
+id that is not registered is refused with the registered ids listed, before any worktree or pane is made. A session may
+manage (send to, interrupt, peek at, remove) only the sessions it started.

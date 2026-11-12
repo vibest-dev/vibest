@@ -4,6 +4,7 @@ import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { AgentRefused, Plugin } from "@vibest/plugin"
 import { Effect, Layer } from "effect"
 
+import { agentsLayer } from "./lib/agents.ts"
 import { testEffect } from "./lib/effect.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
@@ -22,7 +23,7 @@ const usableHarnesses = [
 
 const start = {
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   prompt: "p",
   harness: undefined,
@@ -37,7 +38,7 @@ const start = {
 }
 const failed = {
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   reason: "limited" as const,
@@ -50,8 +51,11 @@ const failed = {
 }
 
 const pluginHost = Layer.provideMerge(
-  Layer.provideMerge(Layer.provideMerge(subscriptionsLayer, harnessesLayer()), runtimesLayer),
-  Bus.layer,
+  Layer.provideMerge(
+    Layer.provideMerge(Layer.provideMerge(subscriptionsLayer, harnessesLayer()), runtimesLayer),
+    Bus.layer,
+  ),
+  agentsLayer,
 )
 
 const it = testEffect(pluginHost)

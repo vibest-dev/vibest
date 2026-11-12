@@ -197,10 +197,16 @@ describe.concurrent("Sessions", () => {
       const sessions = yield* Sessions
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "not_started")
       yield* sessions.send(id, "next")
@@ -405,9 +411,9 @@ describe.concurrent("Sessions", () => {
       const { id, db } = yield* spawnWorking(yield* makeRepository, "cursor")
       const current = (yield* db.currentProcessId(id))!
       const event = JSON.stringify({ hook_event_name: "beforeSubmitPrompt", conversation_id: "c-old", prompt: "x" })
-      yield* integration.prompt({ id, agent: "general", entry: false, harness: "cursor", process: current - 1 }, event)
+      yield* integration.prompt({ id, entry: false, harness: "cursor", process: current - 1 }, event)
       assert.isNull((yield* db.getSession(id))!.harnessSessionId)
-      yield* integration.prompt({ id, agent: "general", entry: false, harness: "cursor", process: current }, event)
+      yield* integration.prompt({ id, entry: false, harness: "cursor", process: current }, event)
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-old")
     }),
   )
@@ -434,7 +440,7 @@ describe.concurrent("Sessions", () => {
       yield* settled
       assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
       const integration = yield* Integration
-      const who = { id, agent: "general", entry: false, harness: CURSOR.id }
+      const who = { id, entry: false, harness: CURSOR.id }
       yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
       yield* integration.prompt(who, thought)

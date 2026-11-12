@@ -23,10 +23,16 @@ const entryAsked = Effect.gen(function* () {
   const sessions = yield* Sessions
   const db = yield* Db
   const repo = yield* makeRepository
-  const entry = yield* db.startEntry(yield* projectOf(repo), "pulling-pi", false, {
-    runtime: RUNTIME,
-    address: { machine: "local", id: "test/coord" },
-  })
+  const entry = yield* db.startEntry(
+    yield* projectOf(repo),
+    "pulling-pi",
+    false,
+    {
+      runtime: RUNTIME,
+      address: { machine: "local", id: "test/coord" },
+    },
+    { agent: "coordinator" },
+  )
   yield* herdr.seedAgent("test/coord")
   const { id } = yield* sessions.spawn(yield* spawnInput(repo))
   yield* until(db.getSession(id), (row) => !!row && row.startedAt !== null)

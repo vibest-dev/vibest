@@ -79,18 +79,6 @@ const claudeEntry = async (
   const configTheResumeCheckReads = w.config.claude
   const flags = await claudeEnv(w, name, anthropic.url, configTheResumeCheckReads)
   const config = claudeConfigOf(flags)
-  const settingsFile = path.join(config, "settings.json")
-  const settings = JSON.parse(await fs.readFile(settingsFile, "utf8")) as { permissions?: { allow?: Array<string> } }
-  await fs.writeFile(
-    settingsFile,
-    JSON.stringify({
-      ...settings,
-      permissions: {
-        ...settings.permissions,
-        allow: [...(settings.permissions?.allow ?? []), `Bash(${binary} run:*)`],
-      },
-    }),
-  )
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
@@ -103,7 +91,7 @@ const claudeEntry = async (
     async () => {
       entryId =
         (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
-          (e) => e.agent === "main",
+          (e) => e.agent === "coordinator",
         )?.id ?? ""
       return entryId !== ""
     },
@@ -512,7 +500,7 @@ const checks: ReadonlyArray<Check> = [
         })
         const entryRows = async () =>
           (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).filter(
-            (e) => e.agent === "main",
+            (e) => e.agent === "coordinator",
           )
         await until("the entry session in vibest ls", async () => (await entryRows()).length === 1, 30_000)
         const reached = (what: string, marker: string) =>

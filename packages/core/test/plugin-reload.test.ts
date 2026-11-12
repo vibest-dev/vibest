@@ -1,6 +1,7 @@
 import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
+import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
@@ -65,7 +66,7 @@ const c1 = candidate("c", "1", logged("c", "c1"))
 
 const event = {
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   prompt: "p",
   harness: undefined,
@@ -93,6 +94,7 @@ const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Ef
     Effect.provide(subscriptionsLayer),
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
+    Effect.provide(Agents.layer),
     Effect.provide(Bus.layer),
   )
 
@@ -106,6 +108,7 @@ describe("plugins: registrations", () => {
       Effect.provide(subscriptionsLayer),
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
+      Effect.provide(Agents.layer),
       Effect.provide(Bus.layer),
     )
 
@@ -523,6 +526,7 @@ const supervise = (dir: string) =>
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
+    Layer.provide(Agents.layer),
     Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
@@ -673,6 +677,7 @@ describe("plugins: supervisor", () => {
         Layer.provide(harnessesLayer()),
         Layer.provide(Layer.effect(Layout, Layout.make(dir))),
         Layer.provideMerge(runtimesLayer),
+        Layer.provide(Agents.layer),
         Layer.provide(Bus.layer),
         Layer.build,
       )

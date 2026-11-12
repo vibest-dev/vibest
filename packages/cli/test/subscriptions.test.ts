@@ -20,7 +20,15 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { runtimesLayer, subscriptionsLayer, harnessesLayer, makeRepository, runVibest, testLayer } from "./fakes.ts"
+import {
+  agentsLayer,
+  runtimesLayer,
+  subscriptionsLayer,
+  harnessesLayer,
+  makeRepository,
+  runVibest,
+  testLayer,
+} from "./fakes.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const PI_SECRET = "pi-key-do-not-log"
@@ -418,7 +426,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         const plugins = yield* Plugins.make([{ source: "see", revision: "-", options: {}, plugin }])
         yield* plugins.start({
           project: "/r",
-          agentType: "general",
+          agent: "general",
           parentSessionId: undefined,
           prompt: "go",
           harness: "pi",
@@ -436,6 +444,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         Effect.provide(subscriptionsLayer),
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
+        Effect.provide(agentsLayer),
         Effect.provide(Bus.layer),
         Effect.scoped,
       )

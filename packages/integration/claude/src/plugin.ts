@@ -14,7 +14,6 @@ export const FULL_MAX = 100
 
 type Reply = { readonly status: number; readonly body: unknown }
 type Env =
-  | "VIBEST_AGENT"
   | "VIBEST_SESSION_ID"
   | "VIBEST_PROJECT_ID"
   | "VIBEST_HARNESS"
@@ -27,8 +26,6 @@ function nativeHost($: EngineInterface) {
   return {
     env: (name: Env) => {
       switch (name) {
-        case "VIBEST_AGENT":
-          return $.env.get("VIBEST_AGENT")
         case "VIBEST_SESSION_ID":
           return $.env.get("VIBEST_SESSION_ID")
         case "VIBEST_PROJECT_ID":
@@ -113,11 +110,10 @@ export function register(on: On, _options?: unknown) {
   let processId: string | undefined
 
   const identity = async (host: Host) => {
-    const agent = await host.env("VIBEST_AGENT")
     const sessionId = await host.env("VIBEST_SESSION_ID")
-    if (!agent || !sessionId) return undefined
+    if (!sessionId) return undefined
     const home = (await host.env("VIBEST_HOME")) || `${(await host.env("HOME")) ?? ""}/.vibest`
-    return { agent, sessionId, socket: `${home}/vibest-http.sock` }
+    return { sessionId, socket: `${home}/vibest-http.sock` }
   }
 
   const post = async (host: Host, path: string, body: unknown, ms: number): Promise<Reply> => {
@@ -127,7 +123,6 @@ export function register(on: On, _options?: unknown) {
       sessionId: who.sessionId,
       projectId: await host.env("VIBEST_PROJECT_ID"),
       harnessSessionId: await host.conversation().catch(() => undefined),
-      agent: who.agent,
       harness: (await host.env("VIBEST_HARNESS")) || "claude",
       cwd: await host.cwd().catch(() => undefined),
       runtime: await host.env("VIBEST_RUNTIME"),
@@ -292,7 +287,7 @@ export function register(on: On, _options?: unknown) {
 
   on("tool.call", async ($, event, next) => {
     const host = nativeHost($)
-    if (!(await host.env("VIBEST_AGENT"))) return next(event)
+    if (!(await host.env("VIBEST_SESSION_ID"))) return next(event)
     const body = { tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() }
     for (let n = 0; ; n++) {
       try {
@@ -309,7 +304,7 @@ export function register(on: On, _options?: unknown) {
     }
   }).catch(async ($, event, next) => {
     try {
-      if (!(await nativeHost($).env("VIBEST_AGENT"))) return undefined
+      if (!(await nativeHost($).env("VIBEST_SESSION_ID"))) return undefined
     } catch {
       return undefined
     }

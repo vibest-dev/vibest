@@ -145,7 +145,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     ...(row.pid === null ? {} : { pid: row.pid }),
     ...(row.readyAt === null ? {} : { ready: row.readyAt }),
     ...(row.routing === null ? {} : { routing: JSON.parse(row.routing) as unknown }),
-    ...(row.endedAt !== null && row.agent !== "main" ? { archived: true, removed: true } : {}),
+    ...(row.endedAt !== null && row.entry !== 1 ? { archived: true, removed: true } : {}),
     ...(attempts.length > 0 ? { attempts } : {}),
   }
   return {
@@ -161,7 +161,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     model: row.model,
     status: live.status,
     startedAt: row.placedAt,
-    exitedAt: row.agent === "main" ? row.endedAt : row.pEnded,
+    exitedAt: row.entry === 1 ? row.endedAt : row.pEnded,
     executionState: row.tId === null ? "none" : (row.tStatus ?? "open"),
     executionPromptedAt: row.tAt ?? 0,
     metadata: JSON.stringify(metadata),

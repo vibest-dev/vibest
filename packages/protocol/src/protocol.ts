@@ -30,7 +30,6 @@ export const SESSION_HEADER = "vibest-session-id"
 export const REPOSITORY_HEADER = "vibest-repository"
 export const PROJECT_HEADER = "vibest-project-id"
 export const HARNESS_SESSION_HEADER = "vibest-harness-session-id"
-export const AGENT_HEADER = "vibest-agent"
 export const HARNESS_HEADER = "vibest-harness"
 export const CWD_HEADER = "vibest-cwd"
 export const RUNTIME_HEADER = "vibest-runtime"
@@ -76,7 +75,6 @@ export type SessionIdentity = {
   readonly sessionId: string
   readonly projectId?: string | undefined
   readonly harnessSessionId?: string | undefined
-  readonly agent?: string | undefined
   readonly harness?: string | undefined
   readonly cwd?: string | undefined
   readonly runtime?: string | undefined
@@ -96,7 +94,6 @@ export const sessionHeaders = (who: SessionIdentity): Record<string, string> => 
   }
   put(PROJECT_HEADER, who.projectId)
   put(HARNESS_SESSION_HEADER, who.harnessSessionId)
-  put(AGENT_HEADER, who.agent)
   put(HARNESS_HEADER, who.harness)
   put(CWD_HEADER, who.cwd === undefined ? undefined : encodeURIComponent(who.cwd))
   put(RUNTIME_HEADER, who.runtime)

@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { SessionLive } from "@vibest/core/session/live"
-import { sessionSystemPrompt } from "@vibest/core/system-prompt"
+import { systemPrompt } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -29,7 +29,7 @@ const X = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 const setup = Effect.gen(function* () {
   const db = yield* Db
   const project = yield* projectOf("r")
-  const entry = yield* db.startEntry(project, "pi", false, place)
+  const entry = yield* db.startEntry(project, "pi", false, place, { agent: "coordinator" })
   yield* db.insertSession(session(A), project, { cwd: "/w", task: "a", parentSessionId: entry.sessionId })
   return { db, project, entryId: entry.sessionId }
 })
@@ -45,7 +45,8 @@ describe("sends from sessions", () => {
         assert.isUndefined(yield* db.insertSend(A, "to the ended parent", undefined, B))
         const creator = yield* db.creatorLabel(B)
         assert.deepStrictEqual(creator, { id: entryId, label: "the entry session" })
-        const prompt = sessionSystemPrompt({
+        const prompt = systemPrompt({
+          system: "",
           id: B,
           projectDir: "/w",
           vibest: ["vibest"],

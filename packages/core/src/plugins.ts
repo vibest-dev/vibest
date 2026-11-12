@@ -3,6 +3,7 @@ import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/e
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
+import { Agents } from "./agents.ts"
 import { timeoutWithoutWaiting } from "./bounded.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -200,6 +201,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const subscriptions = yield* Subscriptions
     const runtimes = yield* Runtimes
     const harnesses = yield* Harnesses
+    const agents = yield* Agents
     const bus = yield* Bus
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
@@ -231,7 +233,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       }
       const context: VibestPlugin.Context = {
         options: candidate.options,
-        agent: { hook },
+        agent: { hook, transform: agents.transform },
         machine: { hook: machine },
         runtime: { transform: runtimes.transform, reload: runtimes.reload },
         harness: { transform: harnesses.transform, reload: harnesses.reload },
@@ -530,6 +532,7 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
     layer: Plugins.layer,
     deps: [
       builtinsNode,
+      Agents.node,
       Bus.node,
       Harnesses.node,
       PluginLoader.node,

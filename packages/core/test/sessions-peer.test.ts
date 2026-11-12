@@ -6,7 +6,7 @@ import { TestClock } from "effect/testing"
 
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { systemPromptFile, until, untilVirtual, writeEnd } from "./lib/observe.ts"
+import { atMostEntryTracked, systemPromptFile, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { callerPlugin, makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
@@ -29,7 +29,7 @@ describe.concurrent("Sessions", () => {
       const split = (yield* herdr.callsTo("open")).at(-1)!
       assert.strictEqual(split.near, peerPane)
       assert.strictEqual(split.cwd, worktree)
-      assert.deepInclude(split.env, { VIBEST_SESSION_ID: id, VIBEST_AGENT: "general" })
+      assert.deepInclude(split.env, { VIBEST_SESSION_ID: id })
       const pane = (yield* herdr.agent(id))!.terminal
       assert.strictEqual(pane.split(":")[0], peerPane.split(":")[0])
       const got = yield* peer.sessions.get(id)
@@ -38,9 +38,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(yield* sessionWorktree(id), worktree)
       assert.match(path.basename(worktree), /^[0-9a-f]{4}$/)
       const rules = yield* fs.readFileString(yield* systemPromptFile(id))
-      assert.include(rules, "others may be making changes in this worktree too")
-      assert.notInclude(rules, peer.id)
-      assert.notInclude(rules, "git switch -c <branch>")
+      assert.include(rules, `Your working directory is shared with session ${peer.id}`)
 
       const third = yield* peer.sessions.spawn({ ...(yield* spawnInput(repo)), peer: id })
       assert.strictEqual(yield* sessionWorktree(third.id), worktree)
@@ -95,15 +93,14 @@ describe.concurrent("Sessions", () => {
         yield* herdr.updateAgent(session, (a) => ({ ...a, alive: false }))
         yield* owner.sessions.check(session)
       }
-      yield* untilVirtual(owner.sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      yield* untilVirtual(owner.sessions.inMemory, atMostEntryTracked)
       for (const session of [owner.id, id]) {
         yield* owner.sessions.send(session, `again ${session}`)
         yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === `again ${session}`))
       }
-      assert.include(yield* fs.readFileString(yield* systemPromptFile(owner.id)), "git switch -c <branch>")
+      assert.notInclude(yield* fs.readFileString(yield* systemPromptFile(owner.id)), "Your working directory is shared")
       const peerRules = yield* fs.readFileString(yield* systemPromptFile(id))
-      assert.include(peerRules, "others may be making changes in this worktree too")
-      assert.notInclude(peerRules, "git switch -c <branch>")
+      assert.include(peerRules, `Your working directory is shared with session ${owner.id}`)
     }),
   )
 
@@ -149,10 +146,16 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
-      const parent = yield* owner.db.startEntry(owner.row.projectId, "pi", false, {
-        runtime: "hc",
-        address: { machine: "local", id: "test/coord-hc" },
-      })
+      const parent = yield* owner.db.startEntry(
+        owner.row.projectId,
+        "pi",
+        false,
+        {
+          runtime: "hc",
+          address: { machine: "local", id: "test/coord-hc" },
+        },
+        { agent: "coordinator" },
+      )
       assert.strictEqual((yield* owner.db.entryOf(owner.row.projectId))?.runtime, "hc")
       const base = yield* spawnInput(repo)
       const followed = yield* owner.sessions.spawn({
@@ -163,6 +166,7 @@ describe.concurrent("Sessions", () => {
         prompt: base.prompt,
         harness: base.harness,
         peer: owner.id,
+        agent: base.agent,
         parentSessionId: parent.sessionId,
       })
       assert.strictEqual(followed.runtime, "herdr")

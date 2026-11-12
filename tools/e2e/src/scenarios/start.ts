@@ -134,7 +134,7 @@ const move = (harness: "claude" | "pi"): Check => ({
             row<{ c: string | null }>(
               w,
               `SELECT s.harness_session_id AS c FROM ${SESSIONS} s
-               WHERE s.agent_type = 'main' AND s.directory = ? AND s.ended_at IS NULL`,
+               WHERE s.agent_type = 'coordinator' AND s.directory = ? AND s.ended_at IS NULL`,
               realRepository,
             )?.c ?? undefined
           if (conversation === undefined) return false
@@ -200,7 +200,7 @@ const move = (harness: "claude" | "pi"): Check => ({
       )
       const entryRows = (
         await w.json<{ sessions: Array<{ agent: string; address: { id: string } }> }>(["ls"]).then((l) => l.sessions)
-      ).filter((e) => e.agent === "main")
+      ).filter((e) => e.agent === "coordinator")
       expect(
         entryRows.length === 1 && entryRows[0]!.address.id.endsWith(b),
         `entry sessions: ${JSON.stringify(entryRows)}`,

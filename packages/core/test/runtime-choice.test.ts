@@ -23,6 +23,7 @@ const input = (
   extra: { readonly runtime?: string; readonly parentSessionId?: string } = {},
 ) => ({
   machine: { id: "local" as const },
+  agent: "general",
   root: repo,
   parentSessionId: "creator",
   projectId,
@@ -36,10 +37,16 @@ const entryId = Effect.gen(function* () {
   const db = yield* Db
   const repo = yield* makeRepository
   const projectId = yield* projectOf(repo)
-  const entry = yield* db.startEntry(projectId, "pi", false, {
-    runtime: "herdr",
-    address: { machine: "local", id: "test/coord" },
-  })
+  const entry = yield* db.startEntry(
+    projectId,
+    "pi",
+    false,
+    {
+      runtime: "herdr",
+      address: { machine: "local", id: "test/coord" },
+    },
+    { agent: "coordinator" },
+  )
   return { db, repo, projectId, sessions: yield* Sessions, parent: entry.sessionId }
 })
 

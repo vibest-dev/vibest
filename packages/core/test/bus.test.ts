@@ -60,10 +60,16 @@ describe("bus", () => {
         const db = yield* Db
         const bus = yield* Bus
         const project = yield* projectOf("r")
-        yield* db.startEntry(project, "pi", false, {
-          runtime: "bench",
-          address: { machine: "bench", id: "main" },
-        })
+        yield* db.startEntry(
+          project,
+          "pi",
+          false,
+          {
+            runtime: "bench",
+            address: { machine: "bench", id: "main" },
+          },
+          { agent: "coordinator" },
+        )
         yield* db.insertSession(session, project)
         const notice = (text: string) => db.insertInbox({ sessionId: session.id, message: text })
         const rows = [yield* notice("one"), yield* notice("two")]

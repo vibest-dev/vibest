@@ -278,7 +278,7 @@ const make = Effect.gen(function* () {
     creatorLabel: (id: string) =>
       Effect.gen(function* () {
         const creator = yield* addressedCreator(id)
-        if (creator === undefined) return undefined
+        if (creator === undefined || creator === id) return undefined
         const [row] = yield* sql<{ entry: string | null; name: string | null }>`SELECT
             p.entry_session_id AS entry, c.name AS name
           FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = ${creator}
@@ -316,7 +316,10 @@ const make = Effect.gen(function* () {
             if (before !== undefined) return before
           }
           if (max !== undefined) {
-            const n = (yield* selectRaw([sql`s.agent != 'main'`, sql`s.ended_at IS NULL`], running)).length
+            const n = (yield* selectRaw(
+              [sql`s.ended_at IS NULL`, sql`NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`],
+              running,
+            )).length
             if (n >= max) return false
           }
           const stopped = row.metadata.archived || row.metadata.removed
@@ -477,7 +480,9 @@ const make = Effect.gen(function* () {
         readonly projectDirectory?: string | undefined
         readonly pid?: number | undefined
         readonly sessionId?: string | undefined
-      } = {},
+        readonly agent: string
+        readonly firstInput?: string | undefined
+      },
     ) =>
       Effect.gen(function* () {
         const id = start.sessionId ?? (yield* unusedId)
@@ -497,7 +502,7 @@ const make = Effect.gen(function* () {
               yield* emit(SessionCreated, {
                 sessionId: id,
                 at,
-                data: { project, agent: "main", name: "entry", directory: start.projectDirectory ?? "" },
+                data: { project, agent: start.agent, name: "entry", directory: start.projectDirectory ?? "" },
               })
               yield* emit(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
               yield* notify({ type: "live.project", projectId: project })
@@ -536,6 +541,14 @@ const make = Effect.gen(function* () {
               },
               at,
             )
+            if (start.firstInput !== undefined && resume === undefined)
+              yield* queueInbox({
+                recipient: entryId,
+                kind: "task",
+                sender: null,
+                content: start.firstInput,
+                status: "delivered",
+              })
             moving.delete(project)
             if (!movingHere || fresh) yield* dropWaiting(project)
             return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project }

@@ -51,6 +51,11 @@ export const untilVirtual = <A, E, R>(
   step: Duration.Input = "100 millis",
 ) => poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust(step))), 1000, "untilVirtual")
 
+export const settleEntry = (sessions: Sessions["Service"], entryId: string) => sessions.check(entryId)
+
+export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks: number }) =>
+  m.tracked <= 1 && m.locks === 0
+
 export const writeEnd = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses).get(harness)

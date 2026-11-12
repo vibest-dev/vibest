@@ -33,7 +33,7 @@ answers with a pass. The tool arguments sent to the guard are the `tool.call` in
 (`tool`, `tool_use_id`, `consent`, `agentId`).
 
 Every request carries the session headers from `@vibest/protocol` `sessionHeaders`: protocol, `VIBEST_SESSION_ID`,
-`VIBEST_PROJECT_ID`, the current Claude session id, `VIBEST_AGENT`, `VIBEST_HARNESS`, the cwd, `VIBEST_RUNTIME` and the
+`VIBEST_PROJECT_ID`, the current Claude session id, `VIBEST_HARNESS`, the cwd, `VIBEST_RUNTIME` and the
 plugin version. Paths carry no version; the only one is `PROTOCOL` in the `vibest-protocol` header. vibestd refuses a
 request with an unknown session (404), a missing or wrong project id (403) or another protocol (409). A 409 body holds
 vibestd's protocol and version, a message and the command to run (`action`); the plugin puts them on the status line
@@ -69,7 +69,7 @@ builtin plugin `harness-claude` in `packages/plugin-harnesses`; this package is 
 
 Nothing to install. vibest starts each Claude session (and a Claude entry session) with
 `claude --plugin-dir <@vibest/cli>/harnesses/claude`, which loads the plugin for that session only. vibest writes
-nothing into `~/.claude`. Plain `claude` sessions never load it, and in a Claude process without `VIBEST_AGENT` and
+nothing into `~/.claude`. Plain `claude` sessions never load it, and in a Claude process without
 `VIBEST_SESSION_ID` every listener returns `next` and sends nothing.
 
 **Mods are not sandboxed.** The module is code that Claude Code runs in its own process with your permissions. What it

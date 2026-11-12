@@ -26,11 +26,11 @@ vibest() {
 case "\${1:-}" in
   guard)
     # preToolUse runs fail-closed, where no answer refuses: outside vibest, allow (it grants no approval).
-    if [ -z "\${VIBEST_AGENT:-}" ]; then cat >/dev/null; echo '{"permission":"allow"}'; exit 0; fi
+    if [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; echo '{"permission":"allow"}'; exit 0; fi
     vibest integration guard --harness cursor || { echo "vibest integration guard failed; the tool call is refused." >&2; exit 2; }
     ;;
   ready | prompt | stop)
-    if [ -z "\${VIBEST_AGENT:-}" ] || [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; exit 0; fi
+    if [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; exit 0; fi
     vibest integration "$1" --harness cursor >/dev/null 2>>"\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log" || exit 1
     ;;
 esac

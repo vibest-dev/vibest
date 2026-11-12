@@ -128,7 +128,7 @@ const checks: ReadonlyArray<Check> = [
           await w
             .json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"], { cwd: repo })
             .then((l) => l.sessions)
-        ).find((e) => e.agent === "main")?.id
+        ).find((e) => e.agent === "coordinator")?.id
         const own = path.join(
           w.vibestHome,
           "projects",
@@ -138,7 +138,7 @@ const checks: ReadonlyArray<Check> = [
           expect(dirs[who] === own, `${who}'s system prompt names ${dirs[who]}, not ${own}`)
           const [, read, refused] = results[who]!
           expect(read!.includes(`${who}-wrote`), `${who} read back: ${read}`)
-          const reason = who === "main" ? "edits files only in the project folder" : "off limits to sessions"
+          const reason = "off limits to sessions"
           expect(refused!.includes(reason), `${who}'s write into another project: ${refused}`)
           expect(
             (await fs.readFile(path.join(own, "artifacts", `${who}.md`), "utf8")) === `${who}-wrote\n`,
@@ -251,7 +251,7 @@ const checks: ReadonlyArray<Check> = [
       const listed = (JSON.parse(await w.ok(["ls"], { cwd: outside, env })) as { sessions: Array<{ agent: string }> })
         .sessions
       expect(
-        listed.some((row) => row.agent === "main"),
+        listed.some((row) => row.agent === "coordinator"),
         `ls outside a project: ${JSON.stringify(listed)}`,
       )
       expect((await fs.readFile(log, "utf8").catch(() => "")) === "", "ls ran git")

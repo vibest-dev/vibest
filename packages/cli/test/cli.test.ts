@@ -63,10 +63,16 @@ describe("vibest CLI", () => {
       const db = yield* Db
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const entry = yield* db.startEntry(yield* projectOf(repo), "claude", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p1" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "claude",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p1" },
+        },
+        { agent: "coordinator" },
+      )
       const run = (args: ReadonlyArray<string>) =>
         vibest(repo, asEntryEnv({ HOME: layout.home, VIBEST_HOME: layout.home }, entry), args)
       const inherited = yield* run(["run", "--runtime", "herdr", "--", "do it"])
@@ -92,10 +98,16 @@ describe("vibest CLI", () => {
       const db = yield* Db
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p1" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p1" },
+        },
+        { agent: "coordinator" },
+      )
       const user = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>, stdin?: string) => vibest(repo, user, args, stdin)
       const runAsEntry = (args: ReadonlyArray<string>, stdin?: string) =>
@@ -205,10 +217,16 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p1" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p1" },
+        },
+        { agent: "coordinator" },
+      )
       const printed = decodeJson(
         (yield* vibest(repo, asEntryEnv(cli, entry), ["run", "--runtime", "herdr", "pi", "do it"])).stdout,
       ) as {
@@ -231,7 +249,10 @@ describe("vibest CLI", () => {
           ),
         )
 
-      for (const args of [["ls"], ["interrupt", id], ["project", "info"]]) {
+      for (const args of [
+        ["machine", "ls"],
+        ["machine", "rm", "x"],
+      ]) {
         const r = yield* asSession(id, args)
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))
@@ -257,10 +278,16 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p1" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p1" },
+        },
+        { agent: "coordinator" },
+      )
       const asCoord = (args: ReadonlyArray<string>) =>
         vibest(
           repo,
@@ -273,10 +300,16 @@ describe("vibest CLI", () => {
           args,
         )
       const otherRepo = yield* makeRepository
-      const other = yield* db.startEntry(yield* projectOf(otherRepo), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w9:p9" },
-      })
+      const other = yield* db.startEntry(
+        yield* projectOf(otherRepo),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w9:p9" },
+        },
+        { agent: "coordinator" },
+      )
 
       for (const command of ["archive", "rm"] as const) {
         const spawned = yield* asCoord(["run", "pi", "--", "do it"])
@@ -360,10 +393,16 @@ describe("vibest CLI", () => {
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
-      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p1" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p1" },
+        },
+        { agent: "coordinator" },
+      )
       const { id } = decodeJson(
         (yield* vibest(repo, asEntryEnv(cli, entry), ["run", "--runtime", "herdr", "pi", "do it"])).stdout,
       ) as { id: string }
@@ -703,7 +742,7 @@ describe("vibest CLI without vibestd", () => {
         const noAgent = yield* guard({}, JSON.stringify({ tool_name: "Shell", tool_input: { command: "git status" } }))
         assert.notStrictEqual(noAgent.code, 0, noAgent.stderr)
         assert.strictEqual(noAgent.stdout, "")
-        assert.match(noAgent.stderr, /VIBEST_AGENT/)
+        assert.match(noAgent.stderr, /VIBEST_SESSION_ID/)
         const unchecked = yield* guard({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "s1" }, "not json")
         assert.notStrictEqual(unchecked.code, 0, unchecked.stderr)
         assert.strictEqual(unchecked.stdout, "")

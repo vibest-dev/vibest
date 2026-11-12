@@ -3,12 +3,12 @@
 Implementation notes for the Pi [harness adapter](../../../docs/design/architecture.md#8-harness-adapters).
 
 `pi -e <dir>/extension.mjs` loads `src/extension.ts` bundled with everything it imports except
-Pi's own packages, which Pi resolves for the extensions it loads. `VIBEST_AGENT=coordinator` makes it the entry session
-(inbox rows delivered in process as custom messages the model sees and the TUI hides: an execution starts when Pi is idle,
-else they queue as follow-ups); another agent with `VIBEST_SESSION_ID` sends its execution starts and ends; without
-`VIBEST_AGENT` it does nothing. Tool calls go through that agent's rules in `guard.ts`, in process. Only the TUI session
-is the harness's root session: print, RPC and JSON modes have no PTY, so a Pi child of the entry session, which inherits
-`VIBEST_AGENT`, takes no rows, reports nothing and does not change the TUI. Pi calls the extension factory once per
+Pi's own packages, which Pi resolves for the extensions it loads. With `VIBEST_SESSION_ID` it
+serves the session (inbox rows taken in process and delivered as custom messages the model sees and the TUI hides: an
+execution starts when Pi is idle, else they queue as follow-ups; execution starts and ends are sent); without it it does
+nothing. Tool calls go through the session's agent definition in vibestd. Only the TUI session
+is the harness's root session: print, RPC and JSON modes have no PTY, so a Pi child of a session, which inherits
+`VIBEST_SESSION_ID`, takes no rows, reports nothing and does not change the TUI. Pi calls the extension factory once per
 session and awaits it, then awaits `session_shutdown`; the extension is built in a scope that lives as long as the
 session, its handlers registered before `session_start`, and `session_shutdown` (kept outside that scope) closes it.
 The extension never starts vibestd: during `vibest daemon restart` the replacement may be between sockets. The inbox

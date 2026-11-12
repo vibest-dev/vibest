@@ -50,10 +50,16 @@ describe.concurrent("after a vibestd stop", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const spawned = yield* Deferred.make<string>()
       return yield* heldAtOpen(
         undefined,
@@ -138,10 +144,16 @@ describe.concurrent("after a vibestd stop", () => {
       const herdr = yield* FakeRuntime
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const opening = yield* herdr.hold("open")
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
       yield* opening.reached
@@ -189,10 +201,16 @@ describe.concurrent("after a vibestd stop", () => {
       const herdr = yield* FakeRuntime
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const sending = yield* herdr.hold("send")
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
       yield* sending.reached

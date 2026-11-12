@@ -19,6 +19,7 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
     (projectId) =>
       ({
         machine: { id: "local" },
+        agent: "general",
         root: repo,
         parentSessionId: "creator",
         projectId,

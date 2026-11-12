@@ -1,5 +1,5 @@
 import { shortId } from "@vibest/schema/id"
-import { NoSuchSession, NotReady } from "@vibest/schema/session"
+import { NoSuchSession, NotReady, type UnknownAgent } from "@vibest/schema/session"
 import {
   Cause,
   Clock,
@@ -81,7 +81,12 @@ export const sessionPlacement = (deps: {
     resume: boolean,
   ) => Effect.Effect<
     ReadonlyArray<string>,
-    HarnessUnavailable | NoSuchSession | PlatformError.PlatformError | SystemPromptDirUnsafe | Config.ConfigError
+    | HarnessUnavailable
+    | NoSuchSession
+    | PlatformError.PlatformError
+    | SystemPromptDirUnsafe
+    | UnknownAgent
+    | Config.ConfigError
   >
   readonly notice: (session: SessionRow, message: string) => Effect.Effect<unknown>
   readonly prompt: (

@@ -12,6 +12,7 @@ import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } fr
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
+import { type Agents, unknownAgent } from "./agents.ts"
 import type { Db, NewSession, PeerStart, SessionRow } from "./db.ts"
 import type { Drain } from "./drain.ts"
 import {
@@ -47,7 +48,7 @@ export interface SpawnInput {
   readonly provider?: string | undefined
   readonly model?: string | undefined
   readonly env?: Record<string, string> | undefined
-  readonly agent?: string | undefined
+  readonly agent: string
   readonly peer?: string | undefined
   readonly archive?: boolean | undefined
   readonly runtime?: string | undefined
@@ -70,6 +71,7 @@ export const sessionSpawn = (deps: {
   readonly runtimes: Runtimes["Service"]
   readonly harness: Harness["Service"]
   readonly harnesses: Harnesses["Service"]
+  readonly agents: Agents["Service"]
   readonly plugins: Plugins["Service"]
   readonly drain: Drain["Service"]
   readonly layout: Layout["Service"]
@@ -89,6 +91,7 @@ export const sessionSpawn = (deps: {
     runtimes,
     harness,
     harnesses,
+    agents,
     plugins,
     drain,
     layout,
@@ -153,7 +156,8 @@ export const sessionSpawn = (deps: {
     if (input.parentSessionId === undefined && input.origin?.reportTo === undefined)
       return yield* new NoCallingSession()
     const root = input.root
-    const agent = input.agent ?? "general"
+    const agent = input.agent
+    if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
     const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
     const entry =
       worker === undefined && input.parentSessionId !== undefined ? yield* db.entryOf(input.projectId) : undefined
@@ -178,7 +182,7 @@ export const sessionSpawn = (deps: {
         : undefined
     const decision = yield* plugins.start({
       project: root,
-      agentType: agent,
+      agent,
       parentSessionId: input.parentSessionId,
       prompt: input.prompt,
       harness: input.harness ?? from?.harnessId,

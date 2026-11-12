@@ -122,6 +122,11 @@ describe("HarnessAdapter", () => {
       assert.deepStrictEqual(userPrompt({ hook_event_name }), { text: "" })
     }
   })
+
+  it("an entry session with no conversation yet starts without a session id or resume flag", () => {
+    for (const id of ["claude", "pi"] as const)
+      assert.notInclude(ADAPTERS[id].launchArgs({ ...input, sessionId: null }).join(" "), "session")
+  })
 })
 
 describe("harness output", () => {
