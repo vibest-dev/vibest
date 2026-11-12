@@ -7,16 +7,7 @@ import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
 import { makeSources } from "@vibest/core/plugin-sources"
 import { resolve } from "@vibest/core/plugin-supervisor"
-import {
-  Builtins,
-  type Candidate,
-  DEBOUNCE,
-  makeHost,
-  PluginLoader,
-  Plugins,
-  RECHECK,
-  WATCH_PROBE,
-} from "@vibest/core/plugins"
+import { Builtins, type Candidate, DEBOUNCE, makeHost, PluginLoader, Plugins, RECHECK } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Plugin, type Harness, type Runtime } from "@vibest/plugin"
 import {
@@ -558,7 +549,12 @@ const timers = Effect.gen(function* () {
     isArmed(duration).pipe(Effect.andThen(clock.adjust(Duration.fromInputUnsafe(duration))))
   const clocked = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provideService(effect, Clock.Clock, Object.assign(Object.create(clock) as TestClock.TestClock, { sleep }))
-  return { armed: isArmed, fire, clocked }
+  const rescanned = <A, E, R>(f: Effect.Effect<A, E, R>, done: (a: A) => boolean, what: string) =>
+    isArmed(RECHECK).pipe(
+      Effect.andThen(clock.adjust(RECHECK)),
+      Effect.andThen(TestClock.withLive(eventually(clock.adjust(DEBOUNCE).pipe(Effect.andThen(f)), done, what))),
+    )
+  return { armed: isArmed, fire, clocked, rescanned }
 })
 const pastDebounce = Effect.sleep("150 millis")
 const pastRescan = Effect.suspend(() => {
@@ -741,52 +737,29 @@ describe("plugins: supervisor", () => {
   )
 
   it.effect(
-    "a change Bun dropped while it rebuilt its watch is found by the rescan once a probe write is reported, however many go unreported first; then it stops",
+    "a save the watch never reports is found by the next periodic rescan, and an unchanged rescan sets nothing up again",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const dir = yield* packageHome
-        const plugins = path.join(dir, "plugins")
+        const file = path.join(dir, "plugins", "a.ts")
         yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
-        yield* fs.writeFileString(path.join(plugins, "a.ts"), pluginFile("a", "drop-a", `"a1"`))
-        yield* fs.makeDirectory(path.join(plugins, "d"))
-        yield* fs.writeFileString(path.join(plugins, "d", "index.ts"), pluginFile("d", "drop-d", "e.model"))
+        yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a1"`))
         watchGate.hold = true
-        const { armed, fire, clocked } = yield* timers
-        const probeArrives = armed(RECHECK).pipe(Effect.andThen(watchSees(dir, WATCH_PROBE)))
+        const { clocked, rescanned } = yield* timers
         const service = yield* clocked(supervise(dir))
-        assert.strictEqual((yield* service.list).length, 2)
-        const startReads = vibestJsonReads.count
-        yield* probeArrives
-        yield* fire(DEBOUNCE)
-        yield* service.settled
-        assert.isAbove(vibestJsonReads.count, startReads, "the rescan once the first watch is live")
-
-        yield* fs.remove(path.join(plugins, "d"), { recursive: true })
-        yield* watchSees(plugins, "d")
-        yield* fire(DEBOUNCE)
-        yield* service.settled
-        assert.deepStrictEqual(
-          (yield* service.list).map((p) => p.id),
-          ["a"],
+        assert.strictEqual((yield* service.start(event)).model, "a1")
+        yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a2"`))
+        yield* rescanned(service.start(event), (s) => s.model === "a2", "the unreported save")
+        const reads = vibestJsonReads.count
+        yield* rescanned(
+          Effect.sync(() => vibestJsonReads.count),
+          (n) => n > reads,
+          "a rescan with nothing changed",
         )
-        const afterRemoval = vibestJsonReads.count
-        yield* fs.writeFileString(path.join(plugins, "a.ts"), pluginFile("a", "drop-a", `"a2"`))
-        assert.strictEqual((yield* service.start(event)).model, "a1", "the dropped save is not seen yet")
-        for (let unreported = 0; unreported < 11; unreported++) yield* fire(RECHECK)
-        yield* armed(RECHECK)
-        assert.strictEqual(yield* fs.readFileString(path.join(dir, WATCH_PROBE)), "12\n", "the probe is still written")
-        assert.strictEqual(vibestJsonReads.count, afterRemoval, "no rescan before the probe is reported")
-        assert.strictEqual((yield* service.start(event)).model, "a1", "the save is still missed")
-        yield* watchSees(dir, WATCH_PROBE)
-        yield* fire(DEBOUNCE)
-        assert.strictEqual((yield* service.start(event)).model, "a2", "the rescan finds the save")
-        assert.isAbove(vibestJsonReads.count, afterRemoval)
-        const settled = vibestJsonReads.count
-        yield* TestClock.adjust("1 minute")
-        yield* TestClock.withLive(Effect.sleep("100 millis"))
-        assert.strictEqual(vibestJsonReads.count, settled, "one rescan per change of the watched set, not polling")
+        yield* TestClock.withLive(Effect.sleep("200 millis"))
+        assert.strictEqual(count("setup:unreported-a"), 2)
       }).pipe(
         Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
         Effect.scoped,
