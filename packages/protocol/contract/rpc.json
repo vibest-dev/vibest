@@ -7009,10 +7009,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },
@@ -10732,10 +10739,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },
@@ -13812,10 +13826,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },

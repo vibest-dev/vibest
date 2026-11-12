@@ -6,6 +6,7 @@ import {
   NoHarnessChosen,
   NoRuntime,
   NoSuchSession,
+  runnableNote,
   type RuntimeMachine,
 } from "@vibest/schema/session"
 import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } from "effect"
@@ -16,6 +17,7 @@ import { type Agents, unknownAgent } from "./agents.ts"
 import type { Db, NewSession, PeerStart, SessionRow } from "./db.ts"
 import type { Drain } from "./drain.ts"
 import {
+  harnessCatalog,
   harnessOptions,
   Harness,
   Harnesses,
@@ -29,6 +31,7 @@ import type { LimitMove } from "./move.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryDirectory } from "./paths.ts"
 import { describeSpawn, type Plugins, type Routing } from "./plugins.ts"
 import { listProjectRepositories } from "./project-create.ts"
+import { sessionEnvelope } from "./replies.ts"
 import { machinesListing as machines, type Runtimes } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
 import type { Placement } from "./session/placement.ts"
@@ -161,19 +164,9 @@ export const sessionSpawn = (deps: {
     const root = input.root
     const agent = input.agent
     if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
-    const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
-    const entry =
-      worker === undefined && input.parentSessionId !== undefined ? yield* db.entryOf(input.projectId) : undefined
-    const parentRuntime =
-      worker !== undefined
-        ? worker.runtime || undefined
-        : entry !== undefined && entry.id === input.parentSessionId
-          ? entry.runtime || undefined
-          : undefined
-    const from =
-      input.harness !== undefined
-        ? undefined
-        : (worker ?? entry ?? (input.parentSessionId === undefined ? yield* db.entryOf(input.projectId) : undefined))
+    const parent = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
+    const parentRuntime = parent?.runtime || undefined
+    const from = input.harness !== undefined ? undefined : parent
     const namedPeer =
       input.runtime === undefined && input.peer !== undefined ? yield* db.getSession(input.peer) : undefined
     const followedPeer =
@@ -202,25 +195,47 @@ export const sessionSpawn = (deps: {
       machines: yield* machinesListing,
     })
     const { provider, model } = decision
-    if (decision.harness === undefined) return yield* new NoHarnessChosen()
+    const runnableHere = harnessCatalog.pipe(
+      Effect.provideService(Harness, harness),
+      Effect.provideService(Harnesses, harnesses),
+      Effect.map((choices) => choices.filter((choice) => choice.problem === null).map((choice) => choice.harness)),
+    )
+    if (decision.harness === undefined) return yield* new NoHarnessChosen({ runnable: yield* runnableHere })
     const rt = yield* chosenRuntime(decision)
     const target = input.machine.id === decision.machine.id ? input.machine.target : undefined
     const runtimeKind = rt.id
+    const inheritedFrom =
+      from !== undefined && Object.keys(decision.decidedBy).length === 0 && decision.harness === from.harnessId
+        ? from.id
+        : undefined
     const routed = (e: HarnessUnavailable) =>
-      Object.keys(decision.decidedBy).length === 0
-        ? e
-        : new HarnessUnavailable({
-            harness: e.harness,
-            message: `${e.message} (routed: ${describeSpawn({ ...decision, harness: e.harness })})`,
-          })
+      Effect.gen(function* () {
+        const origin =
+          Object.keys(decision.decidedBy).length > 0
+            ? ` (routed: ${describeSpawn({ ...decision, harness: e.harness })})`
+            : inheritedFrom === undefined
+              ? ""
+              : ` (inherited from ${inheritedFrom})`
+        return yield* new HarnessUnavailable({
+          harness: e.harness,
+          message: `${e.message}${origin}${runnableNote(yield* runnableHere)}`,
+        })
+      })
     const harnessId = decision.harness
     if (harnesses.find(harnessId) === undefined) return yield* routed(unprovided(harnessId, harnesses.all))
     yield* preflight(harnessId, provider ?? null, model ?? null, input.env).pipe(
       Effect.provideService(Harness, harness),
       Effect.provideService(Harnesses, harnesses),
-      Effect.mapError(routed),
+      Effect.catchTag("HarnessUnavailable", routed),
     )
     const adapter = yield* harnesses.get(harnessId)
+    const sender =
+      parent !== undefined
+        ? { id: parent.id, title: parent.name }
+        : input.origin?.reportTo === undefined
+          ? undefined
+          : { id: input.origin.reportTo }
+    const task = sender === undefined ? decision.prompt : sessionEnvelope(sender, decision.prompt)
     const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
     const id = yield* db.newSessionId
     const now = yield* Clock.currentTimeMillis
@@ -291,7 +306,7 @@ export const sessionSpawn = (deps: {
         const inserted = yield* db.insertSession(draft, input.projectId, {
           max: options.maxSessions,
           cwd,
-          task: decision.prompt,
+          task,
           parentSessionId: input.parentSessionId,
           request: input.request,
           origin: input.origin,
@@ -301,6 +316,13 @@ export const sessionSpawn = (deps: {
         if (inserted === false) {
           yield* unreserve
           return yield* new LimitReached({ limit: options.maxSessions! })
+        }
+        if (inserted === "parent-ended") {
+          yield* unreserve
+          return yield* new NoSuchSession({
+            id: input.parentSessionId!,
+            message: `${input.parentSessionId} has ended and can no longer start sessions`,
+          })
         }
         if (inserted !== true) {
           yield* unreserve
@@ -340,7 +362,7 @@ export const sessionSpawn = (deps: {
             .withLock(id)(
               Deferred.succeed(held, undefined).pipe(
                 Effect.andThen(
-                  launch(rt, target, row, root, decision.prompt, {
+                  launch(rt, target, row, root, task, {
                     splitFrom: input.peer,
                     env: input.env,
                     commit: input.commit,

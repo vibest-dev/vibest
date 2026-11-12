@@ -1,12 +1,13 @@
 import { assert, describe } from "@effect/vitest"
 import { SessionLive } from "@vibest/core/session/live"
+import { Sessions } from "@vibest/core/sessions"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
+import { entryOfProject, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   test(
@@ -74,5 +75,37 @@ describe.concurrent("Sessions", () => {
       assert.include(notices[0], "exited during an execution")
       assert.include(notices[0], "Not delivered:\n\nqueued")
     }),
+  )
+
+  test(
+    "spawn without a harness and nothing to inherit is NoHarnessChosen",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const { parentSessionId: _, ...input } = yield* spawnInput(repo)
+      const error = yield* Effect.flip(
+        (yield* Sessions).spawn({
+          ...input,
+          harness: undefined,
+          origin: { peer: "a".repeat(32), project: "p", reportTo: "origin-session" },
+        }),
+      )
+      assert.strictEqual(error._tag, "NoHarnessChosen")
+      assert.include(error.message, "no harness to inherit")
+      assert.include(error.message, "this machine can run: ")
+    }),
+  )
+
+  test(
+    "an inherited harness that cannot run here fails naming whose it was, and lists the harnesses this machine can run",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const parent = yield* entryOfProject(repo)
+      const error = yield* Effect.flip((yield* Sessions).spawn({ ...(yield* spawnInput(repo)), harness: undefined }))
+      assert.strictEqual(error._tag, "HarnessUnavailable")
+      assert.include(error.message, `(inherited from ${parent})`)
+      assert.match(error.message, /this machine can run: .*claude/)
+      assert.notMatch(error.message, /can run: .*\bpi\b/)
+    }),
+    { unusable: ["pi"] },
   )
 })

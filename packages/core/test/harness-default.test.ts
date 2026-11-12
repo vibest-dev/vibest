@@ -38,6 +38,7 @@ const chosen = (harness: string | undefined, claude: boolean) =>
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
     Effect.provide(Bus.layer),
+    Effect.provide(Agents.layer),
     Effect.scoped,
   )
 

@@ -5,6 +5,7 @@ import { cliHeaders, incompatibleDaemon, protocolHeaders, withVibest } from "@vi
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { projectRoot } from "@vibest/core/project-create"
+import { unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { Plugin } from "@vibest/plugin"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
@@ -461,7 +462,7 @@ describe("vibest.sock", () => {
       const user = asCli(yield* client, repo)
       yield* user.Send({ id, message: "from the user" })
       assert.deepStrictEqual(
-        (yield* db.pendingInbox(id)).map((r) => r.message),
+        (yield* db.pendingInbox(id)).map((r) => unwrapped(r.message)),
         ["from its own entry session", "from the user"],
       )
       assert.strictEqual(

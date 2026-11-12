@@ -20,10 +20,10 @@ messages still arrive.
 When the new vibest refuses the handoff before it takes over (for example, it cannot open the database), the old
 vibestd keeps serving as before.
 
-## U4. A Claude entry session updates vibest itself
+## U4. A session does not update vibest
 
-A Claude entry session that runs `vibest update --yes` is restarted by vibestd in its own pane, on the same session,
-conversation and terminal; it gets a notice to continue, and the update runs once.
+`vibest update` run by a session, the entry session included, is refused as the user's command; nothing is installed or
+restarted and the session keeps running.
 
 ## U5. Moving past a usage limit
 

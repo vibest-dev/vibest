@@ -11,7 +11,6 @@ export const inboxMethods = (store: Store) => {
   const {
     sql,
     reads,
-    addressedCreator,
     now,
     tx,
     findSession,
@@ -60,11 +59,6 @@ export const inboxMethods = (store: Store) => {
     insertSend: (recipient: string, message: string, request?: string, sender?: string) =>
       tx(
         Effect.gen(function* () {
-          if (sender !== undefined) {
-            const from = yield* addressedCreator(sender)
-            const to = yield* addressedCreator(recipient)
-            if (from !== recipient && to !== sender) return undefined
-          }
           const before = request === undefined ? undefined : yield* queuedBy(recipient, request)
           if (before !== undefined) return (yield* inboxIn(recipient, [before]))[0]
           if (!(yield* liveRecipient(recipient))) return undefined
@@ -88,6 +82,9 @@ export const inboxMethods = (store: Store) => {
           return written
         }),
       ).pipe(Effect.orDie),
+
+    sendToPeer: (sender: string, peer: string, session: string, message: string) =>
+      tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message })).pipe(Effect.orDie),
 
     queuedBy: (sessionId: string, request: string) =>
       queuedBy(sessionId, request).pipe(
@@ -117,6 +114,9 @@ export const inboxMethods = (store: Store) => {
               OR (session_id = ${id} AND kind = 'task' AND execution_id IS NULL)
             LIMIT 1`
           if (waiting.length > 0) return false
+          const children =
+            yield* sql`SELECT 1 FROM session WHERE parent_session_id = ${id} AND ended_at IS NULL LIMIT 1`
+          if (children.length > 0) return false
           if ((yield* openExecution(id)) !== undefined) return false
           yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true } })
           return true

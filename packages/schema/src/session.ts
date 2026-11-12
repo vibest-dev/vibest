@@ -116,9 +116,14 @@ export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAge
     return `no agent definition ${this.agent}; registered: ${known || "none"}`
   }
 }
-export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
+export const runnableNote = (runnable: ReadonlyArray<string>) =>
+  runnable.length === 0 ? "" : `; this machine can run: ${runnable.join(", ")}`
+
+export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {
+  runnable: Schema.Array(Schema.String),
+}) {
   override get message() {
-    return "no harness to inherit: name one, for example `vibest run claude -- <prompt>`"
+    return `no harness to inherit: name one, for example \`vibest run claude -- <prompt>\`${runnableNote(this.runnable)}`
   }
 }
 

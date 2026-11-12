@@ -14,6 +14,7 @@ import {
   type SpawnedBefore,
   toInbox,
 } from "./db-rows.ts"
+import { unwrapped } from "./replies.ts"
 
 export const LOCAL_MACHINE = "local"
 
@@ -280,7 +281,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         const raw = row.executionId === null ? undefined : (row.outcome ?? "working")
         const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
         found.set(row.id, {
-          task: row.task ?? null,
+          task: row.task === null ? null : unwrapped(row.task),
           latest:
             status === undefined
               ? null
@@ -334,8 +335,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
   const outboxOf = (peer: string) =>
     sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
-        s.origin_session AS report_to
-      FROM outbox o JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
+        coalesce(o.recipient, s.origin_session) AS report_to
+      FROM outbox o LEFT JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
       Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),
     )
 
