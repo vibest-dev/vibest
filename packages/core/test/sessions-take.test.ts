@@ -1,7 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
-import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -12,7 +11,7 @@ import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { HARNESSES, PULLING_PI } from "./lib/harnesses.ts"
 import { until } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
+import { makeRepository, restartSessions } from "./lib/session.ts"
 import { spawnInput, test as plainTest } from "./lib/sessions-helpers.ts"
 
 const test: typeof plainTest = (name, program, options, touches) =>
@@ -105,7 +104,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       const herdr = yield* FakeRuntime
       const { execution } = (yield* inbox.take(entryId, undefined))!
       yield* sessions.typeTaken(entryId, execution)
-      const restarted = yield* Sessions.make.pipe(Effect.provideServiceEffect(SessionLocks, SessionLocks.make))
+      const restarted = yield* restartSessions
       yield* restarted.typeTaken(entryId, execution)
       const typed = yield* herdr.callsTo("send")
       assert.lengthOf(

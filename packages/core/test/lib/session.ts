@@ -1,11 +1,14 @@
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
+import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
+import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
+import { Inbox } from "@vibest/core/inbox"
 import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
@@ -18,7 +21,20 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin"
 import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
-import { Clock, ConfigProvider, Context, Deferred, type Duration, Effect, FileSystem, Layer, Path, Ref } from "effect"
+import {
+  Clock,
+  ConfigProvider,
+  Context,
+  Crypto,
+  Deferred,
+  type Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Path,
+  Ref,
+} from "effect"
+import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
@@ -273,3 +289,32 @@ export const sessionFrom = (options: TestOptions = {}) =>
 export type TestServices = Layer.Success<ReturnType<typeof sessionFrom>> | FakeRuntime
 
 export { sessionFrom as testLayer }
+
+export const restartSessions = Effect.gen(function* () {
+  const held = [
+    Agents.node.replace(Layer.succeed(Agents, yield* Agents)),
+    Bus.node.replace(Layer.succeed(Bus, yield* Bus)),
+    Db.node.replace(Layer.succeed(Db, yield* Db)),
+    Drain.node.replace(Layer.succeed(Drain, yield* Drain)),
+    Git.node.replace(Layer.succeed(Git, yield* Git)),
+    Harness.node.replace(Layer.succeed(Harness, yield* Harness)),
+    Harnesses.node.replace(Layer.succeed(Harnesses, yield* Harnesses)),
+    Inbox.node.replace(Layer.succeed(Inbox, yield* Inbox)),
+    Plugins.node.replace(Layer.succeed(Plugins, yield* Plugins)),
+    Processes.node.replace(Layer.succeed(Processes, yield* Processes)),
+    Runtimes.node.replace(Layer.succeed(Runtimes, yield* Runtimes)),
+    Subscriptions.node.replace(Layer.succeed(Subscriptions, yield* Subscriptions)),
+    PlatformNode.childProcessSpawner.replace(
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, yield* ChildProcessSpawner.ChildProcessSpawner),
+    ),
+    PlatformNode.crypto.replace(Layer.succeed(Crypto.Crypto, yield* Crypto.Crypto)),
+    PlatformNode.fileSystem.replace(Layer.succeed(FileSystem.FileSystem, yield* FileSystem.FileSystem)),
+    PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
+    PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
+    Spawn.node.replace(defaultSpawn),
+  ]
+  const fresh = yield* Layer.build(
+    Layer.fresh(LayerNode.compile(LayerNode.group([Sessions.node]), { replacements: held })),
+  )
+  return Context.get(fresh, Sessions)
+})

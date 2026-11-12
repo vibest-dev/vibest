@@ -2,8 +2,6 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
-import { SessionLocks } from "@vibest/core/session/locks"
-import { Placement } from "@vibest/core/session/placement"
 import { Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, FileSystem, Ref } from "effect"
 import { SqlClient } from "effect/sql"
@@ -14,7 +12,7 @@ import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { CLAUDE, CURSOR, PI } from "./lib/harnesses.ts"
 import { EXECUTIONS, until, untilVirtual, processEnds, writeEnd } from "./lib/observe.ts"
-import { makeRepository, type TestServices } from "./lib/session.ts"
+import { makeRepository, restartSessions, type TestServices } from "./lib/session.ts"
 import {
   chooseNext,
   harnessOf,
@@ -28,10 +26,7 @@ import {
 
 const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
   Effect.gen(function* () {
-    const next = yield* Sessions.make.pipe(
-      Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
-      Effect.provideServiceEffect(Placement, Placement.make),
-    )
+    const next = yield* restartSessions
     yield* until(done, (yes) => yes)
     yield* until(next.inMemory, (m) => m.locks === 0)
   })
@@ -183,10 +178,7 @@ describe.concurrent("after a vibestd stop", () => {
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
         yield* Ref.set(herdr.skipPromptUpdates, 2)
-        const next = yield* Sessions.make.pipe(
-          Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
-          Effect.provideServiceEffect(Placement, Placement.make),
-        )
+        const next = yield* restartSessions
         yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status === "not_started")
         assert.strictEqual(yield* typed("do it"), 2)
         assert.isTrue((yield* sqlNotices(id)).some((t) => t.startsWith("task_not_started")))
@@ -221,10 +213,7 @@ describe.concurrent("after a vibestd stop", () => {
       yield* Effect.gen(function* () {
         assert.isUndefined(yield* db.untakenTask(id))
         assert.isFalse(yield* db.executionAccepted(id))
-        yield* Sessions.make.pipe(
-          Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
-          Effect.provideServiceEffect(Placement, Placement.make),
-        )
+        yield* restartSessions
         yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status !== "working")
         assert.deepStrictEqual(
           (yield* executionInputs(id)).map((e) => e.status),

@@ -1,6 +1,5 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions, START_TIMEOUT } from "@vibest/core/sessions"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
@@ -9,7 +8,7 @@ import { projectOf } from "./lib/directory.ts"
 import { testEffect } from "./lib/effect.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { until } from "./lib/observe.ts"
-import { makeRepository, sessionFrom } from "./lib/session.ts"
+import { makeRepository, restartSessions, sessionFrom } from "./lib/session.ts"
 
 const TEST_HERDR = "herdr"
 
@@ -52,7 +51,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
         projectId,
         { cwd: repo },
       )
-      const sessions = yield* Sessions.make.pipe(Effect.provideServiceEffect(SessionLocks, SessionLocks.make))
+      const sessions = yield* restartSessions
       yield* startupSettled(sessions)
       assert.isNull((yield* db.getSession(id))!.exitedAt)
       yield* herdr.seedAgent("w8:pending")

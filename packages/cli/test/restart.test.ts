@@ -5,7 +5,6 @@ import { VibestCommand } from "@vibest/core/paths"
 import { noticeEnvelope } from "@vibest/core/replies"
 import { CONTINUE, continueText, type Restarted } from "@vibest/core/restart"
 import { SessionLive } from "@vibest/core/session/live"
-import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
@@ -23,6 +22,7 @@ import {
   FakeProcesses,
   FakeRuntime,
   makeRepository,
+  restartSessions,
   testLayer,
   type TestServices,
   until,
@@ -316,7 +316,7 @@ describe("restart in place", () => {
       assert.strictEqual(outcome?.ok, true, outcome?.message)
       assert.notStrictEqual((yield* db.getSession(id))!.metadata.pid, pid)
       yield* sessions.check(id)
-      const freshSessions = yield* Sessions.make.pipe(Effect.provideServiceEffect(SessionLocks, SessionLocks.make))
+      const freshSessions = yield* restartSessions
       yield* freshSessions.check(id)
       assert.strictEqual((yield* eventsOf(id, "execution.ended")).length, 0)
       assert.isUndefined(yield* db.latestReply(id))
