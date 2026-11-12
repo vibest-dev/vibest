@@ -48,6 +48,11 @@ export const settled = Effect.gen(function* () {
 export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>
   poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("100 millis"))), 1000, "untilVirtual")
 
+export const settleEntry = (sessions: Sessions["Service"], entryId: string) => sessions.check(entryId)
+
+export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks: number }) =>
+  m.tracked <= 1 && m.locks === 0
+
 export const writeEnd = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses).get(harness)

@@ -21,7 +21,10 @@ const entryWorking = Effect.gen(function* () {
     yield* projectOf(yield* makeRepository),
     "pi",
     false,
-    { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+    {
+      runtime: RUNTIME,
+      address: { machine: "local", id: "test/coord" },
+    },
     { agent: "coordinator" },
   )
   yield* herdr.seedAgent("test/coord")
