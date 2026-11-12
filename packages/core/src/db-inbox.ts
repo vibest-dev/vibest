@@ -322,6 +322,17 @@ export const inboxMethods = (store: Store) => {
         return claimed.map((k) => k.id)
       }).pipe(Effect.orDie),
 
+    unacceptedBatch: (sessionId: string, execution: number) =>
+      tx(
+        Effect.gen(function* () {
+          if ((yield* openExecution(sessionId)) !== execution || (yield* acceptedAt(sessionId, execution)) !== null)
+            return undefined
+          return yield* inbox(
+            sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = 'delivered' AND m.execution_id = ${execution}`,
+          )
+        }),
+      ).pipe(Effect.orDie),
+
     deliveredIn: (sessionId: string, execution: number) =>
       inbox(
         sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = 'delivered' AND m.execution_id = ${execution}`,
