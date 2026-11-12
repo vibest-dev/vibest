@@ -1,4 +1,4 @@
-import { newId, shortId } from "@vibest/schema/id"
+import { shortId } from "@vibest/schema/id"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
@@ -38,7 +38,6 @@ import { sessionExecutions } from "./executions.ts"
 import { Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox, text as inboxText } from "./inbox.ts"
 import { entryCommand, restartArgv } from "./launch.ts"
-import { sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { errorMessage, Plugins } from "./plugins.ts"
 import { Processes } from "./processes.ts"
@@ -61,9 +60,9 @@ import { Archive } from "./session/archive.ts"
 import { busy, CONFIRM_TIMEOUT, Executions, STOP_WAIT } from "./session/executions.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
+import { Move } from "./session/move.ts"
 import { Placement, runtimeEnv } from "./session/placement.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
-import { Subscriptions } from "./subscriptions/service.ts"
 import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
 
 export {
@@ -97,13 +96,13 @@ const SESSION_DEPS = [
   Harness.node,
   Harnesses.node,
   Inbox.node,
+  Move.node,
   Placement.node,
   Plugins.node,
   Processes.node,
   Runtimes.node,
   SessionLive.node,
   SessionLocks.node,
-  Subscriptions.node,
   PlatformNode.childProcessSpawner,
   PlatformNode.crypto,
   PlatformNode.fileSystem,
@@ -234,21 +233,8 @@ export class Sessions extends Context.Service<
           )
         })
 
-      const { awaitReady, interruptAgent, prompt, finish } = yield* Executions
-      const {
-        notice,
-        worktreeOf,
-        systemPromptOf,
-        launchArgv,
-        handTask,
-        launch,
-        resume,
-        republish,
-        recount,
-        openTerminal,
-        show,
-        locate,
-      } = yield* Placement
+      const { awaitReady, interruptAgent, prompt } = yield* Executions
+      const { notice, worktreeOf, launchArgv, handTask, launch, resume, republish, recount } = yield* Placement
 
       const { deliverQueued } = sessionExecutions({
         db,
@@ -258,23 +244,7 @@ export class Sessions extends Context.Service<
         handTask,
       })
 
-      const move = sessionMove({
-        db,
-        plugins,
-        subscriptions: yield* Subscriptions,
-        harness,
-        harnesses,
-        prompt,
-        open: openTerminal,
-        show,
-        locate,
-        finish,
-        launchArgv,
-        systemPromptOf,
-        uuid: newId(),
-        terminate: processes.terminate,
-        platform,
-      })
+      const move = yield* Move
 
       const { spawn } = sessionSpawn({
         db,

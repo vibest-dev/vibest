@@ -1,23 +1,19 @@
 import type * as VibestPlugin from "@vibest/plugin"
 import { exhaustedText, isLimited, stillLimited } from "@vibest/plugin"
+import type { ProcessEndReason } from "@vibest/schema/event"
+import { newId } from "@vibest/schema/id"
 import type { Subscription } from "@vibest/schema/subscription"
-import { Cause, Clock, Context, Crypto, Effect, Exit, FileSystem, Path } from "effect"
-import { ChildProcessSpawner } from "effect/process"
+import { Cause, Clock, Context, Effect, Exit, Layer } from "effect"
 
-import type { Db, SessionRow } from "./db.ts"
-import type { Git } from "./git.ts"
-import { Harness, harnessOptions, Harnesses, preflight } from "./harness.ts"
-import { errorMessage, type Plugins } from "./plugins.ts"
-import { RuntimeError } from "./runtimes.ts"
-import { type Runtime, type Terminal } from "./runtimes.ts"
-import type { Subscriptions } from "./subscriptions/service.ts"
-
-export type MovePlatform =
-  | FileSystem.FileSystem
-  | Path.Path
-  | Crypto.Crypto
-  | ChildProcessSpawner.ChildProcessSpawner
-  | Git
+import { Db, type SessionRow } from "../db.ts"
+import { LayerNode } from "../effect/layer-node.ts"
+import { Harness, harnessOptions, Harnesses, preflight } from "../harness.ts"
+import { errorMessage, Plugins } from "../plugins.ts"
+import { Processes } from "../processes.ts"
+import { RuntimeError, type Runtime, type Terminal } from "../runtimes.ts"
+import { Subscriptions } from "../subscriptions/service.ts"
+import { Executions } from "./executions.ts"
+import { Placement } from "./placement.ts"
 
 export interface LimitMove {
   readonly rerun: (
@@ -48,55 +44,20 @@ const limitFailure = (
   return text === "" ? `${named}: ${error}` : text
 }
 
-export const sessionMove = (deps: {
-  readonly db: Pick<
-    Db["Service"],
-    "getSession" | "updateSession" | "limitSource" | "endProcess" | "linkTask" | "limitedSince"
-  >
-  readonly plugins: Plugins["Service"]
-  readonly subscriptions: Subscriptions["Service"]
-  readonly harness: Harness["Service"]
-  readonly harnesses: Harnesses["Service"]
-  readonly prompt: (
-    h: Runtime,
-    session: SessionRow,
-    terminal: Terminal,
-    text: string,
-    onHandover?: Effect.Effect<void>,
-  ) => Effect.Effect<string | undefined, unknown, MovePlatform>
-  readonly open: (
-    h: Runtime,
-    target: string | undefined,
-    session: SessionRow,
-    input: {
-      readonly project: string
-      readonly cwd: string
-      readonly argv: ReadonlyArray<string>
-      readonly near?: Terminal | undefined
-    },
-  ) => Effect.Effect<Terminal, unknown, MovePlatform>
-  readonly show: (
-    h: Runtime,
-    session: SessionRow,
-    terminal: Terminal,
-    root: string,
-  ) => Effect.Effect<void, unknown, MovePlatform>
-  readonly locate: (
-    session: SessionRow,
-  ) => Effect.Effect<{ readonly root: string; readonly cwd: string }, unknown, MovePlatform>
-  readonly launchArgv: (
-    session: SessionRow,
-    resume: boolean,
-  ) => Effect.Effect<ReadonlyArray<string>, unknown, MovePlatform>
-  readonly finish: (session: SessionRow, end: "failed", error: string) => Effect.Effect<unknown, unknown, MovePlatform>
-  readonly systemPromptOf: (session: SessionRow) => Effect.Effect<string, unknown, MovePlatform>
-  readonly uuid: Effect.Effect<string>
-  readonly terminate: (pid: number) => Effect.Effect<"sent" | "gone" | "denied">
-  readonly platform: Context.Context<MovePlatform>
-}) => {
-  const { db, plugins, subscriptions, harness, harnesses } = deps
+const make = Effect.gen(function* () {
+  const db = yield* Db
+  const plugins = yield* Plugins
+  const subscriptions = yield* Subscriptions
+  const harness = yield* Harness
+  const harnesses = yield* Harnesses
+  const processes = yield* Processes
+  const { prompt, finish } = yield* Executions
+  const { openTerminal, show, locate, launchArgv, systemPromptOf } = yield* Placement
 
-  const rerunBody = Effect.fn("Sessions.rerunLimited")(function* (
+  const exited = (id: string, reason: ProcessEndReason) =>
+    Effect.andThen(db.setStatus(id, "unknown"), db.endProcess(id, reason))
+
+  const rerunBody = Effect.fn("Move.rerun")(function* (
     h: Runtime,
     session: SessionRow,
     current: Terminal | undefined,
@@ -118,7 +79,7 @@ export const sessionMove = (deps: {
     const endRunning = Effect.gen(function* () {
       if (running === "none") return "sent" as const
       const pid = ((yield* db.getSession(row.id)) ?? row).metadata.pid
-      const sent = pid === undefined ? "gone" : yield* deps.terminate(pid)
+      const sent = pid === undefined ? "gone" : yield* processes.terminate(pid)
       if (sent !== "denied") {
         yield* db.endProcess(row.id, limitedEnded ? "move" : "limited")
         limitedEnded = true
@@ -127,7 +88,7 @@ export const sessionMove = (deps: {
       return sent
     })
     const at = yield* Clock.currentTimeMillis
-    const stored = session.metadata.attempts ?? []
+    const stored = yield* db.attempts(session.id)
     const provider = session.provider ?? undefined
     const recorded = stored.some((a) => a.harness === session.harnessId && a.provider === provider)
       ? stored
@@ -161,39 +122,25 @@ export const sessionMove = (deps: {
         const fresh = (yield* db.getSession(row.id)) ?? row
         if (inPlace) {
           if (running === "mine") yield* endRunning
-          yield* deps.finish(fresh, "failed", why)
-          if (running === "none") {
-            const t = yield* Clock.currentTimeMillis
-            yield* db.updateSession(fresh.id, {
-              status: "unknown",
-              exitedAt: t,
-              lastActive: t,
-              end: limitedEnded ? "move" : "limited",
-            })
-          }
+          yield* finish(fresh, "failed", why)
+          if (running === "none") yield* exited(fresh.id, limitedEnded ? "move" : "limited")
           return false
         }
         if (!(owns && terminal)) {
-          yield* deps.finish(fresh, "failed", why)
+          yield* finish(fresh, "failed", why)
           return false
         }
         const closed = yield* h.close(terminal).pipe(Effect.exit)
         if (Exit.isFailure(closed)) {
-          yield* deps.finish(
+          yield* finish(
             fresh,
             "failed",
             `${fresh.id} stopped after a usage limit, but closing its terminal failed (${errorMessage(closed.cause)})`,
           )
           return false
         }
-        yield* deps.finish(fresh, "failed", why)
-        const t = yield* Clock.currentTimeMillis
-        yield* db.updateSession(fresh.id, {
-          status: "unknown",
-          exitedAt: t,
-          lastActive: t,
-          end: limitedEnded ? "move" : "limited",
-        })
+        yield* finish(fresh, "failed", why)
+        yield* exited(fresh.id, limitedEnded ? "move" : "limited")
         return false
       })
     const options = yield* harnessOptions.pipe(
@@ -220,7 +167,7 @@ export const sessionMove = (deps: {
           (a.outcome !== "limited" || a.provider === undefined || (a.provider === provider && stillLimited(a, rows))),
       )
     }
-    const { root, cwd } = yield* deps.locate(session)
+    const { root, cwd } = yield* locate(session)
     const base = {
       project: root,
       agent: session.agent,
@@ -284,13 +231,13 @@ export const sessionMove = (deps: {
       if (!limitedEnded && (yield* newerExecution)) return true
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
-          yield* deps.finish(row, "failed", `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`)
+          yield* finish(row, "failed", `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`)
           return false
         }
       } else if (terminal !== undefined) {
         const closed = yield* h.close(terminal).pipe(Effect.exit)
         if (Exit.isFailure(closed)) {
-          yield* deps.finish(
+          yield* finish(
             row,
             "failed",
             `${row.id} stayed on ${row.harnessId}: closing its terminal failed (${errorMessage(closed.cause)})`,
@@ -302,7 +249,7 @@ export const sessionMove = (deps: {
         gone = true
         yield* endLeft
       } else yield* endLeft
-      const harnessSessionId = (yield* harnesses.get(next.harness)).ownSessionId ? yield* deps.uuid : null
+      const harnessSessionId = (yield* harnesses.get(next.harness)).ownSessionId ? yield* newId() : null
       const nextRow: SessionRow = {
         ...row,
         harnessId: next.harness,
@@ -310,7 +257,7 @@ export const sessionMove = (deps: {
         model: next.model ?? null,
         harnessSessionId,
       }
-      const argv = yield* deps.launchArgv(nextRow, false)
+      const argv = yield* launchArgv(nextRow, false)
       if (inPlace)
         yield* db.updateSession(row.id, {
           harnessId: next.harness,
@@ -320,20 +267,17 @@ export const sessionMove = (deps: {
         })
       const placed = inPlace
         ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
-        : yield* deps.open(h, undefined, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
+        : yield* openTerminal(h, undefined, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         const failed = Cause.squash(placed.cause)
         const startDeath = failed instanceof RuntimeError && failed.code === "failed"
         if (!startDeath) {
-          yield* deps.finish(
+          yield* finish(
             row,
             "failed",
             `${row.id} stopped after a usage limit, but placing the next pane failed (${errorMessage(placed.cause)})`,
           )
-          if (gone || inPlace) {
-            const t = yield* Clock.currentTimeMillis
-            yield* db.updateSession(row.id, { status: "unknown", exitedAt: t, lastActive: t, end: "move" })
-          }
+          if (gone || inPlace) yield* exited(row.id, "move")
           return false
         }
         skip(next.harness, "start_failed")
@@ -342,34 +286,43 @@ export const sessionMove = (deps: {
       terminal = placed.value
       if (inPlace) running = "mine"
       else owns = true
-      yield* db.updateSession(row.id, {
-        harnessId: next.harness,
-        provider: next.provider ?? null,
-        model: next.model ?? null,
-        harnessSessionId,
-        exitedAt: null,
-      })
       row = (yield* db.getSession(row.id))!
       const text = (yield* harnesses.get(row.harnessId)).systemPromptInPrompt
-        ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
+        ? `${yield* systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
-      const prompted = yield* deps.prompt(h, row, terminal, text, db.linkTask(row.id)).pipe(Effect.exit)
+      const prompted = yield* prompt(h, row, terminal, text, db.linkTask(row.id)).pipe(Effect.exit)
       if (Exit.isFailure(prompted) || prompted.value !== undefined) {
         skip(next.harness, "not_confirmed")
         continue
       }
-      yield* deps.show(h, row, terminal, root)
+      yield* show(h, row, terminal, root)
       return true
     }
   })
 
   const rerun: LimitMove["rerun"] = (h, session, terminal, fallbackTask, ownsTerminal, error, limited) =>
-    rerunBody(h, session, terminal, fallbackTask, ownsTerminal, error, limited).pipe(
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
-      Effect.provideContext(deps.platform),
-      Effect.orDie,
-    )
+    rerunBody(h, session, terminal, fallbackTask, ownsTerminal, error, limited).pipe(Effect.orDie)
 
   return { rerun }
+})
+
+export class Move extends Context.Service<Move, Effect.Success<typeof make>>()("vibest/Move") {
+  static readonly make = make
+
+  static readonly layer = Layer.effect(Move, make)
+
+  static readonly node = LayerNode.make({
+    service: Move,
+    layer: Move.layer,
+    deps: [
+      Db.node,
+      Executions.node,
+      Harness.node,
+      Harnesses.node,
+      Placement.node,
+      Plugins.node,
+      Processes.node,
+      Subscriptions.node,
+    ],
+  })
 }
