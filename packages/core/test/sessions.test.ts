@@ -363,7 +363,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.startEntry(
+      const entry = yield* db.startEntry(
         yield* projectOf(repo),
         "pi",
         false,
@@ -376,6 +376,8 @@ describe.concurrent("Sessions", () => {
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), env: { VBT_TOKEN: "s3cret" } })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
+      yield* sessions.check(entry.sessionId)
+      const entryTracked = (yield* sessions.inMemory).tracked - 1
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.env.VBT_TOKEN, "s3cret")
       const stored = yield* sql<{
         metadata: string
@@ -386,7 +388,7 @@ describe.concurrent("Sessions", () => {
       )
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
-      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === entryTracked && m.locks === 0)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       for (const open of (yield* herdr.callsTo("open")).slice(1)) assert.isUndefined(open.env.VBT_TOKEN)
