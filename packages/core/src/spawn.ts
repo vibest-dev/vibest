@@ -25,12 +25,13 @@ import {
   unprovided,
 } from "./harness.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
+import type { LimitMove } from "./move.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryDirectory } from "./paths.ts"
-import type { sessionPlacement } from "./placement.ts"
 import { describeSpawn, type Plugins, type Routing } from "./plugins.ts"
 import { listProjectRepositories } from "./project-create.ts"
 import { machinesListing as machines, type Runtimes } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
+import type { Placement } from "./session/placement.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
@@ -84,7 +85,8 @@ export const sessionSpawn = (deps: {
   readonly options: { readonly maxSessions: number | undefined }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
-  readonly launch: ReturnType<typeof sessionPlacement>["launch"]
+  readonly launch: Placement["Service"]["launch"]
+  readonly onOwnLimit: LimitMove["rerun"]
 }) => {
   const {
     db,
@@ -104,6 +106,7 @@ export const sessionSpawn = (deps: {
     worktreeOf,
     logged,
     launch,
+    onOwnLimit,
     options,
   } = deps
   const machinesListing = machines(
@@ -341,6 +344,7 @@ export const sessionSpawn = (deps: {
                     splitFrom: input.peer,
                     env: input.env,
                     commit: input.commit,
+                    onOwnLimit,
                   }),
                 ),
               ),

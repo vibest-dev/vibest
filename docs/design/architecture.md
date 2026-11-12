@@ -371,7 +371,7 @@ How `packages/core/src/sessions.ts` keeps these:
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
 - A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
   is final. A session whose harness is being restarted is never resumed in another terminal.
-- Placing a start (`placement.ts`): the session's `process.start` is written before its terminal exists, so what the
+- Placing a start (`session/placement.ts`): the session's `process.start` is written before its terminal exists, so what the
   harness reports while it starts (ready, its pid) belongs to it; a terminal that never opens ends it as
   `launch_failed`. The worktree comes first: the terminal's cwd is in it, the argv names it, and the
   `.worktreeinclude` files are in place before the harness starts. It is detached and made by vibest (a linked
