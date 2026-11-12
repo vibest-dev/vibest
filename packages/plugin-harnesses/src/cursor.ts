@@ -59,13 +59,11 @@ export const cursor: Harness.HarnessDefinition = {
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
-  userPrompt: (event, coordinator) => {
-    if (coordinator) return undefined
+  userPrompt: (event) => {
     if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
     if (event.hook_event_name !== "beforeSubmitPrompt" || typeof event.prompt !== "string" || !event.prompt.trim())
       return undefined
     return { text: event.prompt }
   },
-  executionEnd: (event, coordinator) =>
-    !coordinator && event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined,
+  executionEnd: (event) => (event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined),
 }

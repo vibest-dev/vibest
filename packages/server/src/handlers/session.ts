@@ -35,7 +35,7 @@ export const make = (
         const id = yield* db.resolveSession(input, scope)
         if (c === undefined) return id
         const session = yield* db.getSession(id)
-        if (!session) {
+        if (!session || session.entry) {
           const identity = yield* db.sessionIdentity(id)
           if (identity?.entry) {
             const directory = yield* db.projectDirectory(identity.projectId)
@@ -249,8 +249,8 @@ export const make = (
           yield* cliOnly("Session.Seen")
           const identity = yield* db.sessionIdentity(id)
           if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-          const at = identity.entry ? yield* db.entryOf(identity.projectId) : yield* db.getSession(id)
-          if (at?.id !== id || !at.runtime || !at.address || at.address.id === "") return
+          const at = yield* db.getSession(id)
+          if (at === undefined || !at.runtime || at.address.id === "") return
           const address = at.address
           const rt = runtimes.find(at.runtime)
           if (rt === undefined || rt.seen === undefined || rt.see === undefined) return

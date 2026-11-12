@@ -8,7 +8,7 @@ import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { projectOf } from "./fakes.ts"
+import { entryPending, projectOf } from "./fakes.ts"
 import { place, session } from "./unit-helpers.ts"
 
 const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
@@ -35,14 +35,13 @@ const setup = Effect.gen(function* () {
 })
 
 describe("sends from sessions", () => {
-  it.effect("a send to the entry session is for its poll or subscribe path, never for typing", () =>
+  it.effect("a send to the entry session waits as a pending row like a send to any session", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
         assert.isDefined(yield* db.insertSend(entryId, "hello", undefined, A))
-        assert.deepStrictEqual(yield* db.pendingInbox(entryId), [])
         assert.deepStrictEqual(
-          (yield* db.entryPending(project)).map((r) => [r.kind, r.sender, r.recipient]),
+          (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
           [["send", A, entryId]],
         )
       }),
@@ -89,9 +88,9 @@ describe("sends from sessions", () => {
   it.effect("a send dropped because the entry session is gone ends with one notice to its sender", () =>
     memory(
       Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
+        const { db, entryId } = yield* setup
         const sent = (yield* db.insertSend(entryId, "hello", undefined, A))!
-        yield* db.dropWaiting(project)
+        yield* db.clearEntry(place.runtime, place.address)
         assert.strictEqual((yield* db.inboxWithStatus(A, "pending")).filter((r) => r.kind === "notice").length, 1)
         const [note] = yield* db.pendingInbox(A)
         assert.include(note!.message, "was not delivered")
@@ -102,27 +101,15 @@ describe("sends from sessions", () => {
     ),
   )
 
-  it.effect("a send in flight to an entry session that does not poll ends failed with one notice to its sender", () =>
+  it.effect("a send in flight when vibestd stopped ends failed with one notice to its sender", () =>
     memory(
       Effect.gen(function* () {
         const { db, entryId } = yield* setup
         const sent = (yield* db.insertSend(entryId, "hello", undefined, A))!
         yield* db.claim(entryId, [sent.id])
-        yield* db.recoverDelivering([], () => "")
+        yield* db.recoverDelivering((_, messages) => messages.join("\n"))
         assert.strictEqual((yield* db.inboxWithStatus(A, "pending")).length, 1)
         assert.include((yield* db.pendingInbox(A))[0]!.message, "hello")
-      }),
-    ),
-  )
-
-  it.effect("a send failed with its subscription lease ends with one notice to its sender", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, entryId } = yield* setup
-        const sent = (yield* db.insertSend(entryId, "hello", undefined, A))!
-        yield* db.claim(entryId, [sent.id])
-        yield* db.failLeased(entryId, [sent.id])
-        assert.strictEqual((yield* db.pendingInbox(A)).length, 1)
       }),
     ),
   )
@@ -136,10 +123,10 @@ describe("sends from sessions", () => {
         const sent = (yield* db.insertSend(B, "hello", undefined, A))!
         yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
         yield* db.claim(B, [sent.id])
-        yield* db.recoverDelivering([], () => "cut")
+        yield* db.recoverDelivering(() => "cut")
         assert.deepStrictEqual(yield* db.pendingInbox(X), [])
         assert.deepStrictEqual(
-          (yield* db.entryPending(project)).map((r) => [r.kind, r.sender, r.message]),
+          (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.message]),
           [["notice", A, "cut"]],
         )
       }),
@@ -185,22 +172,16 @@ describe("sends from sessions", () => {
     ),
   )
 
-  it.effect("a send with no sender session is put back for the next poll when its delivery is cut", () =>
+  it.effect("a send with no sender session that was cut tells its recipient", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
         const first = (yield* db.insertSend(entryId, "one"))!
         yield* db.claim(entryId, [first.id])
-        yield* db.recoverDelivering([], () => "")
+        yield* db.recoverDelivering(() => "cut")
         assert.deepStrictEqual(
-          (yield* db.entryPending(project)).map((r) => r.message),
-          ["one"],
-        )
-        yield* db.claim(entryId, [first.id])
-        yield* db.failLeased(entryId, [first.id])
-        assert.deepStrictEqual(
-          (yield* db.entryPending(project)).map((r) => r.message),
-          ["one"],
+          (yield* entryPending(db, project)).map((r) => [r.kind, r.message]),
+          [["notice", "cut"]],
         )
       }),
     ),

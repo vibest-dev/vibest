@@ -7,6 +7,16 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Pull or type depends only on the harness; the entry session is an ordinary session** (anyone reading
+  `vibest.db` or `vibest ls`, harness integration and plugin authors): a harness that declares `inbox` (Claude, Pi)
+  takes its next batch with `Inbox.Take` / `/inbox/take` when it is idle, for the entry session and spawned sessions
+  alike; any other harness (Cursor) is typed into. vibestd does not hand out the next batch while an execution is open.
+  A pulled batch is `delivered` and attached to its execution when it is taken, and the integration reports the
+  execution accepted when the batch reaches the model; `/inbox/ack`, `Inbox.Ack`, the poll leases and the away timer
+  are gone, `Inbox.Subscribe` only wakes the session, and its access level is `session`. Entry executions are recorded
+  like any other (an entry execution can be judged `lost`), and `vibest ls` shows the entry as an ordinary row. A
+  session with no creator (the entry session) does not switch harness on a usage limit. The protocol number is
+  unchanged; the contract snapshot is regenerated.
 - **`vibest run` runs only inside a session** (users, scripts): a `vibest run` in a plain terminal is refused with a
   pointer to bare `vibest`, which opens a session. Every session `vibest run` starts, here or on another machine, records
   the session that ran it as its creator; `NoCallingSession` is the new error. Any session, not only the entry

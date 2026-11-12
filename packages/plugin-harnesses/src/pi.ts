@@ -97,13 +97,15 @@ export const pi: Harness.HarnessDefinition = {
     answer: piModels,
   },
   subscription: (home) => piSubscription(home).pipe(Effect.provide(platform)),
-  userPrompt: (event, coordinator) => {
-    if (coordinator || event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
+  userPrompt: (event) => {
+    if (event.type === "accepted")
+      return typeof event.execution === "number" ? { execution: event.execution } : undefined
+    if (event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
     if (typeof event.text !== "string" || event.text.trim() === "") return undefined
     return { text: event.text }
   },
-  executionEnd: (event, coordinator) => {
-    if (coordinator || event.type !== "agent_settled") return undefined
+  executionEnd: (event) => {
+    if (event.type !== "agent_settled") return undefined
     const aborted = event.aborted === true
     const error = typeof event.error === "string" ? event.error : ""
     return {

@@ -216,40 +216,6 @@ export class Sessions extends Context.Service<
           ),
         )
 
-      const undelivered = (
-        session: SessionRow,
-        rows: ReadonlyArray<{
-          readonly id: number
-          readonly message: string
-          readonly kind?: string
-          readonly sender?: string | null
-        }>,
-        reason: string,
-      ) =>
-        db
-          .setInboxStatus(
-            session.id,
-            rows.map((r) => r.id),
-            "failed",
-          )
-          .pipe(
-            Effect.andThen(
-              Effect.forEach(
-                [...Map.groupBy(rows, (r) => (r.kind === "send" ? (r.sender ?? null) : null))],
-                ([sender, group]) => {
-                  const message = `A message to ${session.id} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
-                  return sender === null ? notice(session, message) : db.insertNoticeTo(sender, message)
-                },
-                { discard: true },
-              ),
-            ),
-          )
-
-      const dropQueue = (session: SessionRow, reason: string) =>
-        db
-          .pendingInbox(session.id)
-          .pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason))))
-
       const live = (session: SessionRow) => runtimes.route(session.runtime)
 
       const announceExit = (session: SessionRow, execution: number | undefined) =>
@@ -257,7 +223,8 @@ export class Sessions extends Context.Service<
           const queued = yield* db.pendingInbox(session.id)
           const signed = queued.filter((r) => r.kind === "send" && r.sender)
           const unsigned = queued.filter((r) => !signed.includes(r))
-          if (signed.length > 0) yield* undelivered(session, signed, `${session.id} exited before it was delivered`)
+          if (signed.length > 0)
+            yield* inbox.undelivered(session, signed, `${session.id} exited before it was delivered`)
           yield* db.setInboxStatus(
             session.id,
             unsigned.map((r) => r.id),
@@ -336,7 +303,8 @@ export class Sessions extends Context.Service<
       const limit = limitMoveBox()
       const { deliverQueued } = sessionExecutions({
         db,
-        undelivered,
+        pulls: (session) => inbox.pulls(session.harnessId),
+        undelivered: inbox.undelivered,
         prompt,
         handTask: (h, session, terminal, task) => handTask(h, session, terminal, task),
       })
@@ -414,7 +382,10 @@ export class Sessions extends Context.Service<
         const session = yield* db.getSession(id)
         if (!session || session.metadata.archived || session.metadata.removed) return
         const open = session.executionState === "open"
-        const limited = session.executionState === "failed" ? yield* db.limitedExecution(id) : undefined
+        const limited =
+          session.executionState === "failed" && (yield* db.creatorOf(id)) !== undefined
+            ? yield* db.limitedExecution(id)
+            : undefined
         if (!open && session.exitedAt !== null && limited === undefined) return
         if (yield* restarting.has(id)) return
         const routed = yield* live(session).pipe(Effect.option)
@@ -446,7 +417,10 @@ export class Sessions extends Context.Service<
           if (exited) {
             const cutOff = session.startedAt === null
             const announce = !cutOff && (open || session.exitedAt === null)
-            if (announce) yield* announceExit(session, execution)
+            if (announce && session.entry) {
+              if (execution !== undefined)
+                yield* db.closeExecution(id, execution, "failed", { failure: "the harness exited" })
+            } else if (announce) yield* announceExit(session, execution)
             if (session.exitedAt === null) {
               yield* db.updateSession(id, {
                 status: "unknown",
@@ -457,7 +431,10 @@ export class Sessions extends Context.Service<
             }
             if (cutOff) yield* undoCutOffStart(h, session)
             if (!announce)
-              yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
+              yield* inbox.dropQueue(
+                session,
+                `${id} exited before it was delivered; send it again to resume the session`,
+              )
             return
           }
           if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
@@ -474,7 +451,7 @@ export class Sessions extends Context.Service<
           return
         }
         if (s === "blocked") {
-          if (!(yield* Ref.getAndSet(r.blockedNotified, true))) {
+          if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && !session.entry) {
             const since = new Date(yield* Clock.currentTimeMillis)
             const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
             yield* notice(
@@ -491,11 +468,14 @@ export class Sessions extends Context.Service<
         const now = yield* Clock.currentTimeMillis
         const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.executionPromptedAt)
         if (idle && !ended && unconfirmed <= 0) {
+          const reason = `vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected)`
           const closed =
             execution !== undefined &&
             (yield* db.closeExecution(id, execution, "not_started", {
-              notice: `task_not_started: vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected); it is idle and takes queued messages again.`,
+              notice: `task_not_started: ${reason}; it is idle and takes queued messages again.`,
             }))
+          if (closed && execution !== undefined)
+            yield* inbox.undelivered(session, yield* db.deliveredIn(id, execution), reason)
           if (closed) yield* deliverQueued(h, { ...session, executionState: "not_started" }, terminal)
           return
         }
@@ -558,7 +538,7 @@ export class Sessions extends Context.Service<
         getRow,
         live,
         notice,
-        dropQueue,
+        dropQueue: inbox.dropQueue,
         recount,
         sessionLive,
         locked,
@@ -573,6 +553,7 @@ export class Sessions extends Context.Service<
         if (session.metadata.archived || session.metadata.removed)
           return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
         if (
+          session.entry ||
           session.executionState === "open" ||
           session.status === "blocked" ||
           (session.startedAt === null && session.exitedAt === null) ||
@@ -628,7 +609,7 @@ export class Sessions extends Context.Service<
               )
                 return
               const session = yield* db.getSession(id)
-              if (session !== undefined) yield* undelivered(session, [row], errorMessage(cause))
+              if (session !== undefined) yield* inbox.undelivered(session, [row], errorMessage(cause))
             })
           yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
         }).pipe(Effect.provideContext(platform))
@@ -692,12 +673,12 @@ export class Sessions extends Context.Service<
 
       const view = (session: SessionRow) =>
         session.agent === "main"
-          ? Effect.succeed({
+          ? Effect.map(db.sessionDirectory(session.id), (directory) => ({
               ...session,
-              worktree: "",
-              repositoryRoot: undefined,
+              worktree: directory ?? "",
+              repositoryRoot: directory,
               git: undefined,
-            } satisfies SessionView)
+            }))
           : Effect.gen(function* () {
               const worktree = yield* worktreeOf(session)
               const repos = yield* workspaceGit(worktree).pipe(Effect.orDie)
@@ -757,7 +738,16 @@ export class Sessions extends Context.Service<
           case "inbox.moved":
             return event.data.to === "pending" || event.data.to === "delivering"
               ? Effect.void
-              : db.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon))
+              : db
+                  .inboxParties(event.sessionId!, event.data.inbox)
+                  .pipe(
+                    Effect.flatMap(archiveSoon),
+                    Effect.andThen(
+                      event.data.to === "delivered"
+                        ? engine.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
+                        : Effect.void,
+                    ),
+                  )
           case "inbox.queued":
             return queued(event.sessionId!, event.seq)
           case "live.state":
@@ -804,7 +794,6 @@ export class Sessions extends Context.Service<
             concurrency: 8,
             discard: true,
           })
-          for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
           reconciles++
         })
 
@@ -878,7 +867,6 @@ export class Sessions extends Context.Service<
       yield* engine.on(handle)
 
       yield* db.recoverDelivering(
-        harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id),
         (sessionId, messages) =>
           `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
       )

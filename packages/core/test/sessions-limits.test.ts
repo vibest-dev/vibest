@@ -7,6 +7,7 @@ import { Effect, Fiber, FileSystem, HashMap } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
+import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { EXECUTIONS, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
@@ -88,7 +89,7 @@ describe.concurrent("Sessions", () => {
       const moved = (yield* db.getSession(id))!
       assert.strictEqual(moved.harnessId, "claude")
       assert.strictEqual(moved.executionState, "open")
-      assert.deepStrictEqual(yield* db.entryPending(project), [])
+      assert.deepStrictEqual(yield* entryPending(db, project), [])
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
       assert.strictEqual((yield* herdr.callsTo("open")).at(-1)!.cwd, yield* sessionWorktree(id))
       assert.lengthOf(yield* herdr.callsTo("close"), 1)

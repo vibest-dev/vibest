@@ -10,12 +10,16 @@ import {
   makeRepository,
   savedSession,
   tempDirectory,
+  CLAUDE,
+  CURSOR,
+  PI,
   testLayer,
   EXECUTIONS,
   type TestServices,
   until,
   untilVirtual,
   projectOf,
+  entryPending,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
@@ -49,10 +53,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   },
 }))
 
+const pulling = () => testLayer({ harnesses: [{ ...PI, inbox: "subscribe" as const }, CLAUDE, CURSOR] })
+
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
-  Layer.provideMerge(testLayer()),
+  Layer.provideMerge(pulling()),
 )
 
 const test = <E>(
@@ -126,7 +132,29 @@ const session = (env: Record<string, string>) =>
 
 const lease = () =>
   Object.getOwnPropertyDescriptor(UserMessageComponent.prototype, "vibestCompactUserMessagesLease")?.value
-const tuiStart = { mode: "tui", hasUI: true, sessionManager: { getSessionId: () => "s" }, ui: { notify: () => {} } }
+const tuiStart = {
+  mode: "tui",
+  hasUI: true,
+  isIdle: () => true,
+  sessionManager: { getSessionId: () => "s" },
+  ui: { notify: () => {} },
+}
+
+const finishExecution = (
+  s: { readonly emit: (event: string, e?: unknown, ctx?: unknown) => Effect.Effect<unknown> },
+  execution: number,
+) =>
+  Effect.gen(function* () {
+    yield* s.emit(
+      "message_start",
+      { message: { role: "custom", customType: "vibest", details: { execution } } },
+      tuiStart,
+    )
+    yield* s.emit("agent_end", { messages: [] }, tuiStart)
+    yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+  })
+
+const executionOf = (message: unknown) => (message as { details: { execution: number } }).details.execution
 
 const executionEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
   mode,
@@ -195,10 +223,7 @@ describe("pi-vibest", () => {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
-        yield* (yield* Inbox).enqueue({
-          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          message: "survives the gap",
-        })
+        yield* (yield* Inbox).enqueue({ sessionId: coord.sessionId, message: "survives the gap" })
         const notes: Array<string> = []
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
@@ -222,13 +247,13 @@ describe("pi-vibest", () => {
           Effect.sync(() => s.messages.length),
           (n) => n === 1,
         )
-        assert.deepStrictEqual(s.messages[0]?.message, {
+        assert.deepInclude(s.messages[0]?.message, {
           customType: "vibest",
           content: "survives the gap",
           display: false,
         })
         assert.deepStrictEqual(notes, [])
-      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+      }).pipe(Effect.scoped, Effect.provide(pulling())),
     15_000,
   )
 
@@ -275,7 +300,7 @@ describe("pi-vibest", () => {
           Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
         )
         yield* untilVirtual(db.readyAt(id), (at) => at !== undefined)
-      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+      }).pipe(Effect.scoped, Effect.provide(pulling())),
     15_000,
   )
 
@@ -329,11 +354,11 @@ describe("pi-vibest", () => {
           { reason: "startup" },
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
-        const report = (message: string) =>
-          inbox.enqueue({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", message })
+        const report = (message: string) => inbox.enqueue({ sessionId: coord.sessionId, message })
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
+        yield* finishExecution(s, executionOf(s.messages[0]!.message))
         yield* Scope.close(first, Exit.void)
         yield* Layer.build(vibestd)
         yield* report("second")
@@ -347,10 +372,10 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(
-          (yield* db.entryPending(yield* projectOf("r"))).map((r) => r.message),
+          (yield* entryPending(db, yield* projectOf("r"))).map((r) => r.message),
           ["after shutdown"],
         )
-      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+      }).pipe(Effect.scoped, Effect.provide(pulling())),
     30_000,
   )
 
@@ -414,7 +439,6 @@ describe("pi-vibest", () => {
         )
         assert.isFalse(
           [
-            "message_start",
             "message_update",
             "tool_execution_start",
             "tool_execution_end",
@@ -462,7 +486,7 @@ describe("pi-vibest", () => {
         address: { machine: "local", id: "w1:p7" },
       })
       yield* inbox.enqueue({
-        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sessionId: coord.sessionId,
         message: "<agent-result>one</agent-result>",
       })
 
@@ -503,36 +527,39 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
-      assert.strictEqual((yield* db.entryPending(yield* projectOf("r"))).length, 1)
-      yield* s.emit("session_start", { reason: "startup" }, { mode: "tui" })
+      assert.strictEqual((yield* entryPending(db, yield* projectOf("r"))).length, 1)
+      yield* s.emit("session_start", { reason: "startup" }, tuiStart)
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 1,
       )
+      yield* finishExecution(s, executionOf(s.messages[0]!.message))
       yield* inbox.enqueue({
-        sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        sessionId: coord.sessionId,
         message: "<agent-message>two</agent-message>",
       })
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 2,
       )
-      assert.deepStrictEqual(s.messages, [
-        {
-          message: { customType: "vibest", content: "<agent-result>one</agent-result>", display: false },
-          options: { triggerTurn: true, deliverAs: "followUp" },
-        },
-        {
-          message: { customType: "vibest", content: "<agent-message>two</agent-message>", display: false },
-          options: { triggerTurn: true, deliverAs: "followUp" },
-        },
-      ])
-      assert.deepStrictEqual(yield* db.entryPending(yield* projectOf("r")), [])
+      assert.deepStrictEqual(
+        s.messages.map((m) => [
+          (m.message as { content: string }).content,
+          (m.message as { display: boolean }).display,
+          m.options,
+        ]),
+        [
+          ["<agent-result>one</agent-result>", false, { triggerTurn: true }],
+          ["<agent-message>two</agent-message>", false, { triggerTurn: true }],
+        ],
+      )
+      assert.notStrictEqual(executionOf(s.messages[0]!.message), executionOf(s.messages[1]!.message))
+      assert.deepStrictEqual(yield* entryPending(db, yield* projectOf("r")), [])
     }),
   )
 
   test(
-    "a subagent input event records what the user typed; an extension delivery and the coordinator do not",
+    "an input event records what the user typed, in any session; an extension delivery does not",
     Effect.gen(function* () {
       const db = yield* Db
       const sql = yield* SqlClient.SqlClient
@@ -582,7 +609,6 @@ describe("pi-vibest", () => {
         VIBEST_PROJECT_ID: coord.projectId,
         VIBEST_COMMAND: '["vibest"]',
       })
-      assert.isFalse(coordinator.handlers.has("input"))
       yield* coordinator.emit("input", { type: "input", text: "the normal conversation", source: "interactive" })
       assert.deepStrictEqual(
         yield* sql<{
@@ -590,7 +616,7 @@ describe("pi-vibest", () => {
         }>`SELECT count(*) AS n FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${coord.sessionId}`.pipe(
           Effect.orDie,
         ),
-        [{ n: 0 }],
+        [{ n: 1 }],
       )
     }),
   )

@@ -89,8 +89,10 @@ describe("bus", () => {
           rows.map((row) => row.id),
         )
         const sub = yield* bus.subscribe
-        yield* db.recoverDelivering([], () => "")
-        const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
+        yield* db.recoverDelivering(() => "")
+        const published = (yield* PubSub.takeUpTo(sub, 10))
+          .filter(isStored)
+          .filter((event) => event.type === "inbox.moved")
         assert.deepStrictEqual(
           published.map((event) => [
             event.type,

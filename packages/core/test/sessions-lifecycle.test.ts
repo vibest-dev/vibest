@@ -7,6 +7,7 @@ import { Effect, Fiber, FileSystem, HashMap, Path, PlatformError } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
+import { entryPending } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { replyOf, sentBy, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
@@ -515,7 +516,7 @@ describe.concurrent("Sessions", () => {
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
-      assert.deepStrictEqual(yield* db.entryPending((yield* db.getSession(id))!.projectId), [])
+      assert.deepStrictEqual(yield* entryPending(db, (yield* db.getSession(id))!.projectId), [])
       yield* sessions.send(id, "do it differently")
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
     }),
@@ -533,7 +534,7 @@ describe.concurrent("Sessions", () => {
       const row = (yield* db.getSession(id))!
       assert.strictEqual(row.executionState, "interrupted")
       assert.deepStrictEqual(yield* sentBy(id), [])
-      assert.deepStrictEqual(yield* db.entryPending(row.projectId), [])
+      assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
       assert.deepStrictEqual(yield* executionAndSentCounts(id), before)
       assert.strictEqual(before.sent, 0)
     }),
@@ -564,7 +565,7 @@ describe.concurrent("Sessions", () => {
           yield* sessions.check(id)
           assert.deepStrictEqual(yield* executionAndSentCounts(id), { executions: 1, sent: 0 }, id)
           assert.strictEqual((yield* db.getSession(id))!.executionState, "interrupted", id)
-          assert.deepStrictEqual(yield* db.entryPending(row.projectId), [])
+          assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
         }
       }),
       harness === "pi" ? { hooked: ["pi"] } : undefined,
@@ -580,7 +581,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
       assert.deepStrictEqual((yield* herdr.callsTo("send")).slice(1), [])
       assert.strictEqual(yield* replyOf(id), "status: completed")
-      assert.deepStrictEqual(yield* db.entryPending((yield* db.getSession(id))!.projectId), [])
+      assert.deepStrictEqual(yield* entryPending(db, (yield* db.getSession(id))!.projectId), [])
     }),
     { hooked: ["pi"] },
   )

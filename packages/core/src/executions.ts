@@ -2,8 +2,8 @@ import type { HarnessUnavailable, NotReady } from "@vibest/schema/session"
 import { Effect, Exit } from "effect"
 import type { FileSystem, Path } from "effect"
 
+import { nextBatch } from "./batch.ts"
 import { type InboxRow, type InboxStatus, type SessionRow } from "./db.ts"
-import { nextBatch } from "./inbox.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 
 export const sessionExecutions = (deps: {
@@ -20,6 +20,7 @@ export const sessionExecutions = (deps: {
     readonly openExecution: (sessionId: string) => Effect.Effect<number | undefined>
     readonly untakenTask: (sessionId: string) => Effect.Effect<string | undefined>
   }
+  readonly pulls: (session: SessionRow) => boolean
   readonly undelivered: (
     session: SessionRow,
     rows: ReadonlyArray<{
@@ -53,6 +54,7 @@ export const sessionExecutions = (deps: {
   ) {
     const task = yield* db.untakenTask(session.id)
     if (task !== undefined) return yield* deps.handTask(h, session, terminal, task)
+    if (deps.pulls(session)) return
     const pending = yield* db.pendingInbox(session.id)
     if (pending.length === 0) return
     const batch = nextBatch(pending)

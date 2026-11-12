@@ -33,10 +33,12 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
 
 export const claudeEnd = (reason: string) =>
   (
-    CLAUDE.executionEnd!(
-      { hook_event_name: "ExecutionComplete", session_id: "c1", reason, last_assistant_message: "" },
-      false,
-    ) as {
+    CLAUDE.executionEnd!({
+      hook_event_name: "ExecutionComplete",
+      session_id: "c1",
+      reason,
+      last_assistant_message: "",
+    }) as {
       readonly end: object
     }
   ).end

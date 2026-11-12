@@ -14,7 +14,11 @@ import { TestClock } from "effect/testing"
 
 import { daemonPlan } from "../src/update.ts"
 import {
+  CLAUDE,
+  CURSOR,
+  entryPending,
   eventsOf,
+  PI,
   FakeProcesses,
   FakeRuntime,
   makeRepository,
@@ -27,7 +31,9 @@ import {
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer())))
+  it.effect(name, () =>
+    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...PI, inbox: "subscribe" }, CLAUDE, CURSOR] }))),
+  )
 
 describe("vibest update's plan for vibestd", () => {
   const target = { version: "2.0.0", command: ["/v/2/bin/vibest"] }
@@ -85,7 +91,7 @@ describe("restart in place", () => {
       yield* sessions.send(id, "queued meanwhile")
       const down = (yield* db.getSession(id))!
       assert.deepInclude(down, { exitedAt: null, executionState: "open" })
-      assert.deepStrictEqual(yield* db.entryPending(down.projectId), [])
+      assert.deepStrictEqual(yield* entryPending(db, down.projectId), [])
       assert.isUndefined(yield* db.readyAt(id), "the old harness's ready report is gone")
       assert.isUndefined(down.metadata.pid, "so is its pid")
       const opened = (yield* herdr.callsTo("open")).length
@@ -109,7 +115,7 @@ describe("restart in place", () => {
       yield* writeEnd(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.deepStrictEqual(yield* db.entryPending(row.projectId), [])
+      assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
       assert.include((yield* db.latestReply(id))!.text, "done")
     }),
   )
@@ -193,7 +199,7 @@ describe("restart in place", () => {
           [entryId, true],
         ],
       )
-      const notices = (yield* db.entryPending(projectId)).filter((r) => r.kind === "notice")
+      const notices = (yield* entryPending(db, projectId)).filter((r) => r.kind === "notice")
       assert.lengthOf(notices, 1)
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
       assert.include(notices[0]!.message, `Restarted: ${sub}, ${entryId}.`)
@@ -240,7 +246,7 @@ describe("restart in place", () => {
       yield* db.patchLive(id, { ready: 2, pid: 500 })
       yield* held.release()
       const notices = yield* untilVirtual(
-        db.entryPending(projectId).pipe(Effect.map((rows) => rows.filter((row) => row.kind === "notice"))),
+        entryPending(db, projectId).pipe(Effect.map((rows) => rows.filter((row) => row.kind === "notice"))),
         (rows) => rows.length > 0,
       )
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)

@@ -11,6 +11,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { render, RPC_JSON } from "@vibest/protocol/scripts/contract"
 import * as Server from "@vibest/server/server"
 import { Effect, Layer, type Scope } from "effect"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -206,6 +207,7 @@ describe("contract", () => {
         yield* connect(layout.socket),
         sessionHeaders({ sessionId: entry.sessionId, projectId: project }),
       )
+      yield* TestClock.adjust("1 second")
       const { id } = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.executionState === "open")
       yield* settled

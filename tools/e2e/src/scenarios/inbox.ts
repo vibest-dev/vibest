@@ -219,7 +219,7 @@ const curl = async (
     "vibest-caller": "session",
     "vibest-session-id": who.entryId,
     "vibest-project-id": String(who.projectId),
-    "vibest-agent": "coordinator",
+    "vibest-agent": "entry",
     "vibest-harness": "claude",
     "content-type": "application/json",
   }
@@ -311,7 +311,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S15",
     covers: ["S11", "D7"],
     title:
-      "Claude entry session over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-execution still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`; S11: a result still arrives as one line with its context after /clear, and after the entry session is stopped (SIGTERM) and `vibest` resumes it in the same pane",
+      "Claude entry session over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-execution still arrives, curl --unix-socket take (a batch nobody accepts ends not_started and fails its row) / project and protocol mismatch, and delivery after `vibest daemon restart`; S11: a result still arrives as one line with its context after /clear, and after the entry session is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude", "curl"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -422,35 +422,33 @@ const checks: ReadonlyArray<Check> = [
         const who = { entryId: c.entryId, projectId: c.projectId }
         const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
-        let polled: { ids: Array<number>; line: string; text: string } = { ids: [], line: "", text: "" }
+        let taken: { execution: number; ids: Array<number>; line: string; text: string } = {
+          execution: 0,
+          ids: [],
+          line: "",
+          text: "",
+        }
         await until(
-          "a curl poll hands the result out",
+          "a curl take hands the result out",
           async () => {
-            const r = await curl(w, "/inbox/poll", who)
-            expect(r.status === 200, `poll answered ${r.status}: ${JSON.stringify(r.body)}`)
-            polled = r.body as typeof polled
-            return polled.ids.length > 0
+            const r = await curl(w, "/inbox/take", who)
+            expect(r.status === 200 || r.status === 204, `take answered ${r.status}: ${JSON.stringify(r.body)}`)
+            if (r.status === 200) taken = r.body as typeof taken
+            return taken.ids.length > 0
           },
           180_000,
         )
-        expect(polled.text.includes("done-cmcurl"), `the polled text: ${polled.text}`)
-        const id = polled.ids[0]!
-        expect(status(id) === "delivering", `after the poll the row is ${status(id)}`)
-        await until("the lease back to pending once its poller left", () => status(id) === "pending", 15_000)
-        const again = await curl(w, "/inbox/poll", who)
-        expect(JSON.stringify((again.body as typeof polled).ids) === JSON.stringify(polled.ids), "polled again")
-        const acked = await curl(w, "/inbox/ack", who, { ids: polled.ids })
-        expect(
-          acked.status === 200 && JSON.stringify(acked.body) === JSON.stringify({ acked: polled.ids }),
-          `ack answered ${acked.status}: ${JSON.stringify(acked.body)}`,
-        )
-        expect(status(id) === "delivered", `after the ack the row is ${status(id)}`)
-        const other = await curl(w, "/inbox/poll", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
-        expect(other.status === 403, `another project's poll answered ${other.status}`)
-        const old = await curl(w, "/inbox/poll", { ...who, protocol: "3" })
+        expect(taken.text.includes("done-cmcurl"), `the taken text: ${taken.text}`)
+        const id = taken.ids[0]!
+        expect(status(id) === "delivered", `after the take the row is ${status(id)}`)
+        const again = await curl(w, "/inbox/take", who)
+        expect(again.status === 204, `a second take answered ${again.status}: ${JSON.stringify(again.body)}`)
+        const other = await curl(w, "/inbox/take", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
+        expect(other.status === 403, `another project's take answered ${other.status}`)
+        const old = await curl(w, "/inbox/take", { ...who, protocol: "3" })
         expect(
           old.status === 409 && (old.body as { action?: string }).action === "vibest update",
-          `an older protocol's poll answered ${old.status}: ${JSON.stringify(old.body)}`,
+          `an older protocol's take answered ${old.status}: ${JSON.stringify(old.body)}`,
         )
         const ps = (pid: number) =>
           Bun.spawnSync(["ps", "-o", "stat=,pgid=,tpgid=", "-p", String(pid)])
@@ -471,6 +469,11 @@ const checks: ReadonlyArray<Check> = [
           15_000,
         )
 
+        await until(
+          "the batch nobody accepted ends not_started and its row fails",
+          () => status(id) === "failed",
+          60_000,
+        )
         const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: c.repo, timeoutMs: 60_000 })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         const after = c.delivered(b)
@@ -762,7 +765,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S26",
     covers: ["S2"],
     title:
-      "latency: 3 executions of a busy Pi subagent, a queued send, then release, and 3 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (execution end to delivering, pane close to process.end) are recorded",
+      "latency: 3 executions of a busy Pi subagent, a queued send, then release, and 3 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (execution end to delivered, pane close to process.end) are recorded",
     run: async (w, evidence) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
@@ -858,7 +861,7 @@ const checks: ReadonlyArray<Check> = [
                 beforeEnd,
               )
               const delivered = q<{ at: number }>(
-                "SELECT at FROM event WHERE aggregate = ? AND type = 'inbox.moved' AND data ->> '$.inbox' = ? AND data ->> '$.to' = 'delivering' ORDER BY seq LIMIT 1",
+                "SELECT at FROM event WHERE aggregate = ? AND type = 'inbox.moved' AND data ->> '$.inbox' = ? AND data ->> '$.to' = 'delivered' ORDER BY seq LIMIT 1",
                 sub,
                 sent!.id,
               )
@@ -916,7 +919,7 @@ const checks: ReadonlyArray<Check> = [
         }
         const out = {
           hookReceiptToExecutionEndMs: stats(hook),
-          executionEndToDeliveringMs: stats(delivery),
+          executionEndToDeliveredMs: stats(delivery),
           paneCloseToProcessEndMs: stats(closes),
         }
         await writeEvidence(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)

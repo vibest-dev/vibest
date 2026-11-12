@@ -397,7 +397,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
                 conversation: undefined,
               },
             )
-          assert.isUndefined(executionEndOf(yield* harnesses.get("claude"), false, "{", 1))
+          assert.isUndefined(executionEndOf(yield* harnesses.get("claude"), "{", 1))
         }),
     )
 
