@@ -35,15 +35,11 @@ from the importing file up to the plugin's package root (the nearest `package.js
 and an installed folder that does not resolve yet (an install still writing) stays watched, so installing it imports
 the plugin again; `effect`, `@vibest/plugin` and their subpaths are supplied by vibestd and never watched; a package that resolves is neither watched
 nor evicted, and an upgraded package already loaded needs a vibestd restart. While the watched
-directories change the plugins are read again, because a change made before its watch began is not reported; after
-such a rewatch one more read follows, timed by a probe. On macOS Bun 1.4 serves every `fs.watch` of a process from
-one FSEvents stream and rebuilds it, from "now", on a separate thread whenever a watch is added or closed; events in
-every watched directory are lost until the new stream runs, which under CPU load can take well over a second. So after a
-rewatch vibestd writes `.plugins-watch` in `VIBEST_HOME` (always watched for `vibest.json`) and reads the plugins
-again only when that write is reported, writing it again each second until it is (a failed write is logged, not taken
-as reported). This narrows the loss, it does not rule it out: a stream rebuilt again after the probe was reported, or events
-macOS itself drops under heavy load, still go unseen until the next change (drop the probe when Bun no longer rebuilds
-the stream). A teardown that times out is left
+directories change the plugins are read again, because a change made before its watch began is not reported. The watch only makes a change show up fast; it is not what makes it show up at all: vibestd also
+reads the plugins again every second, and an unchanged read imports and sets up nothing. On macOS Bun 1.4 serves every
+`fs.watch` of a process from one FSEvents stream and rebuilds it, from "now", whenever a watch is added or closed, and
+under load FSEvents drops events outright (Bun does not pass on its "dropped, rescan" flags): a write can go unreported
+for good, while the next unrelated write is reported. The periodic read bounds that loss to about a second. A teardown that times out is left
 running, so an old revision's finalizers can overlap the new setup.
 
 ## Machine hooks

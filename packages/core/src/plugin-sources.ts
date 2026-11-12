@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { Context, Crypto, Duration, Effect, FileSystem, Latch, Option, Path, Schema } from "effect"
+import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -27,6 +27,8 @@ export interface Candidate {
   readonly options: Readonly<Record<string, unknown>>
   readonly plugin: VibestPlugin.Plugin.Plugin | { readonly error: string }
 }
+
+export const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options])
 
 export interface Watched {
   readonly paths: ReadonlySet<string>
@@ -294,15 +296,11 @@ export const makeSources = Effect.fnUntraced(function* (
   return { operations, load, retain }
 })
 
-export const WATCH_PROBE = ".plugins-watch"
-
-export const makeWatcher = (changed: (path: string) => void, retry: Duration.Input) =>
+export const makeWatcher = (changed: (path: string) => void) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const loader = yield* PluginLoader
-    const probe = path.join((yield* Layout).home, WATCH_PROBE)
-    const probeSeen = Latch.makeUnsafe(false)
     const running = new Map<string, { readonly key: string; readonly close: () => void }>()
     let current: Watched = { paths: new Set(), listings: new Set() }
     const stop = (dir: string) => {
@@ -355,8 +353,7 @@ export const makeWatcher = (changed: (path: string) => void, retry: Duration.Inp
         const watching = yield* Effect.try(() =>
           loader.watch(dir, (name) => {
             const file = path.join(dir, name)
-            if (file === probe) probeSeen.openUnsafe()
-            else if (current.listings.has(dir) || current.paths.has(file)) changed(file)
+            if (current.listings.has(dir) || current.paths.has(file)) changed(file)
           }),
         ).pipe(
           Effect.tapError((e) => Effect.logWarning(`cannot watch ${dir} for plugin changes: ${messageOf(e)}`)),
@@ -369,16 +366,5 @@ export const makeWatcher = (changed: (path: string) => void, retry: Duration.Inp
       return rewatched
     })
 
-    const live = Effect.gen(function* () {
-      for (let attempt = 1; ; attempt++) {
-        probeSeen.closeUnsafe()
-        yield* fs
-          .writeFileString(probe, `${attempt}\n`)
-          .pipe(
-            Effect.catch((e) => Effect.logWarning(`cannot write ${probe} to check the plugin watch: ${messageOf(e)}`)),
-          )
-        if (Option.isSome(yield* probeSeen.await.pipe(Effect.timeoutOption(retry)))) return
-      }
-    })
-    return { update, live }
+    return { update }
   })
