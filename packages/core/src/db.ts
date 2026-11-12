@@ -95,7 +95,8 @@ const make = Effect.gen(function* () {
     clearEntryAt,
     unusedId,
     conversationOf,
-    addressedCreator,
+    creatorOf,
+    nearestAlive,
   } = store
   const remote = remoteQueries(store)
   const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
@@ -247,45 +248,39 @@ const make = Effect.gen(function* () {
     earlierSharer: (id: string) =>
       sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
         WHERE o.id != s.id AND o.directory = s.directory AND s.directory != ''
-          AND o.ended_at IS NULL AND (o.created_at, o.rowid) < (s.created_at, s.rowid)
+          AND (o.created_at, o.rowid) < (s.created_at, s.rowid)
         ORDER BY o.created_at, o.rowid LIMIT 1`.pipe(
         Effect.map((rows) => rows[0]?.id),
         Effect.orDie,
       ),
 
-    addressedCreator,
-
     maySend: (sender: string, recipient: string) =>
       Effect.gen(function* () {
-        const from = yield* addressedCreator(sender)
-        const to = yield* addressedCreator(recipient)
-        return from === recipient || to === sender
+        const local = (creator: { readonly local: string } | { readonly peer: string } | undefined) =>
+          creator !== undefined && "local" in creator ? creator.local : undefined
+        return local(yield* creatorOf(sender)) === recipient || local(yield* creatorOf(recipient)) === sender
       }),
 
-    creatorOf: (id: string) =>
-      sql<{ parent: string | null; peer: string | null; session: string | null }>`SELECT
-          parent_session_id AS parent, origin_peer AS peer, origin_session AS session
-        FROM session WHERE id = ${id}`.pipe(
-        Effect.map(([row]) => {
-          if (row === undefined) return undefined
-          if (row.peer !== null && row.session !== null) return { peer: row.peer, session: row.session }
-          if (row.parent !== null) return { local: row.parent }
-          return undefined
-        }),
-        Effect.orDie,
-      ),
+    creatorOf,
+
+    nearestAlive,
 
     creatorLabel: (id: string) =>
       Effect.gen(function* () {
-        const creator = yield* addressedCreator(id)
-        if (creator === undefined || creator === id) return undefined
+        const creator = yield* creatorOf(id)
+        if (creator === undefined) return undefined
+        if ("peer" in creator) return { id: creator.session, label: "the agent that started you" }
         const [row] = yield* sql<{ entry: string | null; name: string | null }>`SELECT
             p.entry_session_id AS entry, c.name AS name
-          FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = ${creator}
+          FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = ${creator.local}
           WHERE s.id = ${id}`
         const label =
-          creator === row?.entry ? "the entry session" : row?.name ? `agent ${row.name}` : "the agent that started you"
-        return { id: creator, label }
+          creator.local === row?.entry
+            ? "the entry session"
+            : row?.name
+              ? `agent ${row.name}`
+              : "the agent that started you"
+        return { id: creator.local, label }
       }).pipe(Effect.orDie),
 
     insertSession: (
@@ -308,13 +303,18 @@ const make = Effect.gen(function* () {
         readonly origin?: PeerStart | undefined
         readonly archiveOnIdle?: boolean
       } = {},
-    ): Effect.Effect<boolean | SpawnedBefore> =>
+    ): Effect.Effect<boolean | SpawnedBefore | "parent-ended"> =>
       tx(
         Effect.gen(function* () {
           if (request !== undefined) {
             const before = yield* reads.spawnedBy(project, request)
             if (before !== undefined) return before
           }
+          if (
+            parentSessionId !== undefined &&
+            (yield* sql`SELECT 1 FROM session WHERE id = ${parentSessionId} AND ended_at IS NOT NULL`).length > 0
+          )
+            return "parent-ended" as const
           if (max !== undefined) {
             const n = (yield* selectRaw(
               [sql`s.ended_at IS NULL`, sql`NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`],

@@ -7,6 +7,7 @@ import { applyOnly, type Migration, migrations } from "@vibest/core/database/mig
 import { APPLICATION_ID, Db } from "@vibest/core/db"
 import { makeJournal } from "@vibest/core/journal"
 import { PROJECTION_VERSION } from "@vibest/core/projectors"
+import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Catalog, CATALOG_VERSION, type FactType } from "@vibest/schema/event"
@@ -404,20 +405,20 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a execution-error notice goes to the parent while it has not ended, then to the project's current entry session",
+    "an execution-error notice goes to the nearest creator that has not ended; with none left it writes no row",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
-        yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
-        yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
-          parentSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        })
-        yield* fact("project.entry_changed", {
-          projectId: yield* projectOf("r"),
-          data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
-        })
+        const project = yield* projectOf("r")
+        const [grand, parent, child] = [
+          "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        ] as const
+        yield* db.insertSession(session(grand), project)
+        yield* db.insertSession(session(parent), project, { parentSessionId: grand })
+        yield* db.insertSession(session(child), project, { parentSessionId: parent })
         const recipientOf = (summary: string) =>
           Effect.map(
             sql<{
@@ -427,58 +428,54 @@ describe("Db", () => {
           )
         const execution = (summary: string) =>
           Effect.gen(function* () {
-            yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-              executionState: "open",
-              executionPromptedAt: 1,
-            })
-            yield* db.endExecution(
-              "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-              { outcome: "failed", failure: { message: summary } },
-              summary,
-            )
+            yield* db.updateSession(child, { executionState: "open", executionPromptedAt: 1 })
+            yield* db.endExecution(child, { outcome: "failed", failure: { message: summary } }, summary)
           })
         yield* execution("one")
-        assert.deepStrictEqual(yield* recipientOf("one"), ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"])
-        yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { metadata: { archived: true, removed: true } })
+        assert.deepStrictEqual(yield* recipientOf("one"), [parent])
+        yield* db.updateSession(parent, { metadata: { archived: true, removed: true } })
         yield* execution("two")
-        assert.deepStrictEqual(yield* recipientOf("two"), ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"])
+        assert.deepStrictEqual(yield* recipientOf("two"), [grand])
+        yield* db.updateSession(grand, { metadata: { archived: true, removed: true } })
+        yield* execution("three")
+        assert.deepStrictEqual(yield* recipientOf("three"), [])
       }).pipe(Effect.provide(memoryDb())),
   )
 
-  it.effect("a peer item received again after the project's entry changed is a duplicate, not a second notice", () =>
-    Effect.gen(function* () {
-      const db = yield* Db
-      const sql = yield* SqlClient.SqlClient
-      const project = yield* projectOf("r")
-      const ended = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-      yield* db.insertSession(session(ended), project)
-      yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), project)
-      yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), project)
-      yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
-      const item = {
-        id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
-        recipient: ended,
-        kind: "notice" as const,
-        sender: "mb/aaaaaaaa",
-        content: "done on mb",
-      }
-      yield* fact("project.entry_changed", {
-        projectId: project,
-        data: { session: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
-      })
-      assert.strictEqual(yield* db.receivePeerItem(item), "queued")
-      yield* fact("project.entry_changed", {
-        projectId: project,
-        data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
-      })
-      assert.strictEqual(yield* db.receivePeerItem(item), "duplicate")
-      assert.deepStrictEqual(
-        yield* sql<{
-          recipient: string
-        }>`SELECT session_id AS recipient FROM inbox WHERE peer_item = ${item.id}`,
-        [{ recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }],
-      )
-    }).pipe(Effect.provide(memoryDb())),
+  it.effect(
+    "a peer item for an ended session goes to its nearest living creator, once; with none only a dropped row stays",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        const sql = yield* SqlClient.SqlClient
+        const project = yield* projectOf("r")
+        const ended = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const creator = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        yield* db.insertSession(session(creator), project)
+        yield* db.insertSession(session(ended), project, { parentSessionId: creator })
+        yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
+        const item = (id: string) => ({
+          id,
+          recipient: ended,
+          kind: "notice" as const,
+          sender: "mb/aaaaaaaa",
+          content: "done on mb",
+        })
+        const rows = () =>
+          sql<{
+            recipient: string
+            status: string
+          }>`SELECT session_id AS recipient, status FROM inbox WHERE kind = 'notice'`
+        assert.strictEqual(yield* db.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
+        assert.strictEqual(yield* db.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "duplicate")
+        assert.deepStrictEqual(yield* rows(), [{ recipient: creator, status: "pending" }])
+        yield* db.updateSession(creator, { metadata: { archived: true, removed: true } })
+        assert.strictEqual(yield* db.receivePeerItem(item("8c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
+        assert.deepStrictEqual(yield* rows(), [
+          { recipient: creator, status: "pending" },
+          { recipient: ended, status: "dropped" },
+        ])
+      }).pipe(Effect.provide(memoryDb())),
   )
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest execution", () =>
@@ -558,45 +555,45 @@ describe("Db", () => {
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
     }).pipe(Effect.provide(memoryDb())),
   )
-  it.effect("a notice with no entry session is dropped; a claim takes a pending row once", () =>
-    memory(
-      Effect.gen(function* () {
-        const db = yield* Db
-        const sql = yield* SqlClient.SqlClient
-        const noticeStatus = (content: string) =>
-          Effect.map(
-            sql<{ status: string }>`SELECT status FROM inbox
-              WHERE sender_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${content}`,
-            (rows) => rows.map((row) => row.status).join(),
+  it.effect(
+    "a notice for a session nobody started writes no row; one for a session its entry started is pending, claimed once, and dropped once the entry has no process",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const sql = yield* SqlClient.SqlClient
+          const noticeStatus = (content: string) =>
+            Effect.map(
+              sql<{ status: string }>`SELECT status FROM inbox
+              WHERE sender_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${noticeEnvelope(content)}`,
+              (rows) => rows.map((row) => row.status).join(),
+            )
+          yield* db.insertSession(
+            session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { executionState: "open" }),
+            yield* projectOf("r"),
           )
-        yield* db.insertSession(
-          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "open" }),
-          yield* projectOf("r"),
-        )
-        yield* db.endExecution(
-          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          { outcome: "failed", failure: { message: "m" } },
-          "m",
-        )
-        assert.strictEqual(yield* noticeStatus("m"), "dropped")
-        yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
-        const row = yield* db.insertInbox({
-          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          message: "hi",
-        })
-        assert.strictEqual(row.status, "pending")
-        assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id]), [row.id])
-        assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id]), [])
-        yield* db.setInboxStatus(row.recipient!, [row.id], "delivered", "delivering")
-        assert.strictEqual(yield* noticeStatus("hi"), "delivered")
-        yield* db.insertInbox({
-          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          message: "n",
-        })
-        yield* db.clearEntry(RUNTIME, place.address)
-        assert.strictEqual(yield* noticeStatus("n"), "dropped")
-      }),
-    ),
+          assert.isUndefined(yield* db.insertInbox({ sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", message: "m" }))
+          const entry = yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
+            parentSessionId: entry.sessionId,
+          })
+          const row = yield* db.insertInbox({
+            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            message: "hi",
+          })
+          assert.strictEqual(row!.status, "pending")
+          assert.deepStrictEqual(yield* db.claim(row!.recipient!, [row!.id]), [row!.id])
+          assert.deepStrictEqual(yield* db.claim(row!.recipient!, [row!.id]), [])
+          yield* db.setInboxStatus(row!.recipient!, [row!.id], "delivered", "delivering")
+          assert.strictEqual(yield* noticeStatus("hi"), "delivered")
+          yield* db.insertInbox({
+            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            message: "n",
+          })
+          yield* db.clearEntry(RUNTIME, place.address)
+          assert.strictEqual(yield* noticeStatus("n"), "dropped")
+        }),
+      ),
   )
 
   const fileAt = (dir: string, name: string) => Path.Path.pipe(Effect.map((path) => path.join(dir, name)))

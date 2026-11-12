@@ -301,7 +301,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const { sessionId } = yield* idleMainWithWorker(repo, "claude")
       const inbox = yield* Inbox
       const drain = yield* Drain
-      yield* inbox.enqueue({ sessionId, message: "wait" })
+      yield* (yield* Db).insertNoticeTo(sessionId, "wait")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining

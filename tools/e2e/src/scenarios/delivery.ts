@@ -253,7 +253,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S47",
     title:
-      "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived session NoSuchSession naming the project's entry session; neither appends an inbox.queued",
+      "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived sibling (not its creator, not its child) Forbidden too; neither appends an inbox.queued",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))
@@ -282,15 +282,14 @@ const sendChecks: ReadonlyArray<Check> = [
         const id = await runSub(w, m.repo, m.session, sender.url, "pi-send-refused-sender", "send twice")
         await until(
           "both refusals written",
-          async () => (await fs.readFile(refused, "utf8").catch(() => "")).includes("NoSuchSession"),
+          async () => (await fs.readFile(refused, "utf8").catch(() => "")).split("Forbidden").length > 2,
           60_000,
         )
         const written = await fs.readFile(refused, "utf8")
         expect(
-          written.includes("Forbidden") && written.includes("belongs to another entry session"),
-          `no Forbidden for the other project's session: ${written}`,
+          written.includes("belongs to another entry session") && written.includes("is not the agent that started you"),
+          `missing a Forbidden refusal: ${written}`,
         )
-        expect(written.includes(entryIdOf(w)), `the archived refusal does not name the entry session: ${written}`)
         expect(
           countFacts(
             w,

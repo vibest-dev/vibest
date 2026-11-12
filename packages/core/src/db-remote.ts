@@ -4,7 +4,7 @@ import type { Statement } from "effect/sql"
 
 import type { Store } from "./db-store.ts"
 import type { PeerScope } from "./remote.ts"
-import { envelope } from "./replies.ts"
+import { noticeEnvelope, sessionEnvelope } from "./replies.ts"
 
 export type MachineRow = {
   readonly name: string
@@ -29,7 +29,7 @@ export type OutboxRow = {
   readonly reportTo: string
 }
 
-export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, currentProcess }: Store) => {
+export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, currentProcess, nearestAlive }: Store) => {
   const machineColumns = sql`name, target, vibestd_id, connected_at, created_at`
   const machineNamed = (name: string) =>
     sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(Effect.map((rows) => rows[0]))
@@ -95,24 +95,23 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
       }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
         tx(
           Effect.gen(function* () {
-            const [route] = yield* sql<{ project: string; recipient: string | null; entry: string | null }>`SELECT
-                s.project_id AS project, p.entry_session_id AS entry,
-                CASE WHEN s.ended_at IS NULL THEN s.id ELSE p.entry_session_id END AS recipient
+            const [route] = yield* sql<{ project: string; entry: string | null; alive: number }>`SELECT
+                s.project_id AS project, p.entry_session_id AS entry, s.ended_at IS NULL AS alive
               FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${item.recipient}`
             if (route === undefined) return "unknown" as const
             if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
-            const recipient = route.recipient
+            const heir = route.alive === 1 ? { local: item.recipient } : yield* nearestAlive(item.recipient)
+            const target = heir !== undefined && "local" in heir ? heir.local : undefined
             const here =
-              recipient !== null &&
-              (recipient !== route.entry || placed(route.project, yield* currentProcess(recipient)))
+              target !== undefined && (target !== route.entry || placed(route.project, yield* currentProcess(target)))
             yield* queueInbox({
-              recipient: recipient ?? item.recipient,
+              recipient: target ?? item.recipient,
               kind: item.kind,
               sender: null,
               content:
                 item.kind === "send"
-                  ? envelope("agent-message", [["agent-id", item.sender]], ["message", item.content])
-                  : `${item.sender}: ${item.content}`,
+                  ? sessionEnvelope({ id: item.sender }, item.content)
+                  : noticeEnvelope(`${item.sender}: ${item.content}`),
               status: here ? "pending" : "dropped",
               peerItem: item.id,
             })

@@ -5,6 +5,7 @@ import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { PluginLoader } from "@vibest/core/plugin-sources"
 import { Project } from "@vibest/core/project"
+import { unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
@@ -119,7 +120,7 @@ describe("vibest CLI", () => {
       const { id } = decodeJson(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
-      assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, task)
+      assert.strictEqual(unwrapped((yield* herdr.callsTo("send"))[0]!.text!), task)
 
       const live = ["idle", "working", "blocked", "done", "unknown"]
       const { sessions: listed, machines } = decodeJson((yield* run(["ls"])).stdout) as {

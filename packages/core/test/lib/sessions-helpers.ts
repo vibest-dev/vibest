@@ -1,6 +1,7 @@
 import { it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
+import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { isLimited, Plugin, stillLimited } from "@vibest/plugin"
 import { Effect, type Scope } from "effect"
@@ -15,22 +16,42 @@ import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
 export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ? "cursor" : argv[0])
 
+export const entryOfProject = (repo: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    const projectId = yield* projectOf(repo)
+    const found = yield* db.entryOf(projectId)
+    if (found !== undefined) return found.id
+    return (yield* db.startEntry(
+      projectId,
+      "pi",
+      false,
+      {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      },
+      { agent: "coordinator" },
+    )).sessionId
+  })
+
+export const taskOf = (repo: string, text = "do it") =>
+  Effect.map(entryOfProject(repo), (id) => sessionEnvelope({ id, title: "entry" }, text))
+
 export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
-  Effect.map(
-    projectOf(repo),
-    (projectId) =>
-      ({
-        machine: { id: "local" },
-        agent: "general",
-        root: repo,
-        parentSessionId: "creator",
-        projectId,
-        name: "task",
-        prompt: "do it",
-        harness,
-        runtime: "herdr",
-      }) as const,
-  )
+  Effect.gen(function* () {
+    const parentSessionId = yield* entryOfProject(repo)
+    return {
+      machine: { id: "local" },
+      agent: "general",
+      root: repo,
+      parentSessionId,
+      projectId: yield* projectOf(repo),
+      name: "task",
+      prompt: "do it",
+      harness,
+      runtime: "herdr",
+    } as const
+  })
 
 export const claudeEnd = (reason: string) =>
   (
@@ -44,28 +65,13 @@ export const claudeEnd = (reason: string) =>
     }
   ).end
 
-export const spawnWorking = (
-  repo: string,
-  harness: HarnessId = "pi",
-  extra: { readonly archive?: boolean; readonly underMain?: boolean } = {},
-) =>
+export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    const entry = yield* db.startEntry(
-      yield* projectOf(repo),
-      "pi",
-      false,
-      {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      },
-      { agent: "coordinator" },
-    )
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
-      ...(extra.underMain ? { parentSessionId: entry.sessionId } : {}),
     })
     yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
     yield* sessions.check(id)
@@ -136,7 +142,7 @@ export const sqlNotices = (sessionId: string) =>
     }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.sender_session_id = ${sessionId} ORDER BY m.id`.pipe(
       Effect.orDie,
     )
-    return rows.map((r) => r.message)
+    return rows.map((r) => unwrapped(r.message))
   })
 
 export const limited = { window: "5h", percent: 100, status: "limited" as const, resetTime: null }

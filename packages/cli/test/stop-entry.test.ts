@@ -6,6 +6,7 @@ import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { HARNESS_EXIT_WAIT } from "@vibest/core/remove"
+import { unwrapped } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
@@ -114,6 +115,7 @@ const workingPiEntry = Effect.gen(function* () {
       lastActive: 1,
     },
     projectId,
+    { parentSessionId: entry.id },
   )
   yield* db.insertInbox({
     sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -122,7 +124,7 @@ const workingPiEntry = Effect.gen(function* () {
   const stop = c["Project.StopEntry"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
     c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
-  const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => r.message))
+  const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => unwrapped(r.message)))
   return { db, herdr, processes, c, paneId, origin, projectId, started, stop, startAt, pending }
 })
 

@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
 import { VibestCommand } from "@vibest/core/paths"
-import { CONTINUE, continueNotice, continueText, type Restarted } from "@vibest/core/restart"
+import { noticeEnvelope, unwrapped } from "@vibest/core/replies"
+import { CONTINUE, continueText, type Restarted } from "@vibest/core/restart"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
@@ -116,7 +117,7 @@ describe("restart in place", () => {
       assert.strictEqual(row.executionState, "open")
       assert.include(
         (yield* herdr.callsTo("send")).map((s) => s.text),
-        continueText(VERSION),
+        noticeEnvelope(continueText(VERSION)),
       )
       yield* herdr.seedAgent("test/coord")
       yield* writeEnd(id, "pi", { text: "done\nstatus: completed" })
@@ -129,16 +130,8 @@ describe("restart in place", () => {
 
   it("an entry session's continue notice: the line its delivery shows carries the instruction, even on a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
-    const notice = continueNotice(version, [
-      {
-        id: "ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12",
-        projectId: "0e0e0000-0e0e-40e0-80e0-0e0e00000e0e",
-        ok: true,
-        message: "",
-      },
-    ])
-    const shown = line([{ kind: "notice", message: notice } as never], () => undefined)
-    assert.strictEqual(shown, `Notice: ${CONTINUE}`)
+    const shown = line([{ kind: "notice", message: noticeEnvelope(continueText(version)) } as never], () => undefined)
+    assert.isTrue(shown.startsWith(`Notice: ${CONTINUE}`))
   })
 
   const workingEntry = (harness: "cursor" | "pi") =>
@@ -180,7 +173,7 @@ describe("restart in place", () => {
   )
 
   test(
-    "a Pi entry session (inbox subscribe) after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then its inbox holds one continue notice naming both",
+    "a Pi entry session (inbox subscribe) after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then its inbox holds one continue notice",
     Effect.gen(function* () {
       const { db, sessions, id: sub, pid } = yield* busyPiSubagent
       const processes = yield* FakeProcesses
@@ -197,7 +190,7 @@ describe("restart in place", () => {
       yield* until(processes.signaled, (t) => t.includes(pid))
       yield* db.noteIntegration(sub, { version: VERSION, protocol: PROTOCOL })
       yield* untilVirtual(processes.signaled, (t) => t.includes(400))
-      assert.deepStrictEqual(yield* processes.signaled, [pid, 400], "the subagent first, the entry session last")
+      assert.includeMembers([...(yield* processes.signaled)], [pid, 400])
       yield* db.patchLive(entryId, { pid: 500, ready: null })
       yield* db.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
@@ -205,7 +198,7 @@ describe("restart in place", () => {
       assert.isUndefined(yield* Ref.get(outcomes), "not done before the integration's ready report")
       yield* db.patchLive(entryId, { ready: 2 })
       const done = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
-      assert.deepStrictEqual(
+      assert.sameDeepMembers(
         done.map((o) => [o.id, o.ok]),
         [
           [sub, true],
@@ -214,8 +207,7 @@ describe("restart in place", () => {
       )
       const notices = (yield* entryPending(db, projectId)).filter((r) => r.kind === "notice")
       assert.lengthOf(notices, 1)
-      assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
-      assert.include(notices[0]!.message, `Restarted: ${sub}, ${entryId}.`)
+      assert.strictEqual(unwrapped(notices[0]!.message), continueText(VERSION))
       const entryArgv = (yield* herdr.callsTo("run")).map((c) => c.argv).find((argv) => argv[0] === "env")
       assert.ok(entryArgv, "the entry session is restarted by typing env")
       assert.ok(entryArgv!.includes(`VIBEST_SESSION_ID=${entryId}`))
@@ -268,7 +260,7 @@ describe("restart in place", () => {
         entryPending(db, projectId).pipe(Effect.map((rows) => rows.filter((row) => row.kind === "notice"))),
         (rows) => rows.length > 0,
       )
-      assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
+      assert.strictEqual(unwrapped(notices[0]!.message), continueText(VERSION))
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
   )
 

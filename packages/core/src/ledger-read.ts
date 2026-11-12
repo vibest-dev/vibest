@@ -14,6 +14,7 @@ import {
   type SpawnedBefore,
   toInbox,
 } from "./db-rows.ts"
+import { unwrapped } from "./replies.ts"
 
 export const LOCAL_MACHINE = "local"
 
@@ -280,7 +281,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         const raw = row.executionId === null ? undefined : (row.outcome ?? "working")
         const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
         found.set(row.id, {
-          task: row.task ?? null,
+          task: row.task === null ? null : unwrapped(row.task),
           latest:
             status === undefined
               ? null

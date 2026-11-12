@@ -4,6 +4,7 @@ import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
+import { unwrapped } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
 import { ID } from "@vibest/schema/id"
@@ -18,7 +19,15 @@ import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { replyOf, sentBy, settled, EXECUTIONS, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
+import {
+  entryOfProject,
+  spawnInput,
+  spawnWorking,
+  sessionWorktree,
+  test,
+  pick,
+  sqlNotices,
+} from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   const withEntry = (repo: string) =>
@@ -69,9 +78,17 @@ describe.concurrent("Sessions", () => {
     "spawn without a harness and nothing to inherit is NoHarnessChosen",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const error = yield* Effect.flip((yield* Sessions).spawn({ ...(yield* spawnInput(repo)), harness: undefined }))
+      const { parentSessionId: _, ...input } = yield* spawnInput(repo)
+      const error = yield* Effect.flip(
+        (yield* Sessions).spawn({
+          ...input,
+          harness: undefined,
+          origin: { peer: "a".repeat(32), project: "p", reportTo: "origin-session" },
+        }),
+      )
       assert.strictEqual(error._tag, "NoHarnessChosen")
       assert.include(error.message, "no harness to inherit")
+      assert.include(error.message, "this machine can run: ")
     }),
   )
 
@@ -178,7 +195,7 @@ describe.concurrent("Sessions", () => {
         "/vibest/harnesses/pi/extension.mjs",
       ])
       assert.include(yield* fs.readFileString(yield* systemPromptFile(id)), `You are agent ${id}`)
-      assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, "do it")
+      assert.strictEqual(unwrapped((yield* herdr.callsTo("send"))[0]!.text!), "do it")
     }),
   )
 
@@ -237,7 +254,7 @@ describe.concurrent("Sessions", () => {
         inbox: number | null
       }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`
       assert.deepStrictEqual(
-        working.map((row) => [row.input, row.inbox !== null]),
+        working.map((row) => [unwrapped(row.input), row.inbox !== null]),
         [["do it", true]],
       )
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: done it" })
@@ -284,10 +301,27 @@ describe.concurrent("Sessions", () => {
       const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository)))
       assert.strictEqual(refused._tag, "HarnessUnavailable")
       assert.include(refused.message, "Not logged in")
-      assert.strictEqual(yield* herdr.callCount, 0)
-      assert.deepStrictEqual(yield* db.listSessions(), [])
+      assert.deepStrictEqual(yield* herdr.callsTo("open"), [])
+      assert.deepStrictEqual(
+        (yield* db.listSessions()).filter((s) => !s.entry),
+        [],
+      )
     }),
     { unusable: ["pi", "claude", "cursor"] },
+  )
+
+  test(
+    "an inherited harness that cannot run here fails naming whose it was, and lists the harnesses this machine can run",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const parent = yield* entryOfProject(repo)
+      const error = yield* Effect.flip((yield* Sessions).spawn({ ...(yield* spawnInput(repo)), harness: undefined }))
+      assert.strictEqual(error._tag, "HarnessUnavailable")
+      assert.include(error.message, `(inherited from ${parent})`)
+      assert.match(error.message, /this machine can run: .*claude/)
+      assert.notMatch(error.message, /can run: .*\bpi\b/)
+    }),
+    { unusable: ["pi"] },
   )
 
   test(
@@ -302,7 +336,7 @@ describe.concurrent("Sessions", () => {
         (yield* Effect.flip(sessions.spawn({ ...input, origin: { peer: "a".repeat(32), project: "p" } })))._tag,
         "NoCallingSession",
       )
-      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* herdr.callsTo("open"), [])
     }),
   )
 
@@ -330,7 +364,7 @@ describe.concurrent("Sessions", () => {
       const error = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), model: "gpt-9" }))
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, 'does not list model "gpt-9"; choose one of: fake-model, fake-strong')
-      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* herdr.callsTo("open"), [])
       yield* sessions.spawn({ ...(yield* spawnInput(repo)), model: "fake-strong" })
     }),
   )

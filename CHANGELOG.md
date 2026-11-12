@@ -20,6 +20,21 @@ release. Each release lists what broke, who is affected and how to migrate under
   appends the system prompt, every Claude session starts with all of Bash pre-approved (the coordinator had this before; subagents had only `vibest send`; permission rules the user sets to ask still apply), Cursor can run `coordinator` (its definition and session facts arrive in its first
   input), and the Pi extension serves every vibest session. The protocol number is unchanged; the contract snapshot is
   regenerated.
+- **Messages carry who they are from; notices, ownership and sends fall back to the nearest running creator, never to the
+  entry session** (agents, users reading `vibest.db`, plugin authors): a message from a session reaches its reader wrapped
+  in `<agent-message>` with the sender's id and title (this includes the task the session that started it gave it, and
+  `vibest send` from a session); a notice from vibestd, and the instruction to continue after a restart, are wrapped in
+  `<vibest-notice>`; text with no wrapper is the user's. The system prompt holds the definition's text, then the session
+  facts (who started it, which working directory it has, what the wrappers mean), then a snapshot of `preferences.md`
+  and the memory index. When a session's creator has ended, its notices, its sends to that creator and the right to manage
+  it pass to the nearest creator above that is still running; with none, the user reads it with `vibest ls` and
+  `vibest result` and no inbox row is written. A session may send only to the session that started it and to sessions it
+  started; sending to the entry session is no longer allowed to every session. A session started by another machine uses
+  that machine's own harness choice (explicit flags, its plugins, its default), not the entry session's, and a harness
+  that cannot run is refused with the list of harnesses the machine can run. A new session opens its pane beside its
+  creator's. A session is not archived by `--archive-on-idle` while a session it started is running, and a session that
+  has ended cannot start another. After `vibest update` each restarted session gets its own continue notice (the entry
+  session no longer gets a project summary) and restarts are no longer ordered subagents first.
 - **Cursor is a plugin, claude is the default harness** (users of Cursor, and anyone relying on "no harness to
   inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the file
   `harnesses/cursor/plugin.js` of the install directory to `plugins` in `~/.vibest/vibest.json` (or put it in

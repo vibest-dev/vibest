@@ -7,6 +7,7 @@ import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "../../cli/src/platform/bun.ts"
+import { Agents } from "../src/agents.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
 const events: Array<string> = []
@@ -33,7 +34,7 @@ export default Plugin.define({ id: "${id}", effect: () => Effect.void })
 
 const event = {
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   prompt: "p",
   harness: undefined,
@@ -91,6 +92,7 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(Layer.effect(Layout, Layout.make(dir))),
           Layer.provide(runtimesLayer),
           Layer.provide(Bus.layer),
+          Layer.provide(Agents.layer),
           Layer.build,
           Effect.map(Context.get(Plugins)),
         )

@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
+import { unwrapped } from "@vibest/core/replies"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, FileSystem, Ref } from "effect"
@@ -171,7 +172,7 @@ describe.concurrent("after a vibestd stop", () => {
   const typed = (text: string) =>
     Effect.map(
       Effect.flatMap(FakeRuntime, (herdr) => herdr.callsTo("send")),
-      (calls) => calls.filter((c) => c.text === text).length,
+      (calls) => calls.filter((c) => c.text !== undefined && unwrapped(c.text) === text).length,
     )
 
   test(
@@ -180,9 +181,12 @@ describe.concurrent("after a vibestd stop", () => {
       Effect.gen(function* () {
         const db = yield* Db
         assert.deepStrictEqual(yield* executionInputs(id), [])
-        assert.strictEqual(yield* db.untakenTask(id), "do it")
+        assert.strictEqual(unwrapped((yield* db.untakenTask(id))!), "do it")
         yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
-        assert.deepStrictEqual(yield* executionInputs(id), [{ input: "do it", status: "working" }])
+        assert.deepStrictEqual(
+          (yield* executionInputs(id)).map((e) => ({ ...e, input: unwrapped(e.input) })),
+          [{ input: "do it", status: "working" }],
+        )
         assert.isUndefined(yield* db.untakenTask(id))
       }),
     ),

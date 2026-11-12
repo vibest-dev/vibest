@@ -50,7 +50,8 @@ export const make = (
           }
           return yield* new NoSuchSession({ id, message: `no session ${id}` })
         }
-        if (c._tag === "Session" && (yield* db.creatorOf(id))?.local !== c.sessionId)
+        const manager = yield* db.nearestAlive(id)
+        if (c._tag === "Session" && (manager === undefined || !("local" in manager) || manager.local !== c.sessionId))
           return yield* new Forbidden({
             method,
             message: `${id} was not started by this session; a session manages only the sessions it started`,
@@ -78,35 +79,39 @@ export const make = (
             method: "Send",
             message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
           })
+        const creator = (yield* db.creatorOf(caller.sessionId)) ?? undefined
+        const mine = creator !== undefined && "local" in creator ? creator.local : undefined
         const allowed = Effect.gen(function* () {
           if (yield* db.maySend(caller.sessionId, id)) return true
-          const creator = yield* db.addressedCreator(caller.sessionId)
           return yield* new Forbidden({
             method: "Send",
-            message: `${id} is not the agent that started you, and you did not start it${creator === undefined ? "" : `; you may send to ${creator}`}`,
+            message: `${id} is not the agent that started you, and you did not start it${mine === undefined ? "" : `; you may send to ${mine}`}`,
           })
         })
-        if (target.entry) {
-          yield* allowed
-          const row = yield* db.insertSend(id, p.message, p.request, caller.sessionId)
-          if (!row)
+        const session = yield* db.getSession(id)
+        const stopped = !session || session.metadata.archived || session.metadata.removed
+        yield* allowed
+        const to = yield* Effect.gen(function* () {
+          if (!(stopped && mine === id)) return id
+          const heir = yield* db.nearestAlive(caller.sessionId)
+          if (heir === undefined || "peer" in heir)
             return yield* new NoSuchSession({
               id,
-              message: `${id} is the entry session of this project and is not running`,
+              message: `${id} has ended and no session above it is running; the user reads your last reply with vibest result`,
             })
-          return { id }
+          return heir.local
+        })
+        if ((yield* db.sessionIdentity(to))?.entry) {
+          if (!(yield* db.insertSend(to, p.message, p.request, caller.sessionId)))
+            return yield* new NoSuchSession({
+              id: to,
+              message: `${to} is the entry session of this project and is not running`,
+            })
+          return { id: to }
         }
-        const session = yield* db.getSession(id)
-        if (!session || session.metadata.archived || session.metadata.removed) {
-          const entry = (yield* db.entryOf(caller.projectId))?.id
-          return yield* new NoSuchSession({
-            id,
-            message: `${id} was archived${entry === undefined ? "" : `; the entry session of this project is ${entry}`}`,
-          })
-        }
-        yield* allowed
-        yield* sessions.send(id, p.message, p.request, caller.sessionId)
-        return { id }
+        if (to === id && stopped) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+        yield* sessions.send(to, p.message, p.request, caller.sessionId)
+        return { id: to }
       })
 
     return {

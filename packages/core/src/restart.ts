@@ -6,9 +6,9 @@ import { awaitEvent, Bus, type EngineEvent } from "./bus.ts"
 import type { EntryRow, Db, SessionRow } from "./db.ts"
 import type { HarnessId } from "./harness.ts"
 import type { HarnessDefinition, HarnessesShape } from "./host.ts"
-import type { Inbox } from "./inbox.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
+import { noticeEnvelope } from "./replies.ts"
 import {
   agentState,
   type AgentSeen,
@@ -42,21 +42,6 @@ export const CONTINUE =
   "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
 
 export const continueText = (version: string) => `${CONTINUE} vibest is now ${version}.`
-
-export const continueNotice = (version: string, restarted: ReadonlyArray<Restarted>) =>
-  [
-    CONTINUE,
-    `vibest is now ${version}.`,
-    ...(restarted.some((r) => r.ok)
-      ? [
-          `Restarted: ${restarted
-            .filter((r) => r.ok)
-            .map((r) => r.id)
-            .join(", ")}.`,
-        ]
-      : []),
-    ...restarted.filter((r) => !r.ok).map((r) => r.message),
-  ].join("\n")
 
 export const current = (integration: { readonly version: string; readonly protocol: number } | undefined) =>
   integration !== undefined && integration.version === VERSION && integration.protocol === PROTOCOL
@@ -115,7 +100,6 @@ export const sessionRestart = (deps: {
   readonly harnesses: Pick<HarnessesShape, "get" | "find">
   readonly processes: Processes["Service"]
   readonly restarting: SessionLive["Service"]["restarting"]
-  readonly inbox: Inbox["Service"]
   readonly scope: Scope.Scope
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly checkLater: (id: string) => Effect.Effect<void>
@@ -134,7 +118,7 @@ export const sessionRestart = (deps: {
     text: string,
   ) => Effect.Effect<string | undefined, unknown>
 }) => {
-  const { db, runtimes, harnesses, processes, inbox } = deps
+  const { db, runtimes, harnesses, processes } = deps
 
   const routed = (kind: string | null | undefined) =>
     kind ? runtimes.route(kind).pipe(Effect.orElseSucceed(() => undefined)) : Effect.succeed(undefined)
@@ -243,7 +227,7 @@ export const sessionRestart = (deps: {
               h,
               (yield* db.getSession(id)) ?? session,
               session.address,
-              continueText(VERSION),
+              noticeEnvelope(continueText(VERSION)),
             )
             return missed === undefined
               ? { id, projectId, ok: true, message: `${id} restarted; its interrupted execution continues` }
@@ -252,7 +236,7 @@ export const sessionRestart = (deps: {
       })
     })
 
-  const restartEntry = (entry: EntryRow, before: ReadonlyArray<Restarted>, wasWorking: boolean) =>
+  const restartEntry = (entry: EntryRow, wasWorking: boolean) =>
     Effect.gen(function* () {
       const { id, projectId } = entry
       const label = `${id} (entry session)`
@@ -290,11 +274,7 @@ export const sessionRestart = (deps: {
               ok: true,
               message: `${label} restarted${interrupted ? "; its interrupted execution continues" : ""}`,
             }
-            if (interrupted)
-              yield* inbox.enqueue({
-                sessionId: id,
-                message: continueNotice(VERSION, [...before.filter((r) => r.projectId === projectId), restarted]),
-              })
+            if (interrupted) yield* db.insertNoticeTo(id, continueText(VERSION))
             return restarted
           }),
       })
@@ -359,10 +339,14 @@ export const sessionRestart = (deps: {
   const restart = (ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
     Effect.gen(function* () {
       const entries = (yield* db.entrySessions).filter((entry) => ids.includes(entry.id))
-      const agents = ids.filter((id) => !entries.some((entry) => entry.id === id))
-      const first = yield* Effect.forEach(agents, restartAgent, { concurrency: RESTART_CONCURRENCY })
-      const last = yield* Effect.forEach(entries, (entry) => restartEntry(entry, first, working.includes(entry.id)))
-      const outcomes = [...first, ...last]
+      const outcomes = yield* Effect.forEach(
+        ids,
+        (id) => {
+          const entry = entries.find((candidate) => candidate.id === id)
+          return entry === undefined ? restartAgent(id) : restartEntry(entry, working.includes(id))
+        },
+        { concurrency: RESTART_CONCURRENCY },
+      )
       for (const o of outcomes) yield* o.ok ? Effect.logInfo(o.message) : Effect.logWarning(o.message)
       return outcomes
     })

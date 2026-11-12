@@ -17,10 +17,16 @@ const entryWorking = Effect.gen(function* () {
   const db = yield* Db
   const herdr = yield* FakeRuntime
   const sessions = yield* Sessions
-  const entry = yield* db.startEntry(yield* projectOf(yield* makeRepository), "pi", false, {
-    runtime: RUNTIME,
-    address: { machine: "local", id: "test/coord" },
-  })
+  const entry = yield* db.startEntry(
+    yield* projectOf(yield* makeRepository),
+    "pi",
+    false,
+    {
+      runtime: RUNTIME,
+      address: { machine: "local", id: "test/coord" },
+    },
+    { agent: "coordinator" },
+  )
   yield* herdr.seedAgent("test/coord")
   yield* (yield* Integration).ready(entry.sessionId, undefined)
   yield* sessions.userPrompt(entry.sessionId, "hello")

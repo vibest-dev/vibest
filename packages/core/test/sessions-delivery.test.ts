@@ -2,6 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Harnesses } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/integration"
+import { unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { Clock, Effect, Fiber, Ref } from "effect"
 import { SqlClient } from "effect/sql"
@@ -61,19 +62,19 @@ describe.concurrent("Sessions", () => {
           Effect.orDie,
         )
       assert.deepStrictEqual(
-        (yield* results()).map((row) => row.input),
+        (yield* results()).map((row) => unwrapped(row.input)),
         ["do it"],
       )
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: typed" }, 5_000)
       yield* sessions.check(id)
       assert.deepStrictEqual(
-        (yield* results()).map((row) => row.input),
+        (yield* results()).map((row) => unwrapped(row.input)),
         ["do it", ""],
       )
       assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
       yield* sessions.check(id)
       assert.deepStrictEqual(
-        (yield* results()).map((row) => row.input),
+        (yield* results()).map((row) => unwrapped(row.input)),
         ["do it", ""],
       )
     }),
@@ -427,7 +428,7 @@ describe.concurrent("Sessions", () => {
         ],
       )
       assert.deepStrictEqual(
-        (yield* herdr.callsTo("send")).map((call) => call.text),
+        (yield* herdr.callsTo("send")).map((call) => unwrapped(call.text!)),
         ["do it", "first", "second"],
       )
       assert.deepStrictEqual(pick(yield* db.getSession(id)), { status: "working", executionState: "open" })
@@ -466,7 +467,7 @@ describe.concurrent("Sessions", () => {
         yield* sessions.check(id)
       }
       assert.deepStrictEqual(
-        (yield* herdr.callsTo("send")).map((c) => c.text),
+        (yield* herdr.callsTo("send")).map((c) => unwrapped(c.text!)),
         ["do it", "first", "second"],
       )
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])

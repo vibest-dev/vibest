@@ -64,6 +64,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
       systemPrompt({
         system: definition.system,
         id: saved.sessionId,
+        checkout: true,
         projectDir: layout.project(saved.projectId),
         vibest,
         ...(yield* projectText(layout.project(saved.projectId))),

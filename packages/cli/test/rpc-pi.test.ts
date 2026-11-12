@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { Inbox } from "@vibest/core/inbox"
+import { noticeEnvelope } from "@vibest/core/replies"
 import { Effect, Fiber, Stream } from "effect"
 
 import { CLAUDE, CURSOR, entryPending, FakeRuntime, PI, settled, projectOf } from "./fakes.ts"
@@ -81,7 +81,6 @@ describe("vibest.sock", () => {
     "a subscription wakes when a row arrives for its session after it subscribed",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const inbox = yield* Inbox
       const db = yield* Db
       yield* herdr.seedAgent("w1:p8")
       const entry = yield* db.startEntry(
@@ -98,9 +97,9 @@ describe("vibest.sock", () => {
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(2), Stream.runCollect, Effect.forkChild)
       yield* settled
       assert.isUndefined(received.pollUnsafe())
-      yield* inbox.enqueue({ sessionId: entry.sessionId, message: "back" })
+      yield* db.insertNoticeTo(entry.sessionId, "back")
       yield* Fiber.join(received)
-      assert.strictEqual((yield* c["Inbox.Take"](undefined))?.text, "back")
+      assert.strictEqual((yield* c["Inbox.Take"](undefined))?.text, noticeEnvelope("back"))
     }),
     { harnesses: PULLING },
   )

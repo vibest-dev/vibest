@@ -2,13 +2,14 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 
 import { harnessDefaultPlugin } from "../../builtins/src/harness-default.ts"
+import { Agents } from "../src/agents.ts"
 import { Bus } from "../src/bus.ts"
 import { Plugins } from "../src/plugins.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
 const event = (harness: string | undefined, claude: boolean) => ({
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   prompt: "",
   harness,
@@ -36,6 +37,7 @@ const chosen = (harness: string | undefined, claude: boolean) =>
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Bus.layer),
+    Effect.provide(Agents.layer),
     Effect.scoped,
   )
 

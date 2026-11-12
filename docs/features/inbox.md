@@ -84,8 +84,8 @@ started it and not one it started. Nothing is queued.
 
 ## S47. A send stays inside its project
 
-`vibest send` from a session to a session of another project is refused, and to an archived session is refused with the
-id of the project's entry session; neither queues anything.
+`vibest send` from a session to a session of another project is refused, and to a session that is neither its creator nor
+its child (an archived sibling, say) is refused too; neither queues anything.
 
 ## S48. An undeliverable send goes back to its sender
 

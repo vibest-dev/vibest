@@ -186,11 +186,8 @@ const make = Effect.gen(function* () {
             ),
           )
         const identity = yield* repositoryIdentity(remote)
-        const entry = yield* db.entryOf(from.project)
         const runtime =
-          input.runtime ??
-          callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv) ??
-          (entry?.runtime || undefined)
+          input.runtime ?? callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv)
         const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
         const ready =
           viewer?.locate === undefined || runtime === undefined

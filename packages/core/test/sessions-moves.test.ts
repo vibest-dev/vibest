@@ -1,5 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, isLimited, Plugin } from "@vibest/plugin"
@@ -39,7 +40,7 @@ describe.concurrent("Sessions", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi"],
       )
-      assert.strictEqual((yield* db.listSessions()).length, 1)
+      assert.strictEqual((yield* db.listSessions()).filter((s) => !s.entry).length, 1)
     }),
   )
 
@@ -150,7 +151,7 @@ describe.concurrent("Sessions", () => {
           yield* herdr.endExecution(id)
           yield* sessions.check(id)
           assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude", input)
-          assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, input)
+          assert.strictEqual(unwrapped((yield* herdr.callsTo("send")).at(-1)!.text!), input)
           assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
         })
       yield* resends((id) => sessions.userPrompt(id, "typed follow-up"), "typed follow-up")
@@ -228,7 +229,7 @@ describe.concurrent("Sessions", () => {
       const id = (yield* db.listSessions()).find((s) => !s.entry)!.id
       yield* until(db.getSession(id), (w) => !!w && w.harnessId === "claude" && w.executionState === "open")
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
-      assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
+      assert.strictEqual(unwrapped((yield* herdr.callsTo("send")).at(-1)!.text!), "do it")
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
       const sql = yield* SqlClient.SqlClient
       const [execution] = yield* sql<{
@@ -236,7 +237,7 @@ describe.concurrent("Sessions", () => {
       }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
         Effect.orDie,
       )
-      assert.strictEqual(execution!.input, "do it")
+      assert.strictEqual(unwrapped(execution!.input), "do it")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude"],
@@ -516,7 +517,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const subs = yield* Subscriptions
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "pi", { underMain: true })
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "pi")
       const row = (yield* db.getSession(id))!
       const entry = (yield* db.entryOf(row.projectId))!
       yield* subs.report({

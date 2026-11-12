@@ -49,6 +49,10 @@ export type LaunchOptions = {
 export const sessionPlacement = (deps: {
   readonly db: {
     readonly entryOf: (projectId: string) => Effect.Effect<EntryRow | undefined>
+    readonly projectDirectory: (projectId: string) => Effect.Effect<string | undefined>
+    readonly creatorOf: (
+      id: string,
+    ) => Effect.Effect<{ readonly local: string } | { readonly peer: string; readonly session: string } | undefined>
     readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly openExecution: (id: string) => Effect.Effect<number | undefined>
     readonly closeExecution: (id: string, execution: number, status: "failed") => Effect.Effect<boolean>
@@ -139,14 +143,14 @@ export const sessionPlacement = (deps: {
     undo: (a: A) => Effect.Effect<unknown, unknown, R2>,
   ) => Effect.acquireRelease(acquire, (a, exit) => (Exit.isFailure(exit) ? undo(a).pipe(Effect.ignore) : Effect.void))
 
-  const nearEntry = (session: SessionRow, kind: string) =>
-    db
-      .entryOf(session.projectId)
-      .pipe(
-        Effect.map((entry) =>
-          entry?.runtime === kind && entry.address !== null && entry.address.id !== "" ? entry.address : undefined,
-        ),
-      )
+  const nearCreator = (session: SessionRow, kind: string) =>
+    Effect.gen(function* () {
+      const creator = yield* db.creatorOf(session.id)
+      const parent = creator !== undefined && "local" in creator ? yield* db.getSession(creator.local) : undefined
+      return parent?.runtime === kind && parent.exitedAt === null && parent.address.id !== ""
+        ? parent.address
+        : undefined
+    })
 
   const openTerminal = Effect.fn("Sessions.openTerminal")(function* (
     h: Runtime,
@@ -162,7 +166,7 @@ export const sessionPlacement = (deps: {
       readonly endedByCaller?: boolean
     },
   ) {
-    const near = input.near !== undefined ? input.near : yield* nearEntry(session, h.id)
+    const near = input.near !== undefined ? input.near : yield* nearCreator(session, h.id)
     const remote = yield* db.startedByPeer(session.id)
     const choice = {
       harnessId: session.harnessId,
@@ -298,7 +302,7 @@ export const sessionPlacement = (deps: {
     )
 
   const storedDirectory = (projectId: string) =>
-    db.entryOf(projectId).pipe(Effect.map((entry) => entry?.projectDirectory))
+    db.projectDirectory(projectId).pipe(Effect.map((directory) => directory || undefined))
 
   const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: string) {
     const h = runtimes.find(kind)

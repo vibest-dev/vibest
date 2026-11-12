@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Inbox, line, LINE_MAX } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
+import { noticeEnvelope } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders, TAKE_ROUTE, type SessionIdentity } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
@@ -10,6 +11,7 @@ import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
 import { Effect, Fiber, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
+import { SqlClient } from "effect/sql"
 
 import {
   CLAUDE,
@@ -102,8 +104,11 @@ const project = Effect.gen(function* () {
   return { db, herdr, entryId: entry.sessionId, worker, projectId, repo, key, sessions, call, inbox: yield* Inbox }
 })
 
-const statusOf = (db: Db["Service"], worker: string) =>
-  db.latestInbox(worker, "notice").pipe(Effect.map((r) => r?.status))
+const statusOf = (_db: Db["Service"], recipient: string) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    sql<{ status: string }>`SELECT status FROM inbox WHERE session_id = ${recipient} AND kind = 'notice'
+      ORDER BY id DESC LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.status)),
+  )
 
 describe("vibestd's HTTP API", () => {
   test(
@@ -192,9 +197,9 @@ describe("vibestd's HTTP API", () => {
   test(
     "take hands a batch out once: it opens the execution, marks the rows delivered and is empty while that execution is open",
     Effect.gen(function* () {
-      const { call, db, inbox, entryId } = yield* project
+      const { call, db, entryId } = yield* project
       yield* call("/session/ready", { sessionId: entryId })
-      yield* inbox.enqueue({ sessionId: entryId, message: "hello" })
+      yield* db.insertNoticeTo(entryId, "hello")
       const first = (yield* call(TAKE_ROUTE, { sessionId: entryId })).body as Http.Reply["body"] & {
         execution: number
         ids: Array<number>
@@ -203,10 +208,10 @@ describe("vibestd's HTTP API", () => {
       }
       assert.lengthOf(first.ids, 1)
       assert.strictEqual(first.line, "Notice: hello")
-      assert.strictEqual(first.text, "hello")
+      assert.strictEqual(first.text, noticeEnvelope("hello"))
       assert.strictEqual(yield* statusOf(db, entryId), "delivered")
       assert.strictEqual(yield* db.openExecution(entryId), first.execution)
-      yield* inbox.enqueue({ sessionId: entryId, message: "later" })
+      yield* db.insertNoticeTo(entryId, "later")
       assert.strictEqual((yield* call(TAKE_ROUTE, { sessionId: entryId })).status, 204)
       yield* call(
         "/hooks/claude/prompt",

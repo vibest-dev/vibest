@@ -77,7 +77,7 @@ describe("bus", () => {
         const db = yield* Db
         const bus = yield* Bus
         const project = yield* projectOf("r")
-        yield* db.startEntry(
+        const entry = yield* db.startEntry(
           project,
           "pi",
           false,
@@ -87,9 +87,9 @@ describe("bus", () => {
           },
           { agent: "coordinator" },
         )
-        yield* db.insertSession(session, project)
+        yield* db.insertSession(session, project, { parentSessionId: entry.sessionId })
         const notice = (text: string) => db.insertInbox({ sessionId: session.id, message: text })
-        const rows = [yield* notice("one"), yield* notice("two")]
+        const rows = [(yield* notice("one"))!, (yield* notice("two"))!]
         yield* db.claim(
           rows[0]!.recipient!,
           rows.map((row) => row.id),

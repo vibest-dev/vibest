@@ -15,17 +15,20 @@ import { makeRepository, sessionLayer } from "./lib/session.ts"
 const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) => testEffect(sessionLayer())(name, () => program)
 
 const spawnInput = (repo: string) =>
-  Effect.map(projectOf(repo), (projectId) => ({
-    machine: { id: "local" },
-    agent: "general",
-    root: repo,
-    parentSessionId: "creator",
-    projectId,
-    name: "task",
-    prompt: "do it",
-    harness: "pi" as const,
-    runtime: "herdr",
-  }))
+  Effect.gen(function* () {
+    const projectId = yield* projectOf(repo)
+    return {
+      machine: { id: "local" },
+      agent: "general",
+      root: repo,
+      parentSessionId: (yield* (yield* Db).entryOf(projectId))?.id ?? "creator",
+      projectId,
+      name: "task",
+      prompt: "do it",
+      harness: "pi" as const,
+      runtime: "herdr",
+    }
+  })
 
 describe("placement: every session is a tab beside the project's entry session, in vibest's own detached worktree", () => {
   test(

@@ -130,6 +130,25 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   )
 
   test(
+    "an owner is not archived while a session it started runs, is archived once that session ends, and a session that ended cannot start another",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const w = yield* archiveSession(repo)
+      const child = yield* w.sessions.spawn({ ...(yield* spawnInput(repo)), parentSessionId: w.id })
+      yield* until(w.db.getSession(child.id), (c) => !!c && (c.startedAt !== null || c.exitedAt !== null))
+      yield* askEntry(w)
+      yield* finishExecution(w, "status: completed")
+      yield* entryTakes(w)
+      yield* letForkedArchiveRun
+      assert.isFalse(yield* archived(w.db, w.id))
+      yield* w.sessions.remove(child.id)
+      yield* until(archived(w.db, w.id), (a) => a)
+      const refused = yield* Effect.flip(w.sessions.spawn({ ...(yield* spawnInput(repo)), parentSessionId: w.id }))
+      assert.strictEqual(refused._tag, "NoSuchSession")
+    }),
+  )
+
+  test(
     "a Pi entry session: archived once it took the message, and a clean archive sends it nothing more",
     Effect.gen(function* () {
       const inbox = yield* Inbox

@@ -322,7 +322,7 @@ describe.concurrent("Sessions", () => {
           assert.strictEqual(error._tag, "HarnessUnavailable")
           assert.isTrue(error.message.startsWith(`${harness} has no provider option`), error.message)
         }
-      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* herdr.callsTo("open"), [])
     }),
   )
 

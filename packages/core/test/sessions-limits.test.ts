@@ -20,6 +20,7 @@ import {
   limited,
   chooseNext,
   type FailSeen,
+  entryOfProject,
 } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
@@ -240,12 +241,13 @@ describe.concurrent("Sessions", () => {
     "an unusable harness is never offered; the give-up names only real limits",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const repo = yield* makeRepository
+      const { id, sessions, db } = yield* spawnWorking(repo)
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
-      assert.deepStrictEqual(failSeen, [{ parent: "creator", attempts: [["pi", "limited"]] }])
+      assert.deepStrictEqual(failSeen, [{ parent: yield* entryOfProject(repo), attempts: [["pi", "limited"]] }])
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "cursor", { error: "rate_limit" })
       yield* sessions.check(id)

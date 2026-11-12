@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Harness } from "@vibest/core/harness"
+import { unwrapped } from "@vibest/core/replies"
 import { HOOK_GRACE, Sessions } from "@vibest/core/sessions"
 import { Duration, Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -30,7 +31,7 @@ const working = Effect.gen(function* () {
   const db = yield* Db
   const repo = yield* makeRepository
   const projectId = yield* projectOf(repo)
-  yield* db.startEntry(
+  const entry = yield* db.startEntry(
     projectId,
     "pi",
     false,
@@ -44,7 +45,7 @@ const working = Effect.gen(function* () {
     machine: { id: "local" },
     agent: "general",
     root: repo,
-    parentSessionId: "creator",
+    parentSessionId: entry.sessionId,
     projectId,
     name: "task",
     prompt: "do it",
@@ -106,7 +107,7 @@ describe("session handlers", () => {
       yield* herdr.updateAgent(id, (a) => ({ ...a, status: "blocked" }))
       yield* settled
       assert.lengthOf(yield* notices(id), 1)
-      assert.include((yield* notices(id))[0]!.message, "waiting for a permission decision")
+      assert.include(unwrapped((yield* notices(id))[0]!.message), "waiting for a permission decision")
     }),
   )
 
