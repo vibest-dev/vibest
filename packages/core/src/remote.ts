@@ -111,6 +111,13 @@ const make = Effect.gen(function* () {
         row === null ? row : { ...row, id: addressed(at.machine, row.id) },
       ),
 
+    harnesses: (machine: string, provider: string | undefined) =>
+      Effect.flatMap(machines.link(machine), (link) =>
+        link.call(
+          link.client["Harnesses.List"](provider === undefined ? {} : { provider }, { headers: peerHeaders(self.id) }),
+        ),
+      ),
+
     list: (scope: ListScope, by: string, stopped: boolean | undefined) =>
       Effect.gen(function* () {
         if (scope._tag === "Peer") return { sessions: [], machines: [] }

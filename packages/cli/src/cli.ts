@@ -560,9 +560,9 @@ const providerFlag = Flag.String("provider").pipe(
   Flag.withDescription("Only this provider's models; a harness with no provider option refuses it"),
   Flag.optional,
 )
-const catalog = (provider?: string) =>
+const catalog = (provider?: string, machine?: string) =>
   Effect.flatMap(caller, (c) =>
-    withVibest(c.claim, (client) => client["Harnesses.List"]({ provider }), { start: !c.agent }),
+    withVibest(c.claim, (client) => client["Harnesses.List"]({ provider, machine }), { start: !c.agent }),
   )
 const modelsOf = (harness: string | undefined, provider: Option.Option<string>) =>
   Effect.gen(function* () {
@@ -603,23 +603,31 @@ const models = Command.make(
 const harness = Command.make("harness").pipe(
   Command.withDescription("The harnesses vibest runs"),
   Command.withSubcommands([
-    Command.make("list", {}, () =>
-      Effect.gen(function* () {
-        const choices = yield* catalog()
-        yield* json(
-          choices.map((c) => ({
-            harness: c.harness,
-            binary: c.binary,
-            available: c.problem === null,
-            defaultModel: c.models.find((m) => m.default)?.model ?? null,
-            error: c.problem,
-          })),
-        )
-      }),
+    Command.make(
+      "list",
+      {
+        machine: Flag.String("machine").pipe(
+          Flag.withDescription("List another machine's harnesses (asked each time)"),
+          Flag.optional,
+        ),
+      },
+      (o) =>
+        Effect.gen(function* () {
+          const choices = yield* catalog(undefined, Option.getOrUndefined(o.machine))
+          yield* json(
+            choices.map((c) => ({
+              harness: c.harness,
+              binary: c.binary,
+              available: c.problem === null,
+              defaultModel: c.models.find((m) => m.default)?.model ?? null,
+              error: c.problem,
+            })),
+          )
+        }),
     ).pipe(
       Command.withAlias("ls"),
       Command.withDescription(
-        "Each harness: its binary, whether vibest can start it and the model it runs by default (null: the harness chooses; error says why it cannot be started)",
+        "Each harness: its binary, whether vibest can start it, the model it runs by default (null: the harness chooses) and why it cannot be started; --machine lists another machine's. The list is the whole machine's; the default model is the harness's global default, which a repository's own harness settings may change in its project, and vibest does not read them",
       ),
     ),
     Command.make("models", { harness: Argument.String("harness"), provider: providerFlag }, (o) =>
