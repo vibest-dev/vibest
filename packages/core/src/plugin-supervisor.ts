@@ -1,4 +1,4 @@
-import { Duration, Effect, type Latch, Queue, Stream } from "effect"
+import { Duration, Effect, FiberHandle, type Latch, Queue, Stream } from "effect"
 
 import { logFailure } from "./engine.ts"
 import { type Candidate, makeSources, makeWatcher } from "./plugin-sources.ts"
@@ -52,8 +52,8 @@ export const supervise = Effect.fnUntraced(function* (
     host.ready.closeUnsafe()
     Queue.offerUnsafe(triggers, undefined)
   }
-  const watcher = yield* makeWatcher(notify)
-  const scope = yield* Effect.scope
+  const watcher = yield* makeWatcher(notify, RECHECK)
+  const rescanWhenLive = yield* FiberHandle.make()
   const reload = Effect.gen(function* () {
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
@@ -64,7 +64,8 @@ export const supervise = Effect.fnUntraced(function* (
       resolved = yield* resolve(sources)
     }
     yield* host.activate([...builtins, ...resolved.candidates])
-    if (rewatched) yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
+    if (rewatched)
+      yield* FiberHandle.run(rescanWhenLive, watcher.live.pipe(Effect.andThen(Effect.sync(() => notify()))))
   }).pipe(logFailure("plugins: reload failed"))
   yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
     Stream.runForEach(() =>
