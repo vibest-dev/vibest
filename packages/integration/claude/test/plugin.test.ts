@@ -234,19 +234,22 @@ describe("Claude plugin inbox", () => {
     )
   })
 
-  it("a dropped submit goes back to the front of the queue and is submitted again", async () => {
+  it("a submit Claude refuses is reported once for its execution and not submitted again", async () => {
     const h = host()
     const takes = [batch(1, "same", "first")]
     h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
     await h.start()
     await h.tick()
-    h.state.submit = async () => ({ drop: "busy" })
+    h.state.submit = async () => ({ drop: "the session was stopped and nobody has sent input since" })
     await h.draw()
-    h.state.submit = async () => ({ text: "x" })
     await h.draw()
-    assert.deepStrictEqual(h.submitted, ["same", "same"])
-    assert.deepStrictEqual(((await h.prompt("same", ownSubmit)) as { context: string[] }).context, ["first"])
-    assert.notProperty(await h.prompt("same", ownSubmit), "context")
+    await settle()
+    assert.deepStrictEqual(h.submitted, ["same"])
+    const refusals = h.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt"))
+    assert.deepStrictEqual(
+      refusals.map((r) => r.body),
+      [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 1, refused: true }],
+    )
   })
 
   it("says so once vibestd stops answering, and clears it when it answers again", async () => {
