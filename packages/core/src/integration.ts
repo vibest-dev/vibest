@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, FileSystem, Layer, Path } from "effect"
+import { Clock, Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 
 import { Agents } from "./agents.ts"
 import { Db } from "./db.ts"
@@ -9,7 +9,7 @@ import { Harnesses } from "./harness.ts"
 import type { HarnessDefinition } from "./host.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { jsonObject, promptOf, executionEndOf } from "./replies.ts"
-import { Runtimes } from "./runtimes.ts"
+import { alive, Runtimes } from "./runtimes.ts"
 import { Sessions } from "./sessions.ts"
 
 export type HookCaller = {
@@ -38,11 +38,23 @@ const make = Effect.gen(function* () {
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
 
+  const terminalClosed = (id: string) =>
+    Effect.gen(function* () {
+      const session = yield* db.getSession(id)
+      if (session === undefined || session.address.id === "") return false
+      const runtime = yield* runtimes.route(session.runtime).pipe(Effect.option)
+      return Option.isSome(runtime) && !(yield* alive(runtime.value, session.address))
+    })
+
   const executionEnd = Effect.fn("Integration.executionEnd")(function* (who: HookCaller, raw: string) {
     const definition = harnesses.find(who.harness)
     if (definition === undefined) return
     const end = executionEndOf(definition, raw, yield* Clock.currentTimeMillis)
     if (!end) return yield* noteConversation(definition, who, raw)
+    if (end.status === "interrupted" && (yield* terminalClosed(who.id))) {
+      yield* Effect.log(`execution end ${who.id} (${end.harness}, interrupted as its terminal closed: an exit)`)
+      return yield* sessions.check(who.id)
+    }
     const written = yield* db.endObserved(who.id, end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })

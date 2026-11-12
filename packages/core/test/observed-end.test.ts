@@ -51,6 +51,28 @@ describe("observed execution end", () => {
   )
 
   test(
+    "an interrupted end from a closed terminal is the exit: the execution fails as the harness exited and the queued send fails",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      yield* sessions.send(id, "queued")
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* (yield* Integration).executionEnd(
+        { id, entry: false, harness: "claude" },
+        JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
+      )
+      const row = (yield* db.getSession(id))!
+      assert.strictEqual(row.executionState, "failed")
+      assert.isNotNull(row.exitedAt)
+      assert.deepStrictEqual(
+        (yield* db.inboxWithStatus(id, "failed")).map((r) => r.message),
+        ["queued"],
+      )
+    }),
+    { hooked: ["claude"] },
+  )
+
+  test(
     "a hook end is written while check holds the session lock",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
