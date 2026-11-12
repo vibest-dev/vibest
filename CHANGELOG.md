@@ -231,3 +231,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 ### Added
 
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
+
+### Changed
+
+- The entry session's row in `vibest ls` (and `--json`) now shows the git state of its directory and the repository
+  root git reports for it, like any session working in that directory; it used to show no git state and its directory
+  as the repository root.
