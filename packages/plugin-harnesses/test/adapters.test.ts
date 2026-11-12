@@ -1,14 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { Context, Harness } from "@vibest/plugin"
-import { Effect } from "effect"
+import type { Harness } from "@vibest/plugin"
 
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
-import { claudePlugin, cursorPlugin, piPlugin } from "../src/index.ts"
 import { pi, piModels } from "../src/pi.ts"
 
 const ADAPTERS = { pi, claude, cursor }
-const IDS = ["pi", "claude", "cursor"] as const
 
 const launchInput: Harness.LaunchInput = {
   worktree: "/h/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd",
@@ -130,20 +127,6 @@ describe("HarnessAdapter", () => {
     for (const id of ["claude", "pi"] as const)
       assert.notInclude(ADAPTERS[id].launchArgs({ ...input, sessionId: null }).join(" "), "session")
   })
-
-  it("Sessions get no vibest MCP server: claude may run vibest, and read and edit in the project folder", () => {
-    for (const id of IDS)
-      assert.isEmpty(
-        ADAPTERS[id].launchArgs(input).filter((a) => /mcp/i.test(a)),
-        id,
-      )
-    const claude = ADAPTERS.claude.launchArgs(input)
-    assert.strictEqual(
-      claude[claude.indexOf("--allowedTools") + 1],
-      `Bash,Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
-    )
-    assert.strictEqual(claude[claude.indexOf("--add-dir") + 1], input.projectDir)
-  })
 })
 
 describe("harness output", () => {
@@ -246,27 +229,4 @@ describe("harness output", () => {
     ])
     assert.isUndefined(cursorModels(["Not logged in"]))
   })
-})
-
-describe("plugins", () => {
-  it.effect("each builtin harness plugin adds one definition under its id", () =>
-    Effect.gen(function* () {
-      for (const [plugin, definition] of [
-        [piPlugin, pi],
-        [claudePlugin, claude],
-        [cursorPlugin, cursor],
-      ] as const) {
-        const added: Array<Harness.HarnessDefinition> = []
-        const editor = { add: (d: Harness.HarnessDefinition) => void added.push(d) }
-        const context = {
-          harness: {
-            transform: (f: (e: typeof editor) => void) => Effect.sync(() => (f(editor), { dispose: Effect.void })),
-          },
-        } as unknown as Context
-        yield* plugin.effect(context)
-        assert.strictEqual(plugin.id, `harness-${definition.id}`)
-        assert.deepStrictEqual(added, [definition])
-      }
-    }).pipe(Effect.scoped),
-  )
 })

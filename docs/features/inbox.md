@@ -59,11 +59,6 @@ reads it, and its reply can be read.
 A Pi session with herdr's own Pi hook installed gets its first prompt within seconds; `vibest daemon restart` and
 `vibest interrupt` work while its execution runs.
 
-## S26. Delivery stays prompt
-
-Over repeated executions, every queued send to a busy session goes out once the session is idle, and every closed pane's
-process ends; how long each takes is recorded.
-
 ## S32. A send repeated with one request id
 
 A send repeated with the same request id gets the same answer and makes one message, delivered once, with one more execution and no message sent.
@@ -96,7 +91,3 @@ is told so in a notice that holds the message.
 
 When a session's execution ends in an error, the execution is `failed` with its failure, and the session's creator gets exactly one
 notice that carries the failure, typed into the entry session once.
-
-## S52. A session has no report command
-
-`vibest report` is a usage error: a session tells another agent something with `vibest send`.

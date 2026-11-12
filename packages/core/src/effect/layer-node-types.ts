@@ -1,4 +1,3 @@
-import { it } from "@effect/vitest"
 import { Context, Effect, Layer } from "effect"
 
 import { LayerNode } from "./layer-node.ts"
@@ -214,6 +213,4 @@ const contracts = (tag: LayerNode.Tag<"app"> | LayerNode.Tag<"other">, flag: boo
   ]
 }
 
-it("layer node type contracts compile", () => {
-  void contracts
-})
+void contracts

@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import url from "node:url"
 
-export const CLAUDE_TYPES_PIN = "2eff7a8d21c80be48904f62ebdea36d945d7b504"
+const CLAUDE_TYPES_PIN = "2eff7a8d21c80be48904f62ebdea36d945d7b504"
 export const CLAUDE_TYPES_SHA256 = "e51e637fbbebb2a6a49c4bdc3860a251c2ca2295884822dff0f4c3e3ec802163"
 export const CLAUDE_TYPES_URL = `https://raw.githubusercontent.com/anthropics/claude-code/${CLAUDE_TYPES_PIN}/mods/types/claude-code.d.ts`
 export const CLAUDE_TYPES_CACHE = ".cache/claude-code.d.ts"

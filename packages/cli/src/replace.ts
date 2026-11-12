@@ -73,7 +73,7 @@ export interface Timing {
   readonly reply: Duration.Duration
   readonly observe: Duration.Duration
 }
-export const TIMING: Timing = {
+const TIMING: Timing = {
   reply: Duration.seconds(55),
   observe: Duration.seconds(15),
 }

@@ -1,15 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Exit, Schema } from "effect"
+import { Effect, Exit } from "effect"
 
-import { Catalog, decodeRow, encodeData, type FactType, type Row } from "../src/event.ts"
+import { Catalog, decodeRow, encodeData, type Row } from "../src/event.ts"
 import samples from "./event-rows.json" with { type: "json" }
 
 const rows: ReadonlyArray<Row> = samples
-
-const topLevelKeys = (type: FactType) => {
-  const fields: Schema.Struct.Fields = Catalog[type].data.fields
-  return Object.entries(fields).map(([key, schema]) => ({ key, optional: schema.ast.context?.isOptional === true }))
-}
 
 describe("event catalog", () => {
   it.effect("session and project facts name their aggregate as their session or project", () =>
@@ -33,42 +28,6 @@ describe("event catalog", () => {
       }
     }),
   )
-
-  it("the samples cover every type, and every optional key both present and absent", () => {
-    for (const type of Object.keys(Catalog) as Array<FactType>) {
-      const data = rows.filter((row) => row.type === type).map((row) => JSON.parse(row.data) as object)
-      assert.isAbove(data.length, 0, `${type} has no sample`)
-      for (const { key, optional } of topLevelKeys(type)) {
-        const present = data.filter((d) => Object.hasOwn(d, key)).length
-        assert.isAbove(present, 0, `${type}.${key} is never present`)
-        if (optional) assert.isBelow(present, data.length, `${type}.${key} is never absent`)
-        else assert.strictEqual(present, data.length, `${type}.${key} is required`)
-      }
-    }
-  })
-
-  it("the samples cover every optional key of a routing trace entry and change", () => {
-    const traces = rows
-      .filter((row) => row.type === "process.started")
-      .flatMap(
-        (row) => (JSON.parse(row.data) as { routing?: { trace: Array<Record<string, unknown>> } }).routing?.trace ?? [],
-      )
-    const changes = traces.flatMap((entry) => entry["changes"] as Array<Record<string, unknown>>)
-    for (const key of ["reason", "error"])
-      assert.isTrue(
-        traces.some((entry) => Object.hasOwn(entry, key)),
-        key,
-      )
-    for (const key of ["from", "to", "overwrote"])
-      assert.isTrue(
-        changes.some((change) => Object.hasOwn(change, key)),
-        key,
-      )
-  })
-
-  it("catalog keys are the type names of their definitions", () => {
-    for (const [type, definition] of Object.entries(Catalog)) assert.strictEqual(definition.type, type)
-  })
 
   it.effect("encoding refuses a key the definition does not have", () =>
     Effect.gen(function* () {

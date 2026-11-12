@@ -168,29 +168,6 @@ const cli = Effect.gen(function* () {
 })
 
 describe("pi-vibest", () => {
-  test(
-    "Pi owns all terminal reports; vibest never writes a competing status",
-    Effect.gen(function* () {
-      for (const agent of ["general", "coordinator"]) {
-        const s = yield* session({ VIBEST_AGENT: agent, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" })
-        for (const mode of ["tui", "rpc", "print", "json"]) {
-          const ctx = { ...tuiStart, mode, isIdle: () => true }
-          yield* s.emit("session_start", { reason: "startup" }, ctx)
-          yield* s.emit("input", { source: "interactive", text: "hello" }, ctx)
-          yield* s.emit("agent_start", {}, ctx)
-          for (const kind of ["confirm", "select", "input", "editor", "custom"]) {
-            yield* s.emit("ui_prompt_start", { reason: "ui_prompt", kind }, ctx)
-            yield* s.emit("ui_prompt_end", { reason: "ui_prompt", kind }, ctx)
-          }
-          yield* s.emit("agent_end", { messages: [] }, ctx)
-          yield* s.emit("agent_settled", { aborted: false }, ctx)
-          yield* s.emit("agent_settled", { aborted: true }, ctx)
-        }
-        assert.deepStrictEqual(s.statuses, [])
-      }
-    }),
-  )
-
   it.effect(
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
     () =>

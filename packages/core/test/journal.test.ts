@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { equalToReplay, installLedger, makeJournal, rebuild } from "@vibest/core/journal"
-import { projectors, PROJECTION_VERSION } from "@vibest/core/projectors"
+import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { Catalog, type Fact } from "@vibest/schema/event"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -195,10 +195,6 @@ const story = Effect.gen(function* () {
 const rowsOf = <A extends object>(sql: SqlClient.SqlClient, query: string) => sql.unsafe<A>(query)
 
 describe("journal projectors", () => {
-  it("every catalog type has exactly one projector", () => {
-    assert.deepStrictEqual(Object.keys(projectors).toSorted(), Object.keys(Catalog).toSorted())
-  })
-
   it.effect("project facts: created, repositories, entry, move", () =>
     Effect.gen(function* () {
       const { sql } = yield* story

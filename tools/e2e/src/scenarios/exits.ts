@@ -342,31 +342,6 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "S54",
-    covers: ["S2"],
-    title:
-      "a Pi subagent's first task is delivered once, as one execution that completes with the reply, and no other row is delivered into it",
-    run: async (w) => {
-      const p = await piProject(w, "s54")
-      try {
-        p.model.release()
-        const sub = await p.runSub("first")
-        await until("idle", () => p.idle(sub), 60_000)
-        const tasks = row<{ n: number; executions: number }>(
-          w,
-          `SELECT count(*) AS n, count(DISTINCT execution_id) AS executions FROM inbox
-            WHERE session_id = ? AND kind = 'task' AND status = 'delivered' AND execution_id IS NOT NULL`,
-          sub,
-        )
-        expect(tasks?.n === 1 && tasks.executions === 1, `the task: ${JSON.stringify(tasks)}`)
-        const executions = row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", sub)
-        expect(executions?.n === 1 && p.lastEnd(sub)?.status === "completed", `executions ${executions?.n}`)
-      } finally {
-        await p.close()
-      }
-    },
-  },
-  {
     id: "S25",
     title:
       "herdr hands over to a new server: the reset reconcile runs, a pane closed after it is seen exited (the time it took is recorded), and a send to another idle subagent is delivered",

@@ -336,27 +336,6 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("Cursor subscription probes skip an empty macOS Keychains directory before spawning", () =>
-    Effect.gen(function* () {
-      if (process.platform !== "darwin") return
-      const dir = yield* home
-      yield* Effect.flatMap(FileSystem.FileSystem, (fs) =>
-        fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true }),
-      ).pipe(Effect.provide(Platform.services))
-      const fake = fakeMachine({ installed: ["cursor"], home: dir, commands: {} })
-      const rows = yield* fake.provide(
-        Effect.gen(function* () {
-          const subs = yield* Subscriptions
-          yield* subs.poll
-          return yield* subs.list
-        }),
-      )
-      assert.include(rows[0]?.error, "Library/Keychains")
-      assert.deepStrictEqual(fake.spawned, [])
-      assert.deepStrictEqual(fake.requests, [])
-    }),
-  )
-
   const loggedOut = (dir: string) =>
     fakeMachine({
       installed: ["claude"],

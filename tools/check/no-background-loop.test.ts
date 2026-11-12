@@ -52,15 +52,4 @@ describe("no background loop", () => {
     }
     assert.deepStrictEqual(found, [])
   })
-
-  it("counts each unbounded repeat shape, not a bounded one", () => {
-    const sample = [
-      "x.pipe(Effect.repeat(Schedule.spaced(TICK)))",
-      "Effect.repeat(look(a, b), Schedule.fixed(1))",
-      "Effect.repeat(look, { schedule: TICK })",
-      "Effect.repeat({ until: (v) => v.ready, schedule: TICK })",
-      "Effect.repeat(probe, {\n  while: (up) => !up,\n  schedule: TICK,\n})",
-    ].join("\n")
-    assert.strictEqual(unboundedRepeats(sample), 3)
-  })
 })

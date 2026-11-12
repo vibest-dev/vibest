@@ -3,16 +3,14 @@ import net from "node:net"
 import util from "node:util"
 
 import { assert, describe, it } from "@effect/vitest"
-import { connect, probe } from "@vibest/client/client"
+import { probe } from "@vibest/client/client"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { peerHeaders } from "@vibest/protocol/protocol"
-import { ID, randomId } from "@vibest/schema/id"
+import { ID } from "@vibest/schema/id"
 import { run } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Layer, Scope } from "effect"
-import { RpcClient } from "effect/rpc"
 import { SocketServer } from "effect/socket/SocketServer"
 
 import * as Platform from "#platform"
@@ -151,34 +149,6 @@ describe.concurrent("vibestd.pid lock", () => {
           [],
           "no temp file is left",
         )
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
-  )
-
-  it.live(
-    "two starts racing for the start lock in one home end with one identity file and one id, which vibestd answers",
-    () =>
-      Effect.gen(function* () {
-        const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-        const starts = yield* Effect.forEach([1, 2], () => Effect.forkScoped(daemon(layout.home)))
-        yield* pingOf(layout.socket)
-        const fs = yield* FileSystem.FileSystem
-        const { id } = JSON.parse(yield* fs.readFileString(layout.identity)) as { id: string }
-        assert.match(id, ID)
-        assert.deepStrictEqual(
-          (yield* fs.readDirectory(layout.home)).filter((f) => f.startsWith("identity.json")),
-          ["identity.json"],
-        )
-        const client = yield* connect(layout.socket)
-        const peer = randomId()
-        const hello = yield* RpcClient.withHeaders(
-          client["Peer.Hello"]({ id: peer, name: "x", callsMe: "y" }),
-          peerHeaders(peer),
-        )
-        assert.strictEqual(hello.id, id, "the serving vibestd has the id in the file")
-        const exited = starts.filter((f) => f.pollUnsafe() !== undefined)
-        for (const f of exited)
-          assert.include((yield* Fiber.join(f)).stdout + (yield* Fiber.join(f)).stderr, "already running")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )

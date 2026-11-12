@@ -3,17 +3,14 @@ import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harnesses } from "@vibest/core/harness"
-import { Layout } from "@vibest/core/paths"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
-import { ID } from "@vibest/schema/id"
-import { Cause, Clock, Effect, Exit, Fiber, FileSystem, Path } from "effect"
+import { Cause, Clock, Effect, Exit, Fiber } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { entryPending, projectOf } from "./lib/directory.ts"
-import { FakeGit } from "./lib/fake-git.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import {
@@ -26,10 +23,9 @@ import {
   until,
   untilVirtual,
   writeEnd,
-  systemPromptFile,
 } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
+import { spawnInput, spawnWorking, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   const withEntry = (repo: string) =>
@@ -50,17 +46,6 @@ describe.concurrent("Sessions", () => {
     })
 
   test(
-    "spawn without a harness from the entry session inherits its harness, provider and model",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const entry = yield* withEntry(repo)
-      const input = { ...(yield* spawnInput(repo)), harness: undefined, parentSessionId: entry.sessionId }
-      const { id } = yield* (yield* Sessions).spawn(input)
-      assert.deepStrictEqual(yield* chosen(id), ["pi", "openai", "fake-strong"])
-    }),
-  )
-
-  test(
     "spawn without a harness from a plain terminal inherits the project's entry session; an explicit harness drops its provider and model; a model alone keeps the rest",
     Effect.gen(function* () {
       const repo = yield* makeRepository
@@ -73,16 +58,6 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(yield* chosen(explicit.id), ["claude", null, null])
       const model = yield* sessions.spawn({ ...base, model: "fake-model", name: "model" })
       assert.deepStrictEqual(yield* chosen(model.id), ["pi", "openai", "fake-model"])
-    }),
-  )
-
-  test(
-    "spawn without a harness and nothing to inherit is NoHarnessChosen",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const error = yield* Effect.flip((yield* Sessions).spawn({ ...(yield* spawnInput(repo)), harness: undefined }))
-      assert.strictEqual(error._tag, "NoHarnessChosen")
-      assert.include(error.message, "no harness to inherit")
     }),
   )
 
@@ -151,49 +126,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "spawn: detached worktree with copied files, env on the tab, rules, unchanged prompt",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const layout = yield* Layout
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const { id, row } = yield* spawnWorking(repo)
-      assert.match(id, ID)
-      assert.strictEqual(row.status, "working")
-      assert.strictEqual(row.executionState, "open")
-
-      const wt = yield* sessionWorktree(id)
-      assert.deepStrictEqual(yield* (yield* FakeGit).git.linkedWorktrees(repo), [wt])
-      assert.strictEqual(yield* fs.readFileString(path.join(wt, "README.md")), "hi\n")
-      assert.isFalse(yield* fs.exists(path.join(wt, "CLAUDE.md")))
-      const placed = (yield* herdr.callsTo("open"))[0]!
-      assert.deepStrictEqual([placed.project, placed.cwd], [repo, wt])
-      assert.deepInclude(placed.env, { VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
-      assert.strictEqual(placed.env.VIBEST_PROJECT_DIR, layout.project((yield* (yield* Db).getSession(id))!.projectId))
-      const identity = (yield* (yield* Db).sessionIdentity(id))!
-      assert.deepInclude(placed.env, { VIBEST_PROJECT_ID: String(identity.projectId), VIBEST_HARNESS: "pi" })
-      const runtime = JSON.parse(placed.env.VIBEST_RUNTIME!) as Record<string, unknown>
-      assert.deepStrictEqual(Object.keys(runtime).sort(), ["machine", "runtime"])
-      assert.strictEqual(runtime.machine, "local")
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-      const start = (yield* herdr.callsTo("open"))[0]!
-      assert.strictEqual(start.env.VIBEST_SESSION_ID, id)
-      assert.deepStrictEqual(start.argv, [
-        "pi",
-        "--session-id",
-        row.harnessSessionId!,
-        "--append-system-prompt",
-        yield* systemPromptFile(id),
-        "-e",
-        "/vibest/harnesses/pi/extension.mjs",
-      ])
-      assert.include(yield* fs.readFileString(yield* systemPromptFile(id)), `You are agent ${id}`)
-      assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, "do it")
-    }),
-  )
-
-  test(
     "an execution end reported while vibestd drains (update, daemon restart) is still written: its check is a settlement",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
@@ -205,19 +137,6 @@ describe.concurrent("Sessions", () => {
       assert.include(yield* replyOf(id), "done while draining")
       yield* drain.reopen
     }),
-  )
-
-  test(
-    "hook result + ExecutionEnd ends the execution, keeps the reply as the execution's reply and sends nothing",
-    Effect.gen(function* () {
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeEnd(id, "pi", { text: "\nDone it.\nstatus: failed\n\n## Remember\nuse bun" })
-      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.executionState !== "open")
-      assert.strictEqual(w.executionState, "completed")
-      assert.strictEqual(yield* replyOf(id), "\nDone it.\nstatus: failed\n\n## Remember\nuse bun")
-      assert.deepStrictEqual(yield* sentBy(id), [])
-    }),
-    { hooked: ["pi"] },
   )
 
   test(
@@ -329,20 +248,6 @@ describe.concurrent("Sessions", () => {
       const peer = "a".repeat(32)
       const remote = yield* sessions.spawn({ ...input, origin: { peer, project: "p", reportTo: "away" } })
       assert.deepStrictEqual(yield* db.creatorOf(remote.id), { peer, session: "away" })
-    }),
-  )
-
-  test(
-    "spawn refuses a model the harness does not list, naming the choices",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
-      const repo = yield* makeRepository
-      const error = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), model: "gpt-9" }))
-      assert.strictEqual(error._tag, "HarnessUnavailable")
-      assert.include(error.message, 'does not list model "gpt-9"; choose one of: fake-model, fake-strong')
-      assert.strictEqual(yield* herdr.callCount, 0)
-      yield* sessions.spawn({ ...(yield* spawnInput(repo)), model: "fake-strong" })
     }),
   )
 

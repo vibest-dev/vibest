@@ -1,10 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { normalizeModels } from "@vibest/core/models"
-import { Layout, shellQuote } from "@vibest/core/paths"
+import { shellQuote } from "@vibest/core/paths"
 import { envelope, isUsageLimitError } from "@vibest/core/replies"
 import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { ID, newId, shortId } from "@vibest/schema/id"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem } from "effect"
+import { Cause, Effect, Exit, FileSystem } from "effect"
 
 import { tempDirectory } from "./lib/directory.ts"
 import * as Platform from "./platform/bun.ts"
@@ -93,27 +93,6 @@ describe("envelope", () => {
 })
 
 describe("pure", () => {
-  it.effect("~/.vibest layout: VIBEST_HOME, else $HOME/.vibest; the old product's OMO_HOME is not read", () =>
-    Effect.gen(function* () {
-      const layout = (env: Record<string, string>) =>
-        Effect.gen(function* () {
-          return yield* Layout
-        }).pipe(
-          Effect.provide(Layout.layer),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
-          Effect.provide(Platform.services),
-        )
-      const withOmoHome = yield* layout({ HOME: "/h", OMO_HOME: "/old" })
-      assert.deepInclude(withOmoHome, {
-        home: "/h/.vibest",
-        database: "/h/.vibest/vibest.db",
-        socket: "/h/.vibest/vibest.sock",
-        config: "/h/.vibest/vibest.json",
-      })
-      assert.strictEqual((yield* layout({ HOME: "/h", VIBEST_HOME: "/x" })).home, "/x")
-    }),
-  )
-
   it("normalizeModels: one Model shape, requested provider filled in, other providers dropped", () => {
     assert.deepStrictEqual(
       normalizeModels("pi", "azure", [

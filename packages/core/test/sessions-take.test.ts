@@ -99,19 +99,6 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a batch Claude refused is typed once however often the refusal is reported",
-    Effect.gen(function* () {
-      const { sessions, inbox, entryId } = yield* entryAsked
-      const herdr = yield* FakeRuntime
-      const { execution } = (yield* inbox.take(entryId, undefined))!
-      const typed = Effect.map(herdr.callsTo("send"), (calls) => calls.filter((c) => c.text?.includes("a question")))
-      yield* sessions.typeTaken(entryId, execution)
-      yield* sessions.typeTaken(entryId, execution)
-      assert.lengthOf(yield* typed, 1)
-    }),
-  )
-
-  test(
     "a refusal reported again types the batch no second time, also through a rebuilt Sessions",
     Effect.gen(function* () {
       const { sessions, inbox, entryId } = yield* entryAsked

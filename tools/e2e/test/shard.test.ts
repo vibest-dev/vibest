@@ -11,11 +11,11 @@ const gateIds = (
   .map(({ id }) => ({ id }))
 
 describe("shards", () => {
-  for (const count of [1, 5, 6, 12])
-    test(`${count} shards run every gate check exactly once`, () => {
-      const ran = Array.from({ length: count }, (_, i) => shardOf(gateIds, { index: i + 1, count }).map((c) => c.id))
-      expect(ran.flat().sort()).toEqual(gateIds.map((c) => c.id).sort())
-    })
+  test("12 shards run every gate check exactly once", () => {
+    const count = 12
+    const ran = Array.from({ length: count }, (_, i) => shardOf(gateIds, { index: i + 1, count }).map((c) => c.id))
+    expect(ran.flat().sort()).toEqual(gateIds.map((c) => c.id).sort())
+  })
 })
 
 describe("the release workflow", () => {

@@ -1,2 +1,0 @@
-{"jsonrpc":"2.0","id":1,"method":"Ping","params":null,"headers":[]}
-{"jsonrpc":"2.0","id":1,"result":{"protocol":10,"version":"0.0.0-fixture","runtimes":[{"kind":"herdr","status":"online"}],"update":{"checked":null,"latest":null,"checking":false},"capabilities":{"http":true,"handoff":true,"requests":true,"watch":true,"projects":true,"spawnRuntime":true}}}

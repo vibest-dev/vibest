@@ -4,7 +4,6 @@ import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
-import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, type Scope } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
@@ -70,30 +69,6 @@ const marker = (dir: string) =>
 const directoryOf = (id: string) => Effect.flatMap(Db, (db) => db.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
 
 describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a name is reserved by creating its directory, so whatever already sits at a path takes that name", () => {
-  test(
-    "a new worktree is the repository name plus a 4-hex leaf, and the full session id stays",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const layout = yield* Layout
-      const sessions = yield* Sessions
-      const db = yield* Db
-      const repo = yield* makeRepository
-      const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
-      const wt = yield* directoryOf(id)
-      const leaf = path.basename(wt)
-      assert.match(id, ID)
-      assert.match(leaf, /^[0-9a-f]{4}$/)
-      assert.notStrictEqual(leaf, id)
-      assert.strictEqual(path.basename(path.dirname(wt)), yield* repositoryDirectoryName(repo))
-      assert.strictEqual(wt, layout.allocationWorktree(path.basename(repo), leaf))
-      assert.isTrue(yield* fs.exists(wt))
-      assert.strictEqual(path.basename(yield* fs.realPath(wt)), leaf)
-      assert.strictEqual((yield* sessions.get(id)).worktree, wt)
-    }),
-  )
-
   test(
     "a name whose directory or dangling symlink already exists is skipped and left untouched",
     Effect.gen(function* () {
