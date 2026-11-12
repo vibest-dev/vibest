@@ -36,6 +36,7 @@ const chosen = (harness: string | undefined, claude: boolean) =>
     Effect.provide(subscriptionsLayer),
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
+    Effect.provide(Agents.layer),
     Effect.provide(Bus.layer),
     Effect.provide(Agents.layer),
     Effect.scoped,

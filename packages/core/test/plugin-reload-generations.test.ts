@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugins"
@@ -7,7 +8,6 @@ import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "../../cli/src/platform/bun.ts"
-import { Agents } from "../src/agents.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
 const events: Array<string> = []
@@ -91,8 +91,8 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(harnessesLayer()),
           Layer.provide(Layer.effect(Layout, Layout.make(dir))),
           Layer.provide(runtimesLayer),
-          Layer.provide(Bus.layer),
           Layer.provide(Agents.layer),
+          Layer.provide(Bus.layer),
           Layer.build,
           Effect.map(Context.get(Plugins)),
         )
@@ -109,10 +109,9 @@ describe("plugins: builtins follow the latest config", () => {
         const spawning = yield* Effect.forkChild(plugins.start(event))
         yield* TestClock.adjust("10 seconds")
         const decision = yield* Fiber.join(spawning)
-        assert.deepStrictEqual(
-          decision.trace.map((t) => t.plugin),
-          ["vibest"],
-          "the fallback ran with the removed builtin off",
+        assert.isFalse(
+          decision.trace.some((t) => t.plugin === "harness-x"),
+          "the removed builtin ran in the fallback",
         )
         release()
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),

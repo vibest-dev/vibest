@@ -488,7 +488,8 @@ export class Sessions extends Context.Service<
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
         if (state !== undefined && busy(state)) return
         if (state === undefined && !(yield* alive(h, terminal))) {
-          if (session.exitedAt !== null && (yield* db.pendingInbox(id)).length === 0) return
+          if (session.exitedAt === null) return yield* check(id)
+          if ((yield* db.pendingInbox(id)).length === 0) return
           if (!(yield* harnesses.get(session.harnessId)).ownSessionId && !session.harnessSessionId)
             return yield* new NoSuchSession({
               id,

@@ -7,6 +7,16 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Cursor is a plugin, claude is the default harness** (users of Cursor, and anyone relying on "no harness to
+  inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the file
+  `harnesses/cursor/plugin.js` of the install directory to `plugins` in `~/.vibest/vibest.json` (or put it in
+  `~/.vibest/plugins/`); until then `--harness cursor` fails saying no plugin provides it, and a Cursor session cannot
+  resume or restart. The first bare `vibest` in a project with no `--harness` and no plugin choosing now starts Claude when
+  Claude is available. To choose differently write `"-harness-default"` in
+  `plugins` and pick the harness in a plugin of your own.
+- **`-<id>` removes builtin plugins** (plugin authors): an entry such as `"-runtime-choice"` now removes the builtin with
+  that exact id; `"-*"` and `"-prefix.*"` still match only user plugins. Builtins are kept or removed from the config
+  text at every activation, so un-removing one takes effect on the next reload without restarting vibestd.
 - **Sessions run as agent definitions; no session is "main"** (users, plugin authors, anyone reading `vibest.db` or
   `vibest ls`): a definition (`{ id, description, system, guard? }`, registered by a plugin with `agent.transform`)
   decides a session's system prompt and its extra guard rules; the built-in ones are `coordinator` (what bare `vibest`
