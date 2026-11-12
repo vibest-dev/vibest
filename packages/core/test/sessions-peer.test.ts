@@ -1,5 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { Integration } from "@vibest/core/integration"
 import { peerAdmitPause } from "@vibest/core/sessions"
 import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { TestClock } from "effect/testing"
@@ -184,7 +185,7 @@ describe.concurrent("Sessions", () => {
       const closesBefore = (yield* herdr.callsTo("close")).map((c) => c.terminal)
       const created = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open")
-      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
+      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo, "claude")), peer: owner.id })
       yield* held.reached
       yield* held.release("failed")
       yield* until(owner.db.getSession(id), (w) => !!w && w.exitedAt !== null)
@@ -196,6 +197,12 @@ describe.concurrent("Sessions", () => {
       assert.isTrue(yield* fs.exists(worktree))
       assert.strictEqual((yield* herdr.callsTo("open")).length, created + 1)
       assert.strictEqual(yield* owner.db.sessionDirectory(id), yield* owner.db.sessionDirectory(owner.id))
+      yield* owner.sessions.send(id, "start again")
+      const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === created + 2)
+      const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
+      yield* until(owner.db.getSession(id), (w) => w?.exitedAt === null && w.address.id !== "")
+      assert.strictEqual(yield* owner.db.currentProcessId(id), reporter)
+      assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
     }),
   )
 })

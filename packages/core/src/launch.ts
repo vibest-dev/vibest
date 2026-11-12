@@ -1,3 +1,4 @@
+import { LaunchFailed } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
 
 import { Agents, unknownAgent } from "./agents.ts"
@@ -5,7 +6,6 @@ import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId }
 import type { AgentsShape } from "./host.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
-import { LaunchFailed } from "./sessions.ts"
 import {
   projectText,
   SystemPromptDirUnsafe,

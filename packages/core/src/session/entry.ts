@@ -15,8 +15,8 @@ import { describeSpawn, Plugins } from "../plugins.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
-import { runtimeEnv } from "../sessions.ts"
 import { SessionLive } from "./live.ts"
+import { runtimeEnv } from "./placement.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 

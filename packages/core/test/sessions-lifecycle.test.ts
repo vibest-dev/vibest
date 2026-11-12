@@ -1,11 +1,13 @@
 import { assert, describe } from "@effect/vitest"
+import { Db } from "@vibest/core/db"
+import { Integration } from "@vibest/core/integration"
 import { Effect, Fiber, FileSystem } from "effect"
 import { TestClock } from "effect/testing"
 
 import { entryPending } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { untilVirtual, writeEnd } from "./lib/observe.ts"
+import { until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
   claudeEnd,
@@ -18,6 +20,34 @@ import {
 } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
+  test(
+    "a resume whose start fails closes the pane it placed; the next resume on the same harness starts a process whose terminal report is accepted",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions } = yield* idleSession(yield* makeRepository)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      const placed = (yield* herdr.callsTo("open")).length
+      const held = yield* herdr.hold("open", id)
+      yield* sessions.send(id, "again")
+      yield* held.reached
+      yield* held.release("failed")
+      yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 1)
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      const notice = yield* until(sqlNotices(id), (rows) =>
+        rows.some((message) => message.includes("A message to") && message.includes("again")),
+      )
+      assert.include(notice.at(-1)!, "open: failed")
+      yield* sessions.send(id, "once more")
+      const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 2)
+      const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
+      const db = yield* Db
+      assert.strictEqual(yield* db.currentProcessId(id), reporter)
+      yield* until(db.getSession(id), (row) => row?.exitedAt === null && row.address.id !== "")
+      assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
+    }),
+    { hooked: ["pi"] },
+  )
+
   test(
     "a Send accepted just before vibest rm does not bring the removed session back; its message fails once",
     Effect.gen(function* () {

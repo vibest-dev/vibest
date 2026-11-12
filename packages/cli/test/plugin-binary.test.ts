@@ -116,14 +116,11 @@ const byId = (listed: ReadonlyArray<PluginInfo>, id: string) => listed.find((p) 
 const listUntil = async (
   list: () => Promise<ReadonlyArray<PluginInfo>>,
   done: (listed: ReadonlyArray<PluginInfo>) => boolean,
-  touch?: () => Promise<void>,
 ) => {
   let listed: ReadonlyArray<PluginInfo> = []
-  let polls = 0
   for (const deadline = Date.now() + fsEventsDeliveryUnderLoadMs; Date.now() < deadline; await Bun.sleep(100)) {
     listed = await list()
     if (done(listed)) return listed
-    if (touch && ++polls % 30 === 0) await touch()
   }
   return assert.fail(`gave up; last listing: ${JSON.stringify(listed)}`)
 }
@@ -172,8 +169,7 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
         )!
         assert.deepInclude(hung, { status: "active", revision: second!.revision })
 
-        const writeV3 = () => fs.writeFile(version, versionFileWithTopLevelAwait("v3"))
-        await writeV3()
+        await fs.writeFile(version, versionFileWithTopLevelAwait("v3"))
         const fixed = byId(
           await listUntil(
             list,
@@ -181,7 +177,6 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
               byId(l, "live") !== undefined &&
               byId(l, "live")!.error === undefined &&
               byId(l, "live")!.revision !== second.revision,
-            writeV3,
           ),
           "live",
         )!

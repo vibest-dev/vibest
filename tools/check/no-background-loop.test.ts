@@ -26,6 +26,13 @@ const ALLOWED: Record<string, Record<string, { readonly count: number; readonly 
   "packages/core/src/update-check.ts": {
     "Effect.repeat": { count: 1, reason: "the hourly look-up of the latest vibest, approved by the owner" },
   },
+  "packages/core/src/plugin-supervisor.ts": {
+    "Effect.forever": {
+      count: 1,
+      reason:
+        "the plugin rescan every second, approved by the owner: macOS FSEvents drops change events under file-writing load and Bun fs.watch does not report the drop",
+    },
+  },
 }
 
 const files = (dir: string): Array<string> =>
