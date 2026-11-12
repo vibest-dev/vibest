@@ -225,3 +225,7 @@ release. Each release lists what broke, who is affected and how to migrate under
   The Ping capability `harnesses` is removed; protocol 8 implies the method. New RPC `Integration.Guard`.
 - **`Project.StartMain`** (RPC clients): `harness` is optional and the error union gains `LaunchFailed`. A first start
   without a harness (no main agent to inherit from) now fails with `LaunchFailed` instead of `NoHarnessChosen`.
+
+### Added
+
+- `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
