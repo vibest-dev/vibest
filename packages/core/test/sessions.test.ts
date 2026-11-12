@@ -397,15 +397,18 @@ describe.concurrent("Sessions", () => {
     "a session's in-memory flags, lock and live status go once it ends; resumed, its next execution ends as any execution does; archived, they go again with no check of its own",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 1)
+      const { id, sessions, db, entryId } = yield* spawnWorking(yield* makeRepository)
+      yield* sessions.check(entryId)
+      const entryTracked = (yield* sessions.inMemory).tracked - 1
+      const entryStatuses = (yield* (yield* SessionLive).size).statuses - 1
+      assert.deepInclude(yield* sessions.inMemory, { tracked: entryTracked + 1, locks: 0 })
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses + 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
       assert.deepInclude(yield* db.getSession(id), { executionState: "failed" })
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
-      yield* until(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      yield* until(sessions.inMemory, (m) => m.tracked === entryTracked && m.locks === 0)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       yield* sessions.check(id)
@@ -416,11 +419,11 @@ describe.concurrent("Sessions", () => {
       assert.deepInclude(yield* db.getSession(id), { executionState: "completed" })
       assert.include(yield* replyOf(id), "done again")
       yield* TestClock.adjust("10 seconds")
-      assert.strictEqual((yield* sessions.inMemory).tracked, 1)
+      assert.strictEqual((yield* sessions.inMemory).tracked, entryTracked + 1)
       assert.deepInclude(yield* db.getSession(id), { status: "idle" })
       yield* sessions.remove(id)
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
-      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === entryTracked && m.locks === 0)
     }),
     { hooked: ["pi"] },
   )
