@@ -128,6 +128,7 @@ export const processesOn = (platform: ProcessPlatform["Service"]) =>
 
 export {
   makeRepository,
+  restartSessions,
   PluginHost,
   callerPlugin,
   sessionFrom as testLayer,

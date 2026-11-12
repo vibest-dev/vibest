@@ -1,7 +1,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { cwdHolders, livenessOf, parseProcessTable, Processes, runFor, sessionTree } from "@vibest/core/processes"
-import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -13,6 +12,7 @@ import {
   FakeRuntime,
   FakeProcesses,
   makeRepository,
+  restartSessions,
   processEnds,
   settled,
   tempDirectory,
@@ -107,7 +107,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.isTrue(row.metadata.archived)
       assert.isTrue(row.metadata.removed)
       assert.isTrue(yield* fs.exists(worktree))
-      const freshSessions = yield* Sessions.make.pipe(Effect.provideServiceEffect(SessionLocks, SessionLocks.make))
+      const freshSessions = yield* restartSessions
       assert.deepInclude(yield* freshSessions.remove(id), {
         processes: "exited",
         pane: "closed",

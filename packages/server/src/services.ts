@@ -22,6 +22,7 @@ import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Move } from "@vibest/core/session/move"
 import { Placement } from "@vibest/core/session/placement"
+import { Reconcile } from "@vibest/core/session/reconcile"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -48,6 +49,7 @@ export const services = LayerNode.group([
   Archive.node,
   Delivery.node,
   Exits.node,
+  Reconcile.node,
   Sessions.node,
   Integration.node,
   Peers.node,
