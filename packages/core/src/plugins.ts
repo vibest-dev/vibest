@@ -519,7 +519,6 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
       const host = yield* makeHost()
       const sources = yield* makeSources(DEFAULT_TIMEOUT)
       const builtins = yield* Builtins
-      yield* host.activate(builtins)
       yield* supervise(host, builtins, sources)
       return host.service
     }),

@@ -23,9 +23,9 @@ import {
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
-import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
+import { noticeEnvelope } from "@vibest/core/replies"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
@@ -208,7 +208,7 @@ describe("pi-vibest", () => {
           },
           { agent: "coordinator" },
         )
-        yield* (yield* Inbox).enqueue({ sessionId: coord.sessionId, message: "survives the gap" })
+        yield* db.insertNoticeTo(coord.sessionId, "survives the gap")
         const notes: Array<string> = []
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
@@ -234,7 +234,7 @@ describe("pi-vibest", () => {
         )
         assert.deepInclude(s.messages[0]?.message, {
           customType: "vibest",
-          content: "survives the gap",
+          content: noticeEnvelope("survives the gap"),
           display: false,
         })
         assert.deepStrictEqual(notes, [])
@@ -273,7 +273,6 @@ describe("pi-vibest", () => {
     () =>
       Effect.gen(function* () {
         const db = yield* Db
-        const inbox = yield* Inbox
         const layout = yield* Layout
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
@@ -307,7 +306,7 @@ describe("pi-vibest", () => {
           { reason: "startup" },
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
-        const report = (message: string) => inbox.enqueue({ sessionId: coord.sessionId, message })
+        const report = (message: string) => db.insertNoticeTo(coord.sessionId, message)
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
@@ -316,17 +315,17 @@ describe("pi-vibest", () => {
         yield* Layer.build(vibestd)
         yield* report("second")
         yield* until(contents, (c) => c.length === 2)
-        assert.deepStrictEqual(yield* contents, ["first", "second"])
+        assert.deepStrictEqual(yield* contents, [noticeEnvelope("first"), noticeEnvelope("second")])
         assert.deepStrictEqual(notes, [])
         const closeSeen = TestClock.withLive(Effect.sleep("500 millis"))
         yield* s.emit("session_shutdown")
         yield* closeSeen
         yield* report("after shutdown")
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
-        assert.deepStrictEqual(yield* contents, ["first", "second"])
+        assert.deepStrictEqual(yield* contents, [noticeEnvelope("first"), noticeEnvelope("second")])
         assert.deepStrictEqual(
           (yield* entryPending(db, yield* projectOf("r"))).map((r) => r.message),
-          ["after shutdown"],
+          [noticeEnvelope("after shutdown")],
         )
       }).pipe(Effect.scoped, Effect.provide(pulling())),
     30_000,
@@ -401,7 +400,6 @@ describe("pi-vibest", () => {
     "Coordinator: no MCP server, its tool rules allow vibest, and inbox rows arrive as hidden custom messages, never through agent.prompt",
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
-      const inbox = yield* Inbox
       const db = yield* Db
       yield* runtime.addPane("w1:p7", "ws", "/")
       const row = idleRow("pi")
@@ -417,10 +415,7 @@ describe("pi-vibest", () => {
         },
         { agent: "coordinator" },
       )
-      yield* inbox.enqueue({
-        sessionId: coord.sessionId,
-        message: "<agent-result>one</agent-result>",
-      })
+      yield* db.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
 
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
@@ -462,10 +457,7 @@ describe("pi-vibest", () => {
         (n) => n === 1,
       )
       yield* finishExecution(s, executionOf(s.messages[0]!.message))
-      yield* inbox.enqueue({
-        sessionId: coord.sessionId,
-        message: "<agent-message>two</agent-message>",
-      })
+      yield* db.insertNoticeTo(coord.sessionId, "<agent-message>two</agent-message>")
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 2,
@@ -477,8 +469,8 @@ describe("pi-vibest", () => {
           m.options,
         ]),
         [
-          ["<agent-result>one</agent-result>", false, { triggerTurn: true }],
-          ["<agent-message>two</agent-message>", false, { triggerTurn: true }],
+          [noticeEnvelope("<agent-result>one</agent-result>"), false, { triggerTurn: true }],
+          [noticeEnvelope("<agent-message>two</agent-message>"), false, { triggerTurn: true }],
         ],
       )
       assert.notStrictEqual(executionOf(s.messages[0]!.message), executionOf(s.messages[1]!.message))

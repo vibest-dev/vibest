@@ -150,9 +150,12 @@ describe("a vibestd restart", () => {
         const { sessionId } = yield* db.startEntry(yield* projectOf("a"), "claude", false, place, {
           agent: "coordinator",
         })
-        const row = yield* db.insertInbox({ sessionId, message: "a" })
-        assert.deepStrictEqual(yield* db.claim(sessionId, [row.id]), [row.id])
-        return row.id
+        yield* db.insertNoticeTo(sessionId, "a")
+        const [row] = yield* (yield* SqlClient.SqlClient)<{
+          id: number
+        }>`SELECT id FROM inbox WHERE session_id = ${sessionId}`
+        assert.deepStrictEqual(yield* db.claim(sessionId, [row!.id]), [row!.id])
+        return row!.id
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
         yield* (yield* Db).recoverDelivering(() => "")

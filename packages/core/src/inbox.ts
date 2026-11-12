@@ -8,6 +8,7 @@ import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
+import { unwrapped } from "./replies.ts"
 import { agentState, alive, RuntimeError, type Runtime } from "./runtimes.ts"
 
 export type Presence = "idle" | "busy" | "gone" | "unknown"
@@ -38,7 +39,7 @@ export const line = (
   const more = batch.length > 1 ? ` · +${batch.length - 1} more` : ""
   const fit = (prefix: string, middle: string, suffix: string) =>
     `${prefix}${clip(middle, LINE_MAX - codePoints(prefix) - codePoints(suffix))}${suffix}`
-  if (last.kind === "notice") return fit("Notice: ", last.message.trim().split("\n")[0] ?? "", more)
+  if (last.kind === "notice") return fit("Notice: ", unwrapped(last.message).trim().split("\n")[0] ?? "", more)
   const sender = last.sender ?? ""
   const session = who(sender)
   const type =
@@ -56,7 +57,7 @@ export type Undelivered = ReadonlyArray<{
 export class Inbox extends Context.Service<
   Inbox,
   {
-    readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow>
+    readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow | undefined>
     readonly pulls: (harnessId: string) => boolean
     readonly take: (sessionId: string, process: number | undefined) => Effect.Effect<Taken | undefined>
     readonly stream: (sessionId: string) => Stream.Stream<null>

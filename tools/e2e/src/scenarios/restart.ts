@@ -20,11 +20,9 @@ import {
   compiled,
   expect,
   expectFacts,
-  fail,
   harnesses,
   herdr,
   readDb,
-  row,
   rows,
   SESSIONS,
   Skip,
@@ -327,7 +325,7 @@ const checks: ReadonlyArray<Check> = [
         await reached(
           "the continue notice of the interrupted execution, with the earlier executions",
           (m) =>
-            /^user: .*"text":"vibest update is done and restarted this agent; do not run it again, continue the interrupted work\./.test(
+            /^user: .*"text":"(<vibest-notice>\\n<message>\\n)?vibest update is done and restarted this agent; do not run it again, continue the interrupted work\./.test(
               m.at(-1)!,
             ) &&
             m.some((x) => x.includes("done-zero")) &&
@@ -347,12 +345,6 @@ const checks: ReadonlyArray<Check> = [
             `${id}'s processes: ${JSON.stringify(ends)}`,
           )
         }
-        const notice = () =>
-          row<{ status: string }>(w, "SELECT status FROM inbox WHERE session_id = ? AND kind = 'notice'", before.id)
-            ?.status
-        await until("the continue notice delivered", () => notice() === "delivered").catch(() =>
-          fail(`the entry session's continue notice: ${notice()}`),
-        )
       } finally {
         model.stop()
         await dropHerdrSession(w, session)

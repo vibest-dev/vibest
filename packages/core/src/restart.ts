@@ -6,9 +6,9 @@ import { awaitEvent, Bus, type EngineEvent } from "./bus.ts"
 import type { EntryRow, Db, SessionRow } from "./db.ts"
 import type { HarnessId } from "./harness.ts"
 import type { HarnessDefinition, HarnessesShape } from "./host.ts"
-import type { Inbox } from "./inbox.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
+import { noticeEnvelope } from "./replies.ts"
 import {
   agentState,
   type AgentSeen,
@@ -42,21 +42,6 @@ export const CONTINUE =
   "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
 
 export const continueText = (version: string) => `${CONTINUE} vibest is now ${version}.`
-
-export const continueNotice = (version: string, restarted: ReadonlyArray<Restarted>) =>
-  [
-    CONTINUE,
-    `vibest is now ${version}.`,
-    ...(restarted.some((r) => r.ok)
-      ? [
-          `Restarted: ${restarted
-            .filter((r) => r.ok)
-            .map((r) => r.id)
-            .join(", ")}.`,
-        ]
-      : []),
-    ...restarted.filter((r) => !r.ok).map((r) => r.message),
-  ].join("\n")
 
 export const current = (integration: { readonly version: string; readonly protocol: number } | undefined) =>
   integration !== undefined && integration.version === VERSION && integration.protocol === PROTOCOL
@@ -115,7 +100,6 @@ export const sessionRestart = (deps: {
   readonly harnesses: Pick<HarnessesShape, "get" | "find">
   readonly processes: Processes["Service"]
   readonly restarting: SessionLive["Service"]["restarting"]
-  readonly inbox: Inbox["Service"]
   readonly scope: Scope.Scope
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly checkLater: (id: string) => Effect.Effect<void>
@@ -134,7 +118,7 @@ export const sessionRestart = (deps: {
     text: string,
   ) => Effect.Effect<string | undefined, unknown>
 }) => {
-  const { db, runtimes, harnesses, processes, inbox } = deps
+  const { db, runtimes, harnesses, processes } = deps
 
   const routed = (kind: string | null | undefined) =>
     kind ? runtimes.route(kind).pipe(Effect.orElseSucceed(() => undefined)) : Effect.succeed(undefined)
@@ -243,7 +227,7 @@ export const sessionRestart = (deps: {
               h,
               (yield* db.getSession(id)) ?? session,
               session.address,
-              continueText(VERSION),
+              noticeEnvelope(continueText(VERSION)),
             )
             return missed === undefined
               ? { id, projectId, ok: true, message: `${id} restarted; its interrupted execution continues` }
@@ -252,7 +236,7 @@ export const sessionRestart = (deps: {
       })
     })
 
-  const restartEntry = (entry: EntryRow, before: ReadonlyArray<Restarted>, wasWorking: boolean) =>
+  const restartEntry = (entry: EntryRow, wasWorking: boolean) =>
     Effect.gen(function* () {
       const { id, projectId } = entry
       const label = `${id} (entry session)`
@@ -282,20 +266,17 @@ export const sessionRestart = (deps: {
         locked: (effect) => effect,
         reconcile: deps.checkLater(id),
         hint: "",
-        onBack: () =>
+        onBack: (h) =>
           Effect.gen(function* () {
-            const restarted: Restarted = {
-              id,
-              projectId,
-              ok: true,
-              message: `${label} restarted${interrupted ? "; its interrupted execution continues" : ""}`,
-            }
-            if (interrupted)
-              yield* inbox.enqueue({
-                sessionId: id,
-                message: continueNotice(VERSION, [...before.filter((r) => r.projectId === projectId), restarted]),
-              })
-            return restarted
+            if (!interrupted) return { id, projectId, ok: true, message: `${label} restarted` } satisfies Restarted
+            const row = yield* db.getSession(id)
+            const missed =
+              row === undefined
+                ? "it is gone"
+                : yield* deps.prompt(h, row, entry.address!, noticeEnvelope(continueText(VERSION)))
+            return missed === undefined
+              ? { id, projectId, ok: true, message: `${label} restarted; its interrupted execution continues` }
+              : { id, projectId, ok: false, message: `${label} restarted, but ${missed}` }
           }),
       })
     })
@@ -312,57 +293,73 @@ export const sessionRestart = (deps: {
   const reports = (harness: HarnessId) => harnesses.find(harness)?.ready === "integration"
 
   const outdated = Effect.gen(function* () {
-    const agents = (yield* db.listSessions()).filter(
-      (row) =>
-        !row.entry &&
-        reports(row.harnessId) &&
-        !current(row.metadata.integration) &&
-        !(row.metadata.archived || row.metadata.removed) &&
-        row.startedAt !== null &&
-        row.address.id !== "",
-    )
-    const entries: Array<Outdated> = []
-    for (const entry of yield* db.entrySessions) {
-      if (!reports(entry.harnessId) || current(entry.integration)) continue
-      const seen = yield* entryRunning(entry)
-      if (seen === undefined) continue
-      entries.push({
-        id: entry.id,
-        agent: entry.agent,
-        harness: entry.harnessId,
-        integration: entry.integration?.version ?? null,
-        working: stateOf(seen) === "working",
-        blocked:
-          blockedOf(harnesses.find(entry.harnessId), yield* routed(entry.runtime), entry.pid, entry.harnessSessionId) ??
-          null,
-      })
-    }
-    const subs: Array<Outdated> = []
-    for (const row of agents)
-      subs.push({
+    const sessions = (yield* db.listSessions())
+      .filter(
+        (row) =>
+          !row.entry &&
+          reports(row.harnessId) &&
+          !current(row.metadata.integration) &&
+          !(row.metadata.archived || row.metadata.removed) &&
+          row.startedAt !== null &&
+          row.address.id !== "",
+      )
+      .map((row) => ({
         id: row.id,
         agent: row.agent,
-        harness: row.harnessId,
-        integration: row.metadata.integration?.version ?? null,
-        working: row.executionState === "open",
+        harnessId: row.harnessId,
+        integration: row.metadata.integration,
+        runtime: row.runtime,
+        pid: row.metadata.pid,
+        harnessSessionId: row.harnessSessionId,
+        working: Effect.succeed<boolean | undefined>(row.executionState === "open"),
+      }))
+    const entries = (yield* db.entrySessions)
+      .filter((entry) => reports(entry.harnessId) && !current(entry.integration))
+      .map((entry) => ({
+        id: entry.id,
+        agent: entry.agent,
+        harnessId: entry.harnessId,
+        integration: entry.integration,
+        runtime: entry.runtime,
+        pid: entry.pid,
+        harnessSessionId: entry.harnessSessionId,
+        working: entryRunning(entry).pipe(
+          Effect.map((seen) => (seen === undefined ? undefined : stateOf(seen) === "working")),
+        ),
+      }))
+    const listed: Array<Outdated> = []
+    for (const candidate of [...sessions, ...entries]) {
+      const working = yield* candidate.working
+      if (working === undefined) continue
+      listed.push({
+        id: candidate.id,
+        agent: candidate.agent,
+        harness: candidate.harnessId,
+        integration: candidate.integration?.version ?? null,
+        working,
         blocked:
           blockedOf(
-            harnesses.find(row.harnessId),
-            yield* routed(row.runtime),
-            row.metadata.pid,
-            row.harnessSessionId,
+            harnesses.find(candidate.harnessId),
+            yield* routed(candidate.runtime),
+            candidate.pid,
+            candidate.harnessSessionId,
           ) ?? null,
       })
-    return [...subs, ...entries]
+    }
+    return listed
   })
 
   const restart = (ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
     Effect.gen(function* () {
       const entries = (yield* db.entrySessions).filter((entry) => ids.includes(entry.id))
-      const agents = ids.filter((id) => !entries.some((entry) => entry.id === id))
-      const first = yield* Effect.forEach(agents, restartAgent, { concurrency: RESTART_CONCURRENCY })
-      const last = yield* Effect.forEach(entries, (entry) => restartEntry(entry, first, working.includes(entry.id)))
-      const outcomes = [...first, ...last]
+      const outcomes = yield* Effect.forEach(
+        ids,
+        (id) => {
+          const entry = entries.find((candidate) => candidate.id === id)
+          return entry === undefined ? restartAgent(id) : restartEntry(entry, working.includes(id))
+        },
+        { concurrency: RESTART_CONCURRENCY },
+      )
       for (const o of outcomes) yield* o.ok ? Effect.logInfo(o.message) : Effect.logWarning(o.message)
       return outcomes
     })

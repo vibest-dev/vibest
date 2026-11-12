@@ -27,3 +27,15 @@ for (const harness of ["pi", "claude", "cursor"]) {
     })
   }
 }
+
+const cursorPlugin = await Bun.build({
+  entrypoints: [path.join(app, "../plugin-harnesses/src/cursor-plugin.ts")],
+  outdir: path.join(outdir, "cursor"),
+  naming: "plugin.js",
+  target: "bun",
+  external: ["effect", "effect/*", "@vibest/plugin", "@vibest/plugin/*"],
+})
+if (!cursorPlugin.success) {
+  for (const log of cursorPlugin.logs) console.error(log)
+  process.exit(1)
+}

@@ -160,7 +160,9 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
       if (options.heldMs !== undefined && last?.role === "user") {
         const from = Date.now()
         await Bun.sleep(options.heldMs)
-        if (marker !== undefined && !text(last).includes("<agent-")) answered.push({ marker, from, to: Date.now() })
+        const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+        if (marker !== undefined && (creatorIn(system) !== undefined || !text(last).includes("<agent-")))
+          answered.push({ marker, from, to: Date.now() })
       }
       return new Response(answer(messages), { headers: sseHeaders })
     },
@@ -187,7 +189,8 @@ export const heldModel = () => {
       const entryAnswer = entryRun(messages)
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const last = text(messages.at(-1))
-      const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
+      const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+      const task = creatorIn(system) === undefined && last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
       if (!task) return new Response(reply("ok"), { headers: sseHeaders })
       requestsPerTask.set(task[1]!, (requestsPerTask.get(task[1]!) ?? 0) + 1)
       const answer = reply(`done-${task[1]}\nstatus: completed`)
@@ -239,7 +242,8 @@ export const holdsSlowMessageModel = () => {
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       seen.push(messages.map((m) => `${m.role}: ${text(m)}`))
       const last = text(messages.at(-1))
-      if (last.includes("<agent-") && last.includes("done-slow"))
+      const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+      if (creatorIn(system) === undefined && last.includes("<agent-") && last.includes("done-slow"))
         return new Response(
           new ReadableStream({
             start: (c) =>
@@ -251,7 +255,7 @@ export const holdsSlowMessageModel = () => {
           }),
           { headers: sseHeaders },
         )
-      if (creatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer"))) !== undefined) {
+      if (creatorIn(system) !== undefined) {
         const done = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))
         return new Response(done ? sendOrReply(messages, `done-${done[1]}`) : reply("ok"), { headers: sseHeaders })
       }

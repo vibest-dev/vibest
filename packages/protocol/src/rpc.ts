@@ -368,8 +368,9 @@ export class VibestRpcs extends RpcGroup.make(
   protocol(Rpc.make("Plugins", { success: Schema.Array(PluginInfo) })),
   protocol(
     Rpc.make("Harnesses.List", {
-      payload: { provider: Schema.optional(Schema.String) },
+      payload: { provider: Schema.optional(Schema.String), machine: Schema.optional(Schema.String) },
       success: Schema.Array(HarnessChoice),
+      error: Schema.Union([Forbidden, ...LINE_ERRORS]),
     }),
   ),
   scoped(
@@ -840,7 +841,7 @@ type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "peer"
 export const ACCESS = {
   Ping: ["open", "peer"],
   Plugins: "open",
-  "Harnesses.List": "open",
+  "Harnesses.List": ["open", "peer"],
   "Integration.Guard": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
@@ -894,7 +895,7 @@ export const PEER_CALLS: ReadonlySet<string> = new Set(
 )
 
 export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
-  [...PEER_CALLS].filter((method) => method !== "Ping" && !method.startsWith("Peer.")),
+  [...PEER_CALLS].filter((method) => method !== "Ping" && method !== "Harnesses.List" && !method.startsWith("Peer.")),
 )
 
 export const CAPABILITIES = {

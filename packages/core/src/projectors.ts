@@ -2,7 +2,7 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 7
+export const PROJECTION_VERSION = 8
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -106,6 +106,7 @@ export const PROJECTION_SCHEMA = [
     seq        INTEGER NOT NULL,
     peer_id    TEXT NOT NULL,
     session_id TEXT NOT NULL,
+    recipient  TEXT,
     kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
     content    TEXT NOT NULL,
     created_at INTEGER NOT NULL
@@ -267,8 +268,9 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
       ON CONFLICT (id) DO UPDATE SET name = excluded.name, connected_at = excluded.connected_at`,
 
   "outbox.queued": (fact, sql) =>
-    sql`INSERT INTO outbox (id, seq, peer_id, session_id, kind, content, created_at)
-      VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.kind ?? "notice"},
+    sql`INSERT INTO outbox (id, seq, peer_id, session_id, recipient, kind, content, created_at)
+      VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.recipient ?? null},
+        ${fact.data.kind ?? "notice"},
         ${fact.data.content}, ${fact.at})`,
   "outbox.acked": (fact, sql) =>
     sql`DELETE FROM outbox WHERE peer_id = ${fact.data.peer} AND ${sql.in("id", fact.data.ids)}`,

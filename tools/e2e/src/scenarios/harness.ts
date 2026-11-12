@@ -2,9 +2,10 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { expect, Skip, type World } from "../world.ts"
+import { expect, harnesses, Skip, until, type World } from "../world.ts"
+import { addCursorPlugin } from "../world/plugins.ts"
 
-const HARNESSES = ["claude", "pi", "cursor"] as const
+const HARNESSES = ["claude", "pi"] as const
 type Listed = { harness: string; binary: string; available: boolean; error: string | null }
 type Models = { models: Array<{ harness: string; model: string }>; errors?: Array<string> }
 
@@ -42,7 +43,13 @@ const checks: ReadonlyArray<Check> = [
       )
       expect(ssh.code === 0, "temporary HOME inherited SSH session variables")
       await w.stopDaemon()
+      await addCursorPlugin(w, harnesses)
       try {
+        const plugins = await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })
+        expect(
+          plugins.some((p) => p.id === "harness-cursor" && p.status === "active"),
+          JSON.stringify(plugins),
+        )
         const models = await w.json<Models>(["harness", "models", "cursor"], { env })
         expect(
           models.models.length === 0 && !!models.errors?.[0]?.includes("Library/Keychains"),
@@ -62,6 +69,26 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         await w.stopDaemon()
       }
+    },
+  },
+  {
+    id: "H8",
+    title:
+      "Cursor is not built in: `vibest run cursor` from the entry session is refused saying no plugin provides it and how to add one; adding the shipped harnesses/cursor/plugin.js to vibest.json makes `cursor` appear in `harness list`",
+    run: async (w) => {
+      await w.entry()
+      const before = await w.viaEntry(["run", "cursor", "--", "hello"], { timeoutMs: 60_000 })
+      expect(
+        before.code !== 0 && /no plugin provides harness cursor/.test(before.stderr + before.stdout),
+        `${before.code} ${before.stderr}${before.stdout}`,
+      )
+      expect(
+        /plugins.*vibest\.json/.test(before.stderr + before.stdout),
+        "the refusal does not say how to add a plugin",
+      )
+      expect(!(await listed(w)).some((e) => e.harness === "cursor"), "cursor listed without its plugin")
+      await addCursorPlugin(w, harnesses)
+      await until("cursor listed", async () => (await listed(w)).some((e) => e.harness === "cursor"), 60_000)
     },
   },
   {

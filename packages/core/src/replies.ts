@@ -37,6 +37,26 @@ export const envelope = (
     `</${tag}>`,
   ].join("\n")
 
+export const sessionEnvelope = (
+  sender: { readonly id: string; readonly title?: string | undefined },
+  message: string,
+) =>
+  envelope(
+    "agent-message",
+    [
+      ["agent-id", sender.id],
+      ["title", sender.title ?? ""],
+    ],
+    ["message", message],
+  )
+
+export const noticeEnvelope = (message: string) => envelope("vibest-notice", [], ["message", message])
+
+const ENVELOPED =
+  /^<(agent-message|vibest-notice)>\n(?:<[a-z-]+>[^\n]*<\/[a-z-]+>\n)*<message>\n([\s\S]*)\n<\/message>\n<\/\1>$/
+
+export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? rendered
+
 export type ObservedEnd = {
   readonly harness: HarnessId
   readonly at: number

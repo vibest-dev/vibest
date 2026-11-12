@@ -9,6 +9,7 @@ import { Db } from "@vibest/core/db"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
+import { unwrapped } from "@vibest/core/replies"
 import { PEER_BY_USER, peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
@@ -29,6 +30,7 @@ import {
   entryOn,
   Net,
   onB,
+  peerSession,
   REMOTE,
   REPOSITORY,
   repoStack,
@@ -167,6 +169,24 @@ describe("machine add, ls and rm", () => {
         assert.include(again.message, "this is the vibestd already added as mb")
         assert.strictEqual((yield* a.cli(a.raw["Machine.List"]())).length, 1)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("harness list --machine asks B's vibestd; a peer is not passed on; an unknown machine is named", () =>
+    Effect.gen(function* () {
+      const net = new Net()
+      const a = yield* stack(net)
+      const b = yield* stack(net)
+      net.route("b-host", b.layout.socket)
+      yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
+      const there = yield* b.cli(b.raw["Harnesses.List"]({}))
+      assert.deepStrictEqual(yield* a.cli(a.raw["Harnesses.List"]({ machine: "mb" })), there)
+      const second = yield* Effect.flip(
+        RpcClient.withHeaders(b.raw["Harnesses.List"]({ machine: "mc" }), peerHeaders(a.id)),
+      )
+      assert.strictEqual(second._tag, "Forbidden")
+      const unknown = yield* Effect.flip(a.cli(a.raw["Harnesses.List"]({ machine: "nosuch" })))
+      assert.strictEqual(unknown._tag, "UnknownMachine")
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   it.effect("two adds of one name at once: one is added, the other fails as MachineFailed", () =>
@@ -408,8 +428,8 @@ describe("another machine's vibestd runs agents here", () => {
         Effect.forkScoped,
       )
       const result = yield* finish(b.db, session, "General Agent completed")
-      assert.strictEqual(result.status, "dropped", "B's own delivery never sees it")
-      assert.strictEqual((yield* b.db.latestInbox(session, "notice"))?.message, "General Agent completed")
+      assert.strictEqual(result?.status, "dropped", "B's own delivery never sees it")
+      assert.strictEqual(unwrapped((yield* b.db.latestInbox(session, "notice"))!.message), "General Agent completed")
       const item = yield* Queue.take(items)
       assert.deepStrictEqual(
         { session: item.session, recipient: item.recipient, kind: item.kind, content: item.content, cut: item.cut },
@@ -553,6 +573,40 @@ describe("another machine's vibestd runs agents here", () => {
         assert.include(sent[0]!.content, `<agent-id>${A_ENTRY}</agent-id>`)
         assert.strictEqual(sent[1]!.content, "from the user")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("a forwarded session sends only to what it started and manages the nearest living ones below it", () =>
+    Effect.gen(function* () {
+      const b = yield* peerB
+      const a = randomId()
+      const x = yield* b.as(a, "aproj")
+      const { session } = yield* b.spawn(x)
+      const grandchild = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+      yield* b.db.insertSession(
+        { ...peerSession, id: grandchild, name: "grand", createdAt: 1, lastActive: 1 },
+        b.project,
+        { parentSessionId: session },
+      )
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Send({ id: grandchild, message: "skipping a level" })))),
+        "Forbidden",
+      )
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Interrupt({ id: grandchild })))),
+        "Forbidden",
+        "its parent is alive and manages it",
+      )
+      yield* b.db.updateSession(session, { metadata: { archived: true, removed: true } })
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Send({ id: grandchild, message: "still not its child" })))),
+        "Forbidden",
+      )
+      assert.notStrictEqual(
+        failureTag(yield* Effect.exit(x(b.raw.Interrupt({ id: grandchild })))),
+        "Forbidden",
+        "the nearest living manager is now the forwarded session",
+      )
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   it.effect("archive drops the session's rows; a peer may not call Machine.*", () =>
@@ -713,7 +767,7 @@ describe("vibest run --machine and remote sessions", () => {
         yield* finish(b.db, onB(spawned.id), "General Agent completed")
         const [notice] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
         assert.strictEqual(notice!.kind, "notice")
-        assert.strictEqual(notice!.content, `${spawned.id.slice(0, 11)}: General Agent completed`)
+        assert.strictEqual(unwrapped(notice!.content), `${spawned.id.slice(0, 11)}: General Agent completed`)
         yield* until(b.run(outboxRows), (rows) => rows.length === 0)
         const address = spawned.id.slice(0, 11)
         const got = yield* asEntry(a.raw.Get({ id: address }))
@@ -744,7 +798,7 @@ describe("vibest run --machine and remote sessions", () => {
   )
 
   it.effect(
-    "without --runtime A sends the caller's terminal runtime, else its entry session's; --runtime wins; B lacking it fails clearly",
+    "without --runtime A sends the caller's terminal runtime, else none and B chooses; --runtime wins; B lacking it fails clearly",
     () =>
       Effect.gen(function* () {
         const term = callerPlugin("term", { env: ["TERM_PANE"], terminal: () => Effect.succeed("p1") })
@@ -756,7 +810,7 @@ describe("vibest run --machine and remote sessions", () => {
         )
         assert.deepStrictEqual(
           b.spawns.map((spawn) => spawn.runtime),
-          ["fake", "term", "rex"],
+          [undefined, "term", "rex"],
         )
         const c = yield* repoStack(net, { sessions: (s) => s })
         net.route("c-host", c.layout.socket)
@@ -856,7 +910,7 @@ describe("vibest run --machine and remote sessions", () => {
       assert.lengthOf(yield* b.run(outboxRows), 1, "it waits on B")
       yield* a.cli(a.raw["Machine.Add"]({ name: "mb2", target: "b-host" }))
       const rows = yield* until(a.run(inboxOf(entryId)), (r) => r.length === 2)
-      assert.strictEqual(rows[1]!.content, `mb2/${onB(second.id).slice(0, 8)}: after rm`)
+      assert.strictEqual(unwrapped(rows[1]!.content), `mb2/${onB(second.id).slice(0, 8)}: after rm`)
       yield* until(b.run(outboxRows), (r) => r.length === 0)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
