@@ -576,4 +576,25 @@ describe.concurrent("Sessions", () => {
     }),
     { hooked: ["pi"] },
   )
+  test(
+    "a prompt typed while a delivery awaits the runtime, then the harness dies: the typed execution ends failed with the queued message",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* idleSession(yield* makeRepository)
+      const held = yield* herdr.hold("state", id)
+      yield* sessions.send(id, "queued")
+      yield* held.reached
+      yield* sessions.userPrompt(id, "typed just before exit")
+      const typed = yield* db.openExecution(id)
+      assert.isDefined(typed)
+      yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
+      yield* held.release()
+      yield* until(db.getSession(id), (session) => session?.exitedAt != null)
+      yield* settled
+      assert.isUndefined(yield* db.openExecution(id))
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "failed")
+      assert.deepStrictEqual((yield* db.pendingInbox(id)).length, 0)
+    }),
+    { hooked: ["pi"] },
+  )
 })

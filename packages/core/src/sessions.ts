@@ -11,7 +11,7 @@ import {
   SessionBusy,
   type UnknownAgent,
 } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, FileSystem, Layer, Option, Path, Predicate, Ref } from "effect"
+import { Clock, Context, Duration, Effect, FileSystem, Layer, Option, Path, Ref } from "effect"
 
 import { Agents } from "./agents.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
@@ -20,33 +20,23 @@ import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
-import { sessionExecutions } from "./executions.ts"
 import { Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox, text as inboxText } from "./inbox.ts"
 import { entryCommand, restartArgv } from "./launch.ts"
 import { Layout, VibestCommand } from "./paths.ts"
-import { errorMessage, Plugins } from "./plugins.ts"
+import { Plugins } from "./plugins.ts"
 import { Processes } from "./processes.ts"
 import { projectRoot, workspaceGit } from "./project-create.ts"
 import * as Remove from "./remove.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
-import {
-  agentState,
-  alive,
-  paneTail,
-  peekHint,
-  Runtimes,
-  RuntimeError,
-  type Runtime,
-  stateOf,
-  type Terminal,
-} from "./runtimes.ts"
+import { agentState, alive, paneTail, peekHint, Runtimes, RuntimeError, stateOf, type Terminal } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
 import { Archive } from "./session/archive.ts"
-import { busy, CONFIRM_TIMEOUT, Executions, STOP_WAIT } from "./session/executions.ts"
+import { Delivery, unreachable } from "./session/delivery.ts"
+import { CONFIRM_TIMEOUT, Executions } from "./session/executions.ts"
+import { Exits } from "./session/exits.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
-import { Move } from "./session/move.ts"
 import { Placement, runtimeEnv } from "./session/placement.ts"
 import { Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
 import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
@@ -82,13 +72,14 @@ const SESSION_DEPS = [
   Archive.node,
   Bus.node,
   Db.node,
+  Delivery.node,
   Drain.node,
   Executions.node,
+  Exits.node,
   Git.node,
   Harness.node,
   Harnesses.node,
   Inbox.node,
-  Move.node,
   Placement.node,
   Plugins.node,
   Processes.node,
@@ -192,47 +183,12 @@ export class Sessions extends Context.Service<
 
     const live = (session: SessionRow) => runtimes.route(session.runtime)
 
-    const announceExit = (session: SessionRow, execution: number | undefined) =>
-      Effect.gen(function* () {
-        const queued = yield* db.pendingInbox(session.id)
-        const signed = queued.filter((r) => r.kind === "send" && r.sender)
-        const unsigned = queued.filter((r) => !signed.includes(r))
-        if (signed.length > 0) yield* inbox.undelivered(session, signed, `${session.id} exited before it was delivered`)
-        yield* db.setInboxStatus(
-          session.id,
-          unsigned.map((r) => r.id),
-          "failed",
-        )
-        const lost = unsigned.map((r) => r.message).join("\n\n")
-        const text = (how: string) =>
-          `${session.id} (${session.harnessId}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
-        if (
-          execution !== undefined &&
-          (yield* db.closeExecution(session.id, execution, "failed", {
-            failure: "the harness exited",
-            notice: text(" during an execution"),
-          }))
-        )
-          return
-        const last = yield* db.latestReply(session.id)
-        yield* notice(
-          session,
-          text(last?.status === "failed" ? ` after its execution ended with an error: ${last.failure ?? ""}` : ""),
-        )
-      })
+    const { awaitReady, prompt } = yield* Executions
+    const { notice, worktreeOf, launchArgv, republish } = yield* Placement
 
-    const { awaitReady, interruptAgent, prompt } = yield* Executions
-    const { notice, worktreeOf, launchArgv, handTask, resume, republish, recount } = yield* Placement
-
-    const { deliverQueued } = sessionExecutions({
-      db,
-      pulls: (session) => inbox.pulls(session.harnessId),
-      undelivered: inbox.undelivered,
-      prompt,
-      handTask,
-    })
-
-    const move = yield* Move
+    const delivery = yield* Delivery
+    const exits = yield* Exits
+    const { deliverQueued, send, interrupt, userPrompt } = delivery
 
     const { spawn } = yield* Spawn
 
@@ -240,16 +196,13 @@ export class Sessions extends Context.Service<
       const session = yield* db.getSession(id)
       if (!session || session.metadata.archived || session.metadata.removed) return
       const open = session.executionState === "open"
-      const limited =
-        session.executionState === "failed" && (yield* db.creatorOf(id)) !== undefined
-          ? yield* db.limitedExecution(id)
-          : undefined
+      const limited = yield* exits.limitOf(session)
       if (!open && session.exitedAt !== null && limited === undefined) return
       if (yield* restarting.has(id)) return
       const routed = yield* live(session).pipe(Effect.option)
       if (Option.isNone(routed)) return yield* live(session)
       const h = routed.value
-      if (limited !== undefined && session.exitedAt !== null) return yield* afterLimit(h, session, limited, true)
+      if (limited !== undefined && session.exitedAt !== null) return yield* exits.afterLimit(h, session, limited, true)
       const terminal = session.address
       const execution = open ? yield* db.openExecution(id) : undefined
       const r = yield* track(id)
@@ -270,28 +223,9 @@ export class Sessions extends Context.Service<
             (typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited")
           )
         }))
-      if (limited !== undefined && (yield* afterLimit(h, session, limited, exited))) return
+      if (limited !== undefined && (yield* exits.afterLimit(h, session, limited, exited))) return
       if (state === undefined) {
-        if (exited) {
-          const cutOff = session.startedAt === null
-          const announce = !cutOff && (open || session.exitedAt === null)
-          if (announce && session.entry) {
-            if (execution !== undefined)
-              yield* db.closeExecution(id, execution, "failed", { failure: "the harness exited" })
-          } else if (announce) yield* announceExit(session, execution)
-          if (session.exitedAt === null) {
-            yield* db.updateSession(id, {
-              status: "unknown",
-              exitedAt: yield* Clock.currentTimeMillis,
-              ...(cutOff ? { end: "launch_failed" as const } : {}),
-            })
-            yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
-          }
-          if (cutOff) yield* undoCutOffStart(h, session)
-          if (!announce)
-            yield* inbox.dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
-          return
-        }
+        if (exited) return yield* exits.recordExit(h, session, execution)
         if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
           yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
       } else yield* Ref.set(r.launchRechecked, false)
@@ -349,32 +283,10 @@ export class Sessions extends Context.Service<
       })
     })
 
-    const afterLimit = (
-      h: Runtime,
-      session: SessionRow,
-      limited: { readonly execution: number; readonly process: number | null; readonly failure: string },
-      exited: boolean,
-    ) =>
-      Effect.gen(function* () {
-        const rerun = (terminal: Terminal | undefined) =>
-          move.rerun(h, session, terminal, "", false, limited.failure, limited.execution)
-        if (session.exitedAt !== null) return yield* rerun(undefined)
-        const successor = (yield* db.currentProcessId(session.id)) !== limited.process
-        if (!successor || exited) return yield* rerun(session.address.id === "" ? undefined : session.address)
-        const source = yield* db.limitSource(session.id, limited.execution)
-        const task = source === undefined ? "" : source.working || source.delivered
-        if (task === "") return false
-        yield* handTask(h, session, session.address, task)
-        return true
-      })
-
     const checkSession = (id: string): Effect.Effect<unknown, unknown> =>
       locked(id)(check(id)).pipe(Effect.provideContext(platform))
 
     const checkLocked = (id: string): Effect.Effect<void> => logged(`check ${id}`)(checkSession(id))
-
-    const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
-      Effect.fail(new RuntimeUnreachable({ session: session.runtime, message: e.message }))
 
     const getRow = (id: string) =>
       db
@@ -385,49 +297,7 @@ export class Sessions extends Context.Service<
           ),
         )
 
-    const { undoCutOffStart, remove, finishArchive } = yield* Archive
-
-    const deliver = Effect.fn("Sessions.deliver")(function* (id: string) {
-      const session = yield* getRow(id)
-      if (session.metadata.archived || session.metadata.removed)
-        return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-      if (
-        session.entry ||
-        session.executionState === "open" ||
-        session.status === "blocked" ||
-        (session.startedAt === null && session.exitedAt === null) ||
-        (yield* restarting.has(id))
-      )
-        return
-      const h = yield* live(session)
-      const terminal = session.address
-      const seen = yield* agentState(h, terminal)
-      const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
-      if (state !== undefined && busy(state)) return
-      if (state === undefined && !(yield* alive(h, terminal))) {
-        if (session.exitedAt === null) return yield* check(id)
-        if ((yield* db.pendingInbox(id)).length === 0) return
-        if (!(yield* harnesses.get(session.harnessId)).ownSessionId && !session.harnessSessionId)
-          return yield* new NoSuchSession({
-            id,
-            message: `${id} exited before the runtime reported its session id; spawn a new session`,
-          })
-        yield* resume(h, session)
-      }
-      const fresh = (yield* db.getSession(id)) ?? session
-      yield* deliverQueued(h, fresh, fresh.address)
-    })
-
-    const send = (id: string, message: string, request?: string, sender?: string) =>
-      Effect.gen(function* () {
-        const session = yield* getRow(id)
-        if (request !== undefined && (yield* db.queuedBy(id, request))) return
-        const worktree = yield* worktreeOf(session)
-        if (session.metadata.archived || session.metadata.removed || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
-          return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-        const row = yield* db.insertSend(id, message, request, sender)
-        if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-      })
+    const { remove, finishArchive } = yield* Archive
 
     const typeTaken = (id: string, execution: number) =>
       locks.withLock(id)(
@@ -447,73 +317,6 @@ export class Sessions extends Context.Service<
           Effect.catchTag("NoRuntime", () => Effect.void),
           Effect.provideContext(platform),
         ),
-      )
-
-    const queued = (id: string, inboxId: number | undefined) =>
-      Effect.gen(function* () {
-        const row = (yield* db.pendingInbox(id)).find((r) => r.id === inboxId)
-        if (row === undefined) return
-        const failed = (cause: Cause.Cause<unknown>) =>
-          Effect.gen(function* () {
-            const transient = Cause.findErrorOption(cause).pipe(
-              Option.exists(
-                (e) =>
-                  Predicate.isTagged(e, "RuntimeUnreachable") ||
-                  (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
-              ),
-            )
-            if (
-              Cause.hasInterruptsOnly(cause) ||
-              transient ||
-              !(yield* db.pendingInbox(id)).some((r) => r.id === row.id)
-            )
-              return
-            const session = yield* db.getSession(id)
-            if (session !== undefined) yield* inbox.undelivered(session, [row], errorMessage(cause))
-          })
-        yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
-      }).pipe(Effect.provideContext(platform))
-
-    const deliverNext = (id: string) =>
-      locked(id)(db.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe(
-        Effect.provideContext(platform),
-      )
-
-    const interrupt = (id: string) =>
-      getRow(id).pipe(
-        Effect.flatMap((known) =>
-          locked(id)(
-            Effect.gen(function* () {
-              const session = yield* getRow(id)
-              const h = yield* live(session)
-              const terminal = session.address
-              const execution = yield* db.openExecution(id)
-              if (execution === undefined)
-                return {
-                  message: `${id} is not working; its execution had already finished and its reply is recorded`,
-                }
-              const state = stateOf(yield* agentState(h, terminal))
-              const runtimeKnows = state !== undefined && state !== "unknown"
-              const started = yield* db.executionAccepted(id)
-              if (!started && runtimeKnows && !busy(state))
-                return { message: `${id} is not working; nothing to interrupt` }
-              if (!(yield* interruptAgent(h, session, terminal)))
-                return yield* new SessionBusy({
-                  id,
-                  message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
-                })
-              const closed = yield* db.closeExecution(id, execution, "interrupted")
-              if (closed && !runtimeKnows) yield* db.setStatus(id, "idle")
-              const last = closed ? undefined : yield* db.latestReply(id)
-              if (!closed && !(last?.execution === execution && last.status === "interrupted"))
-                return {
-                  message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
-                }
-              return { message: `${id} interrupted; its terminal, worktree and session are kept` }
-            }),
-          ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) })),
-        ),
-        Effect.provideContext(platform),
       )
 
     const peek = (id: string, lines: number) =>
@@ -591,13 +394,11 @@ export class Sessions extends Context.Service<
     const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
       switch (event.type) {
         case "execution.ended":
-          return event.data.outcome === "failed" ? checkFailed(event.sessionId!) : deliverNext(event.sessionId!)
+          return event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void
         case "inbox.moved":
           return event.data.to === "delivered"
             ? engine.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
             : Effect.void
-        case "inbox.queued":
-          return queued(event.sessionId!, event.seq)
         case "live.state":
           return onTerminal(event.runtime, event.terminal, event.state === "working")
         case "live.exited":
@@ -696,10 +497,6 @@ export class Sessions extends Context.Service<
 
     yield* engine.on(handle)
 
-    yield* db.recoverDelivering(
-      (sessionId, messages) =>
-        `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
-    )
     yield* republish()
     yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)
 
@@ -713,12 +510,7 @@ export class Sessions extends Context.Service<
       list,
       check: checkLocked,
       typeTaken,
-      userPrompt: (id: string, text: string, at?: number, process?: number) =>
-        Effect.gen(function* () {
-          const now = at ?? (yield* Clock.currentTimeMillis)
-          const prompting = yield* Ref.get((yield* track(id)).prompting)
-          yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
-        }),
+      userPrompt,
       republish: republish(),
       inMemory: Effect.gen(function* () {
         return { tracked: (yield* sessionLive.size).tracked, locks: locks.size(), reconciles }
