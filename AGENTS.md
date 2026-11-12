@@ -18,8 +18,8 @@ pnpm verify [area…]          # the superset: all of the above, then the E2E ch
 Unit tests run no git: they state the repository facts they need on the in-memory `FakeGit`
 (`packages/cli/test/fake-git.ts`). The exceptions are `packages/cli/test/git.test.ts`, which tests the live `Git`
 layer against real git with its own `HOME` and identity, and the live herdr tests
-`packages/cli/test/runtime-herdr-close.test.ts`, `runtime-herdr-entry.test.ts` and `runtime-herdr-subagent.test.ts`,
-which are skipped without herdr (the last two start a real Pi when it is on `PATH`).
+`packages/cli/test/runtime-herdr-entry.test.ts` and `runtime-herdr-subagent.test.ts`, which are skipped without herdr
+(both start a real Pi when it is on `PATH`).
 
 The scripts (`pnpm test`, `pnpm e2e`, `pnpm verify`) are deterministic: CI runs them, and they pass or fail. They do
 not say a change works on their own. What vibest can do, and when each

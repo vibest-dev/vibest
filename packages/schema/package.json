@@ -20,8 +20,7 @@
     "access": "public"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/schema"
+    "typecheck": "tsrs --noEmit --fast"
   },
   "dependencies": {
     "effect": "catalog:"

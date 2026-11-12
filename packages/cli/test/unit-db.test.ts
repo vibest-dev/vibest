@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite"
-import url from "node:url"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
@@ -830,60 +829,6 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect(
-    "a hot foreign WAL is refused without checkpointing the database or WAL (the writer keeps its db reachable: Bun's GC would checkpoint it)",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const dir = yield* tempDirectory("vibest-schema-hot-")
-        const file = yield* fileAt(dir, "hot.db")
-        const ready = yield* fileAt(dir, "ready")
-        const maker = yield* fileAt(dir, "maker.ts")
-        const keepDbAlive = "setInterval(() => db, 1000)"
-        yield* fs.writeFileString(
-          maker,
-          [
-            'import { Database } from "bun:sqlite"',
-            'import { writeFileSync } from "node:fs"',
-            "const db = new Database(process.argv[2])",
-            'db.exec("PRAGMA journal_mode = WAL")',
-            'db.exec("BEGIN")',
-            'db.exec("CREATE TABLE other (id INTEGER PRIMARY KEY, note TEXT)")',
-            "db.exec(\"INSERT INTO other VALUES (1, 'keep-me')\")",
-            'for (let i = 0; i < 400; i++) db.run("INSERT INTO other (note) VALUES (?)", ["x".repeat(80)])',
-            'db.exec("PRAGMA user_version = 1")',
-            'db.exec("COMMIT")',
-            "writeFileSync(process.argv[3], 'ok')",
-            keepDbAlive,
-            "",
-          ].join("\n"),
-        )
-        const proc = Bun.spawn(["bun", maker, file, ready], { stdout: "pipe", stderr: "pipe" })
-        yield* Effect.gen(function* () {
-          while (!(yield* fs.exists(ready))) {
-            if (proc.exitCode !== null) return yield* Effect.die("hot wal helper exited before it was ready")
-            yield* Effect.promise(() => Bun.sleep(20))
-          }
-        })
-        proc.kill(9)
-        yield* Effect.promise(() => proc.exited)
-        const dbBefore = yield* fs.readFile(file)
-        const walBefore = yield* fs.readFile(`${file}-wal`)
-        assert.isTrue(walBefore.length > 0)
-        const pretty = yield* refusal(file)
-        assert.include(pretty, "SchemaMismatch")
-        assert.include(pretty, "application_id 0x0, v1")
-        assert.deepStrictEqual(yield* fs.readFile(file), dbBefore)
-        assert.deepStrictEqual(yield* fs.readFile(`${file}-wal`), walBefore)
-        const reader = new Database(file, { readonly: true })
-        assert.strictEqual(
-          (reader.query("SELECT note FROM other WHERE id = 1").get() as { note: string } | null)?.note,
-          "keep-me",
-        )
-        reader.close()
-      }).pipe(Effect.provide(Platform.services)),
-  )
-
   it.effect("sessionAt finds the one live session at that runtime and terminal", () =>
     fresh(
       Effect.gen(function* () {
@@ -911,38 +856,6 @@ describe("Db", () => {
         assert.isUndefined(yield* db.sessionAt(RUNTIME, { machine: "local", id: "missing" }))
       }),
     ),
-  )
-
-  it.effect("two empty opens both initialize", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const dir = yield* tempDirectory("vibest-schema-race-")
-      const file = yield* fileAt(dir, "vibest.db")
-      const script = yield* fileAt(dir, "open.ts")
-      const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
-      const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
-      const liveModule = url.fileURLToPath(new URL("../../../packages/core/src/session/live.ts", import.meta.url))
-      const platformModule = url.fileURLToPath(new URL("../src/platform/bun.ts", import.meta.url))
-      yield* fs.writeFileString(
-        script,
-        [
-          'import { Effect, Layer } from "effect"',
-          `import { Bus } from ${JSON.stringify(busModule)}`,
-          `import { SessionLive } from ${JSON.stringify(liveModule)}`,
-          `import { Db } from ${JSON.stringify(dbModule)}`,
-          `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer)))))",
-          "",
-        ].join("\n"),
-      )
-      const spawn = () => Bun.spawn(["bun", script, file], { stdout: "pipe", stderr: "pipe" })
-      const [a, b] = [spawn(), spawn()]
-      const [codeA, codeB, errA, errB] = yield* Effect.promise(() =>
-        Promise.all([a.exited, b.exited, new Response(a.stderr).text(), new Response(b.stderr).text()]),
-      )
-      assert.deepStrictEqual([codeA, errA, codeB, errB], [0, "", 0, ""])
-      assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
-    }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect(

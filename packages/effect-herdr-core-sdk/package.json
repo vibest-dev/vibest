@@ -11,8 +11,7 @@
   },
   "scripts": {
     "generate": "bun scripts/gen/index.ts",
-    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json && bun scripts/gen/index.ts --check",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/effect-herdr-core-sdk"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json && bun scripts/gen/index.ts --check"
   },
   "dependencies": {
     "effect": "catalog:"

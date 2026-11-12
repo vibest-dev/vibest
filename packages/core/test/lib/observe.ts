@@ -51,11 +51,6 @@ export const untilVirtual = <A, E, R>(
   step: Duration.Input = "100 millis",
 ) => poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust(step))), 1000, "untilVirtual")
 
-export const settleEntry = (sessions: Sessions["Service"], entryId: string) => sessions.check(entryId)
-
-export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks: number }) =>
-  m.tracked <= 1 && m.locks === 0
-
 export const writeEnd = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses).get(harness)
@@ -79,15 +74,6 @@ export const replyOf = (id: string) =>
     const [row] = yield* sql<{ reply: string | null }>`SELECT reply FROM execution
       WHERE session_id = ${id} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
     return row?.reply ?? undefined
-  })
-
-export const sentBy = (id: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    return yield* sql<{ id: number }>`SELECT id FROM inbox WHERE sender_session_id = ${id} ORDER BY id`.pipe(
-      Effect.map((rows) => rows.map((r) => r.id)),
-      Effect.orDie,
-    )
   })
 
 export const lastSentBy = (id: string) =>

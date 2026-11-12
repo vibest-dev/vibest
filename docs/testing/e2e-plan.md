@@ -30,10 +30,6 @@ copy of the user's settings; only the model is fake.
 | Releases      | `npm_config_registry` and `VIBEST_DOWNLOAD_URL` point at a local stand-in that names this checkout's version as the latest, so `vibest update` and the update notice never reach npm or GitHub and never install into the user's global npm                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Secrets       | values of secret-looking login variables and `VIBEST_E2E_ENV` values, and the user's model, provider and account values (Claude `model`, Pi `defaultProvider`/`defaultModel`, Cursor model fields and account ids), are shown as `<redacted>` in output and evidence; the run fails if evidence still holds one                                                                                                                                                                                                                                                                                                                                |
 
-A test that starts the built vibestd itself (`test/plugin-binary.test.ts`) asks it over its socket, never through the
-`vibest` CLI: the CLI starts a vibestd of its own when a Ping is slow and would leave a second, untracked one behind. It
-gives vibestd a `PATH` of the system directories only, so vibestd does not poll the harnesses the user installed.
-
 Every process a test or a check starts that could outlive it is recorded in the run's reap file
 (`<tmpdir>/vibest-reap-<run pid>` or `vibest-reap-e2e-<run pid>`, `tools/reap.ts`) with its command and start time:
 herdr servers, vibestd daemons, herdr-core cores and, under `pnpm test`, every Bun process a test starts (vitest's setup
