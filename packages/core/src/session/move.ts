@@ -5,7 +5,7 @@ import { newId } from "@vibest/schema/id"
 import type { Subscription } from "@vibest/schema/subscription"
 import { Cause, Clock, Context, Effect, Exit, Layer } from "effect"
 
-import { Db, type SessionRow } from "../db.ts"
+import { Db, type SessionRow, harnessIdOf, pidOf, runtimeOf, startOf, terminalOf } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harness, harnessOptions, Harnesses, preflight } from "../harness.ts"
 import { errorMessage, Plugins } from "../plugins.ts"
@@ -74,11 +74,11 @@ const make = Effect.gen(function* () {
     let terminal = current
     let owns = ownsTerminal
     let gone = false
-    const inPlace = current !== undefined && h.run !== undefined && session.metadata.pid !== undefined
+    const inPlace = current !== undefined && h.run !== undefined && pidOf(session) !== undefined
     let running: "old" | "mine" | "none" = "old"
     const endRunning = Effect.gen(function* () {
       if (running === "none") return "sent" as const
-      const pid = ((yield* db.getSession(row.id)) ?? row).metadata.pid
+      const pid = pidOf((yield* db.getSession(row.id)) ?? row)
       const sent = pid === undefined ? "gone" : yield* processes.terminate(pid)
       if (sent !== "denied") {
         yield* db.endProcess(row.id, limitedEnded ? "move" : "limited")
@@ -89,10 +89,10 @@ const make = Effect.gen(function* () {
     })
     const at = yield* Clock.currentTimeMillis
     const stored = yield* db.attempts(session.id)
-    const provider = session.provider ?? undefined
-    const recorded = stored.some((a) => a.harness === session.harnessId && a.provider === provider)
+    const provider = session.process?.provider ?? null ?? undefined
+    const recorded = stored.some((a) => a.harness === harnessIdOf(session) && a.provider === provider)
       ? stored
-      : [...stored, { harness: session.harnessId, provider, outcome: "limited" as const, at }]
+      : [...stored, { harness: harnessIdOf(session), provider, outcome: "limited" as const, at }]
     let limitedEnded = false
     const endLeft = Effect.gen(function* () {
       yield* db.endProcess(row.id, limitedEnded ? "move" : "limited")
@@ -152,7 +152,7 @@ const make = Effect.gen(function* () {
         harness: l.harness,
         provider: l.provider ?? "",
       })),
-      { harness: session.harnessId, provider: provider ?? "" },
+      { harness: harnessIdOf(session), provider: provider ?? "" },
     ]
     const ruledOut = (
       move: { harness: string | undefined; provider?: string | undefined } | undefined,
@@ -183,14 +183,14 @@ const make = Effect.gen(function* () {
           reason: "limited",
           error,
           input: task,
-          harness: row.harnessId,
-          provider: row.provider ?? undefined,
+          harness: harnessIdOf(row),
+          provider: row.process?.provider ?? null ?? undefined,
           attempts: attempts(),
         })
         .pipe(Effect.exit)
       if (Exit.isFailure(decided)) return yield* giveUp(`${yield* left()}: ${errorMessage(decided.cause)}`)
       if (decided.value.move === undefined) {
-        const why = limitFailure(rows, row.harnessId, row.provider ?? undefined, error)
+        const why = limitFailure(rows, harnessIdOf(row), row.process?.provider ?? null ?? undefined, error)
         const tried =
           skipped.length === 0
             ? ""
@@ -207,8 +207,8 @@ const make = Effect.gen(function* () {
           provider: move.provider,
           model: move.model,
           attempts: attempts(),
-          machine: { id: session.address.machine },
-          runtime: session.runtime,
+          machine: { id: terminalOf(session).machine },
+          runtime: runtimeOf(session),
           parentRuntime: undefined,
           machines: [],
         })
@@ -231,7 +231,7 @@ const make = Effect.gen(function* () {
       if (!limitedEnded && (yield* newerExecution)) return true
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
-          yield* finish(row, "failed", `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`)
+          yield* finish(row, "failed", `${row.id} stayed on ${harnessIdOf(row)}: SIGTERM to its harness was refused`)
           return false
         }
       } else if (terminal !== undefined) {
@@ -240,7 +240,7 @@ const make = Effect.gen(function* () {
           yield* finish(
             row,
             "failed",
-            `${row.id} stayed on ${row.harnessId}: closing its terminal failed (${errorMessage(closed.cause)})`,
+            `${row.id} stayed on ${harnessIdOf(row)}: closing its terminal failed (${errorMessage(closed.cause)})`,
           )
           return false
         }
@@ -252,19 +252,19 @@ const make = Effect.gen(function* () {
       const harnessSessionId = (yield* harnesses.get(next.harness)).ownSessionId ? yield* newId() : null
       const nextRow: SessionRow = {
         ...row,
-        harnessId: next.harness,
-        provider: next.provider ?? null,
-        model: next.model ?? null,
-        harnessSessionId,
+        process:
+          row.process === null
+            ? null
+            : {
+                ...row.process,
+                harness: next.harness,
+                provider: next.provider ?? null,
+                model: next.model ?? null,
+                conversation: harnessSessionId,
+              },
       }
       const argv = yield* launchArgv(nextRow, false)
-      if (inPlace)
-        yield* db.updateSession(row.id, {
-          harnessId: next.harness,
-          provider: next.provider ?? null,
-          model: next.model ?? null,
-          harnessSessionId,
-        })
+      if (inPlace) yield* db.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
       const placed = inPlace
         ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
         : yield* openTerminal(h, undefined, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
@@ -287,7 +287,7 @@ const make = Effect.gen(function* () {
       if (inPlace) running = "mine"
       else owns = true
       row = (yield* db.getSession(row.id))!
-      const text = (yield* harnesses.get(row.harnessId)).systemPromptInPrompt
+      const text = (yield* harnesses.get(harnessIdOf(row))).systemPromptInPrompt
         ? `${yield* systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
       const prompted = yield* prompt(h, row, terminal, text, db.linkTask(row.id)).pipe(Effect.exit)

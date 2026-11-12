@@ -29,7 +29,6 @@ export const inboxMethods = (store: Store) => {
     linkTask,
     insertInboxRow,
     endExecution,
-    updateSession,
     setStatus,
     emit,
     currentProcessId,
@@ -118,7 +117,7 @@ export const inboxMethods = (store: Store) => {
             yield* sql`SELECT 1 FROM session WHERE parent_session_id = ${id} AND ended_at IS NULL LIMIT 1`
           if (children.length > 0) return false
           if ((yield* openExecution(id)) !== undefined) return false
-          yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true } })
+          yield* store.archive(id)
           return true
         }),
       ).pipe(Effect.orDie),

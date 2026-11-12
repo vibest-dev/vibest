@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
+import { Db, harnessIdOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Sessions } from "@vibest/core/sessions"
@@ -68,9 +68,9 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
       const row = (yield* db.getSession(s.id))!
-      assert.strictEqual(row.harnessId, "claude")
-      assert.strictEqual(row.model, "claude-haiku-5-5")
-      assert.deepStrictEqual(row.metadata.routing?.decidedBy, {
+      assert.strictEqual(harnessIdOf(row), "claude")
+      assert.strictEqual(row.process?.model ?? null, "claude-haiku-5-5")
+      assert.deepStrictEqual(row.process?.routing?.decidedBy, {
         harness: "route",
         model: "route",
       })

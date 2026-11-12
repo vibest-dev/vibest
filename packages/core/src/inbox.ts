@@ -3,7 +3,7 @@ import { shortId } from "@vibest/schema/id"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
-import { Db, type InboxRow, type NewInboxRow, type RuntimeAddress, type SessionRow } from "./db.ts"
+import { Db, type InboxRow, type NewInboxRow, type RuntimeAddress, type SessionRow, harnessIdOf } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as Engine from "./engine.ts"
@@ -124,7 +124,7 @@ export class Inbox extends Context.Service<
         Effect.gen(function* () {
           if ((yield* drain.phase) !== "open") return undefined
           const session = yield* db.getSession(sessionId)
-          if (session === undefined || !pulls(session.harnessId)) return undefined
+          if (session === undefined || !pulls(harnessIdOf(session))) return undefined
           const taken = yield* drain.work(`take inbox of ${sessionId}`, db.takeInbox(sessionId, process))
           if (taken === undefined) return undefined
           handedOver.add(handedKey(sessionId, taken.execution))

@@ -27,7 +27,6 @@ export const session = (
   exitedAt: null,
   executionState: "none",
   executionPromptedAt: 0,
-  metadata: {},
   createdAt: 1,
   lastActive: 1,
   ...patch,

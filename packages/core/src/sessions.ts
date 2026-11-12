@@ -13,7 +13,7 @@ import {
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Db, type SessionFilter, type SessionRow } from "./db.ts"
+import { Db, type SessionFilter, type SessionRow, runtimeOf, terminalOf, exitedAt } from "./db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import { HarnessUnavailable } from "./harness.ts"
@@ -153,14 +153,14 @@ export class Sessions extends Context.Service<
 
     const peek = Effect.fn("Sessions.peek")(function* (id: string, lines: number) {
       const session = yield* getRow(id)
-      if (session.exitedAt !== null || session.address.id === "")
+      if (exitedAt(session) !== null || terminalOf(session).id === "")
         return yield* new NoSuchSession({
           id,
           message: `${id} has no terminal to peek at (it exited or never started)`,
         })
-      const h = yield* runtimes.route(session.runtime)
+      const h = yield* runtimes.route(runtimeOf(session))
       const text = yield* h
-        .read(session.address, Math.max(1, Math.min(Math.floor(lines), 500)))
+        .read(terminalOf(session), Math.max(1, Math.min(Math.floor(lines), 500)))
         .pipe(Effect.catchTag("RuntimeError", unreachable(session)))
       return text.trimEnd()
     })

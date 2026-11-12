@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, exitedAt } from "@vibest/core/db"
 import { Sessions, START_TIMEOUT } from "@vibest/core/sessions"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
@@ -44,7 +44,6 @@ describe("reconcile: a terminal whose agent has not started", () => {
           exitedAt: null,
           executionState: "open",
           executionPromptedAt: 1,
-          metadata: {},
           createdAt: 1,
           lastActive: 1,
         },
@@ -53,12 +52,12 @@ describe("reconcile: a terminal whose agent has not started", () => {
       )
       const sessions = yield* restartSessions
       yield* startupSettled(sessions)
-      assert.isNull((yield* db.getSession(id))!.exitedAt)
+      assert.isNull(exitedAt((yield* db.getSession(id))!))
       yield* herdr.seedAgent("w8:pending")
       yield* herdr.updateAgent("w8:pending", (agent) => ({ ...agent, alive: false }))
-      assert.isNull((yield* db.getSession(id))!.exitedAt)
+      assert.isNull(exitedAt((yield* db.getSession(id))!))
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* until(db.getSession(id), (session) => session?.exitedAt != null)
+      yield* until(db.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
     }),
   )
 })

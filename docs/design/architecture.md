@@ -1074,7 +1074,7 @@ prompt from the entry session or from vibest's own delivery is ignored). Of the 
   there itself when an execution ended without a reply. `Report` goes to the caller's own entry session.
   `Inbox.Subscribe` streams the entry session's inbox batches (the Pi extension) instead of the runtime's prompt.
 - `SessionInfo.task` is the first row delivered from the user or the parent (`List` cuts it to 500 characters);
-  `latest.summary` is `metadata.summary` when that is a string, else the output's first line.
+  `latest.summary` is the first trimmed line of the execution's `reply`.
 - `Launch` opens `vibest`'s entry session outside the repository's workspace: a tab there, or a new workspace at its
   root, whose shell runs argv. `Project.Open` finds or makes the project of the directory (`move` answers a
   `ProjectMoved`). `Project.StartEntry` picks the entry session's harness, provider, model and runtime and writes

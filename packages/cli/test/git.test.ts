@@ -120,7 +120,6 @@ const session = (id: string): Omit<NewSession, "projectId"> => ({
   exitedAt: null,
   executionState: "none",
   executionPromptedAt: 0,
-  metadata: {},
   createdAt: 1,
   lastActive: 1,
 })

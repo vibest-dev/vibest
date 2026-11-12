@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, pidOf } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Sessions } from "@vibest/core/sessions"
 import { PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
@@ -70,7 +70,7 @@ describe("vibestd's HTTP API", () => {
     "a late Ready from the process a restart replaced changes nothing; the restarted harness's Ready is taken",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
-      yield* until(db.getSession(worker), (s) => s?.startedAt != null)
+      yield* until(db.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
       const first = (yield* db.currentProcessId(worker))!
       const ready = (process: number, pid: number, pluginVersion = VERSION) =>
         call("/session/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
@@ -81,10 +81,10 @@ describe("vibestd's HTTP API", () => {
       const late = yield* ready(first, 111)
       assert.strictEqual(late.status, 204)
       assert.isUndefined(yield* db.readyAt(worker))
-      assert.isUndefined((yield* db.getSession(worker))!.metadata.pid)
+      assert.isUndefined(pidOf((yield* db.getSession(worker))!))
       assert.deepStrictEqual((yield* ready(first, 222, "0.0.2-next")).body, { process: second })
       assert.isNumber(yield* db.readyAt(worker))
-      assert.deepInclude((yield* db.getSession(worker))!.metadata, {
+      assert.deepInclude((yield* db.getSession(worker))!.process, {
         pid: 222,
         integration: { version: "0.0.2-next", protocol: PROTOCOL },
       })

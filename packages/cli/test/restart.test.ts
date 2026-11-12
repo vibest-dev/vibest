@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, executionStateOf, exitedAt, pidOf } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
 import { VibestCommand } from "@vibest/core/paths"
 import { noticeEnvelope } from "@vibest/core/replies"
@@ -74,9 +74,9 @@ const busyPiSubagent = Effect.gen(function* () {
     runtime: "herdr",
     harness: "pi",
   })
-  yield* until(db.getSession(id), (w) => !!w && w.startedAt !== null)
+  yield* until(db.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
   yield* sessions.check(id)
-  const pid = (yield* db.getSession(id))!.metadata.pid!
+  const pid = (yield* db.getSession(id))!.process!.pid!
   return { db, sessions, id, pid }
 })
 
@@ -98,23 +98,24 @@ describe("restart in place", () => {
       yield* sessions.check(id)
       yield* sessions.send(id, "queued meanwhile")
       const down = (yield* db.getSession(id))!
-      assert.deepInclude(down, { exitedAt: null, executionState: "open" })
+      assert.isNull(exitedAt(down))
+      assert.strictEqual(executionStateOf(down), "open")
       assert.deepStrictEqual(yield* entryPending(db, down.projectId), [])
       assert.isUndefined(yield* db.readyAt(id), "the old harness's ready report is gone")
-      assert.isUndefined(down.metadata.pid, "so is its pid")
+      assert.isUndefined(pidOf(down), "so is its pid")
       const opened = (yield* herdr.callsTo("open")).length
       yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
       const [run] = yield* herdr.callsTo("run")
       assert.strictEqual(run!.argv[0], "pi")
-      assert.includeMembers([...run!.argv], ["--session-id", down.harnessSessionId!])
+      assert.includeMembers([...run!.argv], ["--session-id", (down.process?.conversation ?? null)!])
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
       assert.strictEqual((yield* herdr.callsTo("open")).length, opened, "no new terminal")
       const row = (yield* db.getSession(id))!
       assert.isFalse(yield* (yield* SessionLive).restarting.has(id))
-      assert.notStrictEqual(row.metadata.pid, pid)
-      assert.strictEqual(row.executionState, "open")
+      assert.notStrictEqual(row.process?.pid, pid)
+      assert.strictEqual(executionStateOf(row), "open")
       assert.include(
         (yield* herdr.callsTo("send")).map((s) => s.text),
         noticeEnvelope(continueText(VERSION)),
@@ -314,7 +315,7 @@ describe("restart in place", () => {
       yield* held.release()
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (rows) => rows !== undefined))!
       assert.strictEqual(outcome?.ok, true, outcome?.message)
-      assert.notStrictEqual((yield* db.getSession(id))!.metadata.pid, pid)
+      assert.notStrictEqual((yield* db.getSession(id))!.process?.pid, pid)
       yield* sessions.check(id)
       const freshSessions = yield* restartSessions
       yield* freshSessions.check(id)

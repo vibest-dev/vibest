@@ -596,7 +596,7 @@ describe("another machine's vibestd runs agents here", () => {
         "Forbidden",
         "its parent is alive and manages it",
       )
-      yield* b.db.updateSession(session, { metadata: { archived: true, removed: true } })
+      yield* b.db.archive(session)
       assert.strictEqual(
         failureTag(yield* Effect.exit(x(b.raw.Send({ id: grandchild, message: "still not its child" })))),
         "Forbidden",
@@ -617,8 +617,7 @@ describe("another machine's vibestd runs agents here", () => {
       const archived = yield* b.spawn(call)
       yield* finish(b.db, kept.session, "waiting")
       yield* finish(b.db, archived.session, "archived")
-      const row = (yield* b.db.getSession(archived.session))!
-      yield* b.db.updateSession(archived.session, { metadata: { ...row.metadata, archived: true } })
+      yield* b.db.archive(archived.session)
       assert.deepStrictEqual(
         (yield* b.run(outboxRows)).map((r) => r.sessionId),
         [kept.session],

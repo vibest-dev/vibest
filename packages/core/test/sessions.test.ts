@@ -1,4 +1,5 @@
 import { assert, describe } from "@effect/vitest"
+import { executionStateOf, exitedAt } from "@vibest/core/db"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
 import { Effect, Fiber } from "effect"
@@ -22,17 +23,19 @@ describe.concurrent("Sessions", () => {
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
-      assert.deepInclude(yield* db.getSession(id), { executionState: "failed" })
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
       assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
       yield* until(sessions.inMemory, atMostEntryTracked)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       yield* sessions.check(id)
-      assert.deepInclude(yield* db.getSession(id), { executionState: "open", exitedAt: null })
+      const open = (yield* db.getSession(id))!
+      assert.strictEqual(executionStateOf(open), "open")
+      assert.isNull(exitedAt(open))
       yield* writeEnd(id, "pi", { text: "done again" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.deepInclude(yield* db.getSession(id), { executionState: "completed" })
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
       assert.include(yield* replyOf(id), "done again")
       yield* TestClock.adjust("10 seconds")
       assert.strictEqual((yield* sessions.inMemory).tracked, 2)
@@ -65,8 +68,8 @@ describe.concurrent("Sessions", () => {
       yield* Fiber.join(checking)
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       yield* settled
-      assert.deepInclude(yield* db.getSession(id), { executionState: "failed" })
-      assert.isNotNull((yield* db.getSession(id))!.exitedAt)
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
+      assert.isNotNull(exitedAt((yield* db.getSession(id))!))
       assert.lengthOf(yield* db.pendingInbox(id), 0)
       assert.lengthOf(yield* db.inboxWithStatus(id, "failed"), 1)
       assert.strictEqual(yield* opens(), before)

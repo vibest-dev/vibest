@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect, protocolHeaders } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
+import { Db, executionStateOf } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
@@ -88,7 +88,7 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     if (harness === "claude") yield* db.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
-    yield* until(db.getSession(worker), (w) => w?.executionState === "open")
+    yield* until(db.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "open")
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.projectOfSession(sessionId))! }
   })
 
@@ -183,7 +183,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       assert.strictEqual(yield* (yield* Drain).phase, "open")
       assert.isFalse(yield* shutdownDone)
       yield* held.release()
-      yield* until(db.getSession(id), (s) => s?.executionState === "open")
+      yield* until(db.getSession(id), (s) => (s ? executionStateOf(s) : undefined) === "open")
       assert.strictEqual(yield* stopOnceIdle(repo), "accepted")
     }),
   )
@@ -247,7 +247,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* herdr.endExecution(worker)
       yield* writeEnd(worker, "pi", { text: "status: completed" })
       yield* sessions.check(worker)
-      yield* until(db.getSession(worker), (w) => w?.executionState === "completed")
+      yield* until(db.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "completed")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
@@ -272,7 +272,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         harness: "pi",
         prompt: "work",
       })
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)

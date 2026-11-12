@@ -1,6 +1,6 @@
-import { Clock, Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 
-import { Db, type SessionRow } from "../db.ts"
+import { Db, type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Inbox } from "../inbox.ts"
 import type { Runtime, Terminal } from "../runtimes.ts"
@@ -22,7 +22,7 @@ const make = Effect.gen(function* () {
   const { notice, handTask, recount } = yield* Placement
 
   const limitOf = Effect.fn("Exits.limitOf")(function* (session: SessionRow) {
-    if (session.executionState !== "failed" || (yield* db.creatorOf(session.id)) === undefined) return undefined
+    if (executionStateOf(session) !== "failed" || (yield* db.creatorOf(session.id)) === undefined) return undefined
     return yield* db.limitedExecution(session.id)
   })
 
@@ -34,13 +34,13 @@ const make = Effect.gen(function* () {
   ) {
     const rerun = (terminal: Terminal | undefined) =>
       move.rerun(h, session, terminal, "", false, limited.failure, limited.execution)
-    if (session.exitedAt !== null) return yield* rerun(undefined)
+    if (exitedAt(session) !== null) return yield* rerun(undefined)
     const successor = (yield* db.currentProcessId(session.id)) !== limited.process
-    if (!successor || exited) return yield* rerun(session.address.id === "" ? undefined : session.address)
+    if (!successor || exited) return yield* rerun(terminalOf(session).id === "" ? undefined : terminalOf(session))
     const source = yield* db.limitSource(session.id, limited.execution)
     const task = source === undefined ? "" : source.working || source.delivered
     if (task === "") return false
-    yield* handTask(h, session, session.address, task)
+    yield* handTask(h, session, terminalOf(session), task)
     return true
   })
 
@@ -57,7 +57,7 @@ const make = Effect.gen(function* () {
       )
       const lost = unsigned.map((r) => r.message).join("\n\n")
       const text = (how: string) =>
-        `${session.id} (${session.harnessId}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+        `${session.id} (${harnessIdOf(session)}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
       if (
         execution !== undefined &&
         (yield* db.closeExecution(session.id, execution, "failed", {
@@ -78,19 +78,16 @@ const make = Effect.gen(function* () {
     session: SessionRow,
     execution: number | undefined,
   ) {
-    const cutOff = session.startedAt === null
-    const announce = !cutOff && (session.executionState === "open" || session.exitedAt === null)
+    const cutOff = (session.process?.placedAt ?? null) === null
+    const announce = !cutOff && (executionStateOf(session) === "open" || exitedAt(session) === null)
     if (announce && session.entry) {
       if (execution !== undefined)
         yield* db.closeExecution(session.id, execution, "failed", { failure: "the harness exited" })
     } else if (announce) yield* announceExit(session, execution)
-    if (session.exitedAt === null) {
-      yield* db.updateSession(session.id, {
-        status: "unknown",
-        exitedAt: yield* Clock.currentTimeMillis,
-        ...(cutOff ? { end: "launch_failed" as const } : {}),
-      })
-      yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+    if (exitedAt(session) === null) {
+      yield* db.endProcess(session.id, cutOff ? "launch_failed" : "exited")
+      yield* db.setStatus(session.id, "unknown")
+      yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
     }
     if (cutOff) yield* undoCutOffStart(h, session)
     if (!announce)
@@ -103,7 +100,7 @@ const make = Effect.gen(function* () {
   const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string) {
     const session = yield* db.getSession(id)
     if (session === undefined) return
-    const execution = session.executionState === "open" ? yield* db.openExecution(session.id) : undefined
+    const execution = executionStateOf(session) === "open" ? yield* db.openExecution(session.id) : undefined
     const limited = yield* limitOf(session)
     if (limited !== undefined && (yield* afterLimit(h, session, limited, true))) return
     yield* recordExit(h, session, execution)

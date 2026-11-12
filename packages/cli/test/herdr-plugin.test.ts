@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, terminalOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import {
@@ -382,7 +382,7 @@ describe("herdr open-entry", () => {
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.match(stopped.stdout, /^opened /)
         assert.ok((yield* herdr.callsTo("open")).length > 0)
-        const entryId = (yield* db.entryOf(projectId))!.address!.id
+        const entryId = terminalOf((yield* db.entryOf(projectId))!)!.id
         yield* herdr.seedAgent(entryId)
         const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(again.code, 0, again.stderr)

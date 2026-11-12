@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, executionStateOf, exitedAt } from "@vibest/core/db"
 import { Harnesses } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
@@ -30,7 +30,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "one\n\ntwo")
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "open")
       const sql = yield* SqlClient.SqlClient
       const [execution] = yield* sql<{
         input: string
@@ -57,7 +57,7 @@ describe.concurrent("Sessions", () => {
       const second = yield* herdr.hold("state", id)
       yield* first.release()
       yield* second.reached
-      assert.notStrictEqual((yield* (yield* Db).getSession(id))!.executionState, "open")
+      assert.notStrictEqual(executionStateOf((yield* (yield* Db).getSession(id))!), "open")
       yield* sessions.userPrompt(id, "typed during the ready wait")
       const working = sql<{
         input: string
@@ -209,19 +209,19 @@ describe.concurrent("Sessions", () => {
         { agent: "coordinator" },
       )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "not_started")
+      yield* untilVirtual(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "not_started")
       yield* sessions.send(id, "next")
-      yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* sessions.userPrompt(id, "next")
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: landed" }, 120_000)
-      yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "completed")
+      yield* untilVirtual(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
       yield* untilVirtual(
         sql<{
           status: string
         }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
       assert.include(yield* replyOf(id), "landed")
       assert.strictEqual((yield* sqlNotices(id)).filter((message) => message.includes("task_not_started")).length, 1)
     }),
@@ -240,8 +240,11 @@ describe.concurrent("Sessions", () => {
       yield* sessions.userPrompt(id, "next")
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: landed" }, 5_000)
       yield* held.release("busy")
-      const done = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "completed")
-      assert.strictEqual(done.executionState, "completed")
+      const done = yield* until(
+        db.getSession(id),
+        (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "completed",
+      )
+      assert.strictEqual(executionStateOf(done), "completed")
       assert.deepStrictEqual(
         yield* sql<{
           status: string
@@ -270,9 +273,9 @@ describe.concurrent("Sessions", () => {
       yield* held.release("busy")
       const done = yield* until(
         db.getSession(id),
-        (w): w is NonNullable<typeof w> => w?.executionState === "not_started",
+        (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "not_started",
       )
-      assert.strictEqual(done.executionState, "not_started")
+      assert.strictEqual(executionStateOf(done), "not_started")
       assert.deepStrictEqual(
         yield* sql<{
           status: string
@@ -379,7 +382,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
-      assert.isNull((yield* db.getSession(id))!.harnessSessionId)
+      assert.isNull((yield* db.getSession(id))!.process?.conversation ?? null)
       yield* writeEnd(id, "cursor", {
         hook_event_name: "afterAgentResponse",
         conversation_id: "c-123",
@@ -387,10 +390,10 @@ describe.concurrent("Sessions", () => {
       })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-123")
+      assert.strictEqual((yield* db.getSession(id))!.process?.conversation ?? null, "c-123")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
-      yield* until(db.getSession(id), (row) => row?.exitedAt != null)
+      yield* until(db.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
       const starts = (yield* herdr.callsTo("open")).length
       yield* sessions.send(id, "next")
       const calls = yield* until(herdr.callsTo("open"), (c) => c.length > starts)
@@ -398,10 +401,10 @@ describe.concurrent("Sessions", () => {
       yield* writeEnd(id, "cursor", { conversation_id: "c-other", text: "status: completed" }, 5000)
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-other")
+      assert.strictEqual((yield* db.getSession(id))!.process?.conversation ?? null, "c-other")
       yield* herdr.updateAgent(id, (a) => ({ ...a, session: "h-9" }))
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "h-9")
+      assert.strictEqual((yield* db.getSession(id))!.process?.conversation ?? null, "h-9")
     }),
   )
 
@@ -413,9 +416,9 @@ describe.concurrent("Sessions", () => {
       const current = (yield* db.currentProcessId(id))!
       const event = JSON.stringify({ hook_event_name: "beforeSubmitPrompt", conversation_id: "c-old", prompt: "x" })
       yield* integration.prompt({ id, entry: false, harness: "cursor", process: current - 1 }, event)
-      assert.isNull((yield* db.getSession(id))!.harnessSessionId)
+      assert.isNull((yield* db.getSession(id))!.process?.conversation ?? null)
       yield* integration.prompt({ id, entry: false, harness: "cursor", process: current }, event)
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-old")
+      assert.strictEqual((yield* db.getSession(id))!.process?.conversation ?? null, "c-old")
     }),
   )
 
@@ -430,13 +433,13 @@ describe.concurrent("Sessions", () => {
         herdr.updateAgent(session, (a) => ({ ...a, status: "unknown", registerPrompt: false })),
       )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo, "cursor"))
-      yield* until(db.getSession(id), (w) => !!w && w.startedAt !== null)
+      yield* until(db.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
       for (let i = 0; i < 20; i++) yield* untilVirtual(Effect.succeed(0), () => true)
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
       yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis })
       yield* untilVirtual(db.getSession(id), (w) => w?.status === "working")
       assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.text?.includes("do it")))
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "open")
       yield* TestClock.adjust("40 seconds")
       yield* settled
       assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
@@ -446,16 +449,21 @@ describe.concurrent("Sessions", () => {
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
       yield* integration.prompt(who, thought)
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
-      yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "completed")
+      yield* untilVirtual(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
       yield* integration.prompt(who, thought)
       yield* settled
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
       yield* sessions.send(id, "next")
-      yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "open" && w.status === "working")
+      yield* untilVirtual(
+        db.getSession(id),
+        (w) => w !== undefined && executionStateOf(w) === "open" && w.status === "working",
+      )
       const stopped = yield* sessions.interrupt(id)
       assert.include(stopped.message, "interrupted")
       assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("ctrl+c")))
-      assert.deepInclude(yield* db.getSession(id), { status: "idle", executionState: "interrupted" })
+      const row = (yield* db.getSession(id))!
+      assert.strictEqual(row.status, "idle")
+      assert.strictEqual(executionStateOf(row), "interrupted")
     }),
   )
 
@@ -559,7 +567,7 @@ describe.concurrent("Sessions", () => {
       yield* writeEnd(id, "pi", { error: "model_not_found" }, 3000)
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "failed")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
       yield* settled
       const failed = yield* herdr.hold("state", id)
       yield* sessions.send(id, "retry")
@@ -589,10 +597,10 @@ describe.concurrent("Sessions", () => {
       assert.isDefined(typed)
       yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
       yield* held.release()
-      yield* until(db.getSession(id), (session) => session?.exitedAt != null)
+      yield* until(db.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
       yield* settled
       assert.isUndefined(yield* db.openExecution(id))
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "failed")
+      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
       assert.deepStrictEqual((yield* db.pendingInbox(id)).length, 0)
     }),
     { hooked: ["pi"] },

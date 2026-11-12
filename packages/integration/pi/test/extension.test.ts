@@ -181,7 +181,6 @@ const idleRow = <H extends "pi" | "claude">(harnessId: H) => ({
   exitedAt: 1,
   executionState: "none" as const,
   executionPromptedAt: 0,
-  metadata: {},
   createdAt: 1,
   lastActive: 1,
 })

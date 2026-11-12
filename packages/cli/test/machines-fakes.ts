@@ -116,7 +116,6 @@ export const peerSession = {
   exitedAt: null,
   executionState: "none" as const,
   executionPromptedAt: 0,
-  metadata: {},
 }
 
 export const fakeSpawns =

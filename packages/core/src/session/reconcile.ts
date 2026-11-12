@@ -2,7 +2,18 @@ import { shortId } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Ref } from "effect"
 
 import { Bus, type EngineEvent } from "../bus.ts"
-import { Db, type SessionRow, sessionEnded } from "../db.ts"
+import {
+  Db,
+  type SessionRow,
+  sessionEnded,
+  harnessIdOf,
+  runtimeOf,
+  terminalOf,
+  exitedAt,
+  executionStateOf,
+  executionStartedAt,
+  archived,
+} from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as Engine from "../engine.ts"
 import { Harnesses } from "../harness.ts"
@@ -38,7 +49,7 @@ const make = Effect.gen(function* () {
   const { locked } = locks
   const logged = Engine.logFailure
 
-  const live = (session: SessionRow) => runtimes.route(session.runtime)
+  const live = (session: SessionRow) => runtimes.route(runtimeOf(session))
 
   const forgetIfDone = (id: string) =>
     locks.withLock(id)(
@@ -51,16 +62,16 @@ const make = Effect.gen(function* () {
     )
   const check = Effect.fn("Reconcile.check")(function* (id: string) {
     const session = yield* db.getSession(id)
-    if (!session || session.metadata.archived || session.metadata.removed) return
-    const open = session.executionState === "open"
+    if (!session || archived(session)) return
+    const open = executionStateOf(session) === "open"
     const limited = yield* exits.limitOf(session)
-    if (!open && session.exitedAt !== null && limited === undefined) return
+    if (!open && exitedAt(session) !== null && limited === undefined) return
     if (yield* restarting.has(id)) return
     const routed = yield* live(session).pipe(Effect.option)
     if (Option.isNone(routed)) return yield* live(session)
     const h = routed.value
-    if (limited !== undefined && session.exitedAt !== null) return yield* exits.afterLimit(h, session, limited, true)
-    const terminal = session.address
+    if (limited !== undefined && exitedAt(session) !== null) return yield* exits.afterLimit(h, session, limited, true)
+    const terminal = terminalOf(session)
     const execution = open ? yield* db.openExecution(id) : undefined
     const r = yield* track(id)
     const maybe = yield* agentState(h, terminal).pipe(Effect.option)
@@ -68,13 +79,13 @@ const make = Effect.gen(function* () {
     const seen = maybe.value
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
     if (state !== undefined && session.status !== state) yield* db.setStatus(session.id, state)
-    if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(session.harnessId))
+    if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(harnessIdOf(session)))
       yield* db.acceptExecution(id, execution)
     const exited =
       state === undefined &&
       (yield* Effect.gen(function* () {
         const terminalRunning = yield* alive(h, terminal)
-        const reportedPid = session.metadata.pid
+        const reportedPid = session.process?.pid
         return (
           !terminalRunning || (typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited")
         )
@@ -85,9 +96,10 @@ const make = Effect.gen(function* () {
       if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
         yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
     } else yield* Ref.set(r.launchRechecked, false)
-    if (!(yield* harnesses.get(session.harnessId)).ownSessionId && h.session !== undefined) {
+    if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && h.session !== undefined) {
       const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
-      if (sessionId !== null && sessionId !== session.harnessSessionId) yield* db.noteConversation(id, sessionId)
+      if (sessionId !== null && sessionId !== (session.process?.conversation ?? null))
+        yield* db.noteConversation(id, sessionId)
     }
 
     const s = state ?? "unknown"
@@ -99,8 +111,8 @@ const make = Effect.gen(function* () {
     const idle = s === "idle"
     const ended = idle && worked
     const now = yield* Clock.currentTimeMillis
-    const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.executionPromptedAt)
-    const unstarted = !worked && (idle || inbox.pulls(session.harnessId))
+    const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - executionStartedAt(session))
+    const unstarted = !worked && (idle || inbox.pulls(harnessIdOf(session)))
     if (unstarted && unconfirmed <= 0) {
       const reason = `vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected)`
       const closed =
@@ -110,7 +122,7 @@ const make = Effect.gen(function* () {
         }))
       if (closed && execution !== undefined)
         yield* inbox.undelivered(session, yield* db.deliveredIn(id, execution), reason)
-      if (closed) yield* deliverQueued(h, { ...session, executionState: "not_started" }, terminal)
+      if (closed) yield* deliverQueued(h, { ...session, openExecution: null }, terminal)
       return
     }
     if (unstarted) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
@@ -120,7 +132,7 @@ const make = Effect.gen(function* () {
         const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
         yield* notice(
           session,
-          `${shortId(id)} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${shortId(id)} to see the request.`,
+          `${shortId(id)} (${harnessIdOf(session)}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${shortId(id)} to see the request.`,
         )
       }
       return
@@ -148,7 +160,7 @@ const make = Effect.gen(function* () {
       const id = yield* db.sessionAt(runtime, terminal)
       if (id === undefined) return
       const session = working ? yield* db.getSession(id) : undefined
-      const execution = session && !inbox.pulls(session.harnessId) ? yield* db.openExecution(id) : undefined
+      const execution = session && !inbox.pulls(harnessIdOf(session)) ? yield* db.openExecution(id) : undefined
       if (execution !== undefined) yield* db.acceptExecution(id, execution)
       yield* checkSession(id)
     })
@@ -180,18 +192,14 @@ const make = Effect.gen(function* () {
       const here = (yield* db.listSessions()).filter(
         (row) =>
           where === "all" ||
-          (row.runtime === where.runtime && (where.machine === undefined || row.address.machine === where.machine)),
+          (runtimeOf(row) === where.runtime &&
+            (where.machine === undefined || terminalOf(row).machine === where.machine)),
       )
-      const rows = here.filter(
-        (row) =>
-          !row.metadata.archived && !row.metadata.removed && (row.exitedAt === null || row.executionState === "open"),
-      )
+      const rows = here.filter((row) => !archived(row) && (exitedAt(row) === null || executionStateOf(row) === "open"))
       const ended = (yield* db.endedAtLimit)
         .filter((row) => where === "all" || row.runtime === where.runtime)
         .map((row) => row.id)
-      const archiving = here.filter(
-        (row) => (row.metadata.archived || row.metadata.removed) && row.exitedAt === null && row.address.id !== "",
-      )
+      const archiving = here.filter((row) => archived(row) && exitedAt(row) === null && terminalOf(row).id !== "")
       yield* Effect.forEach(archiving, (row) => finishArchive(row.id), { concurrency: 8, discard: true })
       yield* Effect.log(
         `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,

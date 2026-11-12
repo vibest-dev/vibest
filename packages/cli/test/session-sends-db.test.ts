@@ -74,7 +74,7 @@ describe("sends from sessions", () => {
         Effect.gen(function* () {
           const { db, project, entryId } = yield* setup
           yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
-          yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
+          yield* db.archive(A)
           assert.deepStrictEqual(yield* db.nearestAlive(B), { local: entryId })
           assert.isTrue(yield* db.maySend(B, A))
           const creator = yield* db.creatorLabel(B)
@@ -109,7 +109,7 @@ describe("sends from sessions", () => {
             origin: { peer, project: "p", reportTo },
           })
           yield* db.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: B })
-          yield* db.updateSession(B, { metadata: { archived: true, removed: true } })
+          yield* db.archive(B)
           const heir = yield* db.nearestAlive(X)
           assert.deepStrictEqual(heir, { peer, session: reportTo })
           assert.isTrue(yield* db.sendToPeer(X, peer, reportTo, "report"))
@@ -133,8 +133,8 @@ describe("sends from sessions", () => {
         yield* db.notePeer({ id: peer, name: "other" })
         yield* db.insertSession(session(middle), project, { origin: { peer, project: "p", reportTo } })
         yield* db.insertSession(session(ended), project, { parentSessionId: middle })
-        yield* db.updateSession(middle, { metadata: { archived: true, removed: true } })
-        yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
+        yield* db.archive(middle)
+        yield* db.archive(ended)
         const item = {
           id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
           recipient: ended,

@@ -34,7 +34,7 @@ const entryAsked = Effect.gen(function* () {
   )
   yield* herdr.seedAgent("test/coord")
   const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-  yield* until(db.getSession(id), (row) => !!row && row.startedAt !== null)
+  yield* until(db.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
   yield* db.insertSend(entry.sessionId, "a question", undefined, id)
   return { db, sessions, inbox: yield* Inbox, entryId: entry.sessionId, sender: id }
 })

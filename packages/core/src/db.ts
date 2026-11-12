@@ -24,9 +24,9 @@ import { remoteQueries, type PeerStart } from "./db-remote.ts"
 import {
   attemptsOf,
   type NewSession,
-  type SessionPatch,
   type SpawnedBefore,
   type RepositoryRow,
+  type ProcessStart,
   type Integration,
 } from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
@@ -44,14 +44,23 @@ export {
   encodeAddress,
   SessionRow,
   NewSession,
-  type SessionPatch,
-  EntryRow,
   type NewInboxRow,
   type SpawnedBefore,
   type RepositoryRow,
   type ExecutionEnd,
   failureOf,
+  archived,
+  exitedAt,
+  executionStartedAt,
+  executionStateOf,
+  harnessIdOf,
+  pidOf,
+  placedTerminal,
+  reportedOf,
+  runtimeOf,
   sessionEnded,
+  startOf,
+  terminalOf,
   type SessionBrief,
 } from "./db-rows.ts"
 export { APPLICATION_ID, DatabaseOpenFailed, SchemaMismatch, inspectSchema } from "./db-schema.ts"
@@ -70,7 +79,6 @@ const make = Effect.gen(function* () {
     now,
     sessionLive,
     moving,
-    remember,
     emit,
     tx,
     notify,
@@ -88,7 +96,7 @@ const make = Effect.gen(function* () {
     endProcess,
     startProcess,
     startExecution,
-    updateSession,
+    ensureProcess,
     dropWaiting,
     sessionAt,
     entrySessionsAt,
@@ -322,7 +330,6 @@ const make = Effect.gen(function* () {
             )).length
             if (n >= max) return false
           }
-          const stopped = row.metadata.archived || row.metadata.removed
           yield* emit(SessionCreated, {
             sessionId: row.id,
             at: row.createdAt,
@@ -351,23 +358,13 @@ const make = Effect.gen(function* () {
               harness: row.harnessId,
               ...(row.provider ? { provider: row.provider } : {}),
               ...(row.model ? { model: row.model } : {}),
-              ...(row.metadata.routing === undefined ? {} : { routing: row.metadata.routing }),
+              ...(row.routing === undefined ? {} : { routing: row.routing }),
               runtime: row.runtime,
               terminal: row.address.id,
               ...(row.harnessSessionId ? { resume: row.harnessSessionId } : {}),
             },
             processAt,
           )
-          if (row.metadata.pid !== undefined || row.metadata.integration !== undefined)
-            yield* emit(ProcessReady, {
-              sessionId: row.id,
-              at: row.metadata.ready ?? processAt,
-              data: {
-                process,
-                ...(row.metadata.pid === undefined ? {} : { pid: row.metadata.pid }),
-                ...(row.metadata.integration === undefined ? {} : { integration: row.metadata.integration }),
-              },
-            })
           if (row.exitedAt !== null)
             yield* emit(ProcessEnded, { sessionId: row.id, at: row.exitedAt, data: { process, reason: "exited" } })
           if (task !== undefined)
@@ -389,9 +386,7 @@ const make = Effect.gen(function* () {
                 data: { execution, outcome: row.executionState },
               })
           }
-          if (stopped)
-            yield* emit(SessionEnded, { sessionId: row.id, at: row.lastActive, data: { reason: "archived" } })
-          yield* remember(row)
+          yield* sessionLive.setStatus(row.id, row.status)
           return true
         }),
       ).pipe(Effect.orDie),
@@ -436,8 +431,6 @@ const make = Effect.gen(function* () {
       ),
 
     getSession: (id: string) => findSession(id).pipe(Effect.orDie),
-
-    updateSession: (id: string, patch: SessionPatch) => tx(updateSession(id, patch)).pipe(Effect.orDie),
 
     listSessions: (filter: SessionFilter = {}) =>
       selectSessions(
@@ -638,6 +631,8 @@ const make = Effect.gen(function* () {
           yield* startProcess(id, { ...start, ...(conversation ? { resume: conversation } : {}) })
         }),
       ).pipe(Effect.orDie),
+
+    startProcess: (id: string, start: ProcessStart) => tx(ensureProcess(id, start)).pipe(Effect.orDie),
 
     endProcess: (id: string, reason: ProcessEndReason) => tx(endProcess(id, reason)).pipe(Effect.orDie),
 
