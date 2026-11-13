@@ -1,4 +1,4 @@
-import type { Registration, Transform } from "@vibest/plugin"
+import type { Registration, Transform } from "@vibest/plugin/effect"
 import { Context, Effect, Exit, Scope } from "effect"
 
 export type { Registration, Transform }

@@ -1,4 +1,4 @@
-import type * as VibestPlugin from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Duration, Effect, Option, type Scope } from "effect"
 
 import { type Cli, mirrorOf, profiles, said, sameTarget } from "./machines.ts"

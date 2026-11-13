@@ -1,4 +1,4 @@
-import { capture } from "@vibest/plugin"
+import { capture } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 

@@ -1,4 +1,4 @@
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 export const DEFAULT_HARNESS = "claude"

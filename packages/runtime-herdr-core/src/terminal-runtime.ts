@@ -1,5 +1,5 @@
-import type * as VibestPlugin from "@vibest/plugin"
-import { reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
+import { reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, PubSub, type Scope, Schedule, Stream } from "effect"

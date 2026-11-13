@@ -5,11 +5,11 @@ plugin imports both normally and bundles neither.
 
 ## A plugin
 
-A plugin is an id and an effect, or an id and a Promise `setup`. The effect runs once per load in the plugin's own scope; everything it registers lasts
-until the plugin is unloaded or reloaded.
+A plugin is an id and an effect (`@vibest/plugin/effect`), or an id and a Promise `setup` (`@vibest/plugin`). The effect
+runs once per load in the plugin's own scope; everything it registers lasts until the plugin is unloaded or reloaded.
 
 ```ts
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 export default Plugin.define({
@@ -68,7 +68,7 @@ A runtime is where agents' terminals live. Its definition has an `id`, the requi
 terminals set, so `vibest` started in one of them runs there.
 
 ```ts
-import { Plugin, Runtime } from "@vibest/plugin"
+import { Plugin, Runtime } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 declare const mine: Omit<Runtime.RuntimeDefinition, "id" | "caller">
@@ -99,7 +99,7 @@ A harness is a coding-agent CLI. The builtin ones (`pi`, `claude`, `cursor`) are
 harness or change one:
 
 ```ts
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 export default Plugin.define({

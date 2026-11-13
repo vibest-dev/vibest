@@ -1,4 +1,4 @@
-import type { HarnessOption } from "@vibest/plugin"
+import type { HarnessOption } from "@vibest/plugin/effect"
 import { VibestCommand } from "@vibest/schema/layout"
 import type { HarnessChoice } from "@vibest/schema/session"
 import { addPluginHint, HarnessUnavailable } from "@vibest/schema/session"

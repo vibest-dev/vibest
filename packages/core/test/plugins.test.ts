@@ -6,13 +6,14 @@ import { Layout } from "@vibest/core/paths"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Sessions } from "@vibest/core/sessions"
 import { mainCheckout } from "@vibest/core/worktree"
+import { Plugin as PromisePlugin } from "@vibest/plugin"
 import {
   AgentRefused as PluginRefused,
   Plugin,
   type AgentRoute,
   type AgentStartBefore,
   type Registration,
-} from "@vibest/plugin"
+} from "@vibest/plugin/effect"
 import type { Fact } from "@vibest/schema/event"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -287,7 +288,7 @@ describe("plugins: spawn hook", () => {
             source: "pro",
             revision: "-",
             options: {},
-            plugin: Plugin.define({ id: "pro", setup: () => new Promise(() => {}) }),
+            plugin: PromisePlugin.define({ id: "pro", setup: () => new Promise(() => {}) }),
           },
         ]),
       )
@@ -363,7 +364,7 @@ const packageHome = Effect.gen(function* () {
   return dir
 })
 
-const source = (id: string, model: string) => `import { Plugin } from "@vibest/plugin"
+const source = (id: string, model: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed({ model: ${JSON.stringify(model)} })) })
 `

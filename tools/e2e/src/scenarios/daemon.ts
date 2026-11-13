@@ -30,7 +30,7 @@ const raw = (w: World, request: object) =>
     setTimeout(() => (socket.destroy(), reject(new Error("no reply in 5 s"))), 5_000)
   })
 
-const hungTeardownPlugin = `import { Plugin } from "@vibest/plugin"
+const hungTeardownPlugin = `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: "hung-teardown", effect: () => Effect.addFinalizer(() => Effect.never) })
 `

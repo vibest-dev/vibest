@@ -1,7 +1,7 @@
 import readline from "node:readline"
 
 import type { Claim, VibestClient, VibestClients } from "@vibest/client/client"
-import { isLimited } from "@vibest/plugin"
+import { isLimited } from "@vibest/plugin/effect"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { VibestCommand } from "@vibest/schema/layout"

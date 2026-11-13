@@ -1,5 +1,5 @@
-import type { Plugin } from "@vibest/plugin"
 import { claudePlugin, piPlugin } from "@vibest/plugin-harnesses"
+import type { Plugin } from "@vibest/plugin/effect"
 import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { herdrCommands } from "@vibest/runtime-herdr/commands"

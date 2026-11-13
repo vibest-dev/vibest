@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"

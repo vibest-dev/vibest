@@ -3,7 +3,7 @@ import { Db, executionStateOf, exitedAt, type SessionRow } from "@vibest/core/db
 import type { HarnessId } from "@vibest/core/harness"
 import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
-import { isLimited, Plugin, stillLimited } from "@vibest/plugin"
+import { isLimited, Plugin, stillLimited } from "@vibest/plugin/effect"
 import { Effect, type Scope } from "effect"
 import { SqlClient } from "effect/sql"
 

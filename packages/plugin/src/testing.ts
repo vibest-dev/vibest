@@ -1,10 +1,10 @@
 import { Cause, Duration, Effect, Exit, Option, Ref, Schema, type Scope, Stream } from "effect"
 
-import type { MachineEvent, MachineHooks, MachineNote } from "./index.ts"
-import * as Plugin from "./plugin.ts"
-import type * as Runtime from "./runtime.ts"
+import type { MachineEvent, MachineHooks, MachineNote } from "./effect/index.ts"
+import type { Plugin } from "./effect/plugin.ts"
+import type * as Runtime from "./effect/runtime.ts"
 
-export type { RuntimeDefinition } from "./runtime.ts"
+export type { RuntimeDefinition } from "./effect/runtime.ts"
 
 export class ContractFailure extends Schema.TaggedError<ContractFailure>()("ContractFailure", {
   member: Schema.String,
@@ -180,7 +180,7 @@ export const runtimeContract = (
   }).pipe(Effect.asVoid)
 
 export const machineHooks = (
-  plugin: Plugin.Plugin,
+  plugin: Plugin,
   options: Readonly<Record<string, unknown>> = {},
 ): Effect.Effect<
   {
@@ -222,7 +222,7 @@ export const machineHooks = (
       },
     }
     const registration = { dispose: Effect.void }
-    yield* Plugin.effectOf(plugin)({
+    yield* plugin.effect({
       options,
       agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
       machine: {

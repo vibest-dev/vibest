@@ -3,7 +3,7 @@ import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugins"
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -27,7 +27,7 @@ const builtin: Candidate = {
 }
 
 const plugin = (id: string) => `// gate:${id}
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: "${id}", effect: () => Effect.void })
 `

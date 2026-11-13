@@ -1,5 +1,5 @@
-import * as VibestPlugin from "@vibest/plugin"
-import { reconnectSchedule } from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
+import { reconnectSchedule } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, Stream } from "effect"

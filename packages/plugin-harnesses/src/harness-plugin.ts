@@ -1,5 +1,5 @@
-import { Plugin } from "@vibest/plugin"
-import type { Harness } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
+import type { Harness } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 

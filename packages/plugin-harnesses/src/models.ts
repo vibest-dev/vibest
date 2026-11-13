@@ -1,4 +1,4 @@
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 import { Schema } from "effect"
 
 export const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
