@@ -142,20 +142,22 @@ const make = Effect.gen(function* () {
   )
 
   const ownRestart = Effect.fn("SessionLive.restarting.own")((id: string, restart: Effect.Effect<Restarted>) =>
-    Effect.suspend(() => {
-      const owner = restartOwners.get(id)
-      if (owner !== undefined) return Deferred.await(owner)
-      const done = Deferred.makeUnsafe<Restarted>()
-      restartOwners.set(id, done)
-      return restart.pipe(
-        Effect.onExit((exit) =>
-          Effect.sync(() => {
-            restartOwners.delete(id)
-            Deferred.doneUnsafe(done, exit)
-          }),
-        ),
-      )
-    }),
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        const owner = restartOwners.get(id)
+        if (owner !== undefined) return restore(Deferred.await(owner))
+        const done = Deferred.makeUnsafe<Restarted>()
+        restartOwners.set(id, done)
+        return restore(restart).pipe(
+          Effect.onExit((exit) =>
+            Effect.sync(() => {
+              restartOwners.delete(id)
+              Deferred.doneUnsafe(done, exit)
+            }),
+          ),
+        )
+      }),
+    ),
   )
 
   const size = Effect.gen(function* () {

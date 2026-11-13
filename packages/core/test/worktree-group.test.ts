@@ -1,15 +1,18 @@
+import fs from "node:fs"
+
 import { assert, describe, it } from "@effect/vitest"
 import { Db, type NewSession, exitedAt, executionStateOf } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
-import { Deferred, Effect, Exit, Fiber, FileSystem, Path, type Scope } from "effect"
+import { Deferred, Effect, Exit, Fiber, FileSystem, Path, Scheduler, type Scope } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { interruptOnceReady } from "./lib/interrupt-at.ts"
 import { until } from "./lib/observe.ts"
 import { makeRepository, scriptedLeaves, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
 
@@ -242,6 +245,31 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       assert.deepStrictEqual(yield* fs.readDirectory(parent), [])
     }),
     () => ({ db: (db) => ({ ...db, insertSession: () => Effect.die("insert failed") }) }),
+  )
+
+  test(
+    "a spawn interrupted after its directory was reserved and before its admission leaves no directory and no row",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const files = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const layout = yield* Layout
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const parent = path.join(layout.worktrees, yield* repositoryDirectoryName(repo))
+      const reserved = () => fs.existsSync(parent) && fs.readdirSync(parent).length > 0
+      const spawning = yield* Effect.forkChild(
+        sessions
+          .spawn(yield* spawnInput(repo))
+          .pipe(Effect.provideService(Scheduler.Scheduler, interruptOnceReady(reserved))),
+      )
+      const exit = yield* Fiber.await(spawning)
+      assert.isTrue(Exit.hasInterrupts(exit))
+      assert.deepStrictEqual(yield* files.readDirectory(parent), [])
+      assert.lengthOf(yield* db.listSessions({ stopped: true }), 0)
+      assert.lengthOf(yield* herdr.callsTo("open"), 0)
+    }),
   )
 
   const heldAfterInsert = () => {

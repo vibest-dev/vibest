@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as KeyedMutex from "@vibest/core/effect/keyed-mutex"
-import { Deferred, Effect, Fiber } from "effect"
+import { Deferred, Effect, Fiber, Scheduler } from "effect"
+
+import { interruptOnceReady } from "./lib/interrupt-at.ts"
 
 describe("KeyedMutex", () => {
   it.effect("one holder per key; the entry goes once released with nobody waiting", () =>
@@ -60,6 +62,22 @@ describe("KeyedMutex", () => {
       yield* Fiber.interrupt(holder)
       assert.strictEqual(yield* locks.size, 0)
       yield* Effect.exit(locks.withLock("a")(Effect.interrupt))
+      assert.strictEqual(yield* locks.size, 0)
+    }),
+  )
+})
+
+describe("KeyedMutex registration", () => {
+  it.effect("an interrupt right after the key was registered leaves no entry", () =>
+    Effect.gen(function* () {
+      const locks = yield* KeyedMutex.make<string>()
+      const registered = () => Effect.runSync(locks.size) === 1
+      const fiber = yield* Effect.forkChild(
+        locks
+          .withLock("a")(Effect.never)
+          .pipe(Effect.provideService(Scheduler.Scheduler, interruptOnceReady(registered))),
+      )
+      yield* Fiber.await(fiber)
       assert.strictEqual(yield* locks.size, 0)
     }),
   )
