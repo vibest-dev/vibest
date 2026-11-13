@@ -1,5 +1,5 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
-import { fromPromise } from "@vibest/plugin/host"
+import { fromPromise } from "@vibest/plugin/promise/adapter"
 import { messageOf } from "@vibest/schema/error"
 import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"

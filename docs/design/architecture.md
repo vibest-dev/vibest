@@ -679,7 +679,7 @@ export interface Plugin {
 ```
 
 A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/plugin/src/promise/adapter.ts`, as OpenCode's
-`promise/adapter.ts`; core's plugin host picks the form; `@vibest/plugin/host` exports the adapter `fromPromise`), so both forms share one loading, failure and reload path. Its Promise `Context` has the same
+`promise/adapter.ts`; core's plugin host picks the form; `@vibest/plugin/promise/adapter` exports the adapter `fromPromise`), so both forms share one loading, failure and reload path. Its Promise `Context` has the same
 domains with Promises: `hook` callbacks return `Promise<result | void>` or the result, and refuse by throwing
 `AgentRefused`; registrations resolve to `{ dispose(): Promise<void> }`; `event.subscribe` is an `AsyncIterable`,
 closed when the plugin unloads; `subscription.report` and `reload` return Promises; `transform` takes the same

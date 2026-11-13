@@ -16,7 +16,7 @@
   "exports": {
     ".": "./src/promise/index.ts",
     "./effect": "./src/effect/index.ts",
-    "./host": "./src/host.ts",
+    "./promise/adapter": "./src/promise/adapter.ts",
     "./testing": "./src/testing.ts"
   },
   "publishConfig": {

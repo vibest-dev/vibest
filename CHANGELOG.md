@@ -11,8 +11,8 @@ release. Each release lists what broke, who is affected and how to migrate under
   (`Plugin.define({ id, setup })`, a Promise `Context`) and `@vibest/plugin/effect` is the Effect API
   (`Plugin.define({ id, effect })`, `Context`, `Hooks`, `Registration`, `Transform`, `Runtime`, `Harness`, `capture`,
   `reconnectSchedule`). `Plugin.define` takes one shape per entry; `Plugin.Plugin` is no longer a union and
-  `Plugin.effectOf` is gone (the host picks the form itself; `@vibest/plugin/host` only exports the Promise adapter `fromPromise`). `PromiseContext`, `PromiseRegistration` and `PromiseDefinitions`
-  are now `Plugin.Context`, `Registration` and `Definitions` of the Promise entry. `Subscription`, `SubscriptionAccount` and `SubscriptionLimit` are no longer exported from either entry: import them from `@vibest/schema/subscription`. Migrate: an Effect plugin changes
+  `Plugin.effectOf` is gone (the host picks the form itself; `@vibest/plugin/promise/adapter` exports the Promise adapter `fromPromise`). `PromiseContext`, `PromiseRegistration` and `PromiseDefinitions`
+  are now `Plugin.Context`, `Registration` and `Definitions` of the Promise entry. `Subscription`, `SubscriptionAccount` and `SubscriptionLimit` are no longer exported from either entry: import them from `@vibest/schema/subscription`. `@vibest/plugin/testing` `machineHooks` accepts only Effect plugins (a Promise plugin throws `TypeError: plugin.effect is not a function`); migrate `machineHooks(plugin)` to `machineHooks({ id: plugin.id, effect: fromPromise(plugin) })` with `fromPromise` from `@vibest/plugin/promise/adapter`. Migrate: an Effect plugin changes
   `from "@vibest/plugin"` to `from "@vibest/plugin/effect"`; a Promise plugin keeps its import.
 - **A `vibest.json` plugin entry must be a folder** (plugin authors, users with single-file entries): an entry that names
   a file is skipped with a warning, as OpenCode does. Put the file in `~/.vibest/plugins/`, or move it to a folder with
