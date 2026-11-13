@@ -47,3 +47,9 @@ blocker.
 
 `vibest update` from npm's registry finds a newer published release, asks before installing it, and after the
 confirmation the running vibestd is replaced by the new version.
+
+## D10. Reading the event log
+
+`vibest events --session <id>` prints that session's facts, one JSON line each, in `seq` order from 1, the same types the
+session recorded. `vibest events` prints every fact, each aggregate's in `seq` order. `--follow` keeps running and prints
+facts committed after it started, once each. An unknown session fails with NoSuchSession and prints nothing.
