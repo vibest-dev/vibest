@@ -53,6 +53,7 @@ export const agy: Harness.HarnessDefinition = {
   checkProvider: noProvider("agy"),
   launchArgs: (i) => [
     ...(i.resume && i.sessionId ? ["--conversation", i.sessionId] : []),
+    "--dangerously-skip-permissions",
     "--add-dir",
     i.projectDir,
     "--settings",
