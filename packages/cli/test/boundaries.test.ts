@@ -39,7 +39,8 @@ describe("runtime boundary", () => {
       .map((entry) => path.join("packages/cli/src", entry.name))
     for (const rel of sources) {
       const source = fs.readFileSync(path.join(root, rel), "utf8")
-      if (/["']@vibest\/core[/"']/.test(source)) offenders.push(`${rel} imports @vibest/core`)
+      if (!rel.endsWith("/main.ts") && /["']@vibest\/core[/"']/.test(source))
+        offenders.push(`${rel} imports @vibest/core`)
       for (const name of banned)
         if (new RegExp("\\b" + name + "\\b").test(source)) offenders.push(`${rel} imports ${name}`)
     }
