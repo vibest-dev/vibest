@@ -47,5 +47,5 @@ harness to inherit.
 ## H8. Cursor is a plugin
 
 Cursor is not built in. `vibest run cursor` is refused saying no plugin provides it and where plugins are added; after
-the shipped `harnesses/cursor/plugin.js` of the install directory is added to `plugins` in `~/.vibest/vibest.json`,
+the shipped `harnesses/cursor` folder of the install directory is added to `plugins` in `~/.vibest/vibest.json`,
 `cursor` appears in `vibest harness list`.

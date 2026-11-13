@@ -19,7 +19,7 @@ and `vibest/no-restricted-disable` reports a disable comment for that rule. What
 
 ## Loading and watching
 
-In `plugin-sources.ts`: a half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
+In `plugin-sources.ts`: a `vibest.json` entry must be a folder (a single file there is skipped with a warning; single files are discovered in the plugins directory), and `file://` entries are decoded as URLs. A half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
 `package.json` has a `name` and `exports` loads, as OpenCode's `Host.resolve`, the first existing file `exports` maps
 for `./server`, then for `.` (taking the first of the `bun`, `import` and `default` conditions), and nothing else; the
 mapped files are watched until one exists. vibest reads the map itself, because Bun's resolver keeps a lookup that

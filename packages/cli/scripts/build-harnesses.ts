@@ -31,7 +31,7 @@ for (const harness of ["pi", "claude", "cursor"]) {
 const cursorPlugin = await Bun.build({
   entrypoints: [path.join(app, "../plugin-harnesses/src/cursor-plugin.ts")],
   outdir: path.join(outdir, "cursor"),
-  naming: "plugin.js",
+  naming: "index.js",
   target: "bun",
   external: ["effect", "effect/*", "@vibest/plugin", "@vibest/plugin/*"],
 })

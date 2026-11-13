@@ -36,8 +36,8 @@ export default Plugin.define({
 })
 ```
 
-Add it to `plugins` in `vibest.json`, or drop the file into `$VIBEST_HOME/plugins/`. `context.options` holds the
-options its entry gives (`{ "package": "./my-plugin.ts", "options": { … } }`); they reload live. `vibest plugins`
+Drop the file into `$VIBEST_HOME/plugins/`, or put it in a folder (`index.ts`, or a `package.json` with `exports`) and add the folder to `plugins` in `vibest.json`. `context.options` holds the
+options its entry gives (`{ "package": "./my-plugin", "options": { … } }`); they reload live. `vibest plugins`
 lists every plugin, builtins first, with its status and counters.
 
 ## Context

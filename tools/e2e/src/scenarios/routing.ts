@@ -348,17 +348,18 @@ const checks: ReadonlyArray<Check> = [
       "`-<id>` in vibest.json removes a builtin plugin by exact id and `-*` does not; while slow user plugins are still importing, a first start already sees the removal (no Claude chosen); deleting the line brings the builtin back without restarting vibestd",
     run: async (w) => {
       needs("herdr")
-      const slow = [1, 2, 3, 4, 5, 6, 7].map((n) => path.join(w.vibestHome, "slow", `slow-${n}.ts`))
-      await fs.mkdir(path.join(w.vibestHome, "slow"), { recursive: true })
-      for (const [n, file] of slow.entries())
+      const slow = [1, 2, 3, 4, 5, 6, 7].map((n) => path.join(w.vibestHome, "slow", `slow-${n}`))
+      for (const [n, folder] of slow.entries()) {
+        await fs.mkdir(folder, { recursive: true })
         await fs.writeFile(
-          file,
+          path.join(folder, "index.ts"),
           `import { Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
 await new Promise((resolve) => setTimeout(resolve, 4800))
 export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
 `,
         )
+      }
       await configurePlugins(w, () => ["-*", "-harness-default", ...slow])
       await w.daemon()
       const pid = await w.daemonPid()

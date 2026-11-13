@@ -5,12 +5,15 @@ is and when it counts as working.
 
 ## G1. Listing plugins
 
-`vibest plugins` lists a plugin from the plugins folder and one named in `vibest.json`, both active with zero counters.
+`vibest plugins` lists a plugin from the plugins folder, one folder named in `vibest.json`, and one named there by a `file://`
+URL whose path has an escaped space, all active with zero counters. A single file named in `vibest.json` is not loaded; vibestd logs a warning that the path
+must be a directory.
 
 ## G2. Reloading an edited plugin
 
 Editing a plugin file reloads it without a daemon restart: `vibest plugins` shows the new version, and vibestd is the
-same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way.
+same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way. A plugin whose teardown fails
+is logged as an error with its plugin id and cause, and its edited revision still runs.
 
 ## G3. A plugin that fails to load
 
@@ -58,7 +61,8 @@ once, active, and it runs with the options from `vibest.json`.
 A plugin folder whose `package.json` maps `exports` loads the file the map names for `./server`, else for `.`, skipping a
 file that does not exist, and never a file the map does not export. While a package it imports is not
 installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
-active without editing the plugin or restarting vibestd.
+active without editing the plugin or restarting vibestd. An `exports` entry that resolves outside the plugin folder is
+not loaded, and the plugin is not listed.
 
 ## G11. A plugin disabled by a failing transform
 
