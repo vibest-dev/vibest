@@ -208,10 +208,10 @@ describe("import policy", () => {
       expect(scopedFindings(bun, file)).toEqual(refused)
   })
 
-  it("the CLI refuses @vibest/core and herdr in its top-level sources only", () => {
+  it("the CLI refuses @vibest/core and herdr in every source file", () => {
     expect(scopedFindings(core, "packages/cli/src/a.ts")).toEqual(refused)
     expect(scopedFindings(herdr, "packages/cli/src/a.ts")).toEqual(refused)
-    expect(scopedFindings(core, "packages/cli/src/sub/a.ts")).toEqual([])
+    expect(scopedFindings(core, "packages/cli/src/commands/handlers/a.ts")).toEqual(refused)
   })
 })
 

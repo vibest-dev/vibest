@@ -32,6 +32,7 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
+import { Host as CliHost } from "../src/host.ts"
 import {
   agentsLayer,
   FakeGit,
@@ -654,12 +655,14 @@ describe("wizard entry", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* Command.runWith(
-          Cli.command(host, [], () => {
-            touched.exec = true
+        const exit = yield* Command.runWith(Cli.command, { version: "0.0.0-test" })(["--wizard"]).pipe(
+          Effect.provideService(CliHost, {
+            daemon: host,
+            replacements: [],
+            exec: () => {
+              touched.exec = true
+            },
           }),
-          { version: "0.0.0-test" },
-        )(["--wizard"]).pipe(
           Effect.provideService(Terminal.Terminal, terminal),
           Effect.provideService(
             ChildProcessSpawner.ChildProcessSpawner,
@@ -731,12 +734,19 @@ describe("vibest --session inside herdr", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* Command.runWith(
-          Cli.command(host, [], () => {
-            touched.exec = true
+        const exit = yield* Command.runWith(Cli.command, { version: "0.0.0-test" })([
+          "--session",
+          "other",
+          "--in-parent",
+          repo,
+        ]).pipe(
+          Effect.provideService(CliHost, {
+            daemon: host,
+            replacements: [],
+            exec: () => {
+              touched.exec = true
+            },
           }),
-          { version: "0.0.0-test" },
-        )(["--session", "other", "--in-parent", repo]).pipe(
           Effect.provideService(SocketConnector, () => {
             touched.socket = true
             return Effect.die("herdr socket")
@@ -782,10 +792,13 @@ describe("vibest --session inside herdr", () => {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
-      const exit = yield* Command.runWith(
-        Cli.command(host, [], () => {}),
-        { version: "0.0.0-test" },
-      )(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
+      const exit = yield* Command.runWith(Cli.command, { version: "0.0.0-test" })([
+        "--harness",
+        "pi",
+        "--env",
+        "MAIN_PROBE=" + secret,
+      ]).pipe(
+        Effect.provideService(CliHost, { daemon: host, replacements: [], exec: () => {} }),
         Effect.provideService(SocketConnector, () => {
           herdr.push("connect")
           return Effect.die("herdr")

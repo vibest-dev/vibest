@@ -10,7 +10,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { integrationPrompt, integrationReady, integrationStop } from "../src/cli.ts"
+import { integrationPrompt, integrationReady, integrationStop } from "../src/integration.ts"
 import { tempDirectory, untilVirtual } from "./fakes.ts"
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
