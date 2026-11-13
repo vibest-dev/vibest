@@ -15,12 +15,13 @@ import {
 } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, Routing } from "@vibest/schema/plugin"
-import { ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
+import { ProjectActivity, ProjectCreateFailed, ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
   AllocationFailed,
   AmbiguousSession,
+  HarnessChoice,
   HarnessUnavailable,
   LaunchFailed,
   LimitReached,
@@ -117,10 +118,6 @@ export class InvalidCaller extends Schema.TaggedError<InvalidCaller>()("InvalidC
 
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   method: Schema.String,
-  message: Schema.String,
-}) {}
-
-export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
   message: Schema.String,
 }) {}
 
@@ -264,24 +261,6 @@ export const SessionStatusInfo = Schema.Struct({
   ...SessionInfo.fields,
   reply: Schema.optional(Schema.NullOr(SessionReply)),
 })
-
-export const HarnessModel = Schema.Struct({
-  provider: Schema.NullOr(Schema.String),
-  model: Schema.String,
-  name: Schema.String,
-  default: Schema.Boolean,
-})
-
-export const HarnessChoice = Schema.Struct({
-  harness: Schema.String,
-  binary: Schema.String,
-  problem: Schema.NullOr(Schema.String),
-  models: Schema.Array(HarnessModel),
-})
-export type HarnessChoice = typeof HarnessChoice.Type
-
-export const ProjectActivity = Schema.Literals(["blocked", "done", "working", "idle"])
-export type ProjectActivity = typeof ProjectActivity.Type
 
 export const ProjectRow = Schema.Struct({
   id: Schema.String,

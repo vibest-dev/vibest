@@ -1,5 +1,5 @@
 import type { Runtime } from "@vibest/plugin"
-import type { ProjectActivity } from "@vibest/protocol/rpc"
+import type { ProjectActivity } from "@vibest/schema/project"
 import type { AgentStatus } from "@vibest/schema/session"
 
 const NEEDS_ATTENTION_FIRST: ReadonlyArray<ProjectActivity> = ["blocked", "done", "working"]

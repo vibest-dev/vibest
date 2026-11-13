@@ -1,3 +1,5 @@
+import type { Taken } from "@vibest/schema/session"
+
 export const PROTOCOL = 10
 
 export const MISMATCH_ACTION = "vibest update"
@@ -57,12 +59,6 @@ export const parseHookRoute = (path: string): { readonly harness: string; readon
   return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
 }
 
-export type Taken = {
-  readonly execution: number
-  readonly ids: ReadonlyArray<number>
-  readonly line: string
-  readonly text: string
-}
 export const isTaken = (body: unknown): body is Taken =>
   typeof body === "object" &&
   body !== null &&
