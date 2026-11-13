@@ -651,7 +651,7 @@ const make = Effect.gen(function* () {
       tx(clearEntryAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     canResumeConversation,
-    facts: (o: { readonly session?: string; readonly follow: boolean }) =>
+    facts: (o: { readonly session?: string | undefined; readonly follow: boolean }) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const wake = yield* Queue.sliding<void>(1)

@@ -1091,6 +1091,11 @@ prompt from the entry session or from vibest's own delivery is ignored). Of the 
   the runtime's seen mark; a project carries `activity`, the first of blocked, done, working its live sessions show,
   else idle (herdr's order: a finished agent waiting for the user outranks a busy one). `Session.Seen({id, finished})`
   raises that mark to `finished` only when it rises and no further than the runtime's count; anything else writes nothing.
+- `Events({ session?, follow? })` (user only, `events` capability, this machine only, never forwarded to a peer) streams
+  facts as `{ aggregate, seq, at, type, data }`: one session's by its `seq` (an ended session too; an unknown id fails
+  with `NoSuchSession`), or the whole log in commit order with each aggregate's `seq` rising. It reads the log by cursor in
+  pages and uses the Bus only to wake, so no fact is skipped or repeated whatever order the Bus published commits in;
+  `follow` keeps the stream open for facts committed later.
 - `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and
   watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
   `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a
