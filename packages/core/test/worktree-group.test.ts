@@ -4,7 +4,7 @@ import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
-import { Effect, FileSystem, Path, type Scope } from "effect"
+import { Deferred, Effect, Exit, Fiber, FileSystem, Path, type Scope } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
@@ -227,5 +227,59 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       )
     }),
     () => ({ crypto: scriptedLeaves(["abcd", "abce"]) }),
+  )
+  test(
+    "an admission that fails after the directory was reserved leaves no directory behind",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const layout = yield* Layout
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const exit = yield* Effect.exit(sessions.spawn(yield* spawnInput(repo)))
+      assert.isTrue(Exit.isFailure(exit))
+      const parent = path.join(layout.worktrees, yield* repositoryDirectoryName(repo))
+      assert.deepStrictEqual(yield* fs.readDirectory(parent), [])
+    }),
+    () => ({ db: (db) => ({ ...db, insertSession: () => Effect.die("insert failed") }) }),
+  )
+
+  const heldAfterInsert = () => {
+    const inserted = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    return {
+      options: (): TestOptions => ({
+        db: (db) => ({
+          ...db,
+          insertSession: (...args) =>
+            db
+              .insertSession(...args)
+              .pipe(Effect.tap(() => Deferred.succeed(inserted, undefined).pipe(Effect.andThen(Deferred.await(go))))),
+        }),
+      }),
+      inserted: Deferred.await(inserted),
+      go: Deferred.succeed(go, undefined),
+    }
+  }
+
+  const held = heldAfterInsert()
+  test(
+    "a spawn interrupted right after its admission still has exactly one launch owner",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const spawning = yield* Effect.forkChild(sessions.spawn(yield* spawnInput(repo)))
+      yield* held.inserted
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(spawning))
+      yield* Effect.yieldNow
+      yield* held.go
+      yield* Fiber.join(interrupting)
+      const [row] = yield* until(db.listSessions({ stopped: true }), (rows) => rows.length === 1)
+      yield* until(db.getSession(row!.id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
+      assert.lengthOf(yield* herdr.callsTo("open"), 1)
+    }),
+    held.options,
   )
 })

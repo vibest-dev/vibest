@@ -10,7 +10,7 @@ import {
   runnableNote,
   type RuntimeMachine,
 } from "@vibest/schema/session"
-import { Clock, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path } from "effect"
+import { Clock, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Ref } from "effect"
 import { Hex } from "effect/encoding"
 
 import { Agents, unknownAgent } from "../agents.ts"
@@ -218,95 +218,123 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
       const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
       const id = yield* db.newSessionId
       const now = yield* Clock.currentTimeMillis
-      const admit = (shared: string | undefined) =>
+      const held = yield* Deferred.make<void>()
+      const reserveWorktree = (folders: boolean) =>
         Effect.gen(function* () {
           const refuse = (message: string) => new AllocationFailed({ message })
-          const folders = yield* listProjectRepositories(root).pipe(
-            Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
-          )
-          let cwd = shared
-          if (cwd === undefined) {
-            const repository = folders
-              ? path.basename(root)
-              : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
-            if (!safeRepositoryDirectory(repository))
-              return yield* refuse(
-                `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or a session id)`,
-              )
-            const parentPath = path.join(layout.worktrees, repository)
-            if (
-              yield* allocationParentBlocked(parentPath).pipe(
-                Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`)),
-              )
+          const repository = folders
+            ? path.basename(root)
+            : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
+          if (!safeRepositoryDirectory(repository))
+            return yield* refuse(
+              `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or a session id)`,
             )
-              return yield* refuse(
-                `refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`,
-              )
-            yield* fs.makeDirectory(parentPath, { recursive: true }).pipe(Effect.mapError((e) => refuse(e.message)))
-            const attempts = ALLOCATION_NAME_ATTEMPTS
-            for (let i = 0; i < attempts && cwd === undefined; i++) {
-              const candidate = Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
-              if (!ALLOCATION_LEAF.test(candidate)) continue
-              const where = layout.allocationWorktree(repository, candidate)
-              const made = yield* fs.makeDirectory(where).pipe(
-                Effect.as(true),
-                Effect.catchTag("PlatformError", (e) =>
-                  e.reason._tag === "AlreadyExists"
-                    ? Effect.succeed(false)
-                    : Effect.fail(refuse(`${where}: ${e.message}`)),
-                ),
-              )
-              if (made) cwd = where
-            }
-            if (cwd === undefined)
-              return yield* refuse(`no unused 4-hex worktree name under ${repository} after ${attempts} attempts`)
+          const parentPath = path.join(layout.worktrees, repository)
+          if (
+            yield* allocationParentBlocked(parentPath).pipe(
+              Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`)),
+            )
+          )
+            return yield* refuse(
+              `refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`,
+            )
+          yield* fs.makeDirectory(parentPath, { recursive: true }).pipe(Effect.mapError((e) => refuse(e.message)))
+          for (let i = 0; i < ALLOCATION_NAME_ATTEMPTS; i++) {
+            const candidate = Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
+            if (!ALLOCATION_LEAF.test(candidate)) continue
+            const where = layout.allocationWorktree(repository, candidate)
+            const made = yield* fs.makeDirectory(where).pipe(
+              Effect.as(true),
+              Effect.catchTag("PlatformError", (e) =>
+                e.reason._tag === "AlreadyExists"
+                  ? Effect.succeed(false)
+                  : Effect.fail(refuse(`${where}: ${e.message}`)),
+              ),
+            )
+            if (made) return where
           }
-          const draft: Omit<NewSession, "projectId"> = {
-            id,
-            agent,
-            name: input.name,
-            harnessId,
-            provider: provider ?? null,
-            model: model ?? null,
-            harnessSessionId: adapter.ownSessionId ? yield* newId() : null,
-            runtime: runtimeKind,
-            address: { machine: decision.machine.id, id: "" },
-            status: "unknown",
-            startedAt: null,
-            exitedAt: null,
-            executionState: "none",
-            executionPromptedAt: 0,
-            ...(routing === undefined ? {} : { routing }),
-            createdAt: now,
-            lastActive: now,
-          }
-          const inserted = yield* db.insertSession(draft, input.projectId, {
-            max: options.maxSessions,
-            cwd,
-            task,
-            parentSessionId: input.parentSessionId,
-            request: input.request,
-            origin: input.origin,
-            archiveOnIdle: input.archive === true,
-          })
-          const unreserve = shared === undefined ? fs.remove(cwd, { recursive: true }).pipe(Effect.ignore) : Effect.void
-          if (inserted === false) {
-            yield* unreserve
-            return yield* new LimitReached({ limit: options.maxSessions! })
-          }
-          if (inserted === "parent-ended") {
-            yield* unreserve
-            return yield* new NoSuchSession({
-              id: input.parentSessionId!,
-              message: `${input.parentSessionId} has ended and can no longer start sessions`,
-            })
-          }
-          if (inserted !== true) {
-            yield* unreserve
-            return { before: inserted }
-          }
-          return { row: (yield* db.getSession(id))! }
+          return yield* refuse(
+            `no unused 4-hex worktree name under ${repository} after ${ALLOCATION_NAME_ATTEMPTS} attempts`,
+          )
         })
+      const admit = (shared: string | undefined) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const handedOver = yield* Ref.make(false)
+            const folders = yield* listProjectRepositories(root).pipe(
+              Effect.mapError((e) => new AllocationFailed({ message: `${root}: ${e.message}` })),
+            )
+            const cwd =
+              shared ??
+              (yield* Effect.acquireRelease(reserveWorktree(folders !== undefined), (reserved) =>
+                Ref.get(handedOver).pipe(
+                  Effect.flatMap((owned) =>
+                    owned ? Effect.void : fs.remove(reserved, { recursive: true }).pipe(Effect.ignore),
+                  ),
+                ),
+              ))
+            const draft: Omit<NewSession, "projectId"> = {
+              id,
+              agent,
+              name: input.name,
+              harnessId,
+              provider: provider ?? null,
+              model: model ?? null,
+              harnessSessionId: adapter.ownSessionId ? yield* newId() : null,
+              runtime: runtimeKind,
+              address: { machine: decision.machine.id, id: "" },
+              status: "unknown",
+              startedAt: null,
+              exitedAt: null,
+              executionState: "none",
+              executionPromptedAt: 0,
+              ...(routing === undefined ? {} : { routing }),
+              createdAt: now,
+              lastActive: now,
+            }
+            return yield* Effect.uninterruptible(
+              Effect.gen(function* () {
+                const inserted = yield* db.insertSession(draft, input.projectId, {
+                  max: options.maxSessions,
+                  cwd,
+                  task,
+                  parentSessionId: input.parentSessionId,
+                  request: input.request,
+                  origin: input.origin,
+                  archiveOnIdle: input.archive === true,
+                })
+                if (inserted === false) return yield* new LimitReached({ limit: options.maxSessions! })
+                if (inserted === "parent-ended")
+                  return yield* new NoSuchSession({
+                    id: input.parentSessionId!,
+                    message: `${input.parentSessionId} has ended and can no longer start sessions`,
+                  })
+                if (inserted !== true) return { before: inserted }
+                yield* Ref.set(handedOver, true)
+                const row = (yield* db.getSession(id))!
+                const leave = drain.track(`spawn ${id}`)
+                yield* Effect.forkIn(
+                  locks
+                    .withLock(id)(
+                      Deferred.succeed(held, undefined).pipe(
+                        Effect.andThen(
+                          launch(rt, target, row, root, task, {
+                            splitFrom: input.share,
+                            env: input.env,
+                            commit: input.commit,
+                            onOwnLimit,
+                          }),
+                        ),
+                      ),
+                    )
+                    .pipe(Effect.ensuring(leave), logged(`spawn ${id}`)),
+                  scope,
+                )
+                return { before: undefined }
+              }),
+            )
+          }),
+        )
       const admitted =
         input.share === undefined
           ? yield* admit(undefined)
@@ -316,7 +344,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
                 return yield* admit(shared)
               }),
             )
-      if ("before" in admitted) {
+      if (admitted.before !== undefined) {
         const { before } = admitted
         return {
           id: before.id,
@@ -328,30 +356,6 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
           trace: before.routing?.trace ?? [],
         }
       }
-      const row = admitted.row
-      const held = yield* Deferred.make<void>()
-      yield* Effect.uninterruptible(
-        Effect.gen(function* () {
-          const leave = drain.track(`spawn ${id}`)
-          yield* Effect.forkIn(
-            locks
-              .withLock(id)(
-                Deferred.succeed(held, undefined).pipe(
-                  Effect.andThen(
-                    launch(rt, target, row, root, task, {
-                      splitFrom: input.share,
-                      env: input.env,
-                      commit: input.commit,
-                      onOwnLimit,
-                    }),
-                  ),
-                ),
-              )
-              .pipe(Effect.ensuring(leave), logged(`spawn ${id}`)),
-            scope,
-          )
-        }),
-      )
       yield* Deferred.await(held)
       return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
     }, provided)
