@@ -239,28 +239,38 @@ const watchGate: {
 }
 const watchSees = (directory: string, name: string) => Effect.sync(() => watchGate.listeners.get(directory)!(name))
 const vibestJsonReads = { count: 0 }
-const readHold: { current: Promise<void> | undefined } = { current: undefined }
-const gateReads = (fs: FileSystem.FileSystem): FileSystem.FileSystem =>
-  new Proxy(fs, {
+type ConfigPause = {
+  on: boolean
+  gate: Promise<void>
+  release: () => void
+  blocked: boolean
+  mark: boolean
+  reads: number[]
+}
+const pausingConfigReads = (fs: FileSystem.FileSystem, config: string, pause: ConfigPause): FileSystem.FileSystem => {
+  const readConfig = (path: string, encoding?: string): ReturnType<FileSystem.FileSystem["readFileString"]> => {
+    const read = () => {
+      if (pause.mark && path === config) pause.reads.push(Date.now())
+      return fs.readFileString(path, encoding)
+    }
+    if (!pause.on || path !== config) return read()
+    pause.blocked = true
+    const waiting = pause.gate
+    return Effect.promise(() => waiting).pipe(
+      Effect.andThen(() => {
+        pause.blocked = false
+        return read()
+      }),
+    )
+  }
+  return new Proxy(fs, {
     get(target, prop, receiver) {
-      if (prop !== "readFile" && prop !== "readFileString") {
-        const value = Reflect.get(target, prop, receiver)
-        return typeof value === "function" ? value.bind(target) : value
-      }
-      const method = Reflect.get(target, prop, target) as (
-        ...args: ReadonlyArray<never>
-      ) => Effect.Effect<unknown, unknown, never>
-      return (...args: ReadonlyArray<never>) => {
-        const pending = readHold.current
-        if (pending !== undefined) {
-          readHold.current = undefined
-          wake()
-        }
-        const read = method.apply(target, args as never)
-        return pending === undefined ? read : Effect.promise(() => pending).pipe(Effect.andThen(() => read))
-      }
+      if (prop === "readFileString") return readConfig
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === "function" ? value.bind(target) : value
     },
   })
+}
 const nativeRequire = module.createRequire(import.meta.url)
 const freshRequire = async (entry: string, files: ReadonlyArray<string>) => {
   for (const file of files) delete nativeRequire.cache[file]
@@ -490,19 +500,29 @@ describe("plugins: supervisor", () => {
         const dir = yield* packageHome
         yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
         yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "slow-scan-a", `"a1"`))
+        const config = path.join(dir, "vibest.json")
+        const pause: ConfigPause = {
+          on: false,
+          gate: Promise.resolve(),
+          release: () => {},
+          blocked: false,
+          mark: false,
+          reads: [],
+        }
         const service = yield* TestClock.withLive(
-          supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, gateReads(fs))),
+          supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, pausingConfigReads(fs, config, pause))),
         )
         assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
         const setups = count("setup:slow-scan-a")
-        let releaseRead!: () => void
-        readHold.current = new Promise<void>((resolve) => {
-          releaseRead = resolve
+        watchGate.hold = true
+        pause.on = true
+        pause.gate = new Promise<void>((resolve) => {
+          pause.release = resolve
         })
         yield* TestClock.withLive(
           eventually(
-            Effect.sync(() => readHold.current === undefined),
-            (started) => started,
+            Effect.sync(() => pause.blocked),
+            (blocked) => blocked,
             "the rescan to start reading",
           ),
         )
@@ -510,12 +530,16 @@ describe("plugins: supervisor", () => {
         yield* TestClock.withLive(Effect.sleep(RECHECK))
         yield* TestClock.withLive(Effect.sleep("100 millis"))
         assert.isUndefined(starting.pollUnsafe(), "the recheck during the slow rescan reopened readiness")
-        releaseRead()
+        pause.mark = true
+        pause.on = false
+        pause.release()
         const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
         assert.strictEqual(started.model, "a1")
         assert.strictEqual(count("setup:slow-scan-a"), setups)
+        const gap = pause.reads.slice(1).reduce((widest, at, i) => Math.max(widest, at - pause.reads[i]!), 0)
+        assert.ok(gap < 80, `a rescan tick scheduled another reload: ${pause.reads.join(",")}`)
       }).pipe(
-        Effect.ensuring(Effect.sync(() => void (readHold.current = undefined))),
+        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
