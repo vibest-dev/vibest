@@ -364,7 +364,7 @@ export const replacements: LayerNode.Replacements = [
   HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
 ]
 
-export const daemon: Host = { lock, checkDatabase }
+export const daemon: Host = { lock, checkDatabase, exit: (code) => Effect.sync(() => process.exit(code)) }
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")

@@ -42,11 +42,14 @@ export interface Host {
   readonly checkDatabase: (
     filename: string,
   ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
+  readonly exit: (code: number) => Effect.Effect<void>
 }
 
 export { HANDOFF_ENV } from "./server.ts"
 
 const HANDOFF_TIMEOUT = Duration.seconds(30)
+const RELEASE_DEADLINE = Duration.seconds(10)
+const LOG_FLUSH = Duration.millis(1_500)
 const STOP_REPLY_GRACE = Duration.millis(200)
 
 export const checkImport = (host: Host) =>
@@ -125,6 +128,13 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     const shutdown = yield* Deferred.make<void>()
     yield* Layer.build(
       LayerNode.compile(daemon, {
+        releaseDeadline: {
+          after: RELEASE_DEADLINE,
+          expired: (releasing) =>
+            Effect.logError(
+              `vibestd did not stop within ${Duration.format(RELEASE_DEADLINE)}; still releasing: ${releasing.join(", ") || "nothing tracked"}`,
+            ).pipe(Effect.andThen(Effect.sleep(LOG_FLUSH)), Effect.andThen(host.exit(1))),
+        },
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),

@@ -1,4 +1,4 @@
-import { Brand, Context, Effect, Layer, type Scope } from "effect"
+import { Brand, Context, Duration, Effect, Fiber, Layer, Scope } from "effect"
 
 export * as LayerNode from "./layer-node.ts"
 
@@ -226,6 +226,12 @@ export function group<const Items extends readonly AnyGraph[]>(
 export interface CompileOptions {
   readonly replacements?: Replacements
   readonly shared?: Tag
+  readonly releaseDeadline?: ReleaseDeadline
+}
+
+export interface ReleaseDeadline {
+  readonly after: Duration.Input
+  readonly expired: (releasing: ReadonlyArray<string>) => Effect.Effect<void>
 }
 
 type Resolved = {
@@ -298,6 +304,24 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
 
   const roots = resolve(root)
   return Layer.fromBuild((memoMap, scope) => {
+    const releasing = new Set<string>()
+    const trackRelease = <B, F, R>(name: string, nodeScope: Scope.Scope, build: () => Effect.Effect<B, F, R>) =>
+      Effect.gen(function* () {
+        let settle = () => {}
+        yield* Scope.addFinalizer(
+          nodeScope,
+          Effect.sync(() => settle()),
+        )
+        const result = yield* build()
+        yield* Scope.addFinalizer(
+          nodeScope,
+          Effect.sync(() => {
+            releasing.add(name)
+            settle = () => releasing.delete(name)
+          }),
+        )
+        return result
+      })
     const local = shared === undefined ? memoMap : Layer.makeMemoMapUnsafe()
     const ambient = Layer.succeed(Layer.CurrentMemoMap, memoMap)
     const layers = new Map<Resolved, RuntimeLayer>()
@@ -306,15 +330,39 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
       if (cached) return cached
       const dependencies = node.dependencies.map(build)
       const implementation = Layer.suspend(() => node.implementation.pipe(Layer.provide([ambient, ...dependencies])))
-      const layer = Layer.fromBuild((_, scope) => buildContext(implementation, node.shared ? memoMap : local, scope))
+      const layer = Layer.fromBuild((_, nodeScope) =>
+        trackRelease(node.name, nodeScope, () =>
+          buildContext(implementation, node.shared ? memoMap : local, nodeScope),
+        ),
+      )
       layers.set(node, layer)
       return layer
     }
-    return buildContext(
-      roots.map(build).reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty),
-      memoMap,
-      scope,
-    )
+    return Effect.gen(function* () {
+      let stopDeadline = Effect.void
+      yield* Scope.addFinalizer(
+        scope,
+        Effect.suspend(() => stopDeadline),
+      )
+      const context = yield* buildContext(
+        roots.map(build).reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty),
+        memoMap,
+        scope,
+      )
+      const deadline = options.releaseDeadline
+      if (deadline)
+        yield* Scope.addFinalizer(
+          scope,
+          Effect.gen(function* () {
+            const timer = yield* Effect.sleep(deadline.after).pipe(
+              Effect.andThen(Effect.suspend(() => deadline.expired([...releasing]))),
+              Effect.forkDetach,
+            )
+            stopDeadline = Fiber.interrupt(timer)
+          }),
+        )
+      return context
+    })
   }) as Layer.Layer<A, E>
 }
 
