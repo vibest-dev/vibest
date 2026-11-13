@@ -72,7 +72,8 @@ export default Plugin.define({
 const checks: ReadonlyArray<Check> = [
   {
     id: "G2",
-    title: "a plugin whose teardown fails is logged as an error with its id, and its edited revision still runs",
+    title:
+      "a plugin whose teardown fails is logged as an error with its id and cause, and its edited revision still runs",
     run: async (w) => {
       const file = path.join(w.vibestHome, "plugins", "unclean.ts")
       await write(file, failingTeardown("unclean"))
@@ -85,7 +86,7 @@ const checks: ReadonlyArray<Check> = [
       )
       const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
       expect(
-        /ERROR[^\n]*failed to clean up plugin \{\s+"plugin\.id": "unclean"/.test(log),
+        /ERROR[^\n]*failed to clean up plugin[\s\S]*"plugin\.id": "unclean"[\s\S]*e2e teardown boom/.test(log),
         `the failed teardown was not logged: ${log.slice(-2000)}`,
       )
       await fs.rm(file)

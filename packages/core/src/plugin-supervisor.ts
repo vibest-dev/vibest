@@ -1,4 +1,4 @@
-import { Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
+import { Cause, Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
 
 import { type Candidate, keyOf, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
 import { logFailure } from "./reactor.ts"
@@ -85,7 +85,11 @@ export const supervise = Effect.fnUntraced(function* (
         activated = revisions
       }),
     )
-  yield* publish().pipe(logFailure("plugins: first activation failed"))
+  yield* publish().pipe(
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError("failed to activate plugins", { cause }),
+    ),
+  )
   yield* Stream.fromQueue(builtinTriggers).pipe(
     Stream.runForEach(() => publish().pipe(logFailure("plugins: builtin update failed"))),
     Effect.forkScoped,

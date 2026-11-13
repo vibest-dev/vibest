@@ -13,7 +13,7 @@ must be a directory.
 
 Editing a plugin file reloads it without a daemon restart: `vibest plugins` shows the new version, and vibestd is the
 same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way. A plugin whose teardown fails
-is logged as an error with its plugin id, and its edited revision still runs.
+is logged as an error with its plugin id and cause, and its edited revision still runs.
 
 ## G3. A plugin that fails to load
 
