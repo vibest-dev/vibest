@@ -87,7 +87,7 @@ export default Plugin.define({
 
 Keep stable references in runtime definitions: build the definition (and any function you put in it with `update`)
 once, outside the transform, because every registry commit runs all transforms again, and a member that is a new
-inline arrow each time makes vibest treat the runtime as replaced (a `live.reset` and a `machine.connect` per connected
+inline arrow each time makes vibest treat the runtime as replaced (a `runtime.reset` and a `machine.connect` per connected
 machine).
 
 `runtimeContract(definition, { cwd })` from `@vibest/plugin/testing` checks a definition against a real local

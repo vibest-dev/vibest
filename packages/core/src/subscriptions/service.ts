@@ -3,9 +3,9 @@ import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscr
 import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
 
 import { LayerNode } from "../effect/layer-node.ts"
-import { logFailure } from "../engine.ts"
 import { Harness, type HarnessId, Harnesses } from "../harness.ts"
 import type { HarnessDefinition, SubscriptionsShape } from "../host.ts"
+import { logFailure } from "../reactor.ts"
 
 const MINUTE = "1 minute"
 const CLI_TIMEOUT = "10 seconds"

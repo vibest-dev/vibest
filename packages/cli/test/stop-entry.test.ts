@@ -243,7 +243,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       const stopping = yield* Effect.forkChild(s.stop)
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
       yield* (yield* Bus).observe({
-        type: "live.exited",
+        type: "terminal.exited",
         runtime: s.origin.runtime,
         terminal: { machine: "local", id: s.paneId },
       })

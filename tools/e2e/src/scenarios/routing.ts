@@ -446,7 +446,10 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
         await resultOf(w, two, "observedagain")
         await until("the second agent's facts in order", async () => inOrder(of(await factLines(second), two)), 60_000)
         const all = await factLines(second)
-        expect(!all.some((line) => line.startsWith("live.")), `live events reached the plugin: ${JSON.stringify(all)}`)
+        expect(
+          !all.some((line) => /^(terminal\.|runtime\.reset|session\.changed|project\.changed|drain\.)/.test(line)),
+          `signals reached the plugin: ${JSON.stringify(all)}`,
+        )
         expect(
           (await factLines(first)).length === before,
           `the replaced revision still wrote: ${JSON.stringify((await factLines(first)).slice(before))}`,

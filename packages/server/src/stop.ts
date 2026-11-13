@@ -46,7 +46,7 @@ export const stopOnce =
         const accepted = yield* awaitEvent(
           acceptedOnceIdle,
           (event) =>
-            event.type === "live.drain" || event.type === "inbox.moved"
+            event.type === "drain.released" || event.type === "inbox.moved"
               ? acceptedOnceIdle
               : Effect.succeed(Option.none()),
           DRAIN_TIMEOUT,

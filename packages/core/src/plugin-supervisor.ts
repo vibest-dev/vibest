@@ -1,7 +1,7 @@
 import { Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
 
-import { logFailure } from "./engine.ts"
 import { type Candidate, keyOf, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
+import { logFailure } from "./reactor.ts"
 
 export const DEBOUNCE = Duration.millis(100)
 export const RECHECK = Duration.seconds(1)

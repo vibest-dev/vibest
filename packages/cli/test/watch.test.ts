@@ -228,7 +228,7 @@ describe("Watch", () => {
       const first = yield* w.recv
       assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
       for (let i = 0; i < Server.WATCH_BACKLOG + 500; i++)
-        yield* bus.observe({ type: "live.project", projectId: project })
+        yield* bus.observe({ type: "project.changed", projectId: project })
       const ack = { jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: 1 } }
       for (;;) {
         yield* w.send(ack)

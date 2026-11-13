@@ -214,10 +214,15 @@ const untilSignal = (ready: () => boolean, what: string, within: Duration.Input 
     return Effect.sync(() => waiters.delete(check))
   }).pipe(Effect.timeoutOrElse({ duration: within, orElse: () => Effect.die(`gave up waiting for ${what}`) }))
 
-const watchers = { open: 0 }
-const watchGate: { hold: boolean; listeners: Map<string, (name: string) => void> } = {
+const watchers = { open: 0, opened: 0 }
+const watchGate: {
+  hold: boolean
+  listeners: Map<string, (name: string) => void>
+  failures: Map<string, (error: Error) => void>
+} = {
   hold: false,
   listeners: new Map(),
+  failures: new Map(),
 }
 const watchSees = (directory: string, name: string) => Effect.sync(() => watchGate.listeners.get(directory)!(name))
 const vibestJsonReads = { count: 0 }
@@ -235,12 +240,18 @@ const loader: PluginLoader["Service"] = {
     return Platform.plugins.parseJsonc(text)
   },
   load: freshRequire,
-  watch: (directory, changed) => {
+  watch: (directory, changed, failed) => {
     watchGate.listeners.set(directory, changed)
-    const stop = Platform.plugins.watch(directory, (name) => {
-      if (!watchGate.hold) changed(name)
-    })
+    watchGate.failures.set(directory, failed)
+    const stop = Platform.plugins.watch(
+      directory,
+      (name) => {
+        if (!watchGate.hold) changed(name)
+      },
+      failed,
+    )
     watchers.open++
+    watchers.opened++
     return () => {
       watchers.open--
       stop()
@@ -367,6 +378,29 @@ describe("plugins: supervisor", () => {
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
+    20_000,
+  )
+
+  it.effect(
+    "a watcher that fails is set up again by the next rescan",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
+        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "rearm-a", `"a1"`))
+        const { clocked, rescanned } = yield* timers
+        const service = yield* clocked(supervise(dir))
+        yield* service.start(event)
+        const opened = watchers.opened
+        watchGate.failures.get(path.join(dir, "plugins"))!(new Error("EMFILE"))
+        yield* rescanned(
+          Effect.sync(() => watchers.opened),
+          (n) => n > opened,
+          "the watch to be set up again",
+        )
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     20_000,
   )
 

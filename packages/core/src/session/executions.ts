@@ -1,7 +1,7 @@
 import { NotReady } from "@vibest/schema/session"
 import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
 
-import { awaitEvent, awaitOn, Bus, type EngineEvent } from "../bus.ts"
+import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { Db, type SessionRow, harnessIdOf } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harness.ts"
@@ -100,7 +100,7 @@ const make = Effect.gen(function* () {
     session: SessionRow,
     terminal: Terminal,
     execution: number,
-    subscription: PubSub.Subscription<EngineEvent>,
+    subscription: PubSub.Subscription<BusEvent>,
   ) =>
     awaitOn(
       subscription,
@@ -110,7 +110,7 @@ const make = Effect.gen(function* () {
       (event) =>
         event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
           ? Effect.succeed(Option.some(true))
-          : event.type === "live.state" &&
+          : event.type === "terminal.state" &&
               sameTerminal(event.terminal, terminal) &&
               (event.state === "working" || event.state === "blocked")
             ? Effect.map(pickedUp(session, execution, event.state), Option.some)
@@ -138,7 +138,7 @@ const make = Effect.gen(function* () {
       ),
       (event) =>
         Effect.succeed(
-          (event.type === "live.state" &&
+          (event.type === "terminal.state" &&
             sameTerminal(event.terminal, terminal) &&
             event.state !== "working" &&
             event.state !== "blocked") ||

@@ -28,7 +28,6 @@ import {
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import * as Engine from "../engine.ts"
 import {
   harnessCatalog,
   harnessOptions,
@@ -43,6 +42,7 @@ import { directoryLock, type keyedLock } from "../keyed-lock.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, safeRepositoryDirectory } from "../paths.ts"
 import { Plugins, type Routing } from "../plugins.ts"
 import { listProjectRepositories } from "../project-create.ts"
+import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, Runtimes } from "../runtimes.ts"
 import { allocationParentBlocked, Git, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
@@ -419,7 +419,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
       locks: yield* SessionLocks,
       options,
       worktreeOf,
-      logged: Engine.logFailure,
+      logged: Reactor.logFailure,
       launch,
       onOwnLimit: (yield* Move).rerun,
     })

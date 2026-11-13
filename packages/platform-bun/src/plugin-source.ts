@@ -127,10 +127,11 @@ export const load = (entry: string, files: ReadonlyArray<string>): Promise<unkno
   return import(`${entry}?vibest-load=${n}`)
 }
 
-export const watch = (directory: string, changed: (name: string) => void) => {
-  const watcher = fs.watch(directory, { persistent: false }, (_event, name) => {
-    if (name) changed(name)
+export const watch = (directory: string, changed: (name: string) => void, failed: (error: Error) => void) => {
+  const watcher = fs.watch(directory, { persistent: false }, (_event, name) => changed(name ?? ""))
+  watcher.on("error", (error) => {
+    watcher.close()
+    failed(error)
   })
-  watcher.on("error", () => watcher.close())
   return () => watcher.close()
 }

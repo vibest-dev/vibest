@@ -6,16 +6,16 @@ import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Qu
 
 import { Agents } from "./agents.ts"
 import { timeoutWithoutWaiting } from "./bounded.ts"
-import { Bus, type EngineEvent } from "./bus.ts"
+import { Bus, type BusEvent } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
-import { logFailure } from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
 import type { PluginsShape } from "./host.ts"
 import { type Candidate, keyOf, makeSources, PluginLoader } from "./plugin-sources.ts"
 import { supervise } from "./plugin-supervisor.ts"
+import { logFailure } from "./reactor.ts"
 import * as Registry from "./registry.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -133,7 +133,7 @@ const decide = (
   return change
 }
 
-const isFact = (event: EngineEvent): event is Fact => Object.hasOwn(Catalog, event.type)
+const isFact = (event: BusEvent): event is Fact => Object.hasOwn(Catalog, event.type)
 
 const factsFor =
   (bus: Bus["Service"], plugin: string): VibestPlugin.EventDomain["subscribe"] =>

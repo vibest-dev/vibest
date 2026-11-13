@@ -107,7 +107,7 @@ const make = Effect.gen(function* () {
             return fresh.map(outboxItem)
           })
           const wake = Stream.fromSubscription(subscription).pipe(
-            Stream.filter((event) => event.type === "live.outbox" && event.peerId === peer),
+            Stream.filter((event) => event.type === "outbox.queued" && event.data.peer === peer),
           )
           return Stream.concat(Stream.make(undefined), wake).pipe(
             Stream.mapEffect(() => batch),

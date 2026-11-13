@@ -16,7 +16,7 @@ export class PluginLoader extends Context.Service<
       readonly unresolved: ReadonlyArray<string>
     }
     readonly load: (entry: string, files: ReadonlyArray<string>) => Promise<unknown>
-    readonly watch: (directory: string, changed: (name: string) => void) => () => void
+    readonly watch: (directory: string, changed: (name: string) => void, failed: (error: Error) => void) => () => void
   }
 >()("vibest/PluginLoader") {
   static readonly node = LayerNode.unbound(PluginLoader)
@@ -300,6 +300,7 @@ export const makeWatcher = (changed: (path: string) => void) =>
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const loader = yield* PluginLoader
+    const services = yield* Effect.context<never>()
     const running = new Map<string, { readonly key: string; readonly close: () => void }>()
     let current: Watched = { paths: new Set(), listings: new Set() }
     const stop = (dir: string) => {
@@ -350,10 +351,19 @@ export const makeWatcher = (changed: (path: string) => void) =>
       for (const [dir, key] of wanted) {
         if (running.has(dir)) continue
         const watching = yield* Effect.try(() =>
-          loader.watch(dir, (name) => {
-            const file = path.join(dir, name)
-            if (current.listings.has(dir) || current.paths.has(file)) changed(file)
-          }),
+          loader.watch(
+            dir,
+            (name) => {
+              const file = path.join(dir, name)
+              if (name === "" || current.listings.has(dir) || current.paths.has(file)) changed(file)
+            },
+            (e) => {
+              running.delete(dir)
+              Effect.runFork(
+                Effect.logWarning(`plugin watch of ${dir} failed: ${messageOf(e)}`).pipe(Effect.provide(services)),
+              )
+            },
+          ),
         ).pipe(
           Effect.tapError((e) => Effect.logWarning(`cannot watch ${dir} for plugin changes: ${messageOf(e)}`)),
           Effect.option,
