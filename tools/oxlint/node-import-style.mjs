@@ -1,5 +1,7 @@
 import module from "node:module"
 
+import { importBoundaries } from "./import-boundaries.mjs"
+import { ledgerAccessRules } from "./ledger-access.mjs"
 import { noComments } from "./no-comments.mjs"
 import { noRestrictedDisable } from "./no-restricted-disable.mjs"
 
@@ -89,5 +91,7 @@ export default {
     "node-import-style": nodeImportStyle,
     "no-restricted-disable": noRestrictedDisable,
     "no-comments": noComments,
+    "import-boundaries": importBoundaries,
+    ...ledgerAccessRules,
   },
 }

@@ -19,6 +19,11 @@
     "vibest/node-import-style": "error",
     "vibest/no-restricted-disable": "error",
     "vibest/no-comments": "error",
+    "vibest/import-boundaries": "error",
+    "vibest/event-reads": "error",
+    "vibest/no-payload-sql": "error",
+    "vibest/projector-writes": "error",
+    "vibest/no-background-loop": "error",
     "eslint/no-unused-vars": "error",
     "eslint/no-unused-expressions": [
       "error",

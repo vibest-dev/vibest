@@ -8,10 +8,11 @@ import { describe, expect, it } from "vitest"
 
 const root = url.fileURLToPath(new URL("../..", import.meta.url))
 
-const oxlintFindings = (source) => {
+const oxlintFindings = (source, file = "fixture.ts") => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-oxlint-"))
   try {
-    fs.writeFileSync(path.join(dir, "fixture.ts"), source)
+    fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+    fs.writeFileSync(path.join(dir, file), source)
     const run = childProcess.spawnSync(
       path.join(root, "node_modules/.bin/oxlint"),
       ["-c", path.join(root, ".oxlintrc.json"), "-f", "json", dir],
@@ -149,5 +150,83 @@ export const one = 1
     expect(oxlintFindings(`// remember to oxlint-enable later\nexport const one = 1\n`)).toEqual([
       "1 vibest(no-comments)",
     ])
+  })
+})
+
+describe("import-boundaries", () => {
+  const herdr = `import { Herdr } from "effect-herdr-sdk"
+export * from "@vibest/runtime-herdr/x"
+export const later = () => import("@vibest/runtime-herdr")
+export const all = Herdr
+`
+
+  it("bans herdr in runtime-neutral packages", () => {
+    expect(oxlintFindings(herdr, "packages/core/src/a.ts")).toEqual([
+      "1 vibest(import-boundaries)",
+      "2 vibest(import-boundaries)",
+      "3 vibest(import-boundaries)",
+    ])
+    expect(oxlintFindings(herdr, "packages/runtime-herdr/src/a.ts")).toEqual([])
+  })
+
+  it("bans core and herdr in top-level CLI sources only", () => {
+    const source = `import { A } from "@vibest/core/x"\nexport const a = A\n`
+    expect(oxlintFindings(source, "packages/cli/src/a.ts")).toEqual(["1 vibest(import-boundaries)"])
+    expect(oxlintFindings(source, "packages/cli/src/sub/a.ts")).toEqual([])
+  })
+
+  it("bans Bun imports except in platform folders and bun.ts", () => {
+    const source = `import { Database } from "bun:sqlite"\nimport { layer } from "@effect/platform-bun/BunRuntime"\nexport const all = [Database, layer]\n`
+    const both = ["1 vibest(import-boundaries)", "2 vibest(import-boundaries)"]
+    expect(oxlintFindings(source, "packages/server/src/a.ts")).toEqual(both)
+    expect(oxlintFindings(source, "packages/effect-herdr-sdk/src/b.ts")).toEqual(both)
+    expect(oxlintFindings(source, "packages/core/src/platform/a.ts")).toEqual([])
+    expect(oxlintFindings(source, "packages/effect-herdr-sdk/src/bun.ts")).toEqual([])
+    expect(oxlintFindings(source, "packages/cli/src/a.ts")).toEqual([])
+  })
+})
+
+describe("ledger access rules", () => {
+  const core = (name) => `packages/core/src/${name}`
+
+  it("event-reads: only the journal reads the event table and position", () => {
+    const source = "export const q = `SELECT * FROM event`\nexport const p = { position: 1 }\n"
+    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
+    expect(oxlintFindings(source, core("journal.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("a.test.ts"))).toEqual([])
+  })
+
+  it("no-payload-sql: json_extract only in the v1 import", () => {
+    const source = `export const q = "SELECT json_extract(data, '$.a') FROM x"\n`
+    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(no-payload-sql)"])
+    expect(oxlintFindings(source, core("import/v1.ts"))).toEqual([])
+  })
+
+  it("projector-writes: table writes only in the writers", () => {
+    const source = `export const a = "INSERT INTO t VALUES (1)"\nexport const b = sql.insert("t")\nexport const c = "UPDATE t SET a = 1"\n`
+    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(projector-writes)", "3 vibest(projector-writes)"])
+    expect(oxlintFindings(source, core("projectors.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("db.ts"))).toEqual([])
+  })
+
+  it("no-background-loop: unbounded loops in core and server only", () => {
+    const source = `import { Effect, Stream } from "effect"
+export const a = Effect.forever(Effect.void)
+export const b = setInterval(() => {}, 1)
+export const c = Stream.tick("1 second")
+export const d = Effect.repeat(Effect.void, { times: 3 })
+export const e = Effect.repeat(Effect.void, { until: () => true })
+export const f = Effect.repeat(Effect.void, Schedule.spaced("1 second"))
+export const g = Effect.schedule(Effect.void, Schedule.spaced("1 second"))
+`
+    expect(oxlintFindings(source, "packages/server/src/a.ts")).toEqual([
+      "2 vibest(no-background-loop)",
+      "3 vibest(no-background-loop)",
+      "4 vibest(no-background-loop)",
+      "7 vibest(no-background-loop)",
+      "8 vibest(no-background-loop)",
+    ])
+    expect(oxlintFindings(source, "packages/core/src/update-check.ts")).toEqual([])
+    expect(oxlintFindings(source, "packages/client/src/a.ts")).toEqual([])
   })
 })

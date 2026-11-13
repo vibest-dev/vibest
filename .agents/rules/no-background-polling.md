@@ -8,4 +8,4 @@ vibestd learns what changed from events, not by looking again on a clock.
 4. Exception approved by the owner: vibestd looks up the latest vibest at start and then every hour (`packages/core/src/update-check.ts`), keeping the answer in memory only.
 5. Exception approved by the owner: vibestd reads the plugin sources again every second besides watching them (`packages/core/src/plugin-supervisor.ts`), because macOS FSEvents drops change events under file-writing load and Bun's `fs.watch` does not report the drop; an unchanged read imports and sets up nothing.
 
-Status: in force on `feat/event-driven`. The source-scanning check was dropped; an oxlint rule over `packages/core/src` and `packages/server/src` will enforce these shapes. The client, CLI, integration and runtime packages are not scanned: their reconnect loops are allowed.
+Status: in force on `feat/event-driven`. The oxlint rule `vibest/no-background-loop` (`tools/oxlint/ledger-access.mjs`) reports these shapes in `packages/core/src` and `packages/server/src`; the two approved loops are exempt by file. The client, CLI, integration and runtime packages are not scanned: their reconnect loops are allowed.
