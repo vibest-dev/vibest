@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import { ClientInfo } from "@vibest/client/client"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db, exitedAt, executionStateOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
@@ -20,6 +21,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
+import { VERSION } from "../src/version.ts"
 import {
   authed,
   FakeGit,
@@ -206,11 +208,14 @@ describe("multi-repository project", () => {
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
+  Layer.provideMerge(Layer.succeed(ClientInfo, { version: VERSION })),
   Layer.provideMerge(testLayer()),
 )
 
-const sessionTest = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(served)), 30_000)
+const sessionTest = <E>(
+  name: string,
+  program: Effect.Effect<void, E, TestServices | Project | Scope.Scope | ClientInfo>,
+) => it.effect(name, () => program.pipe(Effect.provide(served)), 30_000)
 
 describe("multi-repository isolated workspace", () => {
   sessionTest(

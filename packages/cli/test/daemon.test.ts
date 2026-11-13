@@ -15,7 +15,7 @@ import { SocketServer } from "effect/socket/SocketServer"
 
 import * as Platform from "#platform"
 
-import { appReplacement } from "./fakes.ts"
+import { hostReplacements } from "./fakes.ts"
 import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "./fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
@@ -200,7 +200,7 @@ describe.concurrent("vibestd.pid lock", () => {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const slowClose = [
           ...Platform.replacements,
-          appReplacement,
+          ...hostReplacements,
           Server.socketServer.replace(
             LayerNode.make({
               name: "test/SlowCloseSocketServer",

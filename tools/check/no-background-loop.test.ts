@@ -3,7 +3,7 @@ import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
 
-const ROOTS = ["packages/core/src", "packages/server/src", "packages/platform-bun/src"]
+const ROOTS = ["packages/core/src", "packages/server/src", "packages/cli/src"]
 
 const UNBOUNDED_LOOP_SHAPES = ["Effect.forever", "setInterval", "Stream.tick", "Effect.schedule("]
 const REPEAT = "Effect.repeat"
@@ -23,7 +23,7 @@ const unboundedRepeats = (text: string) => {
 }
 
 const ALLOWED: Record<string, Record<string, { readonly count: number; readonly reason: string }>> = {
-  "packages/platform-bun/src/update-check.ts": {
+  "packages/cli/src/update-check.ts": {
     "Effect.repeat": { count: 1, reason: "the hourly look-up of the latest vibest, approved by the owner" },
   },
   "packages/core/src/plugin-supervisor.ts": {

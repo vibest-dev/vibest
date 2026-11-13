@@ -79,6 +79,8 @@ export const UpdateStatus = Schema.Struct({
 })
 export type UpdateStatus = typeof UpdateStatus.Type
 
+export const NOT_CHECKED: UpdateStatus = { checked: null, latest: null, checking: false }
+
 export const PingResult = Schema.Struct({
   protocol: Schema.optional(Schema.Number),
   version: Schema.String,

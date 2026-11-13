@@ -1,8 +1,8 @@
-import { App } from "@vibest/schema/app"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule, type Scope } from "effect"
 
 import { Agents } from "../agents.ts"
+import { App } from "../app.ts"
 import { awaitEvent, Bus, type BusEvent } from "../bus.ts"
 import {
   archived,
@@ -489,7 +489,7 @@ export class Restart extends Context.Service<Restart, Effect.Success<typeof make
     service: Restart,
     layer: Restart.layer,
     deps: [
-      PlatformNode.app,
+      App.node,
       Agents.node,
       Bus.node,
       Db.node,

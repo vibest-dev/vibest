@@ -58,11 +58,7 @@ const oldInstall = async (w: World, name: string) => {
     expect(patched !== source, `${file}: its version was not found`)
     await fs.writeFile(file, patched)
   }
-  await patch(
-    path.join(old, "harnesses", "pi", "extension.mjs"),
-    /var VERSION = package_default\.version;/,
-    `var VERSION = "${OLD}";`,
-  )
+  await patch(path.join(old, "harnesses", "pi", "extension.mjs"), /var VERSION = "[^"]+";/, `var VERSION = "${OLD}";`)
   await patch(
     path.join(old, "harnesses", "claude", "hooks", "register.mjs"),
     /pluginVersion: "[^"]+"/,

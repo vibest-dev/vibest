@@ -9,12 +9,12 @@ import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
 import {
   claimHeaders,
   type ClientServices,
+  ClientInfo,
   connect,
   hookCall,
   SocketConnector,
   withVibest,
 } from "@vibest/client/client"
-import { App } from "@vibest/schema/app"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
@@ -286,7 +286,7 @@ export const services = Layer.mergeAll(
   NodeFileSystem.layer,
   Layer.succeed(SocketConnector, (endpoint) => NodeSocket.makeNet({ path: endpoint })),
   vibestCommand,
-  Layer.succeed(App, { version: VERSION }),
+  Layer.succeed(ClientInfo, { version: VERSION }),
 ).pipe(Layer.provideMerge(NodePath.layer))
 
 export default (api: ExtensionAPI) => Pi.runMain(api, extension.pipe(Layer.provide(services)))

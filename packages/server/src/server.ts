@@ -1,4 +1,5 @@
 import { Agents } from "@vibest/core/agents"
+import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -101,7 +102,7 @@ export const node = LayerNode.make({
     SshHosts.node,
     Subscriptions.node,
     UpdateCheck.node,
-    PlatformNode.app,
+    App.node,
     VibestdIdentity.node,
     socketServer,
     PlatformNode.childProcessSpawner,

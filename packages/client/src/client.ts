@@ -7,12 +7,12 @@ import {
   sessionHeaders,
 } from "@vibest/protocol/protocol"
 import { DaemonIdentity, VibestRpcs, type Ping } from "@vibest/protocol/rpc"
-import { App } from "@vibest/schema/app"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import {
   Cause,
   Config,
+  Context,
   Duration,
   Effect,
   Exit,
@@ -32,7 +32,9 @@ import * as Socket from "effect/socket/Socket"
 import { SocketConnector } from "./socket-connector.ts"
 export { SocketConnector } from "./socket-connector.ts"
 
-export type ClientServices = App | Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
+export class ClientInfo extends Context.Service<ClientInfo, { readonly version: string }>()("vibest/ClientInfo") {}
+
+export type ClientServices = ClientInfo | Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
 
 export const DAEMON_START_TIMEOUT = Duration.seconds(10)
 
@@ -372,7 +374,7 @@ export const withVibest = <A, E, R>(
     const incompatible = incompatibleDaemon(
       layout.socket,
       ping,
-      { version: (yield* App).version, command: yield* VibestCommand },
+      { version: (yield* ClientInfo).version, command: yield* VibestCommand },
       options?.needs,
     )
     if (incompatible) return yield* incompatible

@@ -1,11 +1,11 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand } from "@vibest/client/client"
+import { App } from "@vibest/core/app"
 import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"
 import type { ReplayDiffers } from "@vibest/core/journal"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { App } from "@vibest/schema/app"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
@@ -116,7 +116,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
     const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
-    const app = yield* App.pipe(Effect.provide(LayerNode.compile(PlatformNode.app, { replacements })))
+    const app = yield* App.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
     const identity = {
       pid: facts.pid,
       instance: yield* newId(),

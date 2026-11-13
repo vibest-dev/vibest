@@ -1,3 +1,4 @@
+import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { NoSuchSession } from "@vibest/core/sessions"
@@ -31,7 +32,6 @@ import {
   ProtocolRejected,
   type CallerShape,
 } from "@vibest/protocol/rpc"
-import { App } from "@vibest/schema/app"
 import { ID } from "@vibest/schema/id"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Effect, Layer, Option } from "effect"

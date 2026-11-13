@@ -1,3 +1,4 @@
+import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/db"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Machines } from "@vibest/core/machines"
@@ -7,7 +8,6 @@ import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import type { NotInRepository } from "@vibest/core/worktree"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerShape, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
-import { App } from "@vibest/schema/app"
 import type { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Stream } from "effect"
 

@@ -1,3 +1,3 @@
-import pkg from "../package.json" with { type: "json" }
+declare const VIBEST_VERSION: string
 
-export const VERSION = pkg.version
+export const VERSION = typeof VIBEST_VERSION === "string" ? VIBEST_VERSION : "0.0.0-local"

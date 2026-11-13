@@ -61,7 +61,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   await fs.mkdir(path.dirname(bin), { recursive: true })
   const bytes = Buffer.from(await fs.readFile(compiled))
   olderProtocol(bytes, protocol)
-  swapOnce(bytes, `version: "${buildVersion}"`, `version: "${version}"`)
+  swapOnce(bytes, `"${buildVersion}"`, `"${version}"`)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
   if (process.platform === "darwin") {
     const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
@@ -71,7 +71,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
   const source = Buffer.from(await fs.readFile(extension))
   olderProtocol(source, protocol)
-  const older = source.toString().replace("var VERSION = package_default.version;", `var VERSION = "${version}";`)
+  const older = source.toString().replace(/var VERSION = "[^"]+";/, `var VERSION = "${version}";`)
   expect(older !== source.toString(), `${extension}: its version was not found`)
   await fs.writeFile(extension, older)
   return bin
