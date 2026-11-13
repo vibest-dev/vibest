@@ -6,6 +6,11 @@ const PROTECTED_RULES = new Set([
   "no-restricted-disable",
   "max-lines",
   "no-restricted-imports",
+  "import-boundaries",
+  "event-reads",
+  "no-payload-sql",
+  "projector-writes",
+  "no-background-loop",
 ])
 
 const parseDisableDirective = (commentValue) => {

@@ -8,14 +8,25 @@ import { describe, expect, it } from "vitest"
 
 const root = url.fileURLToPath(new URL("../..", import.meta.url))
 
-const oxlintFindings = (source, file = "fixture.ts") => {
+const configAt = (dir) => {
+  const config = JSON.parse(fs.readFileSync(path.join(root, ".oxlintrc.json"), "utf8"))
+  const absolute = (specifier) => path.join(root, specifier)
+  config.jsPlugins = config.jsPlugins.map((plugin) =>
+    typeof plugin === "string" ? absolute(plugin) : { ...plugin, specifier: absolute(plugin.specifier) },
+  )
+  const file = path.join(dir, "oxlintrc.json")
+  fs.writeFileSync(file, JSON.stringify(config))
+  return file
+}
+
+const oxlintFindings = (source, file = "fixture.ts", { scoped = false } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-oxlint-"))
   try {
     fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
     fs.writeFileSync(path.join(dir, file), source)
     const run = childProcess.spawnSync(
       path.join(root, "node_modules/.bin/oxlint"),
-      ["-c", path.join(root, ".oxlintrc.json"), "-f", "json", dir],
+      ["-c", scoped ? configAt(dir) : path.join(root, ".oxlintrc.json"), "-f", "json", dir],
       { encoding: "utf8" },
     )
     return JSON.parse(run.stdout)
@@ -92,6 +103,15 @@ export const cpus = os.cpus()
     },
   )
 
+  it.each(["import-boundaries", "event-reads", "no-payload-sql", "projector-writes", "no-background-loop"])(
+    "refuses disabling vibest/%s",
+    (rule) => {
+      expect(oxlintFindings(`// oxlint-disable-next-line vibest/${rule}\nexport const one = 1\n`)).toContain(
+        "1 vibest(no-restricted-disable)",
+      )
+    },
+  )
+
   it("refuses a blanket disable", () => {
     expect(oxlintFindings(`// eslint-disable\nexport const one = 1\n`)).toEqual(["1 vibest(no-restricted-disable)"])
   })
@@ -154,35 +174,47 @@ export const one = 1
 })
 
 describe("import-boundaries", () => {
-  const herdr = `import { Herdr } from "effect-herdr-sdk"
-export * from "@vibest/runtime-herdr/x"
-export const later = () => import("@vibest/runtime-herdr")
-export const all = Herdr
+  const forms = `export const a = import("effect-herdr-sdk")
+export const b = import(\`bun:sqlite\`)
+export type C = import("@vibest/runtime-herdr").T
+export const d = require("effect-herdr-sdk/x")
+import e = require("bun:test")
+export const f = [e, import(name)]
 `
+  const flagged = ["1", "2", "3", "4", "5"].map((line) => `${line} vibest(import-boundaries)`)
 
-  it("bans herdr in runtime-neutral packages", () => {
-    expect(oxlintFindings(herdr, "packages/core/src/a.ts")).toEqual([
-      "1 vibest(import-boundaries)",
-      "2 vibest(import-boundaries)",
-      "3 vibest(import-boundaries)",
-    ])
-    expect(oxlintFindings(herdr, "packages/runtime-herdr/src/a.ts")).toEqual([])
+  it("reports dynamic import, import types, require and import-equals", () => {
+    expect(oxlintFindings(forms, "packages/core/src/a.ts")).toEqual(flagged)
+    expect(oxlintFindings(forms, "packages/core/src/bun.ts")).toEqual([])
+    expect(oxlintFindings(forms, "packages/runtime-herdr/src/a.ts")).toEqual([])
   })
 
-  it("bans core and herdr in top-level CLI sources only", () => {
-    const source = `import { A } from "@vibest/core/x"\nexport const a = A\n`
+  it("reports core and herdr in top-level CLI sources only", () => {
+    const source = `export const a = import("@vibest/core/x")\n`
     expect(oxlintFindings(source, "packages/cli/src/a.ts")).toEqual(["1 vibest(import-boundaries)"])
     expect(oxlintFindings(source, "packages/cli/src/sub/a.ts")).toEqual([])
   })
 
-  it("bans Bun imports except in platform folders and bun.ts", () => {
-    const source = `import { Database } from "bun:sqlite"\nimport { layer } from "@effect/platform-bun/BunRuntime"\nexport const all = [Database, layer]\n`
-    const both = ["1 vibest(import-boundaries)", "2 vibest(import-boundaries)"]
-    expect(oxlintFindings(source, "packages/server/src/a.ts")).toEqual(both)
-    expect(oxlintFindings(source, "packages/effect-herdr-sdk/src/b.ts")).toEqual(both)
-    expect(oxlintFindings(source, "packages/core/src/platform/a.ts")).toEqual([])
-    expect(oxlintFindings(source, "packages/effect-herdr-sdk/src/bun.ts")).toEqual([])
-    expect(oxlintFindings(source, "packages/cli/src/a.ts")).toEqual([])
+  it("static imports are banned by the scoped no-restricted-imports configuration", () => {
+    const herdr = `import { Herdr } from "effect-herdr-sdk"\nexport * from "@vibest/runtime-herdr/x"\nexport const all = Herdr\n`
+    expect(oxlintFindings(herdr, "packages/core/src/a.ts", { scoped: true })).toEqual([
+      "1 eslint(no-restricted-imports)",
+      "2 eslint(no-restricted-imports)",
+    ])
+    expect(oxlintFindings(herdr, "packages/cli/src/a.ts", { scoped: true })).toEqual([
+      "1 eslint(no-restricted-imports)",
+    ])
+    expect(
+      oxlintFindings(`import { Database } from "bun:sqlite"\nexport const a = Database\n`, "packages/server/src/a.ts", {
+        scoped: true,
+      }),
+    ).toEqual(["1 eslint(no-restricted-imports)"])
+    expect(
+      oxlintFindings(
+        `import { Database } from "bun:sqlite"\nexport const a = Database\n`,
+        "packages/effect-herdr-sdk/src/bun.ts",
+      ),
+    ).toEqual([])
   })
 })
 
@@ -202,11 +234,26 @@ describe("ledger access rules", () => {
     expect(oxlintFindings(source, core("import/v1.ts"))).toEqual([])
   })
 
-  it("projector-writes: table writes only in the writers", () => {
-    const source = `export const a = "INSERT INTO t VALUES (1)"\nexport const b = sql.insert("t")\nexport const c = "UPDATE t SET a = 1"\n`
-    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(projector-writes)", "3 vibest(projector-writes)"])
+  it("projector-writes: statements and builder calls only in the writers", () => {
+    const source = `export const a = "INSERT INTO t VALUES (1)"\nexport const b = sql.insert("session")\nexport const c = "UPDATE t SET a = 1"\nexport const d = this.sql.update("t")\n`
+    expect(oxlintFindings(source, core("a.ts"))).toEqual([
+      "1 vibest(projector-writes)",
+      "2 vibest(projector-writes)",
+      "3 vibest(projector-writes)",
+      "4 vibest(projector-writes)",
+    ])
     expect(oxlintFindings(source, core("projectors.ts"))).toEqual([])
-    expect(oxlintFindings(source, core("db.ts"))).toEqual([])
+  })
+
+  it("projector-writes: db.ts may hold only its one opening write", () => {
+    const opening = "export const a = `UPDATE meta SET value = value WHERE key = ''`\n"
+    expect(oxlintFindings(opening, core("db.ts"))).toEqual([])
+    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("db.ts"))).toEqual([
+      "2 vibest(projector-writes)",
+    ])
+    expect(oxlintFindings(`export const a = "DELETE FROM meta"\n`, core("db.ts"))).toEqual([
+      "1 vibest(projector-writes)",
+    ])
   })
 
   it("no-background-loop: unbounded loops in core and server only", () => {
@@ -218,15 +265,31 @@ export const d = Effect.repeat(Effect.void, { times: 3 })
 export const e = Effect.repeat(Effect.void, { until: () => true })
 export const f = Effect.repeat(Effect.void, Schedule.spaced("1 second"))
 export const g = Effect.schedule(Effect.void, Schedule.spaced("1 second"))
+export const h = globalThis.setInterval
+export const i = setInterval
 `
     expect(oxlintFindings(source, "packages/server/src/a.ts")).toEqual([
+      "10 vibest(no-background-loop)",
       "2 vibest(no-background-loop)",
       "3 vibest(no-background-loop)",
       "4 vibest(no-background-loop)",
       "7 vibest(no-background-loop)",
       "8 vibest(no-background-loop)",
+      "9 vibest(no-background-loop)",
     ])
-    expect(oxlintFindings(source, "packages/core/src/update-check.ts")).toEqual([])
     expect(oxlintFindings(source, "packages/client/src/a.ts")).toEqual([])
+  })
+
+  it("no-background-loop: the approved files keep only their one loop", () => {
+    const repeat = "export const a = Effect.repeat(check, Schedule.spaced(EVERY))\n"
+    expect(oxlintFindings(repeat, "packages/core/src/update-check.ts")).toEqual([])
+    expect(oxlintFindings(repeat + repeat.replace("const a", "const b"), "packages/core/src/update-check.ts")).toEqual([
+      "2 vibest(no-background-loop)",
+    ])
+    const forever = "export const a = pipe(x, Effect.forever)\n"
+    expect(oxlintFindings(forever, "packages/core/src/plugin-supervisor.ts")).toEqual([])
+    expect(
+      oxlintFindings(forever + forever.replace("const a", "const b"), "packages/core/src/plugin-supervisor.ts"),
+    ).toEqual(["2 vibest(no-background-loop)"])
   })
 })

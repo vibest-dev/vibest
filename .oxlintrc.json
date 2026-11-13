@@ -83,6 +83,10 @@
                   "!@vibest/client/**"
                 ],
                 "message": "Builtin plugins and harness integrations import only @vibest/plugin, schema, protocol and client."
+              },
+              {
+                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
+                "message": "Bun-specific imports belong in platform folders and bun.ts files."
               }
             ]
           }
@@ -110,6 +114,70 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "files": [
+        "packages/schema/src/**",
+        "packages/core/src/**",
+        "packages/server/src/**",
+        "packages/protocol/src/**",
+        "packages/client/src/**"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(effect-herdr-sdk|@vibest/runtime-herdr)(/|$)",
+                "message": "Runtime-neutral packages never depend on herdr."
+              },
+              {
+                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
+                "message": "Bun-specific imports belong in platform folders and bun.ts files."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/cli/src/*.ts"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(@vibest/core|effect-herdr-sdk)(/|$)",
+                "message": "The CLI does only client work: it imports neither @vibest/core nor herdr."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/effect-herdr-sdk/src/**", "packages/effect-herdr-core-sdk/src/**", "tools/verify/src/**"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
+                "message": "Bun-specific imports belong in platform folders and bun.ts files."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["**/bun.ts"],
+      "rules": {
+        "eslint/no-restricted-imports": "off"
       }
     }
   ],
