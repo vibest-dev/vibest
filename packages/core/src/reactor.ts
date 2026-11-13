@@ -8,9 +8,7 @@ export const logFailure =
   (what: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning(`${what}: ${Cause.pretty(cause)}`),
-      ),
+      Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning(what, cause))),
     )
 
 export const make = Effect.gen(function* () {
