@@ -7,6 +7,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **`Send` takes a UUID `request`** (RPC clients): the optional `request` field of `Send` must be a v4 UUID and any
+  other value is refused when the request is decoded. A retried `Send` with the same `request` reaches another
+  machine once. Send a fresh `crypto.randomUUID()` per message and reuse it only when retrying that message.
 - **`vibest ls` git when a worktree is missing** (scripts reading session JSON): a missing worktree used to give
   `git: null`, and the list did not fail. That row now has a `git` object with `unknown` set (`git cannot read it`
   when the folder is gone; the error text when inspection throws). Check `unknown` before reading `saved`: `saved` is

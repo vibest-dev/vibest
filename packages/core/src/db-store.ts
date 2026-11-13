@@ -388,15 +388,18 @@ export const makeStore = Effect.gen(function* () {
       readonly content: string
       readonly kind: "send" | "notice"
       readonly at?: number
+      readonly request?: string | undefined
     },
   ) =>
     Effect.gen(function* () {
       if (recipientSession === null) return false
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
+      const id = row.request ?? randomId()
+      if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
       yield* emit(OutboxQueued, {
         ...(row.at === undefined ? {} : { at: row.at }),
         data: {
-          id: randomId(),
+          id,
           peer,
           session: row.sessionId,
           recipient: recipientSession,
