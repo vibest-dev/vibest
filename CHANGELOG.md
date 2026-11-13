@@ -7,6 +7,10 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **`vibest ls` when a worktree cannot be read** (scripts reading session JSON): the list no longer fails. That
+  session's `git` is `{ branch: "", pushed: false, saved: false, why: "", unknown: "<error>" }` (`unknown` is the
+  error; a missing folder says `git cannot read it`). Other sessions are unchanged, and a readable session's `git` has
+  no `unknown`.
 - **Starting and stopping the entry session is user-only** (RPC clients, agents): `Launch`, `Project.StartEntry`,
   `Project.EntrySession` and `Project.StopEntry` refuse a session calling them, including the entry session itself.
   Ask the user to run these operations from a terminal that carries no agent session.

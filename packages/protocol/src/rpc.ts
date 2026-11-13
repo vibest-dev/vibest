@@ -215,6 +215,7 @@ export const GitInfo = Schema.Struct({
   pushed: Schema.Boolean,
   saved: Schema.Boolean,
   why: Schema.String,
+  unknown: Schema.optional(Schema.String),
 })
 
 export const SessionInfo = Schema.Struct({
