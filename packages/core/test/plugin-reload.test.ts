@@ -9,7 +9,7 @@ import { Plugin } from "@vibest/plugin"
 import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "../../cli/src/platform/bun.ts"
+import * as Platform from "../../platform-bun/src/bun.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
 
 const events: Array<string> = []

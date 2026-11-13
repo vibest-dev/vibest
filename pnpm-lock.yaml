@@ -254,6 +254,9 @@ importers:
       '@vibest/core':
         specifier: workspace:*
         version: link:../core
+      '@vibest/platform-bun':
+        specifier: workspace:*
+        version: link:../platform-bun
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
@@ -388,9 +391,45 @@ importers:
       '@vibest/core':
         specifier: workspace:*
         version: link:../../core
+      '@vibest/platform-bun':
+        specifier: workspace:*
+        version: link:../../platform-bun
       '@vibest/server':
         specifier: workspace:*
         version: link:../../server
+
+  packages/platform-bun:
+    dependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
+      '@effect/sql-sqlite-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
+      '@vibest/builtins':
+        specifier: workspace:*
+        version: link:../builtins
+      '@vibest/client':
+        specifier: workspace:*
+        version: link:../client
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../core
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@vibest/server':
+        specifier: workspace:*
+        version: link:../server
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+      effect-herdr-sdk:
+        specifier: workspace:*
+        version: link:../effect-herdr-sdk
 
   packages/plugin:
     dependencies:
@@ -510,6 +549,8 @@ importers:
       effect:
         specifier: 4.0.2
         version: 4.0.2
+
+  tools/e2e: {}
 
   tools/tsconfig: {}
 

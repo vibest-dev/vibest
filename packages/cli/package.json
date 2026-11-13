@@ -20,7 +20,7 @@
   "type": "module",
   "imports": {
     "#platform": {
-      "bun": "./src/platform/bun.ts"
+      "bun": "@vibest/platform-bun/bun"
     }
   },
   "exports": {
@@ -47,6 +47,7 @@
     "@vibest/builtins": "workspace:*",
     "@vibest/client": "workspace:*",
     "@vibest/core": "workspace:*",
+    "@vibest/platform-bun": "workspace:*",
     "@vibest/plugin": "workspace:*",
     "@vibest/plugin-harnesses": "workspace:*",
     "@vibest/protocol": "workspace:*",

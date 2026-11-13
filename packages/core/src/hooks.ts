@@ -1,8 +1,8 @@
 import type * as VibestPlugin from "@vibest/plugin"
+import { messageOf } from "@vibest/schema/error"
 import { Cause, Clock, Duration, Effect, Exit, Option, type Scope } from "effect"
 
 import { timeoutWithoutWaiting } from "./bounded.ts"
-import { messageOf } from "./plugin-sources.ts"
 
 export interface Events {
   readonly "agent.start.before": VibestPlugin.AgentStartBefore

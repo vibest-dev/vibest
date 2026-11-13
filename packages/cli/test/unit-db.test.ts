@@ -900,7 +900,7 @@ describe("Db", () => {
       const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
       const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
       const liveModule = url.fileURLToPath(new URL("../../../packages/core/src/session/live.ts", import.meta.url))
-      const platformModule = url.fileURLToPath(new URL("../src/platform/bun.ts", import.meta.url))
+      const platformModule = url.fileURLToPath(new URL("../../platform-bun/src/bun.ts", import.meta.url))
       yield* fs.writeFileString(
         script,
         [

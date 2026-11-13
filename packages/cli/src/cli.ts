@@ -9,16 +9,18 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
-import type { LayerNode } from "@vibest/core/effect/layer-node"
-import { addPluginHint } from "@vibest/core/harness"
-import { askLine, askYesNo, interactive, Layout, VibestCommand } from "@vibest/core/paths"
-import { messageOf } from "@vibest/core/plugin-sources"
-import { describeSpawn } from "@vibest/core/plugins"
-import { ProjectKind } from "@vibest/core/project"
-import { LaunchFailed } from "@vibest/core/sessions"
-import { UpdateError } from "@vibest/core/update-check"
+import { UpdateError } from "@vibest/client/release"
 import { type Ping, VERSION } from "@vibest/protocol/rpc"
-import { HarnessUnavailable, NoCallingSession } from "@vibest/schema/session"
+import { messageOf } from "@vibest/schema/error"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { ProjectKind } from "@vibest/schema/project"
+import {
+  addPluginHint,
+  describeSpawn,
+  HarnessUnavailable,
+  LaunchFailed,
+  NoCallingSession,
+} from "@vibest/schema/session"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,
@@ -39,6 +41,7 @@ import { Argument, CliError, Command, Flag } from "effect/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClientError as ClientError } from "effect/rpc"
 
+import { askLine, askYesNo, interactive } from "./ask.ts"
 import { caller, json, userOnly, vibest } from "./caller.ts"
 import { doctor } from "./doctor.ts"
 import { connectCommand, machine, projectAdd } from "./machine-commands.ts"
@@ -102,7 +105,7 @@ const sessionFlag = Flag.String("session").pipe(
   Flag.optional,
 )
 
-const daemon = (host: Daemon.Host, replacements: LayerNode.Replacements) =>
+const daemon = (host: Daemon.Host, replacements: Daemon.Replacements) =>
   Command.make(
     "daemon",
     {
@@ -818,7 +821,7 @@ const integration = () =>
     Command.withSubcommands([guard, prompt, stop, ready]),
   )
 
-export const command = (host: Daemon.Host, replacements: LayerNode.Replacements, exec: Exec) =>
+export const command = (host: Daemon.Host, replacements: Daemon.Replacements, exec: Exec) =>
   Command.make("vibest", entryFlags, startEntry(exec)).pipe(
     Command.withDescription(
       "vibest: in a project directory, open its entry session here (--new: a new conversation); the entry session runs subagents in herdr panes",

@@ -47,6 +47,9 @@ export type InboxRow = typeof InboxRow.Type
 
 export type HarnessId = string
 
+export const addPluginHint =
+  "a harness comes from a plugin: add one that provides it to `plugins` in vibest.json in the vibest home"
+
 export class HarnessUnavailable extends Schema.TaggedError<HarnessUnavailable>()("HarnessUnavailable", {
   harness: Schema.String,
   message: Schema.String,
@@ -135,4 +138,15 @@ export class NotInRepository extends Schema.TaggedError<NotInRepository>()("NotI
   override get message() {
     return `${this.path} is not inside a git repository`
   }
+}
+
+export const describeSpawn = (s: {
+  harness: string
+  provider?: string | undefined
+  model?: string | undefined
+  decidedBy: Readonly<Record<string, string>>
+}) => {
+  const plugins = [...new Set(Object.values(s.decidedBy))]
+  const by = plugins.length === 0 ? "" : ` (chosen by plugin ${plugins.join(", ")})`
+  return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
 }

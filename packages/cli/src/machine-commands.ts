@@ -1,6 +1,6 @@
 import { probe, startDaemon, type VibestClient, withVibest } from "@vibest/client/client"
-import { Layout } from "@vibest/core/paths"
 import { shortId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
 import type { MachineNote } from "@vibest/schema/machine"
 import { Console, Effect, Path } from "effect"
 import { Argument, Command } from "effect/cli"

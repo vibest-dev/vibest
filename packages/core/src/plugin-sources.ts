@@ -1,4 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin"
+import { messageOf } from "@vibest/schema/error"
 import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
@@ -39,8 +40,6 @@ interface Collected {
   readonly paths: Set<string>
   readonly listings: Set<string>
 }
-
-export const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 const ConfigEntry = Schema.Union([
   Schema.String,

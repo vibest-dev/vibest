@@ -1,3 +1,4 @@
+import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
 import { NoSuchSession } from "@vibest/schema/session"
 import {
@@ -33,7 +34,6 @@ import { encodeCommand, Harness, Harnesses, type HarnessUnavailable } from "../h
 import { Inbox } from "../inbox.ts"
 import { definitionIn } from "../launch.ts"
 import { Layout, VibestCommand } from "../paths.ts"
-import { messageOf } from "../plugin-sources.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,

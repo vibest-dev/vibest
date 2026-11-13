@@ -3,7 +3,6 @@ import net from "node:net"
 import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
 import { assert, describe, it } from "@effect/vitest"
-import * as Platform from "@vibest/cli/platform/bun"
 import {
   authed,
   FakeRuntime,
@@ -26,6 +25,7 @@ import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { noticeEnvelope } from "@vibest/core/replies"
+import * as Platform from "@vibest/platform-bun/bun"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
