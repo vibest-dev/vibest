@@ -1,7 +1,7 @@
 import * as VibestPlugin from "@vibest/plugin"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
-import { Cause, Context, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Duration, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -49,12 +49,29 @@ const sameMembers = (a: Runtime, b: Runtime) => {
   return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
 }
 
+const RESUBSCRIBE_FROM = Duration.seconds(1)
+const RESUBSCRIBE_UP_TO = Duration.seconds(30)
+
 export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Scope> = Effect.gen(function* () {
   const bus = yield* Bus
   const env = yield* HostEnv
   const own = yield* Effect.scope
   const merging = new Map<string, { readonly runtime: Runtime; readonly fiber: Fiber.Fiber<void> }>()
   const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
+  const reset = (runtime: Runtime) => bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })
+  const follow = (runtime: Runtime, resubscribed: boolean, backoff: Duration.Duration): Effect.Effect<void> =>
+    runtime.events.pipe(
+      resubscribed ? Stream.onStart(reset(runtime)) : (events) => events,
+      Stream.runForEach((event) => bus.observe(live(runtime.id, event))),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(
+              Effect.andThen(Effect.sleep(backoff)),
+              Effect.andThen(follow(runtime, true, Duration.min(Duration.times(backoff, 2), RESUBSCRIBE_UP_TO))),
+            ),
+      ),
+    )
   const reconcile = (list: ReadonlyArray<Runtime>) =>
     Effect.gen(function* () {
       for (const [id, entry] of merging) {
@@ -71,17 +88,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
           continue
         }
         fresh.push(runtime.id)
-        const fiber = yield* runtime.events.pipe(
-          Stream.runForEach((event) => bus.observe(live(runtime.id, event))),
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(
-                  Effect.andThen(bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })),
-                ),
-          ),
-          Effect.forkIn(own),
-        )
+        const fiber = yield* follow(runtime, false, RESUBSCRIBE_FROM).pipe(Effect.forkIn(own))
         merging.set(runtime.id, { runtime, fiber })
         yield* bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })
       }
