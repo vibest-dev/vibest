@@ -2,7 +2,7 @@ import * as VibestPlugin from "@vibest/plugin"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
 import { Cause, Context, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
 
-import { Bus, type LiveEvent } from "./bus.ts"
+import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
 import { messageOf } from "./plugin-sources.ts"
@@ -22,16 +22,16 @@ export type { RuntimesShape }
 
 export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
 
-const live = (runtime: string, event: RuntimeEvent): LiveEvent => {
+const live = (runtime: string, event: RuntimeEvent): Signal => {
   switch (event.type) {
     case "state":
-      return { type: "live.state", runtime, terminal: addressOf(event.terminal), state: event.state }
+      return { type: "terminal.state", runtime, terminal: addressOf(event.terminal), state: event.state }
     case "exited":
-      return { type: "live.exited", runtime, terminal: addressOf(event.terminal) }
+      return { type: "terminal.exited", runtime, terminal: addressOf(event.terminal) }
     case "seen":
-      return { type: "live.seen", runtime, terminal: addressOf(event.terminal) }
+      return { type: "terminal.seen", runtime, terminal: addressOf(event.terminal) }
     case "reset":
-      return { type: "live.reset", runtime, machine: "local" }
+      return { type: "runtime.reset", runtime, machine: "local" }
   }
 }
 
@@ -77,13 +77,13 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
             Cause.hasInterruptsOnly(cause)
               ? Effect.void
               : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(
-                  Effect.andThen(bus.observe({ type: "live.reset", runtime: runtime.id, machine: "local" })),
+                  Effect.andThen(bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })),
                 ),
           ),
           Effect.forkIn(own),
         )
         merging.set(runtime.id, { runtime, fiber })
-        yield* bus.observe({ type: "live.reset", runtime: runtime.id, machine: "local" })
+        yield* bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })
       }
       env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
       if (fresh.length > 0) yield* PubSub.publish(added, fresh)

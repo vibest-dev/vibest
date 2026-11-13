@@ -219,7 +219,7 @@ machine, and vibest never installs, prepares or reaches another machine through 
 Out of scope now: Agents on another machine starting their own subagents there, load balancing.
 
 Core follows only its own runtimes (`core/runtimes.ts`): a runtime that registers or comes back publishes one
-`live.reset`, and a terminal a runtime hands back is stored with machine `local`. The runtime registry follows every
+`runtime.reset`, and a terminal a runtime hands back is stored with machine `local`. The runtime registry follows every
 committed change: a definition that appears starts its event merge and a reset, one that is removed (its transform
 disposed or its plugin unloaded) stops its merge.
 

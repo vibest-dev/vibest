@@ -111,22 +111,22 @@ describe("the runtime registry", () => {
         )
         assert.includeMembers(dropped, ["HC_ID", "HERDR_ID"])
         const exited = (id: string): RuntimeEvent => ({ type: "exited", terminal: { id } })
-        const until = (type: "live.exited" | "live.drain") =>
+        const until = (type: "terminal.exited" | "drain.released") =>
           Effect.gen(function* () {
             const passed: Array<string> = []
             for (;;) {
               const event = yield* PubSub.take(seen)
-              if (event.type === "live.exited") passed.push(event.terminal.id)
+              if (event.type === "terminal.exited") passed.push(event.terminal.id)
               if (event.type === type) return passed
             }
           })
         yield* Queue.offer(queue, exited("first"))
-        assert.deepStrictEqual(yield* until("live.exited"), ["first"])
+        assert.deepStrictEqual(yield* until("terminal.exited"), ["first"])
         yield* herdr.dispose
         yield* Queue.offer(queue, exited("after"))
         for (let i = 0; i < 20; i++) yield* Effect.yieldNow
-        yield* bus.observe({ type: "live.drain" })
-        assert.deepStrictEqual(yield* until("live.drain"), [])
+        yield* bus.observe({ type: "drain.released" })
+        assert.deepStrictEqual(yield* until("drain.released"), [])
         assert.deepStrictEqual(
           (yield* runtimes.all).map((runtime) => runtime.id),
           ["hc"],

@@ -1,6 +1,6 @@
 import { Cause, type Duration, Effect, FiberMap, FiberSet, Stream } from "effect"
 
-import { Bus, type EngineEvent } from "./bus.ts"
+import { Bus, type BusEvent } from "./bus.ts"
 
 export const logFailure =
   (what: string) =>
@@ -16,7 +16,7 @@ export const make = Effect.gen(function* () {
   const handlers = yield* FiberSet.make()
   const timers = yield* FiberMap.make<string>()
   return {
-    on: (handle: (event: EngineEvent) => Effect.Effect<unknown, unknown>) =>
+    on: (handle: (event: BusEvent) => Effect.Effect<unknown, unknown>) =>
       Effect.gen(function* () {
         const subscription = yield* bus.subscribe
         yield* Stream.fromSubscription(subscription).pipe(

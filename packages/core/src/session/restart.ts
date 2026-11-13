@@ -3,7 +3,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule, type Scope } from "effect"
 
 import { Agents } from "../agents.ts"
-import { awaitEvent, Bus, type EngineEvent } from "../bus.ts"
+import { awaitEvent, Bus, type BusEvent } from "../bus.ts"
 import {
   archived,
   Db,
@@ -140,7 +140,7 @@ const sessionRestart = (deps: {
       Effect.map((live) => live?.pid !== undefined && live.ready !== undefined && current(live.integration)),
     )
     const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
-    const reported = (event: EngineEvent) => {
+    const reported = (event: BusEvent) => {
       if (event.type !== "process.ready" || event.sessionId !== id) return false
       const { pid, integration } = event.data
       if (typeof pid !== "number" || typeof integration !== "object" || integration === null) return false

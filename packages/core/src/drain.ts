@@ -11,7 +11,7 @@ const make = Effect.gen(function* () {
   const track = (label: string) => {
     const token = {}
     active.set(token, label)
-    return Effect.suspend(() => (active.delete(token) ? bus.observe({ type: "live.drain" }) : Effect.void))
+    return Effect.suspend(() => (active.delete(token) ? bus.observe({ type: "drain.released" }) : Effect.void))
   }
   const enter = (label: string, settlement: boolean): Effect.Effect<Effect.Effect<void>> =>
     Effect.suspend(() =>

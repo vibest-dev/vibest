@@ -647,7 +647,7 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
   files by the daemon (the entry session's by `vibest`); never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
 - Events reach the engine through one in-memory Bus (`core/bus.ts`): the Db publishes a committed transaction's facts
-  in seq order, and observations the schema does not store (`live.*`) are published only. A waiter subscribes before
+  in seq order, and observations the schema does not store (signals: `terminal.*`, `runtime.reset`, `session.changed`, `project.changed`) are published only. A waiter subscribes before
   the action whose consequence it waits for (`awaitEvent` before its first look), so an event in between is not lost.
   The engine (`core/engine.ts`) knows events, not sessions or projects: each handler runs in a fiber of its own, a
   failing one is logged and stops nothing else, and none depends on the order events arrive in. Each re-derives what
@@ -701,7 +701,7 @@ yet.
 **Observing facts.** `ctx.event.subscribe({ types? })` is a `Stream` of the ledger's own facts (`Fact` from
 `@vibest/schema/event`: `seq`, `at`, `type`, `projectId?`, `sessionId?`, `data`), taken from the post-commit `Bus`.
 It replaces the earlier rule that plugins never read the ledger: a plugin observes facts, and still gets no SQL, no
-`Journal.emit` and no projector of its own. Only catalog facts reach it: every `live.*` event is filtered out.
+`Journal.emit` and no projector of its own. Only catalog facts reach it: every signal is filtered out.
 `types` omitted or empty means every fact; an unknown type is logged once per call and ignored, and a non-empty list
 of only unknown types is a stream that never emits. Delivery: this machine only, only after the commit, live from the
 moment the stream is run (no replay, no cursor, no ack); a replaced or unloaded plugin's stream ends with its scope,

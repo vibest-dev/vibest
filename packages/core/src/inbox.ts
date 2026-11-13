@@ -95,7 +95,7 @@ export class Inbox extends Context.Service<
             return wake(event.sessionId)
           case "inbox.moved":
             return event.data.to === "pending" ? wake(event.sessionId) : Effect.void
-          case "live.exited":
+          case "terminal.exited":
             return drain.work("entry session exited", db.clearEntry(event.runtime, event.terminal), true)
           default:
             return Effect.void

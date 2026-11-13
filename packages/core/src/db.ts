@@ -160,7 +160,7 @@ const make = Effect.gen(function* () {
             })
           }
           const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
-          yield* notify({ type: "live.project", projectId: row!.id })
+          yield* notify({ type: "project.changed", projectId: row!.id })
           return row!.id
         }),
       ).pipe(Effect.orDie),
@@ -201,11 +201,11 @@ const make = Effect.gen(function* () {
             projectId: id,
             data: { from, to, repositories: repositoriesOf(repositories) },
           })
-          yield* notify({ type: "live.project", projectId: id })
+          yield* notify({ type: "project.changed", projectId: id })
           for (const session of yield* sql<{
             id: string
           }>`SELECT id FROM session WHERE project_id = ${id} AND ended_at IS NULL`)
-            yield* notify({ type: "live.session", sessionId: session.id })
+            yield* notify({ type: "session.changed", sessionId: session.id })
           return from
         }),
       ).pipe(Effect.orDie),
@@ -498,7 +498,7 @@ const make = Effect.gen(function* () {
                 data: { project, agent: start.agent, name: "entry", directory: start.projectDirectory ?? "" },
               })
               yield* emit(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
-              yield* notify({ type: "live.project", projectId: project })
+              yield* notify({ type: "project.changed", projectId: project })
             }
             const entryId = !existing?.entry || fresh ? id : existing.entry
             if (start.projectDirectory) {

@@ -2,7 +2,7 @@ import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/s
 import { Cause, Clock, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
-import { Bus, type EngineEvent } from "../bus.ts"
+import { Bus, type BusEvent } from "../bus.ts"
 import { Db, type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf, archived } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
     )
   })
 
-  const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
+  const handle = (event: BusEvent): Effect.Effect<unknown, unknown> => {
     switch (event.type) {
       case "execution.ended":
         return event.data.outcome === "failed" ? Effect.void : deliverNext(event.sessionId!)

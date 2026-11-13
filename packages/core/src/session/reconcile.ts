@@ -1,7 +1,7 @@
 import { shortId } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Ref } from "effect"
 
-import { Bus, type EngineEvent } from "../bus.ts"
+import { Bus, type BusEvent } from "../bus.ts"
 import {
   Db,
   type SessionRow,
@@ -165,7 +165,7 @@ const make = Effect.gen(function* () {
       yield* checkSession(id)
     })
 
-  const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
+  const handle = (event: BusEvent): Effect.Effect<unknown, unknown> => {
     switch (event.type) {
       case "execution.ended":
         return event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void
@@ -173,13 +173,13 @@ const make = Effect.gen(function* () {
         return event.data.to === "delivered"
           ? engine.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
           : Effect.void
-      case "live.state":
+      case "terminal.state":
         return onTerminal(event.runtime, event.terminal, event.state === "working")
-      case "live.exited":
+      case "terminal.exited":
         return onTerminal(event.runtime, event.terminal, false)
       case "process.ended":
         return forgetIfDone(event.sessionId!)
-      case "live.reset":
+      case "runtime.reset":
         return republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })))
       default:
         return Effect.void

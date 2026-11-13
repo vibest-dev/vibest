@@ -1,7 +1,7 @@
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
-import { Bus, type EngineEvent } from "../bus.ts"
+import { Bus, type BusEvent } from "../bus.ts"
 import {
   Db,
   type SessionRow,
@@ -223,7 +223,7 @@ const make = Effect.gen(function* () {
       { discard: true },
     )
 
-  const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
+  const handle = (event: BusEvent): Effect.Effect<unknown, unknown> => {
     switch (event.type) {
       case "execution.ended":
         return event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void
