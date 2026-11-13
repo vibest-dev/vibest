@@ -29,7 +29,7 @@ export interface MachineDomain {
   ) => Effect.Effect<Registration, never, Scope.Scope>
 }
 
-export interface SubscriptionDomain {
+interface SubscriptionDomain {
   readonly report: (input: SubscriptionReport) => Effect.Effect<void>
 }
 

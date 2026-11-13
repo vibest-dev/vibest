@@ -7,7 +7,7 @@ export interface Captured {
   readonly stderr: string
 }
 
-export interface CaptureOptions {
+interface CaptureOptions {
   readonly stdin?: ChildProcess.CommandInput | undefined
   readonly cwd?: string | undefined
   readonly env?: Record<string, string | undefined> | undefined

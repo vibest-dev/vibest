@@ -682,13 +682,12 @@ A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/
 `promise/adapter.ts`; core's plugin host picks the form; `@vibest/plugin/promise/adapter` exports the adapter `fromPromise`), so both forms share one loading, failure and reload path. Its Promise `Context` has the same
 domains with Promises: `hook` callbacks return `Promise<result | void>` or the result, and refuse by throwing
 `AgentRefused`; registrations resolve to `{ dispose(): Promise<void> }`; `event.subscribe` is an `AsyncIterable`,
-closed when the plugin unloads; `subscription.report` and `reload` return Promises; `transform` takes the same
+closed when the plugin unloads; `subscription.report` returns a Promise; `transform` takes the same
 synchronous editor (runtime and harness definitions stay Effect types, so their authors write Effect). The `Cleanup`
 `setup` returns runs when the plugin's scope closes; registrations made later, from inside `setup`, still belong to
 that scope.
 
-**Two capabilities**, as OpenCode V2: `transform(editor)` with a synchronous editor (`list`, `get`, `add`, `update`,
-`remove`) plus `reload()` for the definition registries, and `hook(name, callback)` for live interception. Both return
+**Two capabilities**, as OpenCode V2: `transform(editor)` with a synchronous editor (`add`, plus `update` on the harness editor), and `hook(name, callback)` for live interception. Both return
 a `Registration` (`{ dispose }`) owned by the plugin's scope: unloading the plugin disposes everything it registered,
 and `dispose` may be called earlier (a second call is a no-op). Registries are `packages/core/src/registry.ts`, a port
 of V2's `State`: transforms apply in registration order on a lazy rebuild, a plugin's setup runs in one `group` (a
@@ -696,18 +695,18 @@ throwing transform disables the whole plugin and removes its earlier registratio
 again until its own revision or options change), and an activation runs in one
 `batch` (one rebuild and one notification however many plugins changed). Removing a plugin's transform restores the
 definitions it changed or removed. Editor callbacks are synchronous: load effectful data before registering a
-transform or reloading.
+transform.
 
 **Context domains** (`packages/plugin/src/effect/index.ts`):
 
-| Domain         | Members               | Edits                                                               |
-| -------------- | --------------------- | ------------------------------------------------------------------- |
-| `options`      | the plugin's options  | —                                                                   |
-| `agent`        | `hook`                | `start.before`, `fail`                                              |
-| `runtime`      | `transform`, `reload` | `RuntimeDefinition`s by `id`, each with its optional `caller` (§10) |
-| `harness`      | `transform`, `reload` | `HarnessDefinition`s by `id` (§8)                                   |
-| `subscription` | `report`              | one `(harness, provider)` row's limits                              |
-| `event`        | `subscribe`           | — (observes the ledger's facts)                                     |
+| Domain         | Members              | Edits                                                               |
+| -------------- | -------------------- | ------------------------------------------------------------------- |
+| `options`      | the plugin's options | —                                                                   |
+| `agent`        | `hook`               | `start.before`, `fail`                                              |
+| `runtime`      | `transform`          | `RuntimeDefinition`s by `id`, each with its optional `caller` (§10) |
+| `harness`      | `transform`          | `HarnessDefinition`s by `id` (§8)                                   |
+| `subscription` | `report`             | one `(harness, provider)` row's limits                              |
+| `event`        | `subscribe`          | — (observes the ledger's facts)                                     |
 
 Domains such as workspaces, definitions, commands, skills, plugin RPC and storage are planned and not part of the API
 yet.

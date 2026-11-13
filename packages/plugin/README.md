@@ -42,21 +42,19 @@ lists every plugin, builtins first, with its status and counters.
 
 ## Context
 
-| Member                             | What it does                                                                                                                                                      |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `options`                          | the plugin's options                                                                                                                                              |
-| `agent.hook`                       | intercept `start.before` (return `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (return a move) |
-| `runtime.transform`                | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                |
-| `harness.transform`                | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
-| `runtime.reload`, `harness.reload` | rebuild that registry, for a transform that reads data of its own                                                                                                 |
-| `subscription.report`              | replace one `(harness, provider)` row's usage limits                                                                                                              |
-| `event.subscribe`                  | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                            |
+| Member                | What it does                                                                                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options`             | the plugin's options                                                                                                                                              |
+| `agent.hook`          | intercept `start.before` (return `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (return a move) |
+| `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                |
+| `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
+| `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                              |
+| `event.subscribe`     | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                            |
 
 **Hooks** run in plugin order; each callback gets a read-only event, returns what it decides, and has 5 seconds.
 Assigning to the event throws, and counts as the plugin crashing. **Transforms** take a synchronous
-editor (`list`, `get`, `add`, `update`, `remove`) and apply in registration order, so a later plugin sees and may
-change what earlier ones, builtins included, defined. Load effectful data before registering a transform or calling
-`reload`. A transform that throws fails the whole plugin and removes what it registered.
+editor (`add`; the harness editor also has `update`) and apply in registration order, so a later plugin sees and may
+change what earlier ones, builtins included, defined. Load effectful data before registering a transform. A transform that throws fails the whole plugin and removes what it registered.
 
 `hook` and `transform` return a `Registration`. Its `dispose` removes it early (a second call does nothing); the
 plugin's scope disposes the rest when it unloads, and removing a transform restores the definitions it changed.

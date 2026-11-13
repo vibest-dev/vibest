@@ -99,7 +99,6 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   const all = Effect.sync(() => registry.get())
   return {
     transform: registry.transform,
-    reload: registry.reload,
     all,
     find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
     route: (id) =>

@@ -4,14 +4,12 @@ import type { MachineEvent, MachineHooks, MachineNote } from "./effect/index.ts"
 import type { Plugin } from "./effect/plugin.ts"
 import type * as Runtime from "./effect/runtime.ts"
 
-export type { RuntimeDefinition } from "./effect/runtime.ts"
-
-export class ContractFailure extends Schema.TaggedError<ContractFailure>()("ContractFailure", {
+class ContractFailure extends Schema.TaggedError<ContractFailure>()("ContractFailure", {
   member: Schema.String,
   message: Schema.String,
 }) {}
 
-export type ContractError = ContractFailure | Runtime.RuntimeError
+type ContractError = ContractFailure | Runtime.RuntimeError
 
 const fail = (member: string, message: string) => new ContractFailure({ member, message: `runtime ${message}` })
 const that = (member: string, ok: boolean, message: string) => (ok ? Effect.void : Effect.fail(fail(member, message)))
@@ -33,7 +31,7 @@ const until = <A, E, R>(
     }
   })
 
-export interface ContractOptions {
+interface ContractOptions {
   readonly cwd: string
   readonly timeout?: Duration.Input
 }
@@ -202,23 +200,10 @@ export const machineHooks = (
       readonly callback: (event: MachineEvent) => Effect.Effect<ReadonlyArray<MachineNote> | void>
     }> = []
     const editor: Runtime.RuntimeEditor = {
-      list: () => runtimes,
-      get: (id) => runtimes.find((definition) => definition.id === id),
       add: (definition) => {
         const at = runtimes.findIndex((existing) => existing.id === definition.id)
         if (at === -1) runtimes.push(definition)
         else runtimes[at] = definition
-      },
-      update: (id, update) => {
-        const at = runtimes.findIndex((definition) => definition.id === id)
-        if (at === -1) return
-        const copy = { ...runtimes[at]! }
-        update(copy)
-        runtimes[at] = copy
-      },
-      remove: (id) => {
-        const at = runtimes.findIndex((definition) => definition.id === id)
-        if (at !== -1) runtimes.splice(at, 1)
       },
     }
     const registration = { dispose: Effect.void }
@@ -234,8 +219,8 @@ export const machineHooks = (
               })
             : Effect.die(new Error(`unsupported hook machine.${String(name)}`)),
       },
-      runtime: { transform: (f) => Effect.sync(() => (f(editor), registration)), reload: () => Effect.void },
-      harness: { transform: () => Effect.succeed(registration), reload: () => Effect.void },
+      runtime: { transform: (f) => Effect.sync(() => (f(editor), registration)) },
+      harness: { transform: () => Effect.succeed(registration) },
       subscription: { report: () => Effect.void },
       event: { subscribe: () => Stream.empty },
     })

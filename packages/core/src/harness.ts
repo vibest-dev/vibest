@@ -36,7 +36,6 @@ export const makeHarnesses: Effect.Effect<HarnessesShape> = Effect.sync(() => {
       }),
     find,
     transform: registry.transform,
-    reload: registry.reload,
   }
 })
 

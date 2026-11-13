@@ -51,7 +51,6 @@ export const fromPromise =
         domain: EffectContext["runtime"] | EffectContext["harness"],
       ): Definitions<Editor> => ({
         transform: (callback) => register(domain.transform(callback as never)),
-        reload: () => run(domain.reload()),
       })
       const context: Context = {
         options: host.options,
