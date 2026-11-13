@@ -2,6 +2,7 @@ import { messageOf } from "@vibest/schema/error"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
+  type AmbiguousSession,
   LimitReached,
   NoCallingSession,
   NoHarnessChosen,
@@ -22,7 +23,7 @@ import { projectRoot, workspaceGit } from "./project-create.ts"
 import type * as Remove from "./remove.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
 import { Archive } from "./session/archive.ts"
-import { Delivery, unreachable } from "./session/delivery.ts"
+import { Delivery, type SendRefused, unreachable } from "./session/delivery.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { Placement } from "./session/placement.ts"
@@ -112,6 +113,18 @@ export class Sessions extends Context.Service<
       request?: string,
       sender?: string,
     ) => Effect.Effect<void, NoSuchSession>
+    readonly deliverTo: (
+      id: string,
+      message: string,
+      request?: string,
+      sender?: string,
+    ) => Effect.Effect<void, NoSuchSession>
+    readonly admit: (
+      sender: { readonly sessionId: string; readonly projectId: string },
+      input: string,
+      message: string,
+      request?: string,
+    ) => Effect.Effect<{ readonly id: string }, NoSuchSession | AmbiguousSession | SendRefused>
     readonly interrupt: (
       id: string,
     ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
@@ -149,7 +162,7 @@ export class Sessions extends Context.Service<
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const git = yield* Git
     const { worktreeOf, republish } = yield* Placement
-    const { send, interrupt, userPrompt, typeTaken } = yield* Delivery
+    const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery
     const reconcile = yield* Reconcile
     const { spawn } = yield* Spawn
     const { remove } = yield* Archive
@@ -244,6 +257,8 @@ export class Sessions extends Context.Service<
     return Sessions.of({
       spawn,
       send,
+      deliverTo,
+      admit,
       interrupt,
       peek,
       remove,
