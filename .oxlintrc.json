@@ -19,7 +19,6 @@
     "vibest/node-import-style": "error",
     "vibest/no-restricted-disable": "error",
     "vibest/no-comments": "error",
-    "vibest/import-boundaries": "error",
     "vibest/event-reads": "error",
     "vibest/no-payload-sql": "error",
     "vibest/projector-writes": "error",
@@ -175,9 +174,75 @@
       }
     },
     {
-      "files": ["**/bun.ts"],
+      "files": [
+        "packages/schema/src/**/bun.ts",
+        "packages/core/src/**/bun.ts",
+        "packages/server/src/**/bun.ts",
+        "packages/protocol/src/**/bun.ts",
+        "packages/client/src/**/bun.ts",
+        "packages/schema/src/platform/**",
+        "packages/core/src/platform/**",
+        "packages/server/src/platform/**",
+        "packages/protocol/src/platform/**",
+        "packages/client/src/platform/**"
+      ],
       "rules": {
-        "eslint/no-restricted-imports": "off"
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(effect-herdr-sdk|@vibest/runtime-herdr)(/|$)",
+                "message": "Runtime-neutral packages never depend on herdr."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/integration/*/src/**/bun.ts", "packages/integration/*/src/platform/**"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@vibest/*",
+                  "@vibest/*/**",
+                  "!@vibest/plugin",
+                  "!@vibest/plugin/**",
+                  "!@vibest/schema",
+                  "!@vibest/schema/**",
+                  "!@vibest/protocol",
+                  "!@vibest/protocol/**",
+                  "!@vibest/client",
+                  "!@vibest/client/**"
+                ],
+                "message": "Builtin plugins and harness integrations import only @vibest/plugin, schema, protocol and client."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/effect-herdr-sdk/src/**/bun.ts",
+        "packages/effect-herdr-core-sdk/src/**/bun.ts",
+        "tools/verify/src/**/bun.ts",
+        "packages/effect-herdr-sdk/src/platform/**",
+        "packages/effect-herdr-core-sdk/src/platform/**",
+        "tools/verify/src/platform/**"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": []
+          }
+        ]
       }
     }
   ],

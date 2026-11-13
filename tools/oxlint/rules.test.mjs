@@ -103,7 +103,7 @@ export const cpus = os.cpus()
     },
   )
 
-  it.each(["import-boundaries", "event-reads", "no-payload-sql", "projector-writes", "no-background-loop"])(
+  it.each(["event-reads", "no-payload-sql", "projector-writes", "no-background-loop"])(
     "refuses disabling vibest/%s",
     (rule) => {
       expect(oxlintFindings(`// oxlint-disable-next-line vibest/${rule}\nexport const one = 1\n`)).toContain(
@@ -173,48 +173,42 @@ export const one = 1
   })
 })
 
-describe("import-boundaries", () => {
-  const forms = `export const a = import("effect-herdr-sdk")
-export const b = import(\`bun:sqlite\`)
-export type C = import("@vibest/runtime-herdr").T
-export const d = require("effect-herdr-sdk/x")
-import e = require("bun:test")
-export const f = [e, import(name)]
-`
-  const flagged = ["1", "2", "3", "4", "5"].map((line) => `${line} vibest(import-boundaries)`)
+describe("import policy", () => {
+  const importing = (specifier) => `import * as m from "${specifier}"\nexport const v = m\n`
+  const herdr = importing("effect-herdr-sdk")
+  const bun = importing("bun:sqlite")
+  const core = importing("@vibest/core/x")
+  const scopedFindings = (source, file) => oxlintFindings(source, file, { scoped: true })
+  const refused = ["1 eslint(no-restricted-imports)"]
 
-  it("reports dynamic import, import types, require and import-equals", () => {
-    expect(oxlintFindings(forms, "packages/core/src/a.ts")).toEqual(flagged)
-    expect(oxlintFindings(forms, "packages/core/src/bun.ts")).toEqual([])
-    expect(oxlintFindings(forms, "packages/runtime-herdr/src/a.ts")).toEqual([])
+  it("neutral packages refuse herdr and Bun; bun.ts and platform/ accept only Bun", () => {
+    for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
+      const path = `packages/core/src/${file}`
+      expect(scopedFindings(herdr, path)).toEqual(refused)
+      expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
+    }
   })
 
-  it("reports core and herdr in top-level CLI sources only", () => {
-    const source = `export const a = import("@vibest/core/x")\n`
-    expect(oxlintFindings(source, "packages/cli/src/a.ts")).toEqual(["1 vibest(import-boundaries)"])
-    expect(oxlintFindings(source, "packages/cli/src/sub/a.ts")).toEqual([])
+  it("integration packages refuse other vibest packages and Bun; bun.ts and platform/ accept only Bun", () => {
+    const internal = importing("@vibest/core")
+    for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
+      const path = `packages/integration/claude/src/${file}`
+      expect(scopedFindings(internal, path)).toEqual(refused)
+      expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
+    }
   })
 
-  it("static imports are banned by the scoped no-restricted-imports configuration", () => {
-    const herdr = `import { Herdr } from "effect-herdr-sdk"\nexport * from "@vibest/runtime-herdr/x"\nexport const all = Herdr\n`
-    expect(oxlintFindings(herdr, "packages/core/src/a.ts", { scoped: true })).toEqual([
-      "1 eslint(no-restricted-imports)",
-      "2 eslint(no-restricted-imports)",
-    ])
-    expect(oxlintFindings(herdr, "packages/cli/src/a.ts", { scoped: true })).toEqual([
-      "1 eslint(no-restricted-imports)",
-    ])
-    expect(
-      oxlintFindings(`import { Database } from "bun:sqlite"\nexport const a = Database\n`, "packages/server/src/a.ts", {
-        scoped: true,
-      }),
-    ).toEqual(["1 eslint(no-restricted-imports)"])
-    expect(
-      oxlintFindings(
-        `import { Database } from "bun:sqlite"\nexport const a = Database\n`,
-        "packages/effect-herdr-sdk/src/bun.ts",
-      ),
-    ).toEqual([])
+  it("the herdr SDKs and tools/verify refuse Bun outside bun.ts and platform/", () => {
+    for (const file of ["packages/effect-herdr-sdk/src/bun.ts", "packages/effect-herdr-core-sdk/src/platform/a.ts"])
+      expect(scopedFindings(bun, file)).toEqual([])
+    for (const file of ["packages/effect-herdr-sdk/src/a.ts", "tools/verify/src/a.ts"])
+      expect(scopedFindings(bun, file)).toEqual(refused)
+  })
+
+  it("the CLI refuses @vibest/core and herdr in its top-level sources only", () => {
+    expect(scopedFindings(core, "packages/cli/src/a.ts")).toEqual(refused)
+    expect(scopedFindings(herdr, "packages/cli/src/a.ts")).toEqual(refused)
+    expect(scopedFindings(core, "packages/cli/src/sub/a.ts")).toEqual([])
   })
 })
 
