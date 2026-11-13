@@ -12,6 +12,8 @@ import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Sc
 
 import { daemon } from "./app.ts"
 import * as Server from "./server.ts"
+import * as ShutdownDeadline from "./shutdown-deadline.ts"
+import type { ShutdownHost } from "./shutdown-deadline.ts"
 
 export const DaemonInfo = Schema.Struct({
   pid: Schema.Number,
@@ -35,7 +37,7 @@ export class LockFailed extends Schema.TaggedError<LockFailed>()("LockFailed", {
   message: Schema.String,
 }) {}
 
-export interface Host {
+export interface Host extends ShutdownHost {
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
@@ -124,8 +126,11 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       startedAt: yield* Clock.currentTimeMillis,
     }
     const shutdown = yield* Deferred.make<void>()
+    const releases = new LayerNode.Releases()
+    yield* ShutdownDeadline.install(host, releases, shutdown)
     yield* Layer.build(
       LayerNode.compile(daemon, {
+        releases,
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),

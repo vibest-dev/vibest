@@ -340,7 +340,13 @@ export const replacements: LayerNode.Replacements = [
   ),
   MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
   PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
-  builtinsNode.replace(Layer.succeed(Builtins, pre)),
+  builtinsNode.replace(
+    LayerNode.make({
+      name: "vibest/Builtins",
+      layer: Layer.effect(Builtins, pre),
+      deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
+    }),
+  ),
   HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
   ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
   Server.socketServerLayer.replace(
@@ -379,7 +385,24 @@ export const updateCheck = (
     }),
   )
 
-export const daemon: Host = { lock, checkDatabase }
+const onSignals: Host["onSignals"] = (onSignal) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const hangup = () => process.kill(process.pid, "SIGTERM")
+      const interactive = process.stdin.isTTY || process.stdout.isTTY
+      process.on("SIGTERM", onSignal)
+      process.on("SIGINT", onSignal)
+      if (interactive) process.on("SIGHUP", hangup)
+      return () => {
+        process.off("SIGTERM", onSignal)
+        process.off("SIGINT", onSignal)
+        process.off("SIGHUP", hangup)
+      }
+    }),
+    (off) => Effect.sync(off),
+  ).pipe(Effect.asVoid)
+
+export const daemon: Host = { lock, checkDatabase, onSignals, exit: (code) => Effect.sync(() => process.exit(code)) }
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")

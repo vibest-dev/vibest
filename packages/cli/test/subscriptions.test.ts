@@ -5,12 +5,10 @@ import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { Plugin } from "@vibest/plugin"
-import { claude, cursor, pi } from "@vibest/plugin-harnesses"
+import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin"
+import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
 import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
-import { claudeSubscription } from "@vibest/plugin-harnesses/subscriptions/claude"
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
-import { piSubscription } from "@vibest/plugin-harnesses/subscriptions/pi"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
@@ -116,17 +114,30 @@ const fakeMachine = (options: {
   )
   const onMachine = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provide(machine), Effect.provide(Platform.services), Effect.orDie)
-  const definitions = [
-    { ...claude, subscription: (dir: string) => onMachine(claudeSubscription(dir)) },
-    {
-      ...cursor,
-      subscription: (dir: string) =>
-        onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(dir, problem))),
-    },
-    { ...pi, subscription: (dir: string) => onMachine(piSubscription(dir)) },
-  ]
+  const registered = (assembled: typeof claudePlugin) =>
+    Effect.gen(function* () {
+      const plugin = yield* assembled
+      const added: Array<HarnessTypes.HarnessDefinition> = []
+      const editor = { add: (definition: HarnessTypes.HarnessDefinition) => added.push(definition) }
+      const registration = { dispose: Effect.void }
+      const ctx = {
+        harness: {
+          transform: (edit: (e: typeof editor) => unknown) => Effect.sync(() => (edit(editor), registration)),
+        },
+      } as unknown as Parameters<ReturnType<typeof Plugin.effectOf>>[0]
+      yield* Plugin.effectOf(plugin)(ctx)
+      return added[0]!
+    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+  const cursorDefinition = {
+    ...cursor,
+    subscription: (dir: string) =>
+      onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(spawner)(dir, problem))),
+  }
+  const definitions = Effect.all([registered(claudePlugin), registered(piPlugin)]).pipe(
+    Effect.map(([claudeDefinition, piDefinition]) => [claudeDefinition, cursorDefinition, piDefinition]),
+  )
   const fakes = Subscriptions.testLayer.pipe(
-    Layer.provideMerge(harnessesLayer(definitions)),
+    Layer.provideMerge(Layer.unwrap(Effect.map(definitions, harnessesLayer))),
     Layer.provideMerge(harnessLayer(options.installed)),
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
