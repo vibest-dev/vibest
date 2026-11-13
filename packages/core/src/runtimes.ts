@@ -1,7 +1,8 @@
 import * as VibestPlugin from "@vibest/plugin"
+import { reconnectSchedule } from "@vibest/plugin"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
-import { Cause, Context, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -49,41 +50,47 @@ const sameMembers = (a: Runtime, b: Runtime) => {
   return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
 }
 
+const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
+
 export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Scope> = Effect.gen(function* () {
   const bus = yield* Bus
   const env = yield* HostEnv
-  const own = yield* Effect.scope
-  const merging = new Map<string, { readonly runtime: Runtime; readonly fiber: Fiber.Fiber<void> }>()
+  const followers = yield* FiberMap.make<string>()
+  const defined = new Map<string, Runtime>()
   const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
+  const follow = (runtime: Runtime) =>
+    runtime.events.pipe(
+      Stream.tap((event) => bus.observe(live(runtime.id, event))),
+      Stream.filter((event) => event.type === "reset"),
+      Stream.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Stream.failCause(cause)
+          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`)).pipe(
+              Stream.drain,
+              Stream.concat(Stream.fail("reconnect")),
+            ),
+      ),
+      Stream.retry(RESUBSCRIBE_BACKOFF),
+      Stream.runDrain,
+      Effect.orDie,
+    )
   const reconcile = (list: ReadonlyArray<Runtime>) =>
     Effect.gen(function* () {
-      for (const [id, entry] of merging) {
-        const next = list.find((runtime) => runtime.id === id)
-        if (next !== undefined && sameMembers(next, entry.runtime)) continue
-        merging.delete(id)
-        yield* Fiber.interrupt(entry.fiber)
+      for (const [id, runtime] of defined) {
+        const next = list.find((candidate) => candidate.id === id)
+        if (next !== undefined && sameMembers(next, runtime)) continue
+        defined.delete(id)
+        yield* FiberMap.remove(followers, id)
       }
       const fresh: Array<string> = []
       for (const runtime of list) {
-        const kept = merging.get(runtime.id)
-        if (kept !== undefined) {
-          merging.set(runtime.id, { runtime, fiber: kept.fiber })
+        if (defined.has(runtime.id)) {
+          defined.set(runtime.id, runtime)
           continue
         }
         fresh.push(runtime.id)
-        const fiber = yield* runtime.events.pipe(
-          Stream.runForEach((event) => bus.observe(live(runtime.id, event))),
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(
-                  Effect.andThen(bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })),
-                ),
-          ),
-          Effect.forkIn(own),
-        )
-        merging.set(runtime.id, { runtime, fiber })
-        yield* bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })
+        defined.set(runtime.id, runtime)
+        yield* FiberMap.run(followers, runtime.id, follow(runtime))
       }
       env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
       if (fresh.length > 0) yield* PubSub.publish(added, fresh)

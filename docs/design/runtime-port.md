@@ -77,7 +77,7 @@ last pane closes its workspace, and a main checkout's workspace takes its linked
 
 `RuntimeError.code`: `not_found`, `busy`, `unreachable` (transient, retried), `incompatible` (needs the user),
 `failed` (anything else). `events` carries at least `exited` for each terminal whose program ended or that closed, and
-`reset` when the runtime lost track; core then reads each of its terminals once. `state` answers `not_found` when it
+`reset` when the runtime lost track; core then reads each of its terminals once. `events` emits `reset` as its first element once its subscription is acquired (build it with `Runtime.eventsFrom` over a PubSub), so core reads state after the subscription exists; when `events` fails, core logs it and subscribes again with a capped exponential backoff that starts over after each `reset`. `state` answers `not_found` when it
 names no agent in that terminal, which core reads as absent. `run(terminal, argv)` runs a command in an existing
 terminal once its program ended and its shell is back, the counterpart of `open`; without it there is no restart in
 place, and `vibest update` and a usage-limit move leave that terminal's agent for the user to restart. `present` gets

@@ -655,7 +655,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       run,
       state,
       session,
-      events: Stream.fromPubSub(events),
+      events: RuntimeApi.eventsFrom(events),
       present,
       doctor,
       attach: (target) => {
