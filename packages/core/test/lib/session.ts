@@ -19,7 +19,7 @@ import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import {

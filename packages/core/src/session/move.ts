@@ -1,5 +1,5 @@
-import type * as VibestPlugin from "@vibest/plugin"
-import { exhaustedText, isLimited, stillLimited } from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
+import { exhaustedText, isLimited, stillLimited } from "@vibest/plugin/effect"
 import type { ProcessEndReason } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import type { Subscription } from "@vibest/schema/subscription"

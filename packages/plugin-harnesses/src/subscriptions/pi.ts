@@ -1,4 +1,4 @@
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 import type { SubscriptionAccount } from "@vibest/schema/subscription"
 import { Effect } from "effect"
 

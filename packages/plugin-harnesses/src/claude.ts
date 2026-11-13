@@ -1,4 +1,4 @@
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 import { Effect, Ref, Schema } from "effect"
 
 import { findMessage, jsonLines, noProvider, opt, withConfigured } from "./models.ts"

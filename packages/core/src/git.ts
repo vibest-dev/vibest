@@ -1,4 +1,4 @@
-import { capture } from "@vibest/plugin"
+import { capture } from "@vibest/plugin/effect"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"

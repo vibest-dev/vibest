@@ -7,6 +7,13 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Plugin entry points split into Promise and Effect** (plugin authors): `@vibest/plugin` is now the Promise API only
+  (`Plugin.define({ id, setup })`, a Promise `Context`) and `@vibest/plugin/effect` is the Effect API
+  (`Plugin.define({ id, effect })`, `Context`, `Hooks`, `Registration`, `Transform`, `Runtime`, `Harness`, `capture`,
+  `reconnectSchedule`). `Plugin.define` takes one shape per entry; `Plugin.Plugin` is no longer a union and
+  `Plugin.effectOf` moved to `@vibest/plugin/host`. `PromiseContext`, `PromiseRegistration` and `PromiseDefinitions`
+  are now `Plugin.Context`, `Registration` and `Definitions` of the Promise entry. Migrate: an Effect plugin changes
+  `from "@vibest/plugin"` to `from "@vibest/plugin/effect"`; a Promise plugin keeps its import.
 - **A `vibest.json` plugin entry must be a folder** (plugin authors, users with single-file entries): an entry that names
   a file is skipped with a warning, as OpenCode does. Put the file in `~/.vibest/plugins/`, or move it to a folder with
   an `index.ts` (or a `package.json` with `exports`) and name the folder. The shipped Cursor plugin is now
@@ -169,11 +176,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   trace's `changes` list the fields each callback returned. Migrate: `e.harness = "pi"` becomes
   `return { harness: "pi" }` (for example `Effect.succeed({ harness: "pi" })`), `e.move = m` becomes `return m`, and
   `e.notes.push(n)` becomes `return [n]`.
-- **Promise plugins** (plugin authors): a plugin may be `Plugin.define({ id, setup })` instead of `{ id, effect }`:
+- **Promise plugins** (plugin authors): a plugin may be `Plugin.define({ id, setup })` from `@vibest/plugin` instead of `{ id, effect }` from `@vibest/plugin/effect`:
   `setup` gets a context of Promises (hook callbacks return a value or a Promise and refuse by throwing
   `AgentRefused`, `event.subscribe` is an `AsyncIterable`) and may return a cleanup that runs when the plugin unloads.
-  `Plugin.Plugin` is now the union `EffectPlugin | PromisePlugin`, so code that calls `plugin.effect` on a
-  `Plugin.Plugin` calls `Plugin.effectOf(plugin)` instead.
 - **Agent messaging** (users, plugin authors, anyone calling the RPC): an execution that ends normally or is
   interrupted sends nothing. Agents send what they decide to with `vibest send <id> -- '<message>'`, subject to the
   creator-routing rules above; `vibest ls` shows state and `vibest result <id>` reads the last reply. vibest sends

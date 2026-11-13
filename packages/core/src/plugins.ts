@@ -1,4 +1,5 @@
-import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
+import { effectOf, type Plugin as AnyPlugin } from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
@@ -52,7 +53,7 @@ export interface SpawnDecision extends Routing {
 
 type Stats = Hooks.Stats
 const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
-type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
+type Loaded = Candidate & { readonly plugin: AnyPlugin }
 export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plugins/Builtins", {
   defaultValue: () => [],
 })
@@ -238,10 +239,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         Queue.offerUnsafe(broken, { running, refresh })
       }
       const exit = yield* timeoutWithoutWaiting(
-        Effect.suspend(() => VibestPlugin.Plugin.effectOf(plugin)(context)).pipe(
-          Scope.provide(scope),
-          Registry.group(report),
-        ),
+        Effect.suspend(() => effectOf(plugin)(context)).pipe(Scope.provide(scope), Registry.group(report)),
         scope,
         timeout,
       )

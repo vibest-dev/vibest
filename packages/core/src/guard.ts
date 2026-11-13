@@ -1,4 +1,4 @@
-import type { GuardCall } from "@vibest/plugin"
+import type { GuardCall } from "@vibest/plugin/effect"
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 
 import { Agents } from "./agents.ts"

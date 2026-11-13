@@ -1,4 +1,4 @@
-import { reconnectSchedule } from "@vibest/plugin"
+import { reconnectSchedule } from "@vibest/plugin/effect"
 import { RuntimeUnreachable as HerdrUnreachable, type RuntimeLocation as HerdrLocation } from "@vibest/schema/session"
 import {
   Context,

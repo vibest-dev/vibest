@@ -662,17 +662,24 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
 
 ## 7. Plugin architecture
 
-**Definition** (`packages/plugin/src/plugin.ts`): a plugin is an id and either an effect or a Promise setup.
+**Definition**: a plugin is an id and either an effect or a Promise setup, one per entry point as in OpenCode:
+`@vibest/plugin/effect` (`packages/plugin/src/effect/plugin.ts`) defines `{ id, effect }` and `@vibest/plugin`
+(`packages/plugin/src/promise/plugin.ts`) defines `{ id, setup }`; `Plugin.define` takes one shape each. The domain types
+both use (`domain.ts`) are exported from both.
 
 ```ts
-export type Plugin =
-  | { readonly id: string; readonly effect: (context: Context) => Effect.Effect<void, never, Scope.Scope> }
-  | { readonly id: string; readonly setup: (context: PromiseContext) => Promise<Cleanup | void> | Cleanup | void }
-export const define = <P extends Plugin>(plugin: P) => plugin
+export interface Plugin {
+  readonly id: string
+  readonly effect: (context: Context) => Effect.Effect<void, never, Scope.Scope>
+}
+export interface Plugin {
+  readonly id: string
+  readonly setup: (context: Context) => Promise<Cleanup | void> | Cleanup | void
+}
 ```
 
-A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/plugin/src/promise.ts`, as OpenCode's
-`promise/adapter.ts`), so both forms share one loading, failure and reload path. Its `PromiseContext` has the same
+A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/plugin/src/promise/adapter.ts`, as OpenCode's
+`promise/adapter.ts`; the host picks the form with `effectOf` from `@vibest/plugin/host`), so both forms share one loading, failure and reload path. Its Promise `Context` has the same
 domains with Promises: `hook` callbacks return `Promise<result | void>` or the result, and refuse by throwing
 `AgentRefused`; registrations resolve to `{ dispose(): Promise<void> }`; `event.subscribe` is an `AsyncIterable`,
 closed when the plugin unloads; `subscription.report` and `reload` return Promises; `transform` takes the same
@@ -691,7 +698,7 @@ again until its own revision or options change), and an activation runs in one
 definitions it changed or removed. Editor callbacks are synchronous: load effectful data before registering a
 transform or reloading.
 
-**Context domains** (`packages/plugin/src/index.ts`):
+**Context domains** (`packages/plugin/src/effect/index.ts`):
 
 | Domain         | Members               | Edits                                                               |
 | -------------- | --------------------- | ------------------------------------------------------------------- |
@@ -779,7 +786,7 @@ client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and 
 **Loading and watching:** local plugin changes reload without repeating unchanged imports; failed revisions keep
 the previous one. See [loading and watching](plugin-loading.md#loading-and-watching) for watch and reload details.
 
-**Loading on Bun:** plugins share vibestd's `effect` and `@vibest/plugin` instances while local modules reload.
+**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin` and `@vibest/plugin/effect` instances while local modules reload.
 See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module lifetime details.
 
 **Order:**
@@ -825,7 +832,7 @@ configure (skills are builtin, §4.2).
 
 herdr runs the process; the adapter knows how this CLI wants to be started and told things (launch side) and
 loads vibest's plugin into the CLI so its work comes back as events (integration side). The contract is
-`HarnessDefinition` in `@vibest/plugin` (`packages/plugin/src/harness.ts`); `packages/plugin-harnesses` implements
+`HarnessDefinition` in `@vibest/plugin` (`packages/plugin/src/effect/harness.ts`); `packages/plugin-harnesses` implements
 Claude Code and Pi as the builtin plugins `harness-claude` and `harness-pi` (Cursor as a plugin file users add), each adding its
 definition with `context.harness.transform`. Core and the CLI hold no adapter: vibestd answers `Harnesses.List` (each
 row with its `binary`) and `Integration.Guard` from the registered definitions. A user plugin may add a harness or

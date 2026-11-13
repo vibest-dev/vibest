@@ -5,10 +5,10 @@ import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin"
 import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
 import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
+import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin/effect"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
@@ -124,8 +124,8 @@ const fakeMachine = (options: {
         harness: {
           transform: (edit: (e: typeof editor) => unknown) => Effect.sync(() => (edit(editor), registration)),
         },
-      } as unknown as Parameters<ReturnType<typeof Plugin.effectOf>>[0]
-      yield* Plugin.effectOf(plugin)(ctx)
+      } as unknown as Parameters<typeof plugin.effect>[0]
+      yield* plugin.effect(ctx)
       return added[0]!
     }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
   const cursorDefinition = {

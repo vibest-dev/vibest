@@ -2,7 +2,7 @@ import childProcess from "node:child_process"
 import path from "node:path"
 import util from "node:util"
 
-import { Plugin, Runtime } from "@vibest/plugin"
+import { Plugin, Runtime } from "@vibest/plugin/effect"
 import { Effect, Stream } from "effect"
 
 const execFile = util.promisify(childProcess.execFile)

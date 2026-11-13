@@ -1,7 +1,7 @@
 import { Effect, Scope, Stream } from "effect"
 import { expect, test, vi } from "vitest"
 
-import type { Context } from "../src/index.ts"
+import type { Context } from "../src/effect/index.ts"
 
 test("an iterator the plugin closed is not returned again when the plugin unloads", async () => {
   vi.resetModules()
@@ -16,7 +16,7 @@ test("an iterator the plugin closed is not returned again when the plugin unload
   })
   try {
     const mocked = await import("effect")
-    const { fromPromise } = await import("../src/promise.ts")
+    const { fromPromise } = await import("../src/promise/adapter.ts")
     const host = { options: {}, event: { subscribe: () => Stream.make(1, 2, 3) } } as unknown as Context
     const scope = Scope.makeUnsafe()
     await Effect.runPromise(

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, type BusEvent } from "@vibest/core/bus"
 import { Runtimes, type Runtime } from "@vibest/core/runtimes"
-import { Runtime as RuntimeApi } from "@vibest/plugin"
+import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { Effect, Layer, PubSub, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 

@@ -1,7 +1,7 @@
 import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChildProcessSpawner"
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 

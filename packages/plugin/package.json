@@ -14,7 +14,9 @@
   ],
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/promise/index.ts",
+    "./effect": "./src/effect/index.ts",
+    "./host": "./src/host.ts",
     "./testing": "./src/testing.ts"
   },
   "publishConfig": {

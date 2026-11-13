@@ -21,6 +21,7 @@ import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/co
 import { HostEnv } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPluginEffect from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
@@ -139,6 +140,7 @@ export const runMain = BunRuntime.runMain
 const provided: Readonly<Record<string, object>> = {
   effect,
   "@vibest/plugin": VibestPlugin,
+  "@vibest/plugin/effect": VibestPluginEffect,
   "effect/process/ChildProcess": ChildProcess,
   "effect/process/ChildProcessSpawner": ChildProcessSpawner,
   ...Object.fromEntries(

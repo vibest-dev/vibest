@@ -1,6 +1,6 @@
 import { BunServices, BunSocketServer } from "@effect/platform-bun"
 import { assert, describe, it } from "@effect/vitest"
-import type * as VibestPlugin from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
 import {
   Cause,
   Deferred,
