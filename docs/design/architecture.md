@@ -183,7 +183,7 @@ reaches vibestd through `client`, `protocol` and `schema`, and the daemon throug
 | `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                                        |
 | `plugin-harnesses`   | Builtin plugins `harness-pi`, `harness-claude` (and the Cursor plugin file users add): one `HarnessDefinition` per CLI (launch side, models, subscription reader, guard answer, how its vibest plugin loads). |
 | `integration/claude` | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`.           |
-| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to one `extension.mjs`. Loaded with `pi -e`.                                                                                                     |
+| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to `extension.mjs` (reporting, guard, inbox) and `presentation.mjs` (tool grouping, compact user messages). Both loaded with `pi -e`.            |
 | `integration/cursor` | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                                    |
 | `plugin-git`         | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                                  |
 | `builtins`           | The builtin plugins in load order (`pre`): `harness-pi`, `harness-claude`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `harness-default`. Only the binary's composition root reads it.           |
@@ -849,7 +849,7 @@ binary as `VIBEST_HARNESSES`; without it the compiled binary looks beside its ow
 `<root>/harnesses`, the link resolved), which is how install.sh's install runs, without Node; a binary run bare from the
 npm package (a pane vibestd opened runs the binary, not the launcher) then tries the `@vibest/cli` package, flat
 (`node_modules/@vibest/cli`) or nested. From source there is no layout to look beside. The adapter loads the plugin into
-each session it starts, and into the entry session: Pi `-e <dir>/extension.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
+each session it starts, and into the entry session: Pi `-e <dir>/extension.mjs -e <dir>/presentation.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
 Each of these adds to what the harness loads; the user's own plugins, extensions and hooks keep loading beside it
 (checked against Pi 1.4, Claude Code 2.1.316 and cursor-agent 2026.10.22). Why not install into the harness's config:
 
