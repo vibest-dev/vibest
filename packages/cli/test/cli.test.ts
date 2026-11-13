@@ -1,8 +1,7 @@
 import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
-import { PROTOCOL } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
+import { PROTOCOL, VERSION } from "@vibest/schema/version"
 import { Effect, FileSystem, Path, Schema } from "effect"
 
 import * as Platform from "#platform"

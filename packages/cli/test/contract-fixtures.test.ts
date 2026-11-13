@@ -5,7 +5,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders } from "@vibest/client/client"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
-import { VERSION } from "@vibest/protocol/rpc"
+import { VERSION } from "@vibest/schema/version"
 import * as Server from "@vibest/server/server"
 import { Effect, Layer, type Scope } from "effect"
 

@@ -42,9 +42,6 @@ import { Subscription } from "@vibest/schema/subscription"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 
-import pkg from "../package.json" with { type: "json" }
-import { PROTOCOL } from "./protocol.ts"
-
 export const DaemonIdentity = Schema.Struct({
   pid: Schema.optional(Schema.Number),
   instance: Schema.optional(Schema.String),
@@ -91,10 +88,6 @@ export const PingResult = Schema.Struct({
   capabilities: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 })
 export type Ping = typeof PingResult.Type
-
-export const VERSION = pkg.version
-
-export { PROTOCOL }
 
 export class ProtocolRejected extends Schema.TaggedError<ProtocolRejected>()("ProtocolRejected", {
   method: Schema.String,

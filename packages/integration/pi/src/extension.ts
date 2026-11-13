@@ -14,8 +14,8 @@ import {
   SocketConnector,
   withVibest,
 } from "@vibest/client/client"
-import { VERSION } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { VERSION } from "@vibest/schema/version"
 import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
 import { Pi } from "./pi.ts"

@@ -1,7 +1,6 @@
 import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
-import { PROTOCOL } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
+import { PROTOCOL, VERSION } from "@vibest/schema/version"
 import { Console, Effect, Option } from "effect"
 import { Command } from "effect/cli"
 import { RpcClient } from "effect/rpc"

@@ -6,8 +6,9 @@ import { address, type At, type ListScope, type PeerScope, Remote } from "@vibes
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import type { NotInRepository } from "@vibest/core/worktree"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
-import { Caller, type CallerShape, Forbidden, type PayloadOf, VERSION } from "@vibest/protocol/rpc"
+import { Caller, type CallerShape, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
 import type { ProjectMoved } from "@vibest/schema/session"
+import { VERSION } from "@vibest/schema/version"
 import { Effect, Stream } from "effect"
 
 import type { Listing } from "../listing.ts"

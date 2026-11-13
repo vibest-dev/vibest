@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
-import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
+import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
 import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"

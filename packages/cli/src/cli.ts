@@ -10,7 +10,7 @@ import {
   withVibest,
 } from "@vibest/client/client"
 import { UpdateError } from "@vibest/client/release"
-import { type Ping, VERSION } from "@vibest/protocol/rpc"
+import { type Ping } from "@vibest/protocol/rpc"
 import { messageOf } from "@vibest/schema/error"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { ProjectKind } from "@vibest/schema/project"
@@ -21,6 +21,7 @@ import {
   LaunchFailed,
   NoCallingSession,
 } from "@vibest/schema/session"
+import { VERSION } from "@vibest/schema/version"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,

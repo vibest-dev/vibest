@@ -1,5 +1,5 @@
-import { VERSION } from "@vibest/protocol/rpc"
 import { messageOf } from "@vibest/schema/error"
+import { VERSION } from "@vibest/schema/version"
 import { Config, Effect, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 

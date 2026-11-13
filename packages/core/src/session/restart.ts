@@ -1,5 +1,4 @@
-import { PROTOCOL } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
+import { PROTOCOL, VERSION } from "@vibest/schema/version"
 import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule, type Scope } from "effect"
 
 import { Agents } from "../agents.ts"

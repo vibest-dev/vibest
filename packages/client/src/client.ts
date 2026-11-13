@@ -1,14 +1,14 @@
 import {
   CALLER_HEADER,
   MISMATCH_ACTION,
-  PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
   REPOSITORY_HEADER,
   sessionHeaders,
 } from "@vibest/protocol/protocol"
-import { DaemonIdentity, VibestRpcs, type Ping, VERSION } from "@vibest/protocol/rpc"
+import { DaemonIdentity, VibestRpcs, type Ping } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
+import { PROTOCOL, VERSION } from "@vibest/schema/version"
 import {
   Cause,
   Config,

@@ -13,7 +13,6 @@ import {
   PLUGIN_VERSION_HEADER,
   PROCESS_HEADER,
   PROJECT_HEADER,
-  PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
   REPOSITORY_HEADER,
@@ -30,10 +29,10 @@ import {
   PEER_CALLS,
   ProtocolGate,
   ProtocolRejected,
-  VERSION,
   type CallerShape,
 } from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
+import { PROTOCOL, VERSION } from "@vibest/schema/version"
 import { Effect, Layer, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 

@@ -9,10 +9,11 @@ import {
   withVibest,
 } from "@vibest/client/client"
 import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/client/release"
-import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
-import { type Ping, VERSION } from "@vibest/protocol/rpc"
+import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
+import { type Ping } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL, VERSION } from "@vibest/schema/version"
 import { Cause, Config, Console, Duration, Effect, Exit, FileSystem, Option, Path, Schedule } from "effect"
 import { Command, Flag } from "effect/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"

@@ -1,6 +1,5 @@
 import type { Taken } from "@vibest/schema/session"
-
-export const PROTOCOL = 10
+import { PROTOCOL } from "@vibest/schema/version"
 
 export const MISMATCH_ACTION = "vibest update"
 
