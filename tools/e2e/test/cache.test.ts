@@ -38,6 +38,7 @@ describe("cache key", () => {
     await fs.writeFile(launcher, "launcher")
     await fs.writeFile(compiled, "core 1")
     const key = await cacheKeys({
+      login: {},
       binaries: [launcher, compiled],
       harnesses: path.join(root, "harnesses"),
       method: "npm",
@@ -47,6 +48,7 @@ describe("cache key", () => {
     await fs.writeFile(compiled, "core 2")
     const after = await (
       await cacheKeys({
+        login: {},
         binaries: [launcher, compiled],
         harnesses: path.join(root, "harnesses"),
         method: "npm",

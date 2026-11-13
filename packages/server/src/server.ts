@@ -22,7 +22,7 @@ import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Git } from "@vibest/core/worktree"
 import { VibestRpcs } from "@vibest/protocol/rpc"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import * as SocketServer from "effect/socket/SocketServer"
 
@@ -72,7 +72,16 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
 
-export const socketServer = LayerNode.unbound<SocketServer.SocketServerError>()(SocketServer.SocketServer)
+export class SocketServerLayer extends Context.Service<
+  SocketServerLayer,
+  Layer.Layer<SocketServer.SocketServer, SocketServer.SocketServerError>
+>()("vibest/SocketServerLayer") {}
+export const socketServerLayer = LayerNode.unbound(SocketServerLayer)
+export const socketServer = LayerNode.make({
+  service: SocketServer.SocketServer,
+  layer: Layer.unwrap(Effect.map(SocketServerLayer, (layer) => layer)),
+  deps: [socketServerLayer],
+})
 
 export const node = LayerNode.make({
   name: "vibest/RpcServer",

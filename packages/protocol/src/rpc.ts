@@ -1,3 +1,4 @@
+import { RequestId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
   ListedMachine,
@@ -207,6 +208,7 @@ export const GitInfo = Schema.Struct({
   pushed: Schema.Boolean,
   saved: Schema.Boolean,
   why: Schema.String,
+  unknown: Schema.optional(Schema.String),
 })
 
 export const SessionInfo = Schema.Struct({
@@ -404,7 +406,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Send", {
-        payload: { id: Schema.String, message: Schema.String, request: Schema.optional(Schema.String) },
+        payload: { id: Schema.String, message: Schema.String, request: Schema.optional(RequestId) },
         success: Schema.Struct({ id: Schema.String }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),

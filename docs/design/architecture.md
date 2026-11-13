@@ -169,7 +169,7 @@ started, an entry session) cannot answer results with results (rule 4), and that
 **Packages.** Runtime dependencies flow one way: `schema` → `core` and `protocol` → `server`. `client` depends
 on `schema` and `protocol` only. Plugin types derive from the client API. Besides `server`, only `platform-bun` imports `core`; `packages/cli`
 reaches vibestd through `client`, `protocol` and `schema`, and the daemon through `server/daemon`
-(`packages/cli/test/boundaries.test.ts`).
+(scoped `no-restricted-imports` in `.oxlintrc.json`).
 
 | Package              | Role                                                                                                                                                                                                          |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -201,7 +201,7 @@ the code sits in:
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/schema` (`@vibest/schema`)                     | The contracts `protocol` and `client` need, moved out of core modules: session, inbox and harness schemas and errors, the `project` / `session` / `inbox` / `message` rows (`model.ts`), plugin traces, Project store inputs, `RemoveOutcome`, `Layout`, `messageOf`, `describeSpawn`, `addPluginHint`. Core modules re-export some of them. |
 | `packages/protocol`                                      | `rpc.ts`, `protocol.ts`. Depends on `schema` only.                                                                                                                                                                                                                                                                                           |
-| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (`packages/cli/test/boundaries.test.ts` checks `schema`, `core`, `server`, `protocol`, `client`).                                                                                 |
+| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (scoped `no-restricted-imports` in `.oxlintrc.json` check `schema`, `core`, `server`, `protocol`, `client`).                                                                      |
 | `packages/runtime-herdr`                                 | The Runtime port on herdr: `runtime.ts` and `pool.ts` (omac `herdr-pool.ts`). The only package besides `effect-herdr-sdk` and `packages/cli` that imports herdr.                                                                                                                                                                             |
 | `packages/server`                                        | `server.ts`, `daemon.ts`.                                                                                                                                                                                                                                                                                                                    |
 | `packages/client`                                        | `client.ts`; `release.ts`, the latest-release lookup that `vibest update` and vibestd's hourly check share. Depends on `schema` and `protocol` only.                                                                                                                                                                                         |
@@ -610,9 +610,13 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
   Product identity and runtime are replacements, which is how one core yields several isolated products.
 - Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
   `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
-  left out, and `unbound<E>()(service)` declares the errors a host's replacement may fail with). Each service has a
-  `node` listing its `deps`; what the host supplies (sqlite, the sockets, the platform services, the daemon's
-  identity) is an unbound node. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
+  left out, and `unbound` is infallible). Each service has a `node` listing its `deps`; what the host supplies
+  (the platform services, the daemon's identity) is an unbound node. The SQL client, the socket server and the HTTP
+  server can fail to open, so the host supplies each as an infallible layer token (`SqlClientLayer`,
+  `SocketServerLayer`, `HttpServerLayer`: an unbound node whose value is a `Layer`), and a real provider node
+  (`sqlClient`, `socketServer`, `httpServer`) consumes the token and carries the failure (`DatabaseOpenFailed`,
+  `SchemaMismatch`, `SqlError`, `SocketServerError`, `ServeError`) in its type; a host that omits a token is
+  refused when the graph is compiled. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
   the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
   replacements. The platform (`packages/platform-bun/src/bun.ts`) exports `replacements` for everything it supplies
   (platform services, sqlite, the sockets, the machine transport, the plugin loader, the builtin plugins, the host

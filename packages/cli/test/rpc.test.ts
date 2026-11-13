@@ -144,12 +144,16 @@ describe("vibest.sock", () => {
         Effect.map((rows) => rows[0]!.n),
       )
       assert.strictEqual(yield* queued("spawn-1"), 1)
-      const sent = yield* c.Send({ id: first.id, message: "more", request: "send-1" })
+      const sent = yield* c.Send({ id: first.id, message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" })
       yield* c.Remove({ id: first.id })
-      assert.deepStrictEqual(yield* c.Send({ id: first.id, message: "more", request: "send-1" }), sent)
+      assert.deepStrictEqual(
+        yield* c.Send({ id: first.id, message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" }),
+        sent,
+      )
       assert.strictEqual(yield* sends, 1)
       assert.strictEqual(
-        (yield* Effect.flip(c.Send({ id: first.id, message: "more", request: "send-2" })))._tag,
+        (yield* Effect.flip(c.Send({ id: first.id, message: "more", request: "7a2d3b4f-9c8e-4d6b-8f21-3e4a5b6c7d8e" })))
+          ._tag,
         "NoSuchSession",
       )
     }),

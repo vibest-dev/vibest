@@ -34,13 +34,13 @@ import {
   ledgerSnapshot,
   method,
   privateIn,
-  redact,
+  redactor,
   removeExpiredWorlds,
   removeWorldDir,
   Skip,
   World,
-  writeEvidence,
 } from "./world.ts"
+import { capture } from "./world/user-env.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
   daemon,
@@ -157,10 +157,12 @@ const evidence = path.join(checkout, "tools/e2e/evidence", run)
 await fs.mkdir(evidence, { recursive: true })
 const worlds: Array<string> = []
 const userFilesBefore = await userFileHashes()
+const login = capture()
+const redact = redactor(login)
 
 const once = async ({ area, check }: (typeof checks)[number], evidenceName: string): Promise<Result> => {
   const startedAt = new Date()
-  const world = await World.create()
+  const world = await World.create(login)
   worlds.push(world.root)
   let outcome: Outcome = "pass"
   let detail: string | undefined
@@ -186,7 +188,7 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
   if (ledger.code !== 0) problem(`import-check of the world's database: ${ledger.stderr}${ledger.stdout}`)
   const snapshot = ledgerSnapshot(world.vibestHome)
   if (snapshot !== undefined)
-    await writeEvidence(path.join(evidence, `${evidenceName}.ledger.json`), JSON.stringify(snapshot, null, 2))
+    await fs.writeFile(path.join(evidence, `${evidenceName}.ledger.json`), redact(JSON.stringify(snapshot, null, 2)))
   const left = await herdrSessionsLeft(world.herdrSession)
   if (left.length > 0) problem(`herdr sessions left after the check: ${left.join(", ")}`)
   await fs.writeFile(path.join(evidence, `${evidenceName}.json`), redact(JSON.stringify(world.log, null, 2)))
@@ -225,7 +227,7 @@ const print = (r: Result) =>
 
 const t0 = Date.now()
 const results = new Map<string, Result>()
-const keyOf = await cacheKeys({ binaries: [binary, compiled], harnesses, method, userFiles: userFilesBefore })
+const keyOf = await cacheKeys({ login, binaries: [binary, compiled], harnesses, method, userFiles: userFilesBefore })
 const keys = new Map(await Promise.all(selected.map(async (c) => [c.id, await keyOf(c.area, c.id)] as const)))
 const cacheable = (c: (typeof checks)[number]) => !noCache && (c.check.tier ?? "gate") !== "agent"
 for (const c of selected)

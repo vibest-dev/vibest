@@ -1,4 +1,4 @@
-import { type Effect, Schema, type Stream, type Types } from "effect"
+import { Effect, PubSub, Schema, Stream, type Types } from "effect"
 
 import type { Transform } from "./registration.ts"
 
@@ -52,6 +52,15 @@ export type RuntimeEvent =
   | { readonly type: "seen"; readonly terminal: Terminal }
   | { readonly type: "state"; readonly terminal: Terminal; readonly state: AgentState }
   | { readonly type: "reset" }
+
+export const eventsFrom = (pubsub: PubSub.PubSub<RuntimeEvent>): Stream.Stream<RuntimeEvent> =>
+  Stream.unwrap(
+    PubSub.subscribe(pubsub).pipe(
+      Effect.map((subscription) =>
+        Stream.succeed<RuntimeEvent>({ type: "reset" }).pipe(Stream.concat(Stream.fromSubscription(subscription))),
+      ),
+    ),
+  )
 
 export type CallerValues = Readonly<Record<string, string | undefined>>
 

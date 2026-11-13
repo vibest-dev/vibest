@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, checkout, copyEvidence, expect, row, Skip, until, type World, writeEvidence } from "../world.ts"
+import { binary, checkout, expect, row, Skip, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 
 type CoreTerminal = { address: string; reported: boolean; status?: { state: string; kind?: string; app?: string } }
@@ -302,7 +302,7 @@ const statusCore = async (
         "competing terminal writer: " + JSON.stringify(records),
       )
     }
-    await writeEvidence(
+    await w.writeEvidence(
       path.join(evidence, `${id}-versions.json`),
       JSON.stringify(
         {
@@ -316,14 +316,14 @@ const statusCore = async (
       ),
     )
   } finally {
-    await writeEvidence(
+    await w.writeEvidence(
       path.join(evidence, `${id}-status.json`),
       JSON.stringify({ snapshots, model: model.stages }, null, 2),
     )
     model.stop()
     await w.stopDaemon()
     await hc("server", "stop").catch((error) => console.error("Failed to stop isolated herdr-core:", error))
-    await copyEvidence(path.join(w.root, "status-output"), path.join(evidence, `${id}-pty`))
+    await w.copyEvidence(path.join(w.root, "status-output"), path.join(evidence, `${id}-pty`))
     await fs.rm(plugin)
   }
 }
@@ -382,7 +382,7 @@ const checks: ReadonlyArray<Check> = [
           await status("question dialog", "blocked", "question")
           expect(completed() === 0, "question published a completed result")
           await visible("Choose a scratch color")
-          await writeEvidence(path.join(evidence, "T1-claude-question.txt"), await hc("read", terminal()))
+          await w.writeEvidence(path.join(evidence, "T1-claude-question.txt"), await hc("read", terminal()))
           await Bun.sleep(1000)
           await hc("keys", terminal(), "enter")
           await until("held response after question", () => model.waiting.length === 1, 30_000)
@@ -463,7 +463,7 @@ const checks: ReadonlyArray<Check> = [
           await w.ok(["daemon"], { env })
           const screen = await hc("read", terminal())
           expect(!screen.includes("7501;"), "OSC bytes appeared as visible text")
-          await writeEvidence(path.join(evidence, "T1-claude-screen.txt"), screen)
+          await w.writeEvidence(path.join(evidence, "T1-claude-screen.txt"), screen)
           await worker("claude", ["--model", "haiku"])
           await model.next({ error: "invalid x-api-key" })
           let auth: CoreTerminal | undefined
@@ -480,7 +480,7 @@ const checks: ReadonlyArray<Check> = [
             30_000,
           )
           snapshot("HTTP 401 authentication_error", auth!)
-          await writeEvidence(path.join(evidence, "T1-claude-auth.txt"), await hc("read", terminal()))
+          await w.writeEvidence(path.join(evidence, "T1-claude-auth.txt"), await hc("read", terminal()))
           await hc("kill", terminal())
           for (const resolve of model.waiting.splice(0)) resolve("discard authentication retry")
           for (const [name, flag] of [

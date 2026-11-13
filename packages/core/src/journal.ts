@@ -25,7 +25,13 @@ export interface Emit<D extends Definition> {
 }
 
 const Buffer = Context.Reference<
-  { readonly events: Array<unknown>; readonly fiberId: number; closed: boolean } | undefined
+  | {
+      readonly events: Array<unknown>
+      readonly after: Array<() => void>
+      readonly fiberId: number
+      closed: boolean
+    }
+  | undefined
 >("vibest/JournalBuffer", { defaultValue: () => undefined })
 
 const setMeta = (sql: SqlClient.SqlClient, key: "catalog" | "projection", value: number) =>
@@ -221,10 +227,16 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
         if ((yield* Buffer) !== undefined) return yield* body
         return yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            const buffer = { events: [] as Array<Fact | Signal>, fiberId: yield* Effect.fiberId, closed: false }
+            const buffer = {
+              events: [] as Array<Fact | Signal>,
+              after: [] as Array<() => void>,
+              fiberId: yield* Effect.fiberId,
+              closed: false,
+            }
             const result = yield* sql
               .withTransaction(restore(Effect.provideService(body, Buffer, buffer)))
               .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
+            for (const apply of buffer.after) apply()
             if (buffer.events.length > 0) yield* published(buffer.events)
             return result
           }),
@@ -269,5 +281,12 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
         else yield* published([signal])
       })
 
-    return { commit, emit, notify, rebuild }
+    const afterCommit = (apply: () => void) =>
+      Effect.gen(function* () {
+        const buffer = yield* Buffer
+        if (buffer !== undefined && !buffer.closed) buffer.after.push(apply)
+        else apply()
+      })
+
+    return { commit, emit, notify, afterCommit, rebuild }
   })
