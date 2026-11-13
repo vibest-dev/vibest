@@ -1,12 +1,14 @@
 # Harnesses and models
 
-The coding agents (harnesses) vibest runs: Claude, Pi and Cursor. Each capability below says what it is and when it
+The coding agents (harnesses) vibest runs: Claude and Pi come with vibest, Cursor is a plugin you add. Each capability below says what it is and when it
 counts as working.
 
 ## H1. Listing harnesses
 
-`vibest harness list` shows one entry per harness (Claude, Pi, Cursor) with its binary, whether it can start, and its
-default model. A harness whose CLI is missing says so.
+`vibest harness list` shows one entry per loaded harness (Claude and Pi, and Cursor once its plugin is added) with its binary, whether it can start, and its
+default model. A harness whose CLI is missing says so. `--machine <name>` lists another machine's harnesses (see
+[machines.md](machines.md) M9). The list is the whole machine's; the default model is the harness's global default, which a repository's
+own harness settings may change in its project, and vibest does not read them.
 
 ## H2. Listing models
 
@@ -20,16 +22,30 @@ problem under it, and ends with a verdict: one line per harness, and a herdr lin
 
 ## H4. Cursor probes on a home without a login keychain
 
-On macOS, vibest never starts Cursor to discover models or read its usage when the home has no login keychain, and it
+With the Cursor plugin added, on macOS, vibest never starts Cursor to discover models or read its usage when the home has no login keychain, and it
 does not carry SSH session settings into a home it switches to.
 
 ## H5. A run inherits the caller's harness
 
-`vibest run` without a harness takes the caller's harness, provider and model: from the main agent itself, and from a
-plain terminal in a project that has a main agent, the new session has the main agent's three. Naming a harness drops
-the provider and model. With nothing to inherit, it fails saying there is no harness to inherit.
+`vibest run` without a harness takes the caller's harness, provider and model: from the session that runs it. Naming a
+harness drops the provider and model. With nothing to inherit and nothing choosing a harness (the builtin default removed
+with `"-harness-default"`, or Claude not available, and no plugin picking one), it fails saying there is no harness to
+inherit; otherwise the default applies (H7).
 
-## H6. `vibest` reuses the main agent's last harness
+## H6. `vibest` reuses the entry session's last harness
 
-`vibest` without `--harness` starts the harness the project's main agent last used. A project's first start without
-`--harness` fails and asks for one.
+`vibest` without `--harness` starts the harness the project's entry session last used. A project's first start without
+`--harness` runs on Claude when Claude is available, and fails asking for `--harness` when it is not or when
+`"-harness-default"` is in `vibest.json`'s `plugins`.
+
+## H7. The default harness is Claude
+
+A project's first bare `vibest` without `--harness` starts its entry session on Claude when Claude is available. A user
+plugin that picks another harness wins over the default. When Claude cannot start the start fails saying there is no
+harness to inherit.
+
+## H8. Cursor is a plugin
+
+Cursor is not built in. `vibest run cursor` is refused saying no plugin provides it and where plugins are added; after
+the shipped `harnesses/cursor/plugin.js` of the install directory is added to `plugins` in `~/.vibest/vibest.json`,
+`cursor` appears in `vibest harness list`.

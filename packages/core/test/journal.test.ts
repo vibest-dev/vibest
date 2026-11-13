@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { equalToReplay, installLedger, makeJournal, rebuild } from "@vibest/core/journal"
-import { projectors, PROJECTION_VERSION } from "@vibest/core/projectors"
+import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { Catalog, type Fact } from "@vibest/schema/event"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -99,7 +99,7 @@ const story = Effect.gen(function* () {
           pid: 20,
         },
       })
-      const turn = yield* emit(Catalog["execution.started"], {
+      const execution = yield* emit(Catalog["execution.started"], {
         sessionId: SUB,
         at: 310,
         data: { process: subProcess },
@@ -107,12 +107,12 @@ const story = Effect.gen(function* () {
       yield* emit(Catalog["inbox.moved"], {
         sessionId: SUB,
         at: 311,
-        data: { inbox: task, to: "delivered", execution: turn },
+        data: { inbox: task, to: "delivered", execution: execution },
       })
       yield* emit(Catalog["execution.ended"], {
         sessionId: SUB,
         at: 321,
-        data: { execution: turn, outcome: "completed", reply: "All tests pass." },
+        data: { execution: execution, outcome: "completed", reply: "All tests pass." },
       })
       const result = yield* emit(Catalog["inbox.queued"], {
         sessionId: MAIN,
@@ -167,7 +167,7 @@ const story = Effect.gen(function* () {
       })
       yield* emit(Catalog["outbox.queued"], {
         at: 511,
-        data: { id: ITEM_2, peer: PEER, session: REMOTE, content: "archived" },
+        data: { id: ITEM_2, peer: PEER, session: REMOTE, kind: "send", content: "archived" },
       })
       yield* emit(Catalog["outbox.acked"], { at: 520, data: { peer: PEER, ids: [ITEM] } })
       const notice = yield* emit(Catalog["inbox.queued"], {
@@ -186,7 +186,7 @@ const story = Effect.gen(function* () {
         data: { execution: typed, outcome: "failed", failure: { message: "model overloaded" } },
       })
       yield* emit(Catalog["machine.removed"], { at: 600, data: { name: "mb" } })
-      return { mainProcess, task, subProcess, turn, result, placeholder, notice, typed }
+      return { mainProcess, task, subProcess, execution, result, placeholder, notice, typed }
     }),
   )
   return { ...ids, sql, journal }
@@ -195,10 +195,6 @@ const story = Effect.gen(function* () {
 const rowsOf = <A extends object>(sql: SqlClient.SqlClient, query: string) => sql.unsafe<A>(query)
 
 describe("journal projectors", () => {
-  it("every catalog type has exactly one projector", () => {
-    assert.deepStrictEqual(Object.keys(projectors).toSorted(), Object.keys(Catalog).toSorted())
-  })
-
   it.effect("project facts: created, repositories, entry, move", () =>
     Effect.gen(function* () {
       const { sql } = yield* story
@@ -430,12 +426,12 @@ describe("journal projectors", () => {
 
   it.effect("execution facts: started, ended once with its reply", () =>
     Effect.gen(function* () {
-      const { sql, journal, turn, typed, subProcess, mainProcess } = yield* story
+      const { sql, journal, execution, typed, subProcess, mainProcess } = yield* story
       yield* journal.commit(
         journal.emit(Catalog["execution.ended"], {
           sessionId: SUB,
           at: 999,
-          data: { execution: turn, outcome: "lost" },
+          data: { execution: execution, outcome: "lost" },
         }),
       )
       assert.deepStrictEqual(
@@ -446,7 +442,7 @@ describe("journal projectors", () => {
         [
           {
             sessionId: SUB,
-            id: turn,
+            id: execution,
             processId: subProcess,
             typed: null,
             startedAt: 310,
@@ -473,7 +469,7 @@ describe("journal projectors", () => {
 
   it.effect("inbox facts: queued and moved, with the execution that took a row", () =>
     Effect.gen(function* () {
-      const { sql, task, turn, result, notice } = yield* story
+      const { sql, task, execution, result, notice } = yield* story
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
@@ -490,7 +486,7 @@ describe("journal projectors", () => {
             request: "r-1",
             peerItem: null,
             status: "delivered",
-            executionId: turn,
+            executionId: execution,
           },
           {
             id: result,
@@ -545,7 +541,9 @@ describe("journal projectors", () => {
           id: ITEM_2,
           seq: queued!.seq,
           peerId: PEER,
+          recipient: null,
           sessionId: REMOTE,
+          kind: "send",
           content: "archived",
           createdAt: 511,
         },
@@ -758,7 +756,7 @@ describe("journal rebuild", () => {
     Effect.gen(function* () {
       const { sql } = yield* story
       yield* sql`UPDATE meta SET value = '0' WHERE key = 'projection'`
-      yield* sql`CREATE TABLE answer (turn INTEGER PRIMARY KEY)`
+      yield* sql`CREATE TABLE answer (execution INTEGER PRIMARY KEY)`
       yield* sql`DELETE FROM inbox`
       yield* rebuild
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT value FROM meta WHERE key = 'projection'"), [

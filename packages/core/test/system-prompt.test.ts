@@ -1,12 +1,52 @@
 import { assert, describe, it } from "@effect/vitest"
-import { coordinatorSystemPrompt, projectText, sessionSystemPrompt } from "@vibest/core/system-prompt"
+import { projectText, systemPrompt } from "@vibest/core/system-prompt"
 import { Effect, FileSystem, Path } from "effect"
 
 import { tempDirectory } from "./lib/directory.ts"
 import * as Platform from "./platform/bun.ts"
 
 const promptOf = (dir: string, text: { preferences: string; memories: string }) =>
-  sessionSystemPrompt({ id: "a", projectDir: dir, vibest: ["vibest"], ...text })
+  systemPrompt({ system: "You are an agent.\n", id: "a", projectDir: dir, vibest: ["vibest"], ...text })
+
+const facts = (extra: Partial<Parameters<typeof systemPrompt>[0]>) =>
+  systemPrompt({
+    system: "BODY\n",
+    id: "a",
+    projectDir: "/p",
+    vibest: ["vibest"],
+    preferences: "",
+    memories: "",
+    ...extra,
+  })
+
+describe("systemPrompt: the definition body first, then facts that name the channel to use", () => {
+  it("a session the user opened has no one to send its report to and works in the user's checkout", () => {
+    const prompt = facts({ checkout: true })
+    assert.isTrue(prompt.startsWith("BODY\n"))
+    assert.include(prompt, "You were opened by the user in a terminal; the user reads your replies.")
+    assert.include(prompt, "the user's own checkout")
+    assert.notInclude(prompt, "To send it your report")
+  })
+
+  it("a session another session started sends its report with vibest send, and says who inherits it when that one ends", () => {
+    const prompt = facts({ creator: { id: "c1", label: "agent lead" } })
+    assert.include(prompt, "You were started by c1 (agent lead)")
+    assert.include(prompt, "vibest send c1 --")
+    assert.include(prompt, "nearest session above it that is still running")
+    assert.include(prompt, "a worktree that only you use")
+  })
+
+  it("a worktree shared with an earlier session says so", () => {
+    assert.include(facts({ sharer: "e1" }), "shared with session e1")
+  })
+
+  it("every session is told what the two envelopes and the unwrapped text mean", () => {
+    const prompt = facts({})
+    assert.include(prompt, "`<agent-message>`")
+    assert.include(prompt, "`<vibest-notice>`")
+    assert.include(prompt, "Text with no wrapper is from the user")
+  })
+})
 
 describe("projectText: preferences.md and the memory index injected into every agent's system prompt", () => {
   it.effect(
@@ -50,11 +90,8 @@ describe("projectText: preferences.md and the memory index injected into every a
           "Each line is a file in the project folder; read it with your file tools when its line is relevant to the work.",
         )
         const prompt = promptOf(dir, text)
-        assert.include(prompt, "# User preferences\n\nPrefer short diffs.")
-        assert.include(
-          coordinatorSystemPrompt({ projectDir: dir, ...text }),
-          "# User preferences\n\nPrefer short diffs.",
-        )
+        assert.include(prompt, "# User preferences\n\nThis is a snapshot from when your process started;")
+        assert.include(prompt, "Prefer short diffs.")
         assert.include(prompt, "# Project memories\n\n")
         assert.notInclude(prompt, "# Project instructions")
         assert.notInclude(prompt, "instructions.md")

@@ -1,6 +1,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db, type SessionRow } from "@vibest/core/db"
+import { Db, type NewSession } from "@vibest/core/db"
 import { Git } from "@vibest/core/git"
 import { Layout } from "@vibest/core/paths"
 import {
@@ -10,6 +10,7 @@ import {
   projectRoot,
 } from "@vibest/core/project-create"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
+import { SessionLive } from "@vibest/core/session/live"
 import { copyIncluded, gitState, mainCheckout } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
@@ -101,9 +102,10 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
     return error?._tag === "Fail" ? error.error.message : assert.fail(`not a failure: ${exit.cause}`)
   })
 
-const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer))
+const database = (filename: string) =>
+  Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer))
 
-const session = (id: string): Omit<SessionRow, "projectId"> => ({
+const session = (id: string): Omit<NewSession, "projectId"> => ({
   id,
   agent: "general",
   name: "n",
@@ -116,9 +118,8 @@ const session = (id: string): Omit<SessionRow, "projectId"> => ({
   status: "unknown",
   startedAt: null,
   exitedAt: null,
-  turnState: "none",
-  turnPromptedAt: 0,
-  metadata: {},
+  executionState: "none",
+  executionPromptedAt: 0,
   createdAt: 1,
   lastActive: 1,
 })

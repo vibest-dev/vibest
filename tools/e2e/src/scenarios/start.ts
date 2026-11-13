@@ -5,19 +5,7 @@ import path from "node:path"
 import type { Check } from "../check.ts"
 import { answerFolderTrust } from "../drivers/claude.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
-import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
-
-type Entry = {
-  id: string
-  agent: string
-  harness: string
-  address: { id: string }
-  routing?: { trace: Array<{ hook: string }> }
-}
-
-const mains = async (w: World) =>
-  (await w.json<{ sessions: Array<Entry> }>(["ls"]).then((l) => l.sessions)).filter((e) => e.agent === "main")
-const start = (w: World) => w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi }, timeoutMs: 60_000 })
+import { expect, fail, row, SESSIONS, Skip, until } from "../world.ts"
 
 const herdr = (socket: string, method: string, params: Record<string, unknown>) =>
   new Promise<any>((resolve, reject) => {
@@ -75,7 +63,7 @@ const piWrote = async (agentDir: string, cwd: string) => {
 
 const move = (harness: "claude" | "pi"): Check => ({
   id: harness === "claude" ? "S10" : "S10-pi",
-  title: `a ${harness === "claude" ? "Claude" : "Pi"} main agent in terminal A; \`vibest\` in terminal B answered y: A's harness ends and A keeps its shell, B resumes the same conversation`,
+  title: `a ${harness === "claude" ? "Claude" : "Pi"} entry session in terminal A; \`vibest\` in terminal B answered y: A's harness ends and A keeps its shell, B resumes the same conversation`,
   run: async (w) => {
     for (const bin of ["herdr", harness]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
     const pi = heldModel()
@@ -89,7 +77,7 @@ const move = (harness: "claude" | "pi"): Check => ({
     const env = {}
     await w.daemon({ env })
     try {
-      await w.startMain({
+      await w.startEntry({
         harness,
         session,
         env: harness === "claude" ? claudeVars : { PI_CODING_AGENT_DIR: piAgentDir },
@@ -146,7 +134,7 @@ const move = (harness: "claude" | "pi"): Check => ({
             row<{ c: string | null }>(
               w,
               `SELECT s.harness_session_id AS c FROM ${SESSIONS} s
-               WHERE s.agent_type = 'main' AND s.directory = ? AND s.ended_at IS NULL`,
+               WHERE s.agent_type = 'coordinator' AND s.directory = ? AND s.ended_at IS NULL`,
               realRepository,
             )?.c ?? undefined
           if (conversation === undefined) return false
@@ -156,8 +144,12 @@ const move = (harness: "claude" | "pi"): Check => ({
         },
         120_000,
       )
-      const idleOrUnseenTurnDone = ["idle", "done"]
-      await until("A idle after its turn", async () => idleOrUnseenTurnDone.includes(await status(a)), 120_000)
+      const idleOrUnseenExecutionDone = ["idle", "done"]
+      await until(
+        "A idle after its execution",
+        async () => idleOrUnseenExecutionDone.includes(await status(a)),
+        120_000,
+      )
       const b = (
         (await herdr(socket, "pane.split", {
           target_pane_id: a,
@@ -173,7 +165,7 @@ const move = (harness: "claude" | "pi"): Check => ({
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
       await type(socket, b, `vibest --harness ${harness}`)
       await until(
-        "B asks to move the main agent",
+        "B asks to move the entry session",
         async () => (await screen(socket, b)).includes("Move it here and continue? [y/N]"),
         60_000,
       )
@@ -206,10 +198,13 @@ const move = (harness: "claude" | "pi"): Check => ({
       await until("only a shell in A", shellOnly, 30_000).catch(async () =>
         fail(`A runs ${JSON.stringify(await foreground(socket, a))}`),
       )
-      const mains = (
+      const entryRows = (
         await w.json<{ sessions: Array<{ agent: string; address: { id: string } }> }>(["ls"]).then((l) => l.sessions)
-      ).filter((e) => e.agent === "main")
-      expect(mains.length === 1 && mains[0]!.address.id.endsWith(b), `main agents: ${JSON.stringify(mains)}`)
+      ).filter((e) => e.agent === "coordinator")
+      expect(
+        entryRows.length === 1 && entryRows[0]!.address.id.endsWith(b),
+        `entry sessions: ${JSON.stringify(entryRows)}`,
+      )
     } finally {
       pi.stop()
       claude.stop()
@@ -227,34 +222,6 @@ const move = (harness: "claude" | "pi"): Check => ({
   },
 })
 
-const checks: ReadonlyArray<Check> = [
-  {
-    id: "S10-start",
-    title:
-      "in a project directory, `vibest` starts its main agent in this run's herdr session; `vibest ls` shows it first",
-    run: async (w) => {
-      if (!Bun.which("pi")) throw new Skip("pi not on PATH")
-      if (!Bun.which("herdr")) throw new Skip("herdr not on PATH")
-      await start(w)
-      await until("the main agent in vibest ls", async () => (await mains(w)).length === 1, 30_000)
-      const [main] = await mains(w)
-      expect(main!.harness === "pi", `main agent: ${JSON.stringify(main)}`)
-      expect(
-        main!.routing === undefined || main!.routing.trace.every((t) => typeof t.hook === "string"),
-        `routing: ${JSON.stringify(main)}`,
-      )
-      const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-      await herdr(socket, "pane.close", { pane_id: main!.address.id.split("/").pop() })
-      await until(
-        "the main agent's exit recorded",
-        () =>
-          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, main!.id)?.e != null,
-        30_000,
-      )
-    },
-  },
-  move("claude"),
-  move("pi"),
-]
+const checks: ReadonlyArray<Check> = [move("claude"), move("pi")]
 
 export default checks

@@ -26,28 +26,23 @@ const claudeStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.
     }),
 )
 
-const CLAUDE_INSPECT_TOOLS = ["Bash", "Read", "Grep", "Glob", "Skill"]
-
 const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`]
 
-const vibestSend = (vibest: ReadonlyArray<string>) =>
-  [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} send:*)`).join(",")
-
-const turnComplete = (event: Readonly<Record<string, unknown>>) => {
+const executionComplete = (event: Readonly<Record<string, unknown>>) => {
   if (event.reason === "answer") return event
   if (event.reason === "aborted")
     return {
       ...event,
       aborted: true,
       error: "interrupted",
-      error_details: "the turn was stopped in its terminal (Esc) before it ended",
+      error_details: "the execution was stopped in its terminal (Esc) before it ended",
     }
   if (event.reason === "refusal") {
     const r = (event.refusal ?? {}) as { readonly category?: unknown; readonly explanation?: unknown }
     const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
     return { ...event, error: "refusal", error_details: why || "the model refused to answer" }
   }
-  return { ...event, error: "error", error_details: "the turn ended on an API error" }
+  return { ...event, error: "error", error_details: "the execution ended on an API error" }
 }
 
 const optionalModel = Schema.optional(Schema.NullOr(Schema.String))
@@ -108,33 +103,18 @@ export const claude: Harness.HarnessDefinition = {
   systemPromptInPrompt: false,
   interruptKey: "esc",
   startup: claudeStartup,
-  resultField: "last_assistant_message",
+  replyField: "last_assistant_message",
   inbox: "poll",
   ready: "integration",
   checkProvider: noProvider("claude"),
   launchArgs: (i) => [
-    ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
+    ...(i.sessionId === null ? [] : [i.resume ? "--resume" : "--session-id", i.sessionId]),
     "--append-system-prompt-file",
     i.systemPromptFile,
     "--add-dir",
     i.projectDir,
     "--allowedTools",
-    [vibestSend(i.vibest), ...projectDirRules(i.projectDir)].join(","),
-    "--plugin-dir",
-    i.pluginDir,
-    ...opt("--model", i.model),
-  ],
-  coordinatorArgs: (i) => [
-    ...opt("--resume", i.sessionId),
-    "--append-system-prompt-file",
-    i.systemPromptFile,
-    "--strict-mcp-config",
-    "--tools",
-    [...CLAUDE_INSPECT_TOOLS, "Edit", "Write"].join(","),
-    "--add-dir",
-    i.projectDir,
-    "--allowedTools",
-    [...CLAUDE_INSPECT_TOOLS, ...projectDirRules(i.projectDir)].join(","),
+    ["Bash", ...projectDirRules(i.projectDir)].join(","),
     "--plugin-dir",
     i.pluginDir,
     ...opt("--model", i.model),
@@ -156,12 +136,16 @@ export const claude: Harness.HarnessDefinition = {
     ),
     answer: claudeModels,
   },
-  userPrompt: (event, coordinator) => {
-    if (coordinator || event.hook_event_name !== "PromptSubmit") return undefined
+  userPrompt: (event) => {
+    if (event.hook_event_name !== "PromptSubmit") return undefined
+    if (event.origin === "vibest")
+      return typeof event.execution === "number"
+        ? { execution: event.execution, ...(event.refused === true ? { refused: true as const } : {}) }
+        : undefined
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
     return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },
-  turnEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "TurnComplete" ? undefined : { result: turnComplete(event) },
+  executionEnd: (event) =>
+    event.hook_event_name !== "ExecutionComplete" ? undefined : { end: executionComplete(event) },
   subscription: (home) => claudeSubscription(home).pipe(Effect.provide(platform)),
 }

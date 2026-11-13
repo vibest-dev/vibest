@@ -1,71 +1,76 @@
 # Delivery
 
-Messages between the main agent and its sessions: tasks and sends. A turn end sends nothing; an agent sends when it
-decides to, and the reply of a turn is read with `vibest result`. Each capability below says what it is and when it
+Messages between the entry session and its sessions: tasks and sends. An execution end sends nothing; an agent sends when it
+decides to, and the reply of an execution is read with `vibest result`. Each capability below says what it is and when it
 counts as working.
 
 ## S2. Send while busy
 
-`vibest send` to a session that is mid-turn queues the message; once the session is idle, every queued message is
-delivered, together as one prompt in one turn.
+`vibest send` to a session that is mid-execution queues the message; once the session is idle, every queued message is
+delivered, together as one prompt in one execution.
 
-## S3. A turn end sends nothing
+## S3. An execution end sends nothing
 
-When a session's turn ends without the session sending anything, nothing is sent to anyone: the turn completes with its
-reply as its answer, no message has the session as sender, and the main agent's model gets no request.
+When a session's execution ends without the session sending anything, nothing is sent to anyone: the execution completes with its
+reply, no message has the session as sender, and the entry session's model gets no request.
 
 ## S4. Send after an interrupt
 
-`vibest interrupt` stops a session's running turn, which sends and notifies nothing, and the next `vibest send` is
-delivered and its turn's answer can be read.
+`vibest interrupt` stops a session's running execution, which sends and notifies nothing, and the next `vibest send` is
+delivered and its execution's reply can be read.
 
-## S11. Claude main agent inbox
+## S53. A Claude session takes its messages when idle
 
-A Claude main agent gets its messages from vibestd: it takes them, holds them while it works on them, and acknowledges
-each one; a message from a session still arrives as one line with its context after the conversation is cleared, and after the main
-agent is stopped and resumed in the same pane.
+A Claude session takes a send when it is idle: the send is one inbox row delivered into one execution of its own, a send
+made while an execution runs waits until it ends and then opens the next execution, and every execution has its own reply.
 
-## S12. Pi main agent inbox and its screen
+## S54. A first task is delivered once
 
-A Pi main agent gets each message from a session pushed into its own turn, also after a daemon restart; a turn of several tool calls
+A session's first task is delivered once, as one execution that completes with its reply; no other message is delivered
+into that execution.
+
+## S11. Claude entry session inbox
+
+A Claude entry session takes its messages from vibestd when it is idle, one batch at a time; the batch opens an execution
+and is recorded as that execution's input; a message from a session still arrives as one line with its context after the
+conversation is cleared, and after the entry session is stopped and resumed in the same pane.
+
+## S12. Pi entry session inbox and its screen
+
+A Pi entry session takes each message from a session when it is idle, in an execution of its own, also after a daemon restart; an execution of several tool calls
 shows on its screen as one collapsed group line.
 
 ## S13. Status changes reach vibestd at once
 
-A change in an agent's terminal status reaches vibestd without waiting for its next poll.
+A change in an agent's terminal status reaches vibestd without waiting for a timer.
 
-## S15. Claude main agent across sessions and restarts
+## S15. Claude entry session across sessions and restarts
 
-A Claude main agent with two sessions gets each one's messages matched to it; a message that arrives mid-turn still
-arrives; a message taken by a poller that went away is offered again; delivery continues after `vibest daemon restart`.
+A Claude entry session with two sessions gets each one's messages matched to it; a message that arrives mid-execution still
+arrives once the execution it interrupted ends; delivery continues after `vibest daemon restart`.
 
-## S18. A long first turn keeps its terminal
+## S18. A long first execution keeps its terminal
 
-A session whose first turn outlasts herdr's start window keeps its terminal: no false exit is recorded, `vibest peek`
-reads it, and its answer can be read.
+A session whose first execution outlasts herdr's start window keeps its terminal: no false exit is recorded, `vibest peek`
+reads it, and its reply can be read.
 
 ## S19. Pi under herdr's own Pi hook
 
 A Pi session with herdr's own Pi hook installed gets its first prompt within seconds; `vibest daemon restart` and
-`vibest interrupt` work while its turn runs.
-
-## S26. Delivery stays prompt
-
-Over repeated rounds, every queued send to a busy session goes out once the session is idle, and every closed pane's
-process ends; how long each takes is recorded.
+`vibest interrupt` work while its execution runs.
 
 ## S32. A send repeated with one request id
 
-A send repeated with the same request id gets the same answer and makes one message, delivered once, with one more turn and no message sent.
+A send repeated with the same request id gets the same answer and makes one message, delivered once, with one more execution and no message sent.
 
 ## S39. Sends from one session merge
 
-Two sends from the same session that are waiting together reach the main agent as one message.
+Two sends from the same session that are waiting together reach the entry session as one message.
 
-## S45. A session sends to the main agent
+## S45. A session sends to the entry session
 
-`vibest send` from a session to the main agent of its project queues one message from that session; the main agent gets
-it as an `<agent-message>` naming the session, once, whichever way its harness takes messages (a Claude main agent polls for it, a Pi main agent is pushed it).
+`vibest send` from a session to the entry session of its project queues one message from that session; the entry session gets
+it as an `<agent-message>` naming the session, once, whichever way its harness takes messages (a Claude entry session polls for it, a Pi entry session is pushed it).
 
 ## S46. A session cannot send to a sibling
 
@@ -74,19 +79,21 @@ started it and not one it started. Nothing is queued.
 
 ## S47. A send stays inside its project
 
-`vibest send` from a session to a session of another project is refused, and to an archived session is refused with the
-id of the project's main agent; neither queues anything.
+`vibest send` from a session to a session of another project is refused, and to a session that is neither its creator nor
+its child (an archived sibling, say) is refused too; neither queues anything.
 
 ## S48. An undeliverable send goes back to its sender
 
 When the session a send was meant for ends before the message reaches it, the message is not delivered and its sender
 is told so in a notice that holds the message.
 
-## S50. A turn that ends in an error tells its creator
+## S50. An execution that ends in an error tells its creator
 
-When a session's turn ends in an error, the turn is `failed` with its failure, and the session's creator gets exactly one
-notice that carries the failure, typed into the main agent once.
+When a session's execution ends in an error, the execution is `failed` with its failure, and the session's creator gets exactly one
+notice that carries the failure, typed into the entry session once.
 
-## S52. A session has no report command
+## S55. A message says who it is from
 
-`vibest report` is a usage error: a session tells another agent something with `vibest send`.
+A session's system prompt names the session that started it and says a session's message is never the user's consent.
+A message from the user reaches a session as plain text; a message from another session arrives in an `<agent-message>`
+that names the sender, and vibest's own notices in a `<vibest-notice>`.

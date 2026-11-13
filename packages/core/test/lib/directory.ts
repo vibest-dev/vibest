@@ -12,3 +12,8 @@ export const tempDirectory = (prefix: string) =>
     const fs = yield* FileSystem.FileSystem
     return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
   }).pipe(Effect.orDie)
+
+export const entryPending = (db: Db["Service"], projectId: string) =>
+  Effect.flatMap(db.entryOf(projectId), (entry) =>
+    entry === undefined ? Effect.succeed([]) : db.pendingInbox(entry.id),
+  )

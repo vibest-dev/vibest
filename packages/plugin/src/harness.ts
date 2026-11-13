@@ -16,17 +16,6 @@ export interface LaunchInput {
   readonly env: Readonly<Record<string, string>>
 }
 
-export interface CoordinatorInput {
-  readonly root: string
-  readonly projectDir: string
-  readonly systemPromptFile: string
-  readonly provider: string | null
-  readonly model: string | null
-  readonly sessionId: string | null
-  readonly pluginDir: string
-  readonly env: Readonly<Record<string, string>>
-}
-
 export interface StartupPane {
   readonly screen: Effect.Effect<string>
   readonly sendKeys: (keys: ReadonlyArray<string>) => Effect.Effect<void>
@@ -62,22 +51,20 @@ export interface HarnessDefinition {
   readonly ownSessionId: boolean
   readonly systemPromptInPrompt: boolean
   readonly interruptKey: string
-  readonly resultField: "text" | "last_assistant_message"
+  readonly replyField: "text" | "last_assistant_message"
   readonly inbox?: "subscribe" | "poll"
   readonly ready: "integration" | "runtime"
   readonly startup?: Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
   readonly checkProvider?: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
-  readonly coordinatorArgs?: (input: CoordinatorInput) => ReadonlyArray<string>
   readonly models: ModelLister
   readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
   readonly subscription?: (home: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => unknown
-  readonly turnEnd?: (
+  readonly executionEnd?: (event: HarnessEvent) => { readonly end: Readonly<Record<string, unknown>> } | undefined
+  readonly userPrompt?: (
     event: HarnessEvent,
-    coordinator: boolean,
-  ) => { readonly result: Readonly<Record<string, unknown>> } | undefined
-  readonly userPrompt?: (event: HarnessEvent, coordinator: boolean) => { readonly text: string } | undefined
+  ) => { readonly text: string } | { readonly execution: number; readonly refused?: true } | undefined
   readonly conversationOf?: (event: HarnessEvent) => string | undefined
 }
 

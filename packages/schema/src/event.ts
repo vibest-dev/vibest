@@ -80,11 +80,12 @@ export const ExecutionStarted = fact("execution.started", "session", {
   process: optional(Seq),
   typed: optional(Text),
 })
+export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
 export const ExecutionEnded = fact("execution.ended", "session", {
   execution: Seq,
   outcome: ExecutionOutcome,
-  failure: optional(Schema.Struct({ message: Text })),
+  failure: optional(Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")) })),
   conversation: optional(Text),
   reply: optional(Schema.String),
 })
@@ -116,6 +117,8 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   id: Text,
   peer: Text,
   session: Text,
+  recipient: optional(Text),
+  kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
 })
 export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
@@ -136,6 +139,7 @@ const definitions = [
   ProcessConversation,
   ProcessEnded,
   ExecutionStarted,
+  ExecutionAccepted,
   ExecutionEnded,
   InboxQueued,
   InboxMoved,

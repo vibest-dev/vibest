@@ -1,23 +1,32 @@
+import { LaunchFailed } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
 
-import { COORDINATOR } from "./guard.ts"
+import { Agents, unknownAgent } from "./agents.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
+import type { AgentsShape } from "./host.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
-import { LaunchFailed } from "./sessions.ts"
 import {
-  coordinatorSystemPrompt,
   projectText,
   SystemPromptDirUnsafe,
+  systemPrompt,
   systemPromptRoot,
   writeSystemPrompt,
 } from "./system-prompt.ts"
 
+export const definitionIn = (agents: AgentsShape, id: string) => {
+  const found = agents.find(id)
+  return found === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.succeed(found)
+}
+
+export const definitionOf = (id: string) => Effect.flatMap(Agents, (agents) => definitionIn(agents, id))
+
 const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.catch((e) => (e instanceof SystemPromptDirUnsafe ? Effect.fail(e) : Effect.die(e))))
 
-export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, R>(input: {
+export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   readonly harness: HarnessId
+  readonly agent: string
   readonly root: string
   readonly provider: string | null
   readonly model: string | null
@@ -32,20 +41,18 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     R
   >
 }) {
+  const definition = yield* definitionOf(input.agent)
   const adapter = yield* (yield* Harnesses).get(input.harness)
   const harness = yield* Harness
   const layout = yield* Layout
   const vibest = yield* VibestCommand
   const unavailable = (message: string) => new HarnessUnavailable({ harness: input.harness, message })
-  if (!adapter.coordinatorArgs)
-    return yield* unavailable(`${input.harness} is not currently supported as the coordinator`)
   const providerError = adapter.checkProvider?.(input.provider)
   if (providerError) return yield* unavailable(providerError)
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   const pluginDir = yield* harness.plugin(input.harness)
   yield* unsafeOnly(systemPromptRoot)
   const env: Record<string, string> = {
-    VIBEST_AGENT: COORDINATOR,
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
     VIBEST_COMMAND: encodeCommand(vibest),
@@ -54,8 +61,12 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const systemPromptFile = yield* unsafeOnly(
     writeSystemPrompt(
       saved.sessionId,
-      coordinatorSystemPrompt({
+      systemPrompt({
+        system: definition.system,
+        id: saved.sessionId,
+        checkout: true,
         projectDir: layout.project(saved.projectId),
+        vibest,
         ...(yield* projectText(layout.project(saved.projectId))),
       }),
     ),
@@ -72,14 +83,16 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
   return {
     file: adapter.binary,
-    args: adapter.coordinatorArgs({
-      root: input.root,
+    args: adapter.launchArgs({
+      worktree: input.root,
       projectDir: layout.project(saved.projectId),
       systemPromptFile,
       provider: input.provider,
       model: input.model,
       sessionId: saved.harnessSessionId,
+      resume: saved.harnessSessionId !== null,
       pluginDir,
+      vibest,
       env: commandEnv,
     }),
     env: commandEnv,
@@ -90,7 +103,6 @@ export const IDENTITY_ENV = [
   "VIBEST_SESSION_ID",
   "VIBEST_PROJECT_ID",
   "VIBEST_PROJECT_DIR",
-  "VIBEST_AGENT",
   "VIBEST_HARNESS",
   "VIBEST_RUNTIME",
   "VIBEST_HOME",

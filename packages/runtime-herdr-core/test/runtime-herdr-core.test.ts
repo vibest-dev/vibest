@@ -14,7 +14,7 @@ import {
   LABEL,
   make,
   parseTerminalId,
-  PRESENT_MAIN_SESSION,
+  PRESENT_ENTRY_SESSION,
   PRESENT_PROJECT_ID,
 } from "../src/terminal-runtime.ts"
 
@@ -192,7 +192,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
   )
 
   it.live(
-    "labels a main agent's terminal for herdr-app and reports the typed program's exit",
+    "labels an entry session's terminal for herdr-app and reports the typed program's exit",
     () =>
       withRuntime((runtime, hc) =>
         Effect.gen(function* () {
@@ -206,7 +206,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           )
           yield* Effect.sleep("300 millis")
           const main = yield* runtime.open({ project: cwd, cwd, argv: [], env: {}, label: "main" })
-          yield* runtime.present!(main, { [PRESENT_MAIN_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
+          yield* runtime.present!(main, { [PRESENT_ENTRY_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
           const labels = (yield* hc.call("terminal.get", { terminal: parseTerminalId(main.id, socketPath).address }))
             .labels
           assert.deepInclude(labels, {

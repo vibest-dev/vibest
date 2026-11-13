@@ -58,7 +58,7 @@ export const scenario = async (file: string) => {
   )
 }
 
-export const writtenByHarness = (rel: string) => /^claude\/(tsconfig\.json$|\.claude-plugin\/types\/)/.test(rel)
+const writtenByHarness = (rel: string) => /^claude\/(tsconfig\.json$|\.claude-plugin\/types\/)/.test(rel)
 
 const stablePath = (p: string) => p.replace(/fnm_multishells\/[^/:]+/g, "fnm_multishells")
 

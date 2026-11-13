@@ -43,7 +43,7 @@ export interface RuntimeReport {
 }
 
 export interface Seen {
-  readonly turn: number
+  readonly finished: number
   readonly seen: number | null
 }
 
@@ -95,7 +95,7 @@ export interface RuntimeDefinition {
   readonly state?: (terminal: Terminal) => Effect.Effect<AgentState, RuntimeError>
   readonly session?: (terminal: Terminal) => Effect.Effect<string | null, RuntimeError>
   readonly seen?: (terminal: Terminal) => Effect.Effect<Seen, RuntimeError>
-  readonly see?: (terminal: Terminal, turn: number) => Effect.Effect<void, RuntimeError>
+  readonly see?: (terminal: Terminal, finished: number) => Effect.Effect<void, RuntimeError>
   readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
   readonly focus?: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
   readonly present?: (terminal: Terminal, info: Readonly<Record<string, string>>) => Effect.Effect<void, RuntimeError>

@@ -7,7 +7,13 @@ import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { agentName, binary, expect, readDb, redact, row, Skip, until, writeEvidence, type World } from "../world.ts"
 import { fakeSsh, sh, stopVibestd, subModel } from "./machines.ts"
 
-type Listed = { id: string; machine?: string; runtime?: string; address?: { machine: string; id: string } }
+type Listed = {
+  id: string
+  agent?: string
+  machine?: string
+  runtime?: string
+  address?: { machine: string; id: string }
+}
 type Profile = { id: string; label: string; target: string; session: string; enabled?: boolean }
 type MachineView = {
   runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
@@ -108,7 +114,7 @@ const setup = async (w: World, evidence: string) => {
   await w.stopDaemon()
   const daemonA = await w.run(w.repository, [binary, "daemon"], { env: aEnv })
   expect(daemonA.code === 0, `A: vibest daemon: ${daemonA.stderr}`)
-  await w.startMain({
+  await w.startEntry({
     harness: "pi",
     session: sessions.a,
     socket: socketA,
@@ -140,8 +146,8 @@ const setup = async (w: World, evidence: string) => {
   const notices = (address: string, marker: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE content LIKE ? AND content LIKE ?",
-      `${address}:%`,
+      "SELECT count(*) AS n FROM inbox WHERE kind = 'send' AND content LIKE ? AND content LIKE ?",
+      `%<agent-id>${address}</agent-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
   const stop = async () => {
@@ -174,7 +180,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M7",
     title:
-      "herdr terminals on another machine: an agent run --machine starts opens in herdr's default session on B; machine add saves that session as a herdr machine on A (isolated XDG state, through herdr's own command, which never installs: against a host without herdr it fails and saves nothing); a plain herdr server on B is refused with a restart note and nothing saved; a run --machine row's address names B's pane under that machine and herdr --machine reaches B's agent; a prompt typed there through herdr starts a typed turn on B whose result arrives once; a profile removed in herdr is added back by the next ls; after B's session stops, B's vibestd starts it again as its own session leader for the next run --machine and the same saved machine reaches the new agent; machine rm removes it",
+      "herdr terminals on another machine: an agent run --machine starts opens in herdr's default session on B; machine add saves that session as a herdr machine on A (isolated XDG state, through herdr's own command, which never installs: against a host without herdr it fails and saves nothing); a plain herdr server on B is refused with a restart note and nothing saved; a run --machine row's address names B's pane under that machine and herdr --machine reaches B's agent; a prompt typed there through herdr starts a typed execution on B whose result arrives once; a profile removed in herdr is added back by the next ls; after B's session stops, B's vibestd starts it again as its own session leader for the next run --machine and the same saved machine reaches the new agent; machine rm removes it",
     run: async (w, evidence) => {
       let s: Setup | undefined
       try {
@@ -212,13 +218,35 @@ const checks: ReadonlyArray<Check> = [
         expect(herdr?.here.visible === true && herdr.here.as === label, `machine ls: ${JSON.stringify(machines)}`)
 
         const printed = (
-          JSON.parse(await s.okA(["run", "--machine", "mb", "pi", "--", ask("hseven")])) as { id: string }
+          JSON.parse(
+            await w.okViaEntry(["run", "--machine", "mb", "pi", "--", ask("hseven")], { env: s.aEnv, asIs: true }),
+          ) as { id: string }
         ).id
         const id = printed.slice(3)
         const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
           id.startsWith(r.id.slice(0, 8)),
         )
         expect(bRow?.runtime === "herdr", `B's row: ${JSON.stringify(bRow)}`)
+        expect(bRow?.agent === "general", `B's row ran as ${bRow?.agent}, not the default general`)
+        const unknown = await w.viaEntry(["run", "--machine", "mb", "--agent", "nosuch", "pi", "--", ask("hnone")], {
+          env: s.aEnv,
+          asIs: true,
+        })
+        expect(unknown.code !== 0 && unknown.stderr.includes("nosuch"), `unknown agent on B: ${unknown.stderr}`)
+        const coordinator = (
+          JSON.parse(
+            await w.okViaEntry(["run", "--machine", "mb", "--agent", "coordinator", "pi", "--", ask("hcoord")], {
+              env: s.aEnv,
+              asIs: true,
+            }),
+          ) as { id: string }
+        ).id
+        const onB = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
+        expect(
+          onB.find((r) => coordinator.slice(3).startsWith(r.id.slice(0, 8)))?.agent === "coordinator",
+          `B's rows: ${JSON.stringify(onB.map((r) => [r.id, r.agent]))}`,
+        )
+        expect(onB.length === 2, `the refused run left a session on B: ${onB.length}`)
         const name = agentName(bRow!.id)
         const shown = async () =>
           (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
@@ -242,9 +270,9 @@ const checks: ReadonlyArray<Check> = [
 
         const typed = await s.herdrA("--machine", label, "agent", "prompt", name, ask("hstep"))
         expect(typed.code === 0, `herdr --machine agent prompt: ${typed.stdout}${typed.stderr}`)
-        await until("B saw the typed turn", () => s!.subs.asked("hstep"), 120_000)
+        await until("B saw the typed execution", () => s!.subs.asked("hstep"), 120_000)
         await until(
-          "B recorded a typed turn",
+          "B recorded a typed execution",
           () =>
             (s!.bDb<{ n: number }>(
               "SELECT count(*) AS n FROM execution WHERE session_id = ? AND typed IS NOT NULL",
@@ -252,7 +280,7 @@ const checks: ReadonlyArray<Check> = [
             )?.n ?? 0) === 1,
           60_000,
         )
-        await until("the typed turn's notice", () => s!.notices(printed.slice(0, 11), "hstep") === 1, 120_000)
+        await until("the typed execution's notice", () => s!.notices(printed.slice(0, 11), "hstep") === 1, 120_000)
 
         const removedInHerdr = await s.herdrA("machine", "remove", saved[0]!.id)
         expect(removedInHerdr.code === 0, `herdr machine remove: ${removedInHerdr.stderr}`)
@@ -265,8 +293,11 @@ const checks: ReadonlyArray<Check> = [
 
         const kept = (await s.profiles()).map((p) => p.id)
         await s.stopB()
-        const again = (JSON.parse(await s.okA(["run", "--machine", "mb", "pi", "--", ask("hnine")])) as { id: string })
-          .id
+        const again = (
+          JSON.parse(
+            await w.okViaEntry(["run", "--machine", "mb", "pi", "--", ask("hnine")], { env: s.aEnv, asIs: true }),
+          ) as { id: string }
+        ).id
         await until(
           "A's row of the agent after B's herdr session restarted has its terminal",
           async () => {

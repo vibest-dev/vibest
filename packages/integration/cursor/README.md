@@ -8,16 +8,16 @@ vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`)
   fail-closed.
 - **readiness**: `sessionStart` goes to `vibest integration ready --harness cursor`; vibestd types the first task only
   after it.
-- **a turn at work**: `afterAgentThought`, `postToolUse` and `beforeSubmitPrompt` go to
-  `vibest integration prompt --harness cursor`; vibestd shows the session working, and opens a round for a prompt the
+- **an execution at work**: `afterAgentThought`, `postToolUse` and `beforeSubmitPrompt` go to
+  `vibest integration prompt --harness cursor`; vibestd shows the session working, and opens an execution for a prompt the
   user typed. Cursor runs a plugin's `beforeSubmitPrompt` only when user or project hooks also have one.
-- **the turn end**: `afterAgentResponse` goes to `vibest integration stop --harness cursor`; vibestd writes the session's
+- **the execution end**: `afterAgentResponse` goes to `vibest integration stop --harness cursor`; vibestd writes the session's
   result and shows it idle. Cursor does not run a plugin's `stop` hook.
 
-A report that does not reach vibestd fails its hook (never blocking the turn) and appends the error to
+A report that does not reach vibestd fails its hook (never blocking the execution) and appends the error to
 `$VIBEST_HOME/vibestd.log`. Nothing is written to the terminal.
 
-Outside a vibest agent (no `VIBEST_AGENT` in the environment) the hooks do nothing.
+Outside a vibest agent (no `VIBEST_SESSION_ID` in the environment) the hooks do nothing.
 
 ## Use
 

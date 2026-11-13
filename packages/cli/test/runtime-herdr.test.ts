@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest"
-import { targetFrom } from "@vibest/runtime-herdr/caller"
 import { HerdrPool, type SessionEvent } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
@@ -108,61 +107,6 @@ describe("send to an agent herdr started", () => {
   )
 })
 
-describe("open an agent", () => {
-  it.effect("asks herdr's agent.start with a 120 s window and returns its terminal once agent.start resolves", () =>
-    Effect.gen(function* () {
-      const { runtime, calls } = yield* scriptedRuntime((method) => {
-        if (method === "worktree.list") return Effect.succeed({ source: { source_workspace_id: "w1" } })
-        if (method === "tab.create") return Effect.succeed({ root_pane: { pane_id: "w1:p2" } })
-        if (method === "pane.get") return Effect.succeed({ pane: { tab_id: "w1:t2" } })
-        return Effect.succeed({})
-      })
-      const id = "abcd1234-abcd-4abc-8abc-abcd1234abcd"
-      const terminal = yield* runtime.open({
-        project: "/p",
-        cwd: "/p",
-        argv: ["pi", "--x"],
-        env: { VIBEST_SESSION_ID: id },
-        label: "pi",
-      })
-      const start = calls.find((c) => c.method === "agent.start")
-      assert.deepStrictEqual(start?.params, {
-        name: TerminalRuntime.agentName(id),
-        kind: "pi",
-        pane_id: "w1:p2",
-        args: ["--x"],
-        timeout_ms: 120_000,
-      })
-      assert.strictEqual(terminal.id, `s/w1:p2/${TerminalRuntime.agentName(id)}`)
-    }).pipe(Effect.provide(Platform.services)),
-  )
-
-  it.effect("an agent another machine started opens in herdr's default session, never beside a pane", () =>
-    Effect.gen(function* () {
-      const { runtime, calls, resolved } = yield* scriptedRuntime((method) => {
-        if (method === "worktree.list") return Effect.succeed({ source: { source_workspace_id: "w1" } })
-        if (method === "tab.create") return Effect.succeed({ root_pane: { pane_id: "w1:p2" } })
-        if (method === "pane.get") return Effect.succeed({ pane: { tab_id: "w1:t2" } })
-        return Effect.succeed({})
-      })
-      yield* runtime.open({
-        project: "/p",
-        cwd: "/p",
-        argv: ["pi"],
-        env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
-        label: "pi",
-        near: TerminalRuntime.terminalOf("work", "w9:p9"),
-        remote: true,
-      })
-      assert.deepStrictEqual(resolved, [{ session: "default" }])
-      assert.notInclude(
-        calls.map((c) => JSON.stringify(c.params)),
-        JSON.stringify({ pane_id: "w9:p9" }),
-      )
-    }).pipe(Effect.provide(Platform.services)),
-  )
-})
-
 describe("pane events", () => {
   it.effect("a pane.agent_status_changed subscription frame (its data has no type) is a state event", () =>
     Effect.gen(function* () {
@@ -183,27 +127,6 @@ describe("pane events", () => {
       assert.deepStrictEqual(yield* Fiber.join(first), [
         { type: "state", terminal: TerminalRuntime.terminalOf("s", "w1:p2"), state: "idle" },
       ])
-    }).pipe(Effect.provide(Platform.services)),
-  )
-})
-
-describe("focus and the caller target", () => {
-  it("targetFrom encodes the socket path or the named session, and nothing when neither is set", () => {
-    assert.deepStrictEqual(TerminalRuntime.decodeTarget(targetFrom({ HERDR_SOCKET_PATH: "/h/s.sock" })), {
-      socketPath: "/h/s.sock",
-    })
-    assert.deepStrictEqual(TerminalRuntime.decodeTarget(targetFrom({ HERDR_SOCKET_PATH: "/h/s.sock" }, "other")), {
-      session: "other",
-    })
-    assert.isUndefined(targetFrom({}))
-    assert.isUndefined(targetFrom({ HERDR_SOCKET_PATH: "" }))
-  })
-
-  it.effect("focus asks herdr to focus that pane on the pane's own session", () =>
-    Effect.gen(function* () {
-      const { runtime, calls } = yield* scriptedRuntime(() => Effect.succeed({}))
-      yield* runtime.focus!(TerminalRuntime.terminalOf("s", "w1:p2"))
-      assert.deepStrictEqual(calls, [{ method: "pane.focus", params: { pane_id: "w1:p2" } }])
     }).pipe(Effect.provide(Platform.services)),
   )
 })

@@ -1,23 +1,42 @@
+import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
+import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
+import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
+import { Inbox } from "@vibest/core/inbox"
 import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
 import { Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
 import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
+import { Spawn } from "@vibest/core/session/spawn"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin"
 import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
-import { Clock, ConfigProvider, Context, Deferred, type Duration, Effect, FileSystem, Layer, Path, Ref } from "effect"
+import {
+  Clock,
+  ConfigProvider,
+  Context,
+  Crypto,
+  Deferred,
+  type Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Path,
+  Ref,
+} from "effect"
+import { ChildProcessSpawner } from "effect/process"
 
+import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import * as App from "../../../server/src/app.ts"
 import * as Server from "../../../server/src/server.ts"
@@ -87,6 +106,7 @@ export const pluginsHost = (
   options: { readonly timeout?: Duration.Input; readonly activateLate?: boolean } = {},
 ) => {
   const candidates: ReadonlyArray<Candidate> = [
+    { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
     { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
   ]
@@ -106,7 +126,7 @@ export const pluginsHost = (
         )
       }),
     ),
-    deps: [Bus.node, Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
+    deps: [Agents.node, Bus.node, Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
   })
 }
 
@@ -131,25 +151,21 @@ const defaultSsh = Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed
 
 const defaultTransport = Layer.succeed(MachineTransport, noTransport)
 
-const defaultSessions = Sessions.configured({ maxSessions: undefined })
+const defaultSpawn = Spawn.configured({ maxSessions: undefined })
 
-export const sessionsNode = (
-  maxSessions: number | undefined,
-  decorate?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"],
-) => {
-  const configured = Sessions.configured({ maxSessions })
-  if (decorate === undefined) return configured
-  return LayerNode.make({
-    service: Sessions,
-    layer: Layer.effect(
-      Sessions,
-      Effect.gen(function* () {
-        return decorate(yield* Sessions, yield* Db)
-      }),
-    ),
-    deps: [configured, Db.node],
-  })
-}
+const sessionsDecorated = (decorate: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]) =>
+  Sessions.node.replace(
+    LayerNode.make({
+      service: Sessions,
+      layer: Layer.effect(
+        Sessions,
+        Effect.gen(function* () {
+          return decorate(yield* Sessions.make, yield* Db)
+        }),
+      ),
+      deps: Sessions.deps,
+    }),
+  )
 
 export const dbReplacement = (decorate: (db: Db["Service"]) => Db["Service"]) =>
   Db.node.replace(Db.node.mapLayer((layer) => Layer.effect(Db, Effect.map(Db, decorate)).pipe(Layer.provide(layer))))
@@ -181,6 +197,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       runtimeNode,
       App.services,
       plugins,
+      Agents.node,
       readyOnStart,
     ]),
     [
@@ -190,7 +207,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
       Plugins.node.replace(plugins),
-      Sessions.node.replace(defaultSessions),
+      Spawn.node.replace(defaultSpawn),
       SshHosts.node.replace(defaultSsh),
       MachineTransport.node.replace(defaultTransport),
       HostEnv.node.replace(noHostEnv),
@@ -254,7 +271,8 @@ export const sessionFrom = (options: TestOptions = {}) =>
       runtimeNode.replace(FakeRuntime.layer(options)),
       Harness.node.replace(harnessLayer(harnessStandIn(options))),
       Harnesses.node.replace(harnessesLayer(options.harnesses)),
-      Sessions.node.replace(sessionsNode(options.maxSessions, options.sessions)),
+      Spawn.node.replace(Spawn.configured({ maxSessions: options.maxSessions })),
+      ...(options.sessions === undefined ? [] : [sessionsDecorated(options.sessions)]),
       ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
       SshHosts.node.replace(sshHosts(options.sshHosts)),
       MachineTransport.node.replace(transportLayer(options.transport)),
@@ -271,3 +289,32 @@ export const sessionFrom = (options: TestOptions = {}) =>
 export type TestServices = Layer.Success<ReturnType<typeof sessionFrom>> | FakeRuntime
 
 export { sessionFrom as testLayer }
+
+export const restartSessions = Effect.gen(function* () {
+  const held = [
+    Agents.node.replace(Layer.succeed(Agents, yield* Agents)),
+    Bus.node.replace(Layer.succeed(Bus, yield* Bus)),
+    Db.node.replace(Layer.succeed(Db, yield* Db)),
+    Drain.node.replace(Layer.succeed(Drain, yield* Drain)),
+    Git.node.replace(Layer.succeed(Git, yield* Git)),
+    Harness.node.replace(Layer.succeed(Harness, yield* Harness)),
+    Harnesses.node.replace(Layer.succeed(Harnesses, yield* Harnesses)),
+    Inbox.node.replace(Layer.succeed(Inbox, yield* Inbox)),
+    Plugins.node.replace(Layer.succeed(Plugins, yield* Plugins)),
+    Processes.node.replace(Layer.succeed(Processes, yield* Processes)),
+    Runtimes.node.replace(Layer.succeed(Runtimes, yield* Runtimes)),
+    Subscriptions.node.replace(Layer.succeed(Subscriptions, yield* Subscriptions)),
+    PlatformNode.childProcessSpawner.replace(
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, yield* ChildProcessSpawner.ChildProcessSpawner),
+    ),
+    PlatformNode.crypto.replace(Layer.succeed(Crypto.Crypto, yield* Crypto.Crypto)),
+    PlatformNode.fileSystem.replace(Layer.succeed(FileSystem.FileSystem, yield* FileSystem.FileSystem)),
+    PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
+    PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
+    Spawn.node.replace(defaultSpawn),
+  ]
+  const fresh = yield* Layer.build(
+    Layer.fresh(LayerNode.compile(LayerNode.group([Sessions.node]), { replacements: held })),
+  )
+  return Context.get(fresh, Sessions)
+})

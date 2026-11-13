@@ -1,15 +1,16 @@
 # vibestd RPC contract
 
-What a client outside this TypeScript workspace (for example `apps/desktop`) builds against. Both files are generated
-and checked by `pnpm test`; never edit them by hand.
+What a client outside this TypeScript workspace (for example `apps/desktop`) builds against. Both are generated; never
+edit them by hand.
 
 - `rpc.json`: `{ protocol, capabilities, methods }`. Each method has its `access` (who may call it: `open`, `cli`,
-  `agent`, `owner`, `coordinator`, `session`, `self`, `peer`; a pair such as `["agent", "peer"]` when another
+  `agent`, `owner`, `session`, `self`, `peer`; a pair such as `["agent", "peer"]` when another
   machine's vibestd may call it too), whether it is a `stream`, and draft 2020-12 JSON Schemas of its
   `payload`, `success` (for a stream: one element) and `error` (the method's errors and those of its middleware:
   `ProtocolRejected`, `InvalidCaller`, `NoSuchSession`, `DaemonStopping`). Regenerate with
   `pnpm --filter @vibest/protocol contract`.
-- `fixtures/*.ndjson`: lines recorded on `vibest.sock` against the real server with the test fakes. A line with a
+- `fixtures/*.ndjson`: lines recorded on `vibest.sock` against the real server with the test fakes, and checked by
+  `pnpm test`. A line with a
   `method` was sent by the client; a line without one was sent by vibestd. Ids, times, temp paths and the version are
   replaced by fixed values. Re-record with `VIBEST_RECORD_FIXTURES=1 pnpm test contract-fixtures` and review the diff.
 
@@ -27,10 +28,10 @@ When the client stops acknowledging, the stream fails with `WatchLagged` instead
 or any other end, reconnect and take the new `Snapshot` as the truth.
 
 With capability `projects`: each project has `activity` (`blocked`, `done`, `working` or `idle`), and each session
-`turn` (null: its runtime counts no turns) and may have `status` `done` (idle with a finished turn nobody looked at).
+`finished` (null: its runtime counts nothing) and may have `status` `done` (idle with a finished execution nobody looked at).
 A `Project` comes again whenever one of its sessions changes. Show these as they are. When a session's terminal is
-drawn in the focused window, send `Session.Seen` (`cli`) `{id, turn}` with the `turn` Watch last gave it, once per
-turn; vibestd writes only a mark that rises, so a stale or repeated call changes nothing, and the result comes back
+drawn in the focused window, send `Session.Seen` (`cli`) `{id, finished}` with the `finished` Watch last gave it, once per
+finished execution; vibestd writes only a mark that rises, so a stale or repeated call changes nothing, and the result comes back
 through Watch.
 
 `Harnesses.List` (`open`, payload `{provider?}`): one entry per harness the loaded plugins provide, `{harness, binary, problem, models}`. `problem` is null when vibestd can

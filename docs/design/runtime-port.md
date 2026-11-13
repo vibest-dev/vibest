@@ -20,7 +20,7 @@ question 3 (§12, §17).
    each other over vibest's own ssh pipe (§6). A runtime manages only the terminals of its own machine; the
    connection to its product (socket, server) is the plugin's, opened and re-opened in its own scope.
 4. **Connections go outward only.** vibestd calls runtimes; nothing on a machine calls back.
-5. **The truth about a turn comes from vibest's harness integration**, not from the runtime.
+5. **The truth about an execution comes from vibest's harness integration**, not from the runtime.
 
 ## 2. Terms
 
@@ -39,7 +39,7 @@ terminals encode to equal JSON.
 Required: `id`, `status()`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
 runtime only when one arrives, and once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
-`split` (a split beside `near` instead of a tab of its own, `vibest run --peer`), `focus` (the user is waiting to
+`split` (a split beside `near` instead of a tab of its own, `vibest run --share`), `focus` (the user is waiting to
 see it), `target` (where the caller sits in this runtime, the value its own `caller.target` gave; herdr: the
 caller's herdr session or socket) and `remote` (another machine's vibestd started the agent, `Peer.Spawn`; herdr then opens it in its default
 session `default` and ignores `near`); each is the runtime's to honor as it can.
@@ -111,15 +111,15 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   variable they declare from its own environment (the platform's `HostEnv.drop`), so a process it starts does not
   inherit a runtime's variables. A plugin cannot read its own caller variables inside vibestd, because those are
   removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
-- The main agent (`vibest`) starts in that terminal. `vibest --runtime <id>` overrides the detection and, when this
+- The entry session (`vibest`) starts in that terminal. `vibest --runtime <id>` overrides the detection and, when this
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
   `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
   another runtime's variables the shell inherited.
 - A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. With
-  `--peer` and no `--runtime`, it runs in the peer's runtime on the peer's machine instead: it shares that session's
-  worktree and splits a pane off it, so the default choice must not replace the peer. An explicit `--runtime` is kept,
-  and a peer on another runtime or machine is still refused. The parent lookup includes the coordinator, because
-  `getSession` leaves the live main row out. If the runtime that was chosen is not online, the start fails with the
+  `--share` and no `--runtime`, it runs in the shared session's runtime on its machine instead: it shares that session's
+  worktree and splits a pane off it, so the default choice must not replace the shared session's. An explicit `--runtime` is kept,
+  and a shared session on another runtime or machine is still refused. The parent lookup includes the entry session, because
+  `getSession` leaves the live entry row out. If the runtime that was chosen is not online, the start fails with the
   runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
   already set stands.
 - vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
@@ -130,16 +130,16 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 ## 5. Agent state, one direction
 
 - The harness integration (the plugin vibest loads into each CLI agent) writes only OSC 7501 status to its tty. It sends
-  each turn start (the user's prompt) and turn end (the result) to vibestd as the harness's raw event: RPC `Prompt` and
-  `TurnEnd` on vibest.sock (2 s per try, one retry 300 ms later, long enough for a vibestd handoff to listen again;
+  each execution start (the user's prompt) and execution end (the result) to vibestd as the harness's raw event: RPC `Prompt` and
+  `ExecutionEnd` on vibest.sock (2 s per try, one retry 300 ms later, long enough for a vibestd handoff to listen again;
   only when the connection could not be made at all, since a request that may have been sent may have been handled,
-  and a second turn end would be delivered twice), or the HTTP hook routes (Claude). vibestd keeps them in memory
-  (no file) and checks the session: the turn end becomes its `turn.end` event and result row.
-- Core follows each Agent with `events` and `state` when present; it never polls `process`. When a turn ends (state
-  idle after working, or the process exited), core takes the reported turn end and delivers the result. A turn end
-  vibestd had not written when it stopped is lost; reconciliation records that turn lost.
-- Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its turn
-  ends loses the round, as today.
+  and a second execution end would be delivered twice), or the HTTP hook routes (Claude). vibestd keeps them in memory
+  (no file) and checks the session: the execution end becomes its `execution.end` event and result row.
+- Core follows each Agent with `events` and `state` when present; it never polls `process`. When an execution ends (state
+  idle after working, or the process exited), core takes the reported execution end and delivers the result. An execution end
+  vibestd had not written when it stopped is lost; reconciliation records that execution lost.
+- Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its execution
+  ends loses the execution, as today.
 
 ### Terminal status ownership
 
@@ -154,7 +154,7 @@ question or auth; an unknown blocked reason would omit kind, and native reports 
 Cursor writes no terminal status. Its hooks run detached from the terminal (no `/dev/tty`), so its plugin reports to
 vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types the first task only then, since herdr-core
 has no status for Cursor), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
-also hooks it) are a turn start, which vibestd shows as working, and `afterAgentResponse` is the turn end, shown as
+also hooks it) are an execution start, which vibestd shows as working, and `afterAgentResponse` is the execution end, shown as
 idle. Cursor 2026.11.05 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
 when user or project hooks also have one. It reports no permission/question/auth waits, so vibestd never shows it
 blocked on herdr-core. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
@@ -173,8 +173,8 @@ evidence files, never the runner terminal. Claude ignores keys at its first dial
 visible dialog text, pauses, reads it again, then answers only the scratch action.
 
 Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: launch a real
-Claude and Pi coordinator with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
-and assert native working, complete it and assert native done, then start another turn and interrupt it to assert
+Claude and Pi entry session with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
+and assert native working, complete it and assert native done, then start another execution and interrupt it to assert
 idle, with the loaded vibest integration and no competing OSC writer. This is independent of worker result coverage.
 In the same follow-up, remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle
 there; terminal status must not inherit the coordinator exclusion used for result reporting.
@@ -202,15 +202,15 @@ machine, and vibest never installs, prepares or reaches another machine through 
 
 ## 7. Running an Agent on another machine
 
-- `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` to B's vibestd with the project's
+- `vibest run --machine <name>` (the user or the entry session) sends `Peer.Spawn` to B's vibestd with the project's
   repository identity, its `HEAD`, and a runtime kind: `--runtime`, else the runtime of the caller's terminal, else
-  that of A's main agent. The caller's environment is not sent; it names a terminal on A. A stores nothing for the
+  that of A's entry session. The caller's environment is not sent; it names a terminal on A. A stores nothing for the
   session.
 - B starts the agent as a local start in its own runtime of that kind (`NoRuntime` when it has none), with its own
   `agent.start.before` hooks. B finds its checkout of the project by repository identity, needs the `HEAD` commit
   there ("push first"), and makes the worktree as for a local agent; work comes back by the agent pushing its branch.
   herdr opens an agent another machine started in its default session `default` (`open`'s `remote`).
-- B reports the agent's results to A's main agent through B's outbox; `vibest result|send|interrupt|archive|peek
+- B reports the agent's results to A's entry session through B's outbox; `vibest result|send|interrupt|archive|peek
   <name>/<id>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
 - `agent.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
   that returns another `machine` does not move the start there. Core checks after the chain that the chosen runtime is
@@ -225,7 +225,7 @@ disposed or its plugin unloaded) stops its merge.
 
 ## 8. Order of work
 
-1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations report turn events and
+1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations report execution events and
    OSC 7501; herdr becomes the builtin `runtime-herdr` plugin. Gates and e2e unchanged.
 2. `vibest machine`, remote herdr, the machine flow above; proven on voyracloud (Linux) and macbook-pro-m1 (macOS).
 3. `runtime-rex` and `runtime-tern` (parallel), each passing the contract suite.

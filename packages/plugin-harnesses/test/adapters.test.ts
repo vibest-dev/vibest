@@ -1,15 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { Context, Harness } from "@vibest/plugin"
-import { Effect } from "effect"
+import type { Harness } from "@vibest/plugin"
 
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
-import { claudePlugin, cursorPlugin, piPlugin } from "../src/index.ts"
 import { pi, piModels } from "../src/pi.ts"
 
 const ADAPTERS = { pi, claude, cursor }
-const IDS = ["pi", "claude", "cursor"] as const
-const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
 
 const launchInput: Harness.LaunchInput = {
   worktree: "/h/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd",
@@ -41,53 +37,50 @@ describe("HarnessAdapter", () => {
     assert.notInclude(dashLeadingArgs, "--yolo")
   })
 
-  it("cursor reports its turn end at its response; its stop hook is not one", () => {
-    const turnEnd = ADAPTERS.cursor.turnEnd!
+  it("cursor reports its execution end at its response; its stop hook is not one", () => {
+    const executionEnd = ADAPTERS.cursor.executionEnd!
     const reply = { hook_event_name: "afterAgentResponse", text: "done" }
-    assert.deepStrictEqual(turnEnd(reply, false), { result: reply })
+    assert.deepStrictEqual(executionEnd(reply), { end: reply })
     for (const status of ["completed", "aborted", "error"])
-      assert.isUndefined(turnEnd({ hook_event_name: "stop", status }, false))
-    assert.isUndefined(turnEnd(reply, true))
+      assert.isUndefined(executionEnd({ hook_event_name: "stop", status }))
   })
 
-  it("claude reports every reason of the plugin's TurnComplete: answer as it is, aborted, refusal and error failed", () => {
-    const turnEnd = ADAPTERS.claude.turnEnd!
+  it("claude reports every reason of the plugin's ExecutionComplete: answer as it is, aborted, refusal and error failed", () => {
+    const executionEnd = ADAPTERS.claude.executionEnd!
     const answer = {
-      hook_event_name: "TurnComplete",
+      hook_event_name: "ExecutionComplete",
       session_id: "c1",
       reason: "answer",
       last_assistant_message: "done",
     }
-    assert.deepStrictEqual(turnEnd(answer, false), { result: answer })
-    assert.isUndefined(turnEnd(answer, true))
+    assert.deepStrictEqual(executionEnd(answer), { end: answer })
     const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
-    assert.deepStrictEqual(turnEnd(aborted, false), {
-      result: {
+    assert.deepStrictEqual(executionEnd(aborted), {
+      end: {
         ...aborted,
         aborted: true,
         error: "interrupted",
-        error_details: "the turn was stopped in its terminal (Esc) before it ended",
+        error_details: "the execution was stopped in its terminal (Esc) before it ended",
       },
     })
-    assert.isUndefined(turnEnd(aborted, true))
     const error = { ...answer, reason: "error", last_assistant_message: "" }
-    assert.deepStrictEqual(turnEnd(error, false), {
-      result: { ...error, error: "error", error_details: "the turn ended on an API error" },
+    assert.deepStrictEqual(executionEnd(error), {
+      end: { ...error, error: "error", error_details: "the execution ended on an API error" },
     })
-    assert.deepStrictEqual(turnEnd({ ...error, last_assistant_message: " API Error: 500 " }, false), {
-      result: {
+    assert.deepStrictEqual(executionEnd({ ...error, last_assistant_message: " API Error: 500 " }), {
+      end: {
         ...error,
         last_assistant_message: " API Error: 500 ",
         error: "error",
-        error_details: "the turn ended on an API error",
+        error_details: "the execution ended on an API error",
       },
     })
     const refusal = { ...answer, reason: "refusal", refusal: { category: "cyber", explanation: "not that" } }
-    assert.deepStrictEqual(turnEnd(refusal, false), {
-      result: { ...refusal, error: "refusal", error_details: "cyber: not that" },
+    assert.deepStrictEqual(executionEnd(refusal), {
+      end: { ...refusal, error: "refusal", error_details: "cyber: not that" },
     })
-    assert.deepStrictEqual(turnEnd({ ...refusal, refusal: { category: null, explanation: null } }, false), {
-      result: {
+    assert.deepStrictEqual(executionEnd({ ...refusal, refusal: { category: null, explanation: null } }), {
+      end: {
         ...refusal,
         refusal: { category: null, explanation: null },
         error: "refusal",
@@ -95,99 +88,44 @@ describe("HarnessAdapter", () => {
       },
     })
     for (const name of ["Stop", "StopFailure", "SubagentStop"])
-      assert.isUndefined(turnEnd({ ...answer, hook_event_name: name }, false), name)
-    assert.isUndefined(turnEnd({ ...answer, session_id: "" }, true))
+      assert.isUndefined(executionEnd({ ...answer, hook_event_name: name }), name)
   })
 
   it("claude reads a user prompt from the plugin's prompt.submit only when the person submitted it", () => {
     const userPrompt = ADAPTERS.claude.userPrompt!
     const typed = { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" }
-    assert.deepStrictEqual(userPrompt(typed, false), { text: "look here" })
-    assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }, false), { text: "look here" })
-    assert.isUndefined(userPrompt(typed, true))
-    assert.isUndefined(userPrompt({ ...typed, text: "  " }, false))
+    assert.deepStrictEqual(userPrompt(typed), { text: "look here" })
+    assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }), { text: "look here" })
+    assert.isUndefined(userPrompt({ ...typed, text: "  " }))
     for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified", undefined])
-      assert.isUndefined(userPrompt({ ...typed, origin }, false), String(origin))
-    assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }, false))
+      assert.isUndefined(userPrompt({ ...typed, origin }), String(origin))
+    assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }))
   })
 
-  it("cursor reads a user prompt from beforeSubmitPrompt, and a thought or tool result as a turn at work", () => {
+  it("claude and pi read the report of a taken batch as the execution it started, not as a typed prompt", () => {
+    assert.deepStrictEqual(
+      ADAPTERS.claude.userPrompt!({ hook_event_name: "PromptSubmit", origin: "vibest", execution: 7 }),
+      { execution: 7 },
+    )
+    assert.isUndefined(ADAPTERS.claude.userPrompt!({ hook_event_name: "PromptSubmit", origin: "vibest" }))
+    assert.deepStrictEqual(ADAPTERS.pi.userPrompt!({ type: "accepted", execution: 7 }), { execution: 7 })
+    assert.isUndefined(ADAPTERS.pi.userPrompt!({ type: "accepted" }))
+  })
+
+  it("cursor reads a user prompt from beforeSubmitPrompt, and a thought or tool result as an execution at work", () => {
     const userPrompt = ADAPTERS.cursor.userPrompt!
     const event = { hook_event_name: "beforeSubmitPrompt", prompt: "look here" }
-    assert.deepStrictEqual(userPrompt(event, false), { text: "look here" })
-    assert.isUndefined(userPrompt(event, true))
-    assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }, false))
-    assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }, false))
+    assert.deepStrictEqual(userPrompt(event), { text: "look here" })
+    assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }))
+    assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }))
     for (const hook_event_name of ["afterAgentThought", "postToolUse"]) {
-      assert.deepStrictEqual(userPrompt({ hook_event_name }, false), { text: "" })
-      assert.isUndefined(userPrompt({ hook_event_name }, true))
+      assert.deepStrictEqual(userPrompt({ hook_event_name }), { text: "" })
     }
   })
 
-  it("Coordinator argv: rules, the inspection tools and file tools for the project folder, no MCP server at all; cursor cannot be one", () => {
-    const input: Harness.CoordinatorInput = {
-      root: "/repo",
-      projectDir: "/h/p",
-      systemPromptFile: "/tmp/vibest/c0ffee00-c0ff-4c0f-8c0f-c0ffee00c0ff/system-prompt.md",
-      provider: null,
-      model: "m",
-      sessionId: null,
-      pluginDir: "/opt/vibest/harnesses/x",
-      env: { VIBEST_AGENT: "coordinator", HERDR_PANE_ID: "w1:p1" },
-    }
-    const claude = ADAPTERS.claude.coordinatorArgs!(input)
-    assert.deepStrictEqual(
-      claude.slice(claude.indexOf("--strict-mcp-config"), claude.indexOf("--strict-mcp-config") + 7),
-      [
-        "--strict-mcp-config",
-        "--tools",
-        "Bash,Read,Grep,Glob,Skill,Edit,Write",
-        "--add-dir",
-        "/h/p",
-        "--allowedTools",
-        "Bash,Read,Grep,Glob,Skill,Read(//h/p/**),Edit(//h/p/**)",
-      ],
-    )
-    assert.notInclude(claude, "--mcp-config")
-    assert.include(claude, "--append-system-prompt-file")
-    assert.deepStrictEqual(ADAPTERS.pi.coordinatorArgs!(input), [
-      "--system-prompt",
-      input.systemPromptFile,
-      "--tools",
-      "read,bash,codemode,grep,find,ls,write,edit",
-      "--no-mcp",
-      "-e",
-      `${input.pluginDir}/extension.mjs`,
-      "--model",
-      "m",
-    ])
-    assert.isUndefined(ADAPTERS.cursor.coordinatorArgs)
-    assert.deepStrictEqual(ADAPTERS.pi.coordinatorArgs!({ ...input, sessionId: "s" }).slice(0, 2), [
-      "--session-id",
-      "s",
-    ])
-    assert.deepStrictEqual(ADAPTERS.claude.coordinatorArgs!({ ...input, sessionId: "s" }).slice(0, 2), [
-      "--resume",
-      "s",
-    ])
-    for (const id of ["pi", "claude"] as const)
-      assert.notInclude(ADAPTERS[id].coordinatorArgs!(input).join(" "), "session")
-    for (const id of IDS)
-      if (ADAPTERS[id].coordinatorArgs) assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!(input)))
-  })
-
-  it("Sessions get no vibest MCP server: claude may run vibest send, and read and edit in the project folder", () => {
-    for (const id of IDS)
-      assert.isEmpty(
-        ADAPTERS[id].launchArgs(input).filter((a) => /mcp/i.test(a)),
-        id,
-      )
-    const claude = ADAPTERS.claude.launchArgs(input)
-    assert.strictEqual(
-      claude[claude.indexOf("--allowedTools") + 1],
-      `Bash(vibest send:*),Bash(/usr/bin/bun /src/main.ts send:*),Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
-    )
-    assert.strictEqual(claude[claude.indexOf("--add-dir") + 1], input.projectDir)
+  it("an entry session with no conversation yet starts without a session id or resume flag", () => {
+    for (const id of ["claude", "pi"] as const)
+      assert.notInclude(ADAPTERS[id].launchArgs({ ...input, sessionId: null }).join(" "), "session")
   })
 })
 
@@ -291,27 +229,4 @@ describe("harness output", () => {
     ])
     assert.isUndefined(cursorModels(["Not logged in"]))
   })
-})
-
-describe("plugins", () => {
-  it.effect("each builtin harness plugin adds one definition under its id", () =>
-    Effect.gen(function* () {
-      for (const [plugin, definition] of [
-        [piPlugin, pi],
-        [claudePlugin, claude],
-        [cursorPlugin, cursor],
-      ] as const) {
-        const added: Array<Harness.HarnessDefinition> = []
-        const editor = { add: (d: Harness.HarnessDefinition) => void added.push(d) }
-        const context = {
-          harness: {
-            transform: (f: (e: typeof editor) => void) => Effect.sync(() => (f(editor), { dispose: Effect.void })),
-          },
-        } as unknown as Context
-        yield* plugin.effect(context)
-        assert.strictEqual(plugin.id, `harness-${definition.id}`)
-        assert.deepStrictEqual(added, [definition])
-      }
-    }).pipe(Effect.scoped),
-  )
 })

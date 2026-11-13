@@ -46,7 +46,7 @@ export interface Host {
 
 export { HANDOFF_ENV } from "./server.ts"
 
-export const HANDOFF_TIMEOUT = Duration.seconds(30)
+const HANDOFF_TIMEOUT = Duration.seconds(30)
 const STOP_REPLY_GRACE = Duration.millis(200)
 
 export const checkImport = (host: Host) =>

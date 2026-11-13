@@ -87,6 +87,7 @@ export type Claim =
       readonly repositoryRoot?: string
       readonly harnessSessionId?: string
       readonly pluginVersion?: string
+      readonly process?: string
     }
 
 export const protocolHeaders = () => ({ [PROTOCOL_HEADER]: String(PROTOCOL) })
@@ -102,9 +103,9 @@ const fromEnv = Effect.gen(function* () {
     Config.option(Config.String(name)).pipe(Effect.map((v) => Option.getOrUndefined(v) || undefined))
   return {
     projectId: yield* read("VIBEST_PROJECT_ID"),
-    agent: yield* read("VIBEST_AGENT"),
     harness: yield* read("VIBEST_HARNESS"),
     runtime: yield* read("VIBEST_RUNTIME"),
+    process: yield* read("VIBEST_PROCESS"),
     cwd: (yield* Path.Path).resolve("."),
   }
 }).pipe(
@@ -122,6 +123,7 @@ export const claimHeaders = (claim: Claim) =>
           repositoryRoot: claim.repositoryRoot,
           harnessSessionId: claim.harnessSessionId,
           pluginVersion: claim.pluginVersion,
+          ...(claim.process === undefined ? {} : { process: claim.process }),
         }),
       )
 
@@ -236,7 +238,7 @@ export const runCaptured = (
       .spawn(
         ChildProcess.make(argv[0]!, argv.slice(1), {
           stdin: "ignore",
-          env: { ...env, VIBEST_SESSION_ID: undefined, VIBEST_AGENT: undefined },
+          env: { ...env, VIBEST_SESSION_ID: undefined },
           extendEnv: true,
         }),
       )

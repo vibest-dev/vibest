@@ -1,6 +1,7 @@
 import { it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db, executionStateOf, exitedAt, type SessionRow } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
+import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
 import { isLimited, Plugin, stillLimited } from "@vibest/plugin"
 import { Effect, type Scope } from "effect"
@@ -10,67 +11,82 @@ import { KIND as RUNTIME } from "../../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./directory.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
 import { CLAUDE } from "./harnesses.ts"
-import { settled, TURNS, until, writeResult } from "./observe.ts"
+import { settled, EXECUTIONS, until, writeEnd } from "./observe.ts"
 import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
 export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ? "cursor" : argv[0])
 
+export const entryOfProject = (repo: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    const projectId = yield* projectOf(repo)
+    const found = yield* db.entryOf(projectId)
+    if (found !== undefined) return found.id
+    return (yield* db.startEntry(
+      projectId,
+      "pi",
+      false,
+      {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      },
+      { agent: "coordinator" },
+    )).sessionId
+  })
+
+export const taskOf = (repo: string, text = "do it") =>
+  Effect.map(entryOfProject(repo), (id) => sessionEnvelope({ id, title: "entry" }, text))
+
 export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
-  Effect.map(
-    projectOf(repo),
-    (projectId) =>
-      ({
-        machine: { id: "local" },
-        root: repo,
-        projectId,
-        name: "task",
-        prompt: "do it",
-        harness,
-        runtime: "herdr",
-      }) as const,
-  )
+  Effect.gen(function* () {
+    const parentSessionId = yield* entryOfProject(repo)
+    return {
+      machine: { id: "local" },
+      agent: "general",
+      root: repo,
+      parentSessionId,
+      projectId: yield* projectOf(repo),
+      name: "task",
+      prompt: "do it",
+      harness,
+      runtime: "herdr",
+    } as const
+  })
 
 export const claudeEnd = (reason: string) =>
   (
-    CLAUDE.turnEnd!(
-      { hook_event_name: "TurnComplete", session_id: "c1", reason, last_assistant_message: "" },
-      false,
-    ) as {
-      readonly result: object
+    CLAUDE.executionEnd!({
+      hook_event_name: "ExecutionComplete",
+      session_id: "c1",
+      reason,
+      last_assistant_message: "",
+    }) as {
+      readonly end: object
     }
-  ).result
+  ).end
 
-export const spawnWorking = (
-  repo: string,
-  harness: HarnessId = "pi",
-  extra: { readonly archive?: boolean; readonly underMain?: boolean } = {},
-) =>
+export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    const main = yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
-      runtime: RUNTIME,
-      address: { machine: "local", id: "test/coord" },
-    })
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
-      ...(extra.underMain ? { parentSessionId: main.sessionId } : {}),
     })
-    yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+    yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
     yield* sessions.check(id)
     yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
     const row = (yield* db.getSession(id))!
-    return { id, row, sessions, db }
+    return { id, row, sessions, db, entryId: yield* entryOfProject(repo) }
   })
 
 export const idleSession = (repo: string, extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {
     const herdr = yield* FakeRuntime
     const w = yield* spawnWorking(repo, "pi", extra)
-    yield* herdr.endTurn(w.id)
-    yield* writeResult(w.id, "pi", { text: "status: completed" })
+    yield* herdr.endExecution(w.id)
+    yield* writeEnd(w.id, "pi", { text: "status: completed" })
     yield* w.sessions.check(w.id)
     yield* settled
     return w
@@ -103,20 +119,20 @@ export const slowTest = <E>(
   options?: TestOptions,
 ) => it.effect(name, () => program.pipe(Effect.provide(sessionFrom(options))), { timeout: SPAWN_HEAVY_TEST_TIMEOUT })
 
-export const pick = (w: { readonly status: string; readonly turnState: string } | undefined) => ({
+export const pick = (w: SessionRow | undefined) => ({
   status: w?.status,
-  turnState: w?.turnState,
+  executionState: w === undefined ? undefined : executionStateOf(w),
 })
-export const roundAndResultCounts = (sessionId: string) =>
+export const executionAndSentCounts = (sessionId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [rounds] = yield* sql<{
+    const [executions] = yield* sql<{
       n: number
-    }>`SELECT count(*) AS n FROM ${sql.literal(TURNS)} m WHERE session_id = ${sessionId}`.pipe(Effect.orDie)
-    const [results] = yield* sql<{
+    }>`SELECT count(*) AS n FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${sessionId}`.pipe(Effect.orDie)
+    const [sent] = yield* sql<{
       n: number
-    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId} AND kind = 'result'`.pipe(Effect.orDie)
-    return { rounds: rounds!.n, results: results!.n }
+    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId}`.pipe(Effect.orDie)
+    return { executions: executions!.n, sent: sent!.n }
   })
 export const sqlNotices = (sessionId: string) =>
   Effect.gen(function* () {
@@ -126,7 +142,7 @@ export const sqlNotices = (sessionId: string) =>
     }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.sender_session_id = ${sessionId} ORDER BY m.id`.pipe(
       Effect.orDie,
     )
-    return rows.map((r) => r.message)
+    return rows.map((r) => unwrapped(r.message))
   })
 
 export const limited = { window: "5h", percent: 100, status: "limited" as const, resetTime: null }

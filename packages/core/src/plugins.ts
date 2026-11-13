@@ -3,6 +3,7 @@ import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/e
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
+import { Agents } from "./agents.ts"
 import { timeoutWithoutWaiting } from "./bounded.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -12,14 +13,14 @@ import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
 import type { PluginsShape } from "./host.ts"
-import { type Candidate, makeSources, messageOf, PluginLoader } from "./plugin-sources.ts"
+import { type Candidate, keyOf, makeSources, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { supervise } from "./plugin-supervisor.ts"
 import * as Registry from "./registry.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 
-export { type Candidate, pluginEntries, PluginLoader, WATCH_PROBE } from "./plugin-sources.ts"
+export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
 export { DEBOUNCE, RECHECK } from "./plugin-supervisor.ts"
 export { errorMessage }
 
@@ -83,8 +84,6 @@ type Slot = {
   readonly loadedAt: number
   readonly stats: Stats
 }
-
-const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options])
 
 const info = (slot: Slot): PluginInfo => {
   const { candidate } = slot
@@ -200,6 +199,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const subscriptions = yield* Subscriptions
     const runtimes = yield* Runtimes
     const harnesses = yield* Harnesses
+    const agents = yield* Agents
     const bus = yield* Bus
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
@@ -231,7 +231,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       }
       const context: VibestPlugin.Context = {
         options: candidate.options,
-        agent: { hook },
+        agent: { hook, transform: agents.transform },
         machine: { hook: machine },
         runtime: { transform: runtimes.transform, reload: runtimes.reload },
         harness: { transform: harnesses.transform, reload: harnesses.reload },
@@ -519,7 +519,6 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
       const host = yield* makeHost()
       const sources = yield* makeSources(DEFAULT_TIMEOUT)
       const builtins = yield* Builtins
-      yield* host.activate(builtins)
       yield* supervise(host, builtins, sources)
       return host.service
     }),
@@ -530,6 +529,7 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
     layer: Plugins.layer,
     deps: [
       builtinsNode,
+      Agents.node,
       Bus.node,
       Harnesses.node,
       PluginLoader.node,

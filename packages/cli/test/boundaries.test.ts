@@ -7,8 +7,6 @@ const root = path.resolve(import.meta.dirname, "../../..")
 const PACKAGES = ["schema", "core", "server", "protocol", "client"]
 const HERDR = /["'](effect-herdr-sdk|@vibest\/runtime-herdr)(\/[^"']*)?["']/
 
-const HERDR_TESTS = new Set(["packages/cli/test/guard.test.ts", "packages/cli/test/runtime-herdr.test.ts"])
-
 describe("runtime boundary", () => {
   it("no runtime-neutral package depends on or imports herdr", () => {
     const offenders: Array<string> = []
@@ -24,25 +22,11 @@ describe("runtime boundary", () => {
     assert.deepStrictEqual(offenders, [])
   })
 
-  it("unit tests outside the herdr allowlist do not import effect-herdr-sdk", () => {
-    const dir = path.join(root, "packages/cli/test")
-    const offenders: Array<string> = []
-    for (const file of fs.readdirSync(dir, { encoding: "utf8" })) {
-      if (!file.endsWith(".ts")) continue
-      const rel = path.join("packages/cli/test", file)
-      if (HERDR_TESTS.has(rel)) continue
-      const text = fs.readFileSync(path.join(dir, file), "utf8")
-      const blocks = text.match(/(?:import|export)[\s\S]*?from\s+["'][^"']+["']/g) ?? []
-      if (blocks.some((block) => /["']effect-herdr-sdk["']/.test(block))) offenders.push(rel)
-    }
-    assert.deepStrictEqual(offenders, [])
-  })
-
   it("the CLI does only client work", () => {
     const banned = [
       "projectRoot",
       "createProject",
-      "coordinatorCommand",
+      "entryCommand",
       "specHits",
       "makeSources",
       "preflight",

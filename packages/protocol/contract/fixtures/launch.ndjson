@@ -1,2 +1,0 @@
-{"jsonrpc":"2.0","id":1,"method":"Launch","params":{"argv":["vibest","--harness","pi"],"focus":false,"runtime":"herdr","callerEnv":{}},"headers":[["vibest-protocol","9"],["vibest-caller","cli"],["vibest-repository","/fixture/repo"]]}
-{"jsonrpc":"2.0","id":1,"result":{"runtime":"herdr","terminal":"ws1:p2","place":"herdr ws1:p2","attach":["fake","attach"]}}

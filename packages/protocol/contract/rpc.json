@@ -1,5 +1,5 @@
 {
-  "protocol": 9,
+  "protocol": 10,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -358,137 +358,6 @@
               "_tag",
               "id",
               "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
-    "CoordinatorSessionReady": {
-      "access": "open",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "harness": {
-            "type": "string"
-          },
-          "harnessSessionId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sessionId",
-          "harness",
-          "harnessSessionId"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "not": {}
-          },
-          {
-            "$ref": "#/$defs/DaemonStoppingEncoded"
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "DaemonStoppingEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "DaemonStopping"
-                ]
-              },
-              "method": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method"
             ],
             "additionalProperties": true
           },
@@ -1163,6 +1032,137 @@
         }
       }
     },
+    "ExecutionEnd": {
+      "access": "open",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "harness",
+          "event"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "null"
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "not": {}
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Get": {
       "access": [
         "agent",
@@ -1272,7 +1272,7 @@
               }
             ]
           },
-          "turnState": {
+          "executionState": {
             "type": "string",
             "enum": [
               "none",
@@ -1594,14 +1594,14 @@
               }
             ]
           },
-          "answer": {
+          "reply": {
             "anyOf": [
               {
                 "anyOf": [
                   {
                     "type": "object",
                     "properties": {
-                      "turn": {
+                      "execution": {
                         "anyOf": [
                           {
                             "type": "number"
@@ -1656,7 +1656,7 @@
                       }
                     },
                     "required": [
-                      "turn",
+                      "execution",
                       "status",
                       "text",
                       "failure",
@@ -1685,7 +1685,7 @@
           "status",
           "startedAt",
           "exitedAt",
-          "turnState",
+          "executionState",
           "projectId",
           "runtime",
           "address",
@@ -1977,13 +1977,26 @@
       }
     },
     "Harnesses.List": {
-      "access": "open",
+      "access": [
+        "open",
+        "peer"
+      ],
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "machine": {
             "anyOf": [
               {
                 "type": "string"
@@ -2066,13 +2079,121 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "not": {}
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownMachineEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineIncompatibleEncoded"
+              }
+            ]
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
           }
         ],
         "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownMachineEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownMachine"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "machines"
+            ],
+            "additionalProperties": true
+          },
+          "MachineUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineUnavailable"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "MachineIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineIncompatible"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
           "ProtocolRejectedEncoded": {
             "type": "object",
             "properties": {
@@ -2144,7 +2265,7 @@
       }
     },
     "Inbox.Subscribe": {
-      "access": "coordinator",
+      "access": "session",
       "stream": true,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2152,7 +2273,7 @@
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "string"
+        "type": "null"
       },
       "error": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2321,6 +2442,236 @@
         }
       }
     },
+    "Inbox.Take": {
+      "access": "session",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "null"
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "execution": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              "ids": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Infinity",
+                        "-Infinity",
+                        "NaN"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "line": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "execution",
+              "ids",
+              "line",
+              "text"
+            ],
+            "additionalProperties": true
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Integration.Guard": {
       "access": "open",
       "stream": false,
@@ -2331,16 +2682,12 @@
           "harness": {
             "type": "string"
           },
-          "agent": {
-            "type": "string"
-          },
           "input": {
             "type": "string"
           }
         },
         "required": [
           "harness",
-          "agent",
           "input"
         ],
         "additionalProperties": true
@@ -2937,7 +3284,7 @@
       }
     },
     "Launch": {
-      "access": "agent",
+      "access": "cli",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2948,6 +3295,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "agent": {
+            "type": "string"
           },
           "focus": {
             "type": "boolean"
@@ -2981,6 +3331,7 @@
         },
         "required": [
           "argv",
+          "agent",
           "focus",
           "callerEnv"
         ],
@@ -3056,6 +3407,9 @@
               },
               {
                 "$ref": "#/$defs/AgentRefusedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               }
             ]
           },
@@ -3227,6 +3581,45 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },
@@ -3470,7 +3863,7 @@
                     }
                   ]
                 },
-                "turnState": {
+                "executionState": {
                   "type": "string",
                   "enum": [
                     "none",
@@ -3803,7 +4196,7 @@
                 "status",
                 "startedAt",
                 "exitedAt",
-                "turnState",
+                "executionState",
                 "projectId",
                 "runtime",
                 "address",
@@ -5894,7 +6287,7 @@
           "kind": {
             "type": "string",
             "enum": [
-              "result",
+              "send",
               "notice"
             ]
           },
@@ -6107,6 +6500,9 @@
           "commit": {
             "type": "string"
           },
+          "agent": {
+            "type": "string"
+          },
           "prompt": {
             "type": "string"
           },
@@ -6160,16 +6556,6 @@
               }
             ]
           },
-          "reportTo": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "request": {
             "type": "string"
           }
@@ -6177,6 +6563,7 @@
         "required": [
           "repository",
           "commit",
+          "agent",
           "prompt",
           "request"
         ],
@@ -6368,6 +6755,9 @@
                 "$ref": "#/$defs/HarnessUnavailableEncoded"
               },
               {
+                "$ref": "#/$defs/NoCallingSessionEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoHarnessChosenEncoded"
               },
               {
@@ -6375,6 +6765,9 @@
               },
               {
                 "$ref": "#/$defs/AgentRefusedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -6593,6 +6986,21 @@
             ],
             "additionalProperties": true
           },
+          "NoCallingSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoCallingSession"
+                ]
+              }
+            },
+            "required": [
+              "_tag"
+            ],
+            "additionalProperties": true
+          },
           "NoHarnessChosenEncoded": {
             "type": "object",
             "properties": {
@@ -6601,10 +7009,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },
@@ -6647,6 +7062,45 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },
@@ -7267,618 +7721,6 @@
         }
       }
     },
-    "Project.CoordinatorSession": {
-      "access": "agent",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "harness": {
-            "type": "string"
-          },
-          "fresh": {
-            "type": "boolean"
-          },
-          "terminal": {
-            "type": "string"
-          },
-          "runtime": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "routing": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "decidedBy": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "type": "string"
-                    }
-                  },
-                  "trace": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "plugin": {
-                          "type": "string"
-                        },
-                        "hook": {
-                          "type": "string"
-                        },
-                        "outcome": {
-                          "type": "string",
-                          "enum": [
-                            "ok",
-                            "refused",
-                            "crashed",
-                            "timeout"
-                          ]
-                        },
-                        "ms": {
-                          "anyOf": [
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "string",
-                              "enum": [
-                                "Infinity",
-                                "-Infinity",
-                                "NaN"
-                              ]
-                            }
-                          ]
-                        },
-                        "changes": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "field": {
-                                "type": "string"
-                              },
-                              "from": {
-                                "anyOf": [
-                                  {},
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "to": {
-                                "anyOf": [
-                                  {},
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "overwrote": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": [
-                              "field"
-                            ],
-                            "additionalProperties": true
-                          }
-                        },
-                        "reason": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "error": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": [
-                        "plugin",
-                        "hook",
-                        "outcome",
-                        "ms",
-                        "changes"
-                      ],
-                      "additionalProperties": true
-                    }
-                  }
-                },
-                "required": [
-                  "decidedBy",
-                  "trace"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "pid": {
-            "anyOf": [
-              {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "harness",
-          "fresh",
-          "terminal"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "harnessSessionId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "projectId": {
-            "type": "string"
-          },
-          "runtime": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "command": {
-            "type": "object",
-            "properties": {
-              "file": {
-                "type": "string"
-              },
-              "args": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "env": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "file",
-              "args",
-              "env"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "required": [
-          "sessionId",
-          "harnessSessionId",
-          "projectId",
-          "command"
-        ],
-        "additionalProperties": true
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeIncompatibleEncoded"
-              },
-              {
-                "$ref": "#/$defs/HarnessUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/LaunchFailedEncoded"
-              }
-            ]
-          },
-          {
-            "$ref": "#/$defs/DaemonStoppingEncoded"
-          },
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "InvalidCallerEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "InvalidCaller"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ForbiddenEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "Forbidden"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "NotInRepositoryEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NotInRepository"
-                ]
-              },
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
-            ],
-            "additionalProperties": true
-          },
-          "RuntimeUnreachableEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "RuntimeUnreachable"
-                ]
-              },
-              "session": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "session",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "RuntimeIncompatibleEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "RuntimeIncompatible"
-                ]
-              },
-              "session": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "session",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "HarnessUnavailableEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "HarnessUnavailable"
-                ]
-              },
-              "harness": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "harness",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "LaunchFailedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "LaunchFailed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "DaemonStoppingEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "DaemonStopping"
-                ]
-              },
-              "method": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method"
-            ],
-            "additionalProperties": true
-          },
-          "NoSuchSessionEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NoSuchSession"
-                ]
-              },
-              "id": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "id",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
     "Project.Create": {
       "access": "cli",
       "stream": false,
@@ -8168,7 +8010,1003 @@
         }
       }
     },
-    "Project.FocusCoordinator": {
+    "Project.EntryPlace": {
+      "access": "cli",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "callerEnv": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "callerEnv"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "place": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "in": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "terminal"
+                        ]
+                      }
+                    ]
+                  },
+                  "runtime": {
+                    "type": "string"
+                  },
+                  "terminal": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "in",
+                  "runtime",
+                  "terminal"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "in": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "launch"
+                        ]
+                      }
+                    ]
+                  },
+                  "runtime": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "in",
+                  "runtime"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "required": [
+          "directory",
+          "place"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NotInRepositoryEncoded"
+              },
+              {
+                "$ref": "#/$defs/ProjectMovedEncoded"
+              },
+              {
+                "$ref": "#/$defs/LaunchFailedEncoded"
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NotInRepositoryEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NotInRepository"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "path"
+            ],
+            "additionalProperties": true
+          },
+          "ProjectMovedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProjectMoved"
+                ]
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "projectId",
+              "from",
+              "to"
+            ],
+            "additionalProperties": true
+          },
+          "LaunchFailedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "LaunchFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Project.EntrySession": {
+      "access": "cli",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "harness": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "fresh": {
+            "type": "boolean"
+          },
+          "terminal": {
+            "type": "string"
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "routing": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "decidedBy": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "trace": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "plugin": {
+                          "type": "string"
+                        },
+                        "hook": {
+                          "type": "string"
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "ok",
+                            "refused",
+                            "crashed",
+                            "timeout"
+                          ]
+                        },
+                        "ms": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "Infinity",
+                                "-Infinity",
+                                "NaN"
+                              ]
+                            }
+                          ]
+                        },
+                        "changes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "field": {
+                                "type": "string"
+                              },
+                              "from": {
+                                "anyOf": [
+                                  {},
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "to": {
+                                "anyOf": [
+                                  {},
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "overwrote": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "field"
+                            ],
+                            "additionalProperties": true
+                          }
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "plugin",
+                        "hook",
+                        "outcome",
+                        "ms",
+                        "changes"
+                      ],
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "required": [
+                  "decidedBy",
+                  "trace"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pid": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "harness",
+          "agent",
+          "fresh",
+          "terminal"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "harnessSessionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "command": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "file",
+              "args",
+              "env"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "sessionId",
+          "harnessSessionId",
+          "projectId",
+          "command"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NotInRepositoryEncoded"
+              },
+              {
+                "$ref": "#/$defs/ProjectMovedEncoded"
+              },
+              {
+                "$ref": "#/$defs/RuntimeUnreachableEncoded"
+              },
+              {
+                "$ref": "#/$defs/RuntimeIncompatibleEncoded"
+              },
+              {
+                "$ref": "#/$defs/HarnessUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/LaunchFailedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NotInRepositoryEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NotInRepository"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "path"
+            ],
+            "additionalProperties": true
+          },
+          "ProjectMovedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProjectMoved"
+                ]
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "projectId",
+              "from",
+              "to"
+            ],
+            "additionalProperties": true
+          },
+          "RuntimeUnreachableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "RuntimeUnreachable"
+                ]
+              },
+              "session": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "session",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "RuntimeIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "RuntimeIncompatible"
+                ]
+              },
+              "session": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "session",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "HarnessUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "HarnessUnavailable"
+                ]
+              },
+              "harness": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "harness",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "LaunchFailedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "LaunchFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
+            ],
+            "additionalProperties": true
+          },
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Project.FocusEntry": {
       "access": "cli",
       "stream": false,
       "payload": {
@@ -8669,344 +9507,6 @@
         }
       }
     },
-    "Project.MainPlace": {
-      "access": "cli",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "callerEnv": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "runtime": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "callerEnv"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "directory": {
-            "type": "string"
-          },
-          "place": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "in": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "terminal"
-                        ]
-                      }
-                    ]
-                  },
-                  "runtime": {
-                    "type": "string"
-                  },
-                  "terminal": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "in",
-                  "runtime",
-                  "terminal"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "in": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "launch"
-                        ]
-                      }
-                    ]
-                  },
-                  "runtime": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "in",
-                  "runtime"
-                ],
-                "additionalProperties": true
-              }
-            ]
-          }
-        },
-        "required": [
-          "directory",
-          "place"
-        ],
-        "additionalProperties": true
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
-                "$ref": "#/$defs/LaunchFailedEncoded"
-              }
-            ]
-          },
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "InvalidCallerEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "InvalidCaller"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ForbiddenEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "Forbidden"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "NotInRepositoryEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NotInRepository"
-                ]
-              },
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
-            ],
-            "additionalProperties": true
-          },
-          "LaunchFailedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "LaunchFailed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "NoSuchSessionEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NoSuchSession"
-                ]
-              },
-              "id": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "id",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
     "Project.Open": {
       "access": "cli",
       "stream": false,
@@ -9306,7 +9806,7 @@
         }
       }
     },
-    "Project.RunningCoordinator": {
+    "Project.RunningEntry": {
       "access": "agent",
       "stream": false,
       "payload": {
@@ -9879,8 +10379,8 @@
         }
       }
     },
-    "Project.StartMain": {
-      "access": "agent",
+    "Project.StartEntry": {
+      "access": "cli",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9895,6 +10395,9 @@
                 "type": "null"
               }
             ]
+          },
+          "agent": {
+            "type": "string"
           },
           "provider": {
             "anyOf": [
@@ -9927,6 +10430,9 @@
             ]
           }
         },
+        "required": [
+          "agent"
+        ],
         "additionalProperties": true
       },
       "success": {
@@ -10112,6 +10618,9 @@
               },
               {
                 "$ref": "#/$defs/LaunchFailedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               }
             ]
           },
@@ -10230,10 +10739,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },
@@ -10318,6 +10834,45 @@
             "required": [
               "_tag",
               "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },
@@ -10414,8 +10969,8 @@
         }
       }
     },
-    "Project.StopCoordinator": {
-      "access": "agent",
+    "Project.StopEntry": {
+      "access": "cli",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12018,6 +12573,29 @@
                 "type": "null"
               }
             ]
+          },
+          "conversation": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "harness",
+                  "id"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12027,7 +12605,32 @@
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
+        "type": "object",
+        "properties": {
+          "process": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
       },
       "error": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12206,7 +12809,7 @@
           "id": {
             "type": "string"
           },
-          "turn": {
+          "finished": {
             "anyOf": [
               {
                 "type": "number"
@@ -12224,7 +12827,7 @@
         },
         "required": [
           "id",
-          "turn"
+          "finished"
         ],
         "additionalProperties": true
       },
@@ -12511,14 +13114,7 @@
             ]
           },
           "agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "string"
           },
           "callerEnv": {
             "type": "object",
@@ -12536,7 +13132,7 @@
               }
             ]
           },
-          "peer": {
+          "share": {
             "anyOf": [
               {
                 "type": "string"
@@ -12589,6 +13185,7 @@
         },
         "required": [
           "prompt",
+          "agent",
           "callerEnv"
         ],
         "additionalProperties": true
@@ -12835,6 +13432,9 @@
                 "$ref": "#/$defs/ProjectMovedEncoded"
               },
               {
+                "$ref": "#/$defs/NoCallingSessionEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoHarnessChosenEncoded"
               },
               {
@@ -12842,6 +13442,9 @@
               },
               {
                 "$ref": "#/$defs/AgentRefusedEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -13200,6 +13803,21 @@
             ],
             "additionalProperties": true
           },
+          "NoCallingSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoCallingSession"
+                ]
+              }
+            },
+            "required": [
+              "_tag"
+            ],
+            "additionalProperties": true
+          },
           "NoHarnessChosenEncoded": {
             "type": "object",
             "properties": {
@@ -13208,10 +13826,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },
@@ -13254,6 +13879,45 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownAgentEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownAgent"
+                ]
+              },
+              "agent": {
+                "type": "string"
+              },
+              "known": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "agent",
+              "known"
             ],
             "additionalProperties": true
           },
@@ -13683,137 +14347,6 @@
         }
       }
     },
-    "TurnEnd": {
-      "access": "open",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "harness": {
-            "type": "string"
-          },
-          "event": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sessionId",
-          "harness",
-          "event"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "not": {}
-          },
-          {
-            "$ref": "#/$defs/DaemonStoppingEncoded"
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "DaemonStoppingEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "DaemonStopping"
-                ]
-              },
-              "method": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
     "Watch": {
       "access": "cli",
       "stream": true,
@@ -13971,7 +14504,7 @@
                         }
                       ]
                     },
-                    "turnState": {
+                    "executionState": {
                       "type": "string",
                       "enum": [
                         "none",
@@ -14303,7 +14836,7 @@
                         }
                       ]
                     },
-                    "turn": {
+                    "finished": {
                       "anyOf": [
                         {
                           "anyOf": [
@@ -14336,7 +14869,7 @@
                     "status",
                     "startedAt",
                     "exitedAt",
-                    "turnState",
+                    "executionState",
                     "projectId",
                     "runtime",
                     "address",
@@ -14348,7 +14881,7 @@
                     "task",
                     "latest",
                     "parentId",
-                    "turn"
+                    "finished"
                   ],
                   "additionalProperties": true
                 }
@@ -14519,7 +15052,7 @@
                       }
                     ]
                   },
-                  "turnState": {
+                  "executionState": {
                     "type": "string",
                     "enum": [
                       "none",
@@ -14851,7 +15384,7 @@
                       }
                     ]
                   },
-                  "turn": {
+                  "finished": {
                     "anyOf": [
                       {
                         "anyOf": [
@@ -14884,7 +15417,7 @@
                   "status",
                   "startedAt",
                   "exitedAt",
-                  "turnState",
+                  "executionState",
                   "projectId",
                   "runtime",
                   "address",
@@ -14896,7 +15429,7 @@
                   "task",
                   "latest",
                   "parentId",
-                  "turn"
+                  "finished"
                 ],
                 "additionalProperties": true
               }

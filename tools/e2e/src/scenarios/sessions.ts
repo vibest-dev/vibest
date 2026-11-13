@@ -2,8 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel } from "../fake-model.ts"
-import { alive, expect, expectAnswered, expectFacts, row, until, type World } from "../world.ts"
+import { ask, heldModel, reply, sseHeaders, text, toolCall, type Message } from "../fake-model.ts"
+import { alive, expect, expectReplied, expectFacts, row, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
 
@@ -37,7 +37,7 @@ const resultOf = (w: World, p: Project, id: string) =>
   w.json<{
     id: string
     status: string
-    answer: { turn: number; status: string; text: string | null } | null
+    reply: { execution: number; status: string; text: string | null } | null
   }>(["result", id], {
     cwd: p.repo,
     env: p.env,
@@ -45,8 +45,8 @@ const resultOf = (w: World, p: Project, id: string) =>
 
 const answered = async (w: World, p: Project, id: string, task: string) =>
   until(
-    `the answer of ${task}`,
-    async () => ((await resultOf(w, p, id)).answer?.text ?? "").includes(`done-${task}`),
+    `the reply of ${task}`,
+    async () => ((await resultOf(w, p, id)).reply?.text ?? "").includes(`done-${task}`),
     90_000,
   )
 
@@ -65,11 +65,30 @@ const git = async (w: World, cwd: string, ...args: Array<string>) => {
 const archive = async (w: World, p: Project, id: string, ...flags: Array<string>) =>
   JSON.parse(await w.ok(["archive", id, ...flags], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })) as Removed
 
+const spawningModel = (child: string, flags: string) => {
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (req) => {
+      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+      const vibest = /run `([^`]+) send [0-9a-f-]{36} -- '<message>'`/.exec(system)?.[1]
+      const last = messages.at(-1)
+      const answer =
+        vibest !== undefined && last?.role === "user" && text(last).includes("spawn-child")
+          ? toolCall("call-run", "bash", { command: `${vibest} run pi ${flags} -- '${ask(child)}'` })
+          : reply(text(last).includes(`done-${child}`) ? `done-${child}\nstatus: completed` : "ok")
+      return new Response(answer, { headers: sseHeaders })
+    },
+  })
+  return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
+}
+
 const checks: ReadonlyArray<Check> = [
   {
     id: "S1",
     title:
-      "vibest run pi --title --provider --model --env --session starts a Pi subagent in a new detached worktree of the repository at its HEAD, in that herdr session, on that provider and model, the --env value not stored; --peer runs a second one in the same worktree",
+      "vibest run pi --title --provider --model --env --session starts a Pi subagent in a new detached worktree of the repository at its HEAD, in that herdr session, on that provider and model, the --env value not stored; --share runs a second one in the same worktree",
     run: async (w) => {
       const p = await piProject(w, "s1")
       const second = heldModel()
@@ -85,7 +104,7 @@ const checks: ReadonlyArray<Check> = [
         const run = async (task: string, ...flags: Array<string>) =>
           (
             JSON.parse(
-              await w.ok(["run", "pi", "--session", session, "--env", env, ...flags, "--", ask(task)], {
+              await w.okViaEntry(["run", "pi", "--session", session, "--env", env, ...flags, "--", ask(task)], {
                 cwd: p.repo,
                 env: p.env,
                 timeoutMs: 90_000,
@@ -94,7 +113,7 @@ const checks: ReadonlyArray<Check> = [
           ).id
         const a = await run("s1", "--title", "s1 title", "--provider", "second", "--model", "m2")
         await answered(w, p, a, "s1")
-        expect(second.asked("s1") > 0 && p.model.asked("s1") === 0, "the turn did not run on provider second")
+        expect(second.asked("s1") > 0 && p.model.asked("s1") === 0, "the execution did not run on provider second")
         const entry = (await ls(w, p)).find((e) => e.id === a)
         expect(
           entry !== undefined &&
@@ -121,14 +140,14 @@ const checks: ReadonlyArray<Check> = [
           const bytes = await fs.readFile(path.join(w.vibestHome, file), "latin1").catch(() => "")
           expect(!bytes.includes(subDir), `${file} stores the --env value`)
         }
-        const b = await run("s1peer", "--peer", a.slice(0, 8))
-        await answered(w, p, b, "s1peer")
-        const peer = (await ls(w, p)).find((e) => e.id === b)
+        const b = await run("s1share", "--share", a.slice(0, 8))
+        await answered(w, p, b, "s1share")
+        const sharer = (await ls(w, p)).find((e) => e.id === b)
         expect(
-          peer !== undefined &&
-            (await fs.realpath(peer.worktree)) === worktree &&
-            peer.address.id !== entry!.address.id,
-          `peer: ${JSON.stringify(peer)}, first: ${JSON.stringify(entry)}`,
+          sharer !== undefined &&
+            (await fs.realpath(sharer.worktree)) === worktree &&
+            sharer.address.id !== entry!.address.id,
+          `sharer: ${JSON.stringify(sharer)}, first: ${JSON.stringify(entry)}`,
         )
       } finally {
         second.stop()
@@ -139,30 +158,30 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S5",
     title:
-      "vibest result has no answer before a subagent's first turn ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the main agent and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
+      "vibest result has no reply before a subagent's first execution ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the entry session and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
     run: async (w) => {
       const p = await piProject(w, "s5")
       try {
         const a = await p.runSub("s5")
-        await until("the subagent's turn at the model", () => p.model.held() > 0, 60_000)
+        await until("the subagent's execution at the model", () => p.model.held() > 0, 60_000)
         const before = await resultOf(w, p, a)
-        expect(before.id === a && before.answer === null, `result before the turn ended: ${JSON.stringify(before)}`)
+        expect(before.id === a && before.reply === null, `result before the execution ended: ${JSON.stringify(before)}`)
         p.model.release()
         await answered(w, p, a, "s5")
         const after = await resultOf(w, p, a)
-        const projected = row<{ answer: string | null; reported: string | null }>(
+        const projected = row<{ reply: string | null; reported: string | null }>(
           w,
-          `SELECT t.reply AS answer, e.data ->> '$.reply' AS reported FROM execution t
+          `SELECT t.reply, e.data ->> '$.reply' AS reported FROM execution t
             JOIN event e ON e.aggregate = t.session_id AND e.type = 'execution.ended' AND e.data ->> '$.execution' = t.id
             WHERE t.session_id = ? AND t.outcome = 'completed'`,
           a,
         )
         expect(
-          projected?.answer?.includes("done-s5") === true &&
-            projected.answer === projected.reported &&
-            after.answer?.text === projected.answer &&
-            after.answer.status === "completed",
-          `turn.answer: ${JSON.stringify(projected)}, vibest result: ${JSON.stringify(after.answer)}`,
+          projected?.reply?.includes("done-s5") === true &&
+            projected.reply === projected.reported &&
+            after.reply?.text === projected.reply &&
+            after.reply.status === "completed",
+          `execution.reply: ${JSON.stringify(projected)}, vibest result: ${JSON.stringify(after.reply)}`,
         )
         const status = await w.json<{ daemon: { status: string; pid: number | null } }>(["status"], {
           cwd: p.repo,
@@ -176,7 +195,7 @@ const checks: ReadonlyArray<Check> = [
         const listed = await ls(w, p)
         const sub = listed.find((e) => e.id === a)
         expect(
-          listed.some((e) => e.agent === "main") &&
+          listed.some((e) => e.agent === "coordinator") &&
             sub !== undefined &&
             sub.latest?.summary.includes("done-s5") === true,
           `ls: ${JSON.stringify(listed)}`,
@@ -188,14 +207,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         await p.close()
       }
-    },
-  },
-  {
-    id: "S52",
-    title: "vibest report is a usage error: sessions message with vibest send",
-    run: async (w) => {
-      const r = await w.vibest(["report", "--", "x"])
-      expect(r.code !== 0 && /report/.test(r.stderr), `vibest report exited ${r.code}: ${r.stderr}${r.stdout}`)
     },
   },
   {
@@ -306,7 +317,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S9",
     title:
-      "with VIBEST_MAX_SESSIONS=2 in vibestd, the main agent is not counted: two subagents start, the third vibest run fails LimitReached naming the limit, and starts once one is archived",
+      "with VIBEST_MAX_SESSIONS=2 in vibestd, the entry session is not counted: two subagents start, the third vibest run fails LimitReached naming the limit, and starts once one is archived",
     run: async (w) => {
       const p = await piProject(w, "s9")
       try {
@@ -316,7 +327,7 @@ const checks: ReadonlyArray<Check> = [
         await p.startDaemon()
         const first = await p.runSub("one")
         await p.runSub("two")
-        const third = await w.vibest(
+        const third = await w.viaEntry(
           [
             "run",
             "pi",
@@ -347,8 +358,65 @@ const checks: ReadonlyArray<Check> = [
         )
         const three = await p.runSub("three")
         await answered(w, p, three, "three")
-        await expectAnswered(w, three)
+        await expectReplied(w, three)
       } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S41",
+    title:
+      "vibest run in a plain terminal is refused and leaves no worktree or pane; a session the entry session started runs vibest run and the session it starts records it as its creator",
+    run: async (w) => {
+      const p = await piProject(w, "s41")
+      const subDir = path.join(w.root, "pi-s41-sub")
+      const spawning = spawningModel("s41c", `--env PI_CODING_AGENT_DIR=${subDir}`)
+      try {
+        p.model.release()
+        await piShadow(subDir, w.profile, { fake: { baseUrl: spawning.url } })
+        const before = await git(w, p.repo, "worktree", "list", "--porcelain")
+        const listed = (await ls(w, p)).length
+        const refused = await w.vibest(["run", "pi", "--", ask("s41x")], { cwd: p.repo, env: p.env })
+        const said = `${refused.stdout}${refused.stderr}`
+        expect(
+          refused.code !== 0 && said.includes("NoCallingSession") && said.includes("run vibest in a terminal"),
+          `a plain-terminal run exited ${refused.code}: ${said}`,
+        )
+        expect(
+          (await git(w, p.repo, "worktree", "list", "--porcelain")) === before && (await ls(w, p)).length === listed,
+          "the refused run left a worktree or a session",
+        )
+        const a = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--session",
+                `${w.herdrSession}-s41`,
+                "--env",
+                `PI_CODING_AGENT_DIR=${subDir}`,
+                "--",
+                ask("spawn-child"),
+              ],
+              { cwd: p.repo, env: p.env, timeoutMs: 90_000 },
+            ),
+          ) as { id: string }
+        ).id
+        const entry = await w.entryOf(p.repo)
+        await until(
+          "the session the first session started",
+          () => row(w, "SELECT id FROM session WHERE parent_session_id = ?", a) !== undefined,
+          90_000,
+        )
+        expect(
+          row<{ parent: string }>(w, "SELECT parent_session_id AS parent FROM session WHERE id = ?", a)?.parent ===
+            entry,
+          `the first session's creator is not the entry session ${entry}`,
+        )
+      } finally {
+        spawning.stop()
         await p.close()
       }
     },

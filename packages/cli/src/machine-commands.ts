@@ -85,6 +85,6 @@ export const projectAdd = <A, E, R>(openProject: (client: VibestClient) => Effec
     }),
   ).pipe(
     Command.withDescription(
-      "Record a checkout as a project without starting a main agent, so another machine's vibestd can run agents in it",
+      "Record a checkout as a project without starting an entry session, so another machine's vibestd can run agents in it",
     ),
   )

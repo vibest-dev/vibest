@@ -114,9 +114,8 @@ export const peerSession = {
   status: "unknown" as const,
   startedAt: null,
   exitedAt: null,
-  turnState: "none" as const,
-  turnPromptedAt: 0,
-  metadata: {},
+  executionState: "none" as const,
+  executionPromptedAt: 0,
 }
 
 export const fakeSpawns =
@@ -160,6 +159,7 @@ export const fakeSpawns =
       }),
   })
 
+export const A_ENTRY = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 export const REMOTE = "git@example.com:o/r.git"
 export const COMMIT = "0123456789abcdef0123456789abcdef01234567"
 export const REPOSITORY = { origin: REMOTE, head: COMMIT, commits: [COMMIT] }
@@ -179,18 +179,41 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
     const project = yield* db.createProject(directory, [{ path: directory, remote }])
     const raw = yield* connect(layout.socket)
     const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
-    const as = (peer: string, aProject: string) =>
+    const as = (peer: string, aProject: string, by = A_ENTRY) =>
       Effect.gen(function* () {
         yield* RpcClient.withHeaders(
           raw["Peer.Hello"]({ id: peer, name: `a-${peer.slice(0, 4)}`, callsMe: "mb" }),
           peerHeaders(peer),
         )
-        const call = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, peerHeaders(peer, aProject))
-        return Object.assign(call, { outbox: raw["Peer.Outbox"](undefined, { headers: peerHeaders(peer, aProject) }) })
+        const call = <A, E>(effect: Effect.Effect<A, E>) =>
+          RpcClient.withHeaders(effect, peerHeaders(peer, aProject, by))
+        return Object.assign(call, {
+          outbox: raw["Peer.Outbox"](undefined, { headers: peerHeaders(peer, aProject, by) }),
+        })
       })
     const spawn = (call: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>, request = randomId()) =>
-      call(raw["Peer.Spawn"]({ repository: REMOTE, commit: COMMIT, prompt: "do it", reportTo: "a-main", request }))
+      call(raw["Peer.Spawn"]({ agent: "general", repository: REMOTE, commit: COMMIT, prompt: "do it", request }))
     return { run, db, raw, cli, as, spawn, spawns, directory, project, layout, id: (yield* run(VibestdIdentity)).id }
+  })
+
+export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
+  Effect.gen(function* () {
+    const started = yield* stack.db.startEntry(
+      stack.project,
+      "pi",
+      false,
+      {
+        runtime: "fake",
+        address: { machine: "local", id: "main-pane" },
+      },
+      { agent: "coordinator" },
+    )
+    const asEntry = <A, E>(effect: Effect.Effect<A, E>) =>
+      RpcClient.withHeaders(
+        effect,
+        sessionHeaders({ sessionId: started.sessionId, projectId: stack.project, repositoryRoot: stack.directory }),
+      )
+    return { entryId: started.sessionId, asEntry }
   })
 
 export const onB = (address: string) => address.slice(address.indexOf("/") + 1)
@@ -201,13 +224,8 @@ export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: Te
     const a = yield* repoStack(net, options.a)
     const b = yield* repoStack(net, options.b)
     net.route("b-host", b.layout.socket)
-    const main = yield* a.db.coordinatorLaunch(a.project, "pi", false, {
-      runtime: "fake",
-      address: { machine: "local", id: "main-pane" },
-    })
-    const coordinator = <A, E>(effect: Effect.Effect<A, E>) =>
-      RpcClient.withHeaders(effect, sessionHeaders({ sessionId: main.sessionId, projectId: a.project }))
+    const { entryId, asEntry } = yield* entryOn(a)
     yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
     yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-    return { net, a, b, main: main.sessionId, coordinator }
+    return { net, a, b, entryId, asEntry }
   })

@@ -8,7 +8,6 @@ import {
   runCaptured,
   withVibest,
 } from "@vibest/client/client"
-import * as Guard from "@vibest/core/guard"
 import { askYesNo, interactive, Layout, shellQuote, VibestCommand } from "@vibest/core/paths"
 import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/core/update-check"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
@@ -88,7 +87,7 @@ export const extraVibests = Effect.gen(function* () {
 
 export const noticeFrom = <E, R>(ping: Effect.Effect<Option.Option<Ping>, E, R>) =>
   Effect.gen(function* () {
-    if (Option.isSome(yield* Config.option(Config.String("VIBEST_AGENT")))) return
+    if (Option.isSome(yield* Config.option(Config.String("VIBEST_SESSION_ID")))) return
     if (Option.isSome(yield* Config.option(Config.String("VIBEST_NO_UPDATE_CHECK")))) return
     const latest = Option.getOrUndefined(yield* ping)?.update?.latest
     if (latest && compareVersions(VERSION, latest) < 0)
@@ -228,7 +227,7 @@ export const restartAgents = (
     }
     yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after }))
     yield* Console.log(
-      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
+      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited; one that was working continues its execution (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )
   })
 
@@ -237,7 +236,7 @@ export const update = Command.make(
   {
     yes: Flag.Boolean("yes").pipe(
       Flag.withDescription(
-        "Restart the agents still on the old integration without asking (a shell without a terminal, such as the main agent's)",
+        "Restart the agents still on the old integration without asking (a shell without a terminal)",
       ),
       Flag.withDefault(false),
     ),
@@ -245,9 +244,7 @@ export const update = Command.make(
   },
   ({ yes, restartAgentsAfter }) =>
     Effect.gen(function* () {
-      const isMainAgent =
-        Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) === Guard.COORDINATOR
-      if (!isMainAgent) yield* userOnly("update")
+      yield* userOnly("update")
       if (Option.isSome(restartAgentsAfter))
         return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
       const self = yield* VibestCommand

@@ -1,9 +1,9 @@
 import { RemoveOutcome } from "@vibest/schema/remove"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import { Clock, Duration, Effect, FileSystem, Option } from "effect"
+import { Clock, Duration, Effect, FileSystem, Option, Path } from "effect"
 
 import { awaitOn, Bus } from "./bus.ts"
-import { Db, type SessionRow } from "./db.ts"
+import { Db, type SessionRow, runtimeOf, terminalOf, exitedAt } from "./db.ts"
 import { Layout } from "./paths.ts"
 import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
@@ -85,12 +85,14 @@ export const make = Effect.gen(function* () {
   const db = yield* Db
   const layout = yield* Layout
   const processes = yield* Processes
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const git = yield* Git
 
   const release = (input: ReleaseInput) =>
     Effect.gen(function* () {
       const { h, session } = input
       const id = session.id
-      const fs = yield* FileSystem.FileSystem
       const reasons = [...input.reasons]
       const directory = yield* db.sessionDirectory(id)
       if (!directory) {
@@ -119,7 +121,7 @@ export const make = Effect.gen(function* () {
               error.code === "unreachable"
                 ? Effect.fail(
                     new RuntimeUnreachable({
-                      session: session.runtime,
+                      session: runtimeOf(session),
                       message: `closing terminal ${input.terminal!.id}: ${error.message}`,
                     }),
                   )
@@ -148,9 +150,9 @@ export const make = Effect.gen(function* () {
         return { state: "exited" as const, why: "" }
       })
 
-      const harnessPid = session.metadata.pid
+      const harnessPid = session.process?.pid
       const owned =
-        session.address.machine === "local" && validPid(harnessPid) ? yield* processes.tree(harnessPid) : undefined
+        terminalOf(session).machine === "local" && validPid(harnessPid) ? yield* processes.tree(harnessPid) : undefined
       const pane = yield* closeTerminal()
       if (pane !== "kept" && owned !== undefined) {
         const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(TREE_EXIT_WAIT)
@@ -166,9 +168,8 @@ export const make = Effect.gen(function* () {
           ? { state: "unknown" as const, why: "its terminal was not closed, so nothing is proven" }
           : yield* confirmExited
       const processState: ProcessState = confirmed.state
-      if (processState === "exited" && session.exitedAt === null) {
-        const t = yield* Clock.currentTimeMillis
-        yield* db.updateSession(id, { status: "unknown", exitedAt: t, lastActive: t, end: "archived" })
+      if (processState === "exited" && exitedAt(session) === null) {
+        yield* db.endProcess(id, "archived")
       }
       let shared = false
       const g = exists ? yield* gitState(worktree) : undefined
@@ -259,7 +260,11 @@ export const make = Effect.gen(function* () {
         branch,
         reasons,
       }
-    })
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(Git, git),
+    )
 
   return { release }
 })

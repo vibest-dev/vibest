@@ -201,10 +201,8 @@ const statusCore = async (
       permissions: { defaultMode: "default", disableAutoMode: "disable", ask: ["Bash"] },
     }),
   )
-  const plugin = path.join(w.vibestHome, "plugins/status-runtime.ts")
-  await fs.mkdir(path.dirname(plugin), { recursive: true })
-  await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-runtime.ts"), plugin)
   await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-pty.py"), path.join(w.root, "status-pty.py"))
+  const plugin = path.join(w.vibestHome, "plugins/status-runtime.ts")
   const hc = async (...args: Array<string>) => {
     const r = await w.run(w.root, ["hc", ...args], { env })
     expect(r.code === 0, "isolated hc " + args.join(" ") + ": " + r.stderr)
@@ -253,10 +251,12 @@ const statusCore = async (
     )
   }
   const worker = async (harness: string, flags: Array<string> = []) => {
-    const launched = await w.json<{ id: string }>(
-      ["run", harness, ...flags, "--", "Run the terminal status fixture."],
-      { env, timeoutMs: 90_000 },
-    )
+    const launched = JSON.parse(
+      await w.okViaEntry(["run", harness, ...flags, "--", "Run the terminal status fixture."], {
+        env,
+        timeoutMs: 90_000,
+      }),
+    ) as { id: string }
     await bind(launched.id)
     return launched.id
   }
@@ -264,6 +264,23 @@ const statusCore = async (
   try {
     await hc("server", "start")
     await w.ok(["daemon"], { env })
+    w.ownRuntimes.add("hc")
+    await w.entry({
+      runtime: "hc",
+      extra: ["--runtime", "hc"],
+      processEnv: env,
+      hc: { run: (...args) => w.run(w.root, ["hc", ...args], { env }) },
+    })
+    await fs.mkdir(path.dirname(plugin), { recursive: true })
+    await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-runtime.ts"), plugin)
+    await until(
+      "the status-fixture plugin active",
+      async () =>
+        (await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })).some(
+          (p) => p.id === "status-fixture" && p.status === "active",
+        ),
+      30_000,
+    )
     await body({
       env,
       model,
@@ -371,13 +388,13 @@ const checks: ReadonlyArray<Check> = [
           await until("held response after question", () => model.waiting.length === 1, 30_000)
           await status("question answered", "working")
           await model.next("native-status-completed")
-          await status("successful turn", "done")
+          await status("successful execution", "done")
           await until(
             "unchanged vibest result",
             async () =>
-              (
-                await w.json<{ answer: { text: string } | null }>(["result", launched.id], { env })
-              ).answer?.text.includes("native-status-completed") === true,
+              (await w.json<{ reply: { text: string } | null }>(["result", launched.id], { env })).reply?.text.includes(
+                "native-status-completed",
+              ) === true,
             30_000,
           )
           const conversation = row<{ conversation: string }>(
@@ -397,11 +414,11 @@ const checks: ReadonlyArray<Check> = [
           await hc("send", terminal(), "/resume " + conversation)
           await visible("native-status-completed")
           await status("resumed conversation", "idle")
-          await hc("send", terminal(), "Start another turn and wait for the model.")
+          await hc("send", terminal(), "Start another execution and wait for the model.")
           await until("second held request", () => model.waiting.length === 1, 30_000)
-          await status("next turn", "working")
+          await status("next execution", "working")
           await hc("keys", terminal(), "esc")
-          await status("interrupted turn", "idle")
+          await status("interrupted execution", "idle")
           await model.next("discard interrupted response")
           const denied = path.join(w.root, "denied.txt")
           await hc("send", terminal(), "Test a denied scratch action.")
@@ -514,7 +531,7 @@ const checks: ReadonlyArray<Check> = [
         await model.next("pi-status-completed")
         await status("Pi settled", "done")
         expect(
-          (await w.json<{ answer: { text: string } | null }>(["result", pi], { env })).answer?.text.includes(
+          (await w.json<{ reply: { text: string } | null }>(["result", pi], { env })).reply?.text.includes(
             "pi-status-completed",
           ) === true,
           "Pi result changed",

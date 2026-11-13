@@ -4,9 +4,17 @@ import { InboxKind } from "./event.ts"
 
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
 export type AgentStatus = typeof AgentStatus.Type
-export const TurnState = Schema.Literals(["none", "open", "completed", "failed", "interrupted", "lost", "not_started"])
-export type TurnState = typeof TurnState.Type
-export const InboxStatus = Schema.Literals(["pending", "sending", "delivered", "failed", "dropped"])
+export const ExecutionState = Schema.Literals([
+  "none",
+  "open",
+  "completed",
+  "failed",
+  "interrupted",
+  "lost",
+  "not_started",
+])
+export type ExecutionState = typeof ExecutionState.Type
+export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"])
 export type InboxStatus = typeof InboxStatus.Type
 
 export const RuntimeAddress = Schema.Struct({
@@ -94,9 +102,28 @@ export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
   id: Schema.String,
   message: Schema.String,
 }) {}
-export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
+export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("NoCallingSession", {}) {
   override get message() {
-    return "no harness to inherit: name one, for example `vibest run claude -- <prompt>`"
+    return "vibest run is run by an agent in a session; to start working, run vibest in a terminal"
+  }
+}
+export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAgent", {
+  agent: Schema.String,
+  known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
+}) {
+  override get message() {
+    const known = this.known.map((definition) => `${definition.id} (${definition.description})`).join("; ")
+    return `no agent definition ${this.agent}; registered: ${known || "none"}`
+  }
+}
+export const runnableNote = (runnable: ReadonlyArray<string>) =>
+  runnable.length === 0 ? "" : `; this machine can run: ${runnable.join(", ")}`
+
+export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {
+  runnable: Schema.Array(Schema.String),
+}) {
+  override get message() {
+    return `no harness to inherit: name one, for example \`vibest run claude -- <prompt>\`${runnableNote(this.runnable)}`
   }
 }
 

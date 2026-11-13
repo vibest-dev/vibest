@@ -1,8 +1,8 @@
-import { type Effect, Schema, type Scope } from "effect"
+import { type Effect, Schema, type Scope, type Types } from "effect"
 
 import type { EventDomain } from "./event.ts"
 import type { HarnessDomain } from "./harness.ts"
-import type { Hooks, Registration } from "./registration.ts"
+import type { Hooks, Registration, Transform } from "./registration.ts"
 import type { RuntimeDomain } from "./runtime.ts"
 
 export * as Harness from "./harness.ts"
@@ -130,7 +130,7 @@ export interface Attempt {
 
 export interface AgentContext {
   readonly project: string
-  readonly agentType: string
+  readonly agent: string
   readonly parentSessionId: string | undefined
   readonly harnesses: ReadonlyArray<HarnessOption>
   readonly subscriptions: ReadonlyArray<SubscriptionSnapshot>
@@ -152,7 +152,7 @@ export interface AgentFail extends AgentContext {
   readonly sessionId: string
   readonly reason: "limited"
   readonly error: string
-  readonly turn: string
+  readonly input: string
   readonly harness: string
   readonly provider: string | undefined
 }
@@ -187,8 +187,38 @@ export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
   readonly fail: never
 }
 
+export interface GuardCall {
+  readonly tool: string
+  readonly input: Readonly<Record<string, unknown>>
+  readonly cwd: string
+  readonly programs: ReadonlyArray<ReadonlyArray<string>>
+  readonly writes: ReadonlyArray<string> | undefined
+  readonly session: {
+    readonly id: string
+    readonly projectFolder: string
+    readonly harnessBinaries: ReadonlySet<string>
+    readonly runtimePrograms: ReadonlySet<string>
+  }
+}
+
+export interface AgentDefinition {
+  readonly id: string
+  readonly description: string
+  readonly system: string
+  readonly guard?: (call: GuardCall) => string | undefined
+}
+
+export interface AgentEditor {
+  list(): ReadonlyArray<AgentDefinition>
+  get(id: string): AgentDefinition | undefined
+  add(definition: AgentDefinition): void
+  update(id: string, update: (definition: Types.Mutable<AgentDefinition>) => void): void
+  remove(id: string): void
+}
+
 export interface AgentDomain {
   readonly hook: Hooks<AgentHooks, AgentResults, AgentFailures>
+  readonly transform: Transform<AgentEditor>
 }
 
 export interface MachineHooks {

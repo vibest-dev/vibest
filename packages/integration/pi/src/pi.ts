@@ -6,6 +6,7 @@ import type {
   ExtensionContext,
   InputEvent,
   InputEventResult,
+  MessageStartEvent,
   ResourcesDiscoverEvent,
   ResourcesDiscoverResult,
   SessionStartEvent,
@@ -23,6 +24,7 @@ interface Events {
   readonly before_agent_start: { readonly event: BeforeAgentStartEvent; readonly result: void }
   readonly input: { readonly event: InputEvent; readonly result: InputEventResult | void }
   readonly tool_call: { readonly event: ToolCallEvent; readonly result: ToolCallEventResult | undefined }
+  readonly message_start: { readonly event: MessageStartEvent; readonly result: void }
   readonly agent_end: { readonly event: AgentEndEvent; readonly result: void }
   readonly agent_settled: { readonly event: AgentSettledEvent; readonly result: void }
 }

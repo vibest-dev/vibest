@@ -9,7 +9,7 @@ import { Cause, Effect, Exit, Layer, Option, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
-import { authed, testLayer, type TestOptions, type TestServices } from "./fakes.ts"
+import { authed, projectOf, testLayer, type TestOptions, type TestServices } from "./fakes.ts"
 
 export const served = (options?: TestOptions) =>
   Server.layer.pipe(
@@ -32,6 +32,25 @@ export const asSession = (raw: Effect.Success<typeof client>, sessionId: string,
   Effect.gen(function* () {
     const row = yield* (yield* Db).sessionIdentity(sessionId)
     return authed(raw, sessionHeaders({ sessionId, repositoryRoot, projectId: row && String(row.projectId) }))
+  })
+
+export const asEntry = (raw: Effect.Success<typeof client>, repositoryRoot: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    const projectId = yield* projectOf(repositoryRoot)
+    const entry =
+      (yield* db.entryOf(projectId))?.id ??
+      (yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "test/entry" },
+        },
+        { agent: "coordinator" },
+      )).sessionId
+    return authed(raw, sessionHeaders({ sessionId: entry, repositoryRoot, projectId }))
   })
 
 export const failureTag = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>

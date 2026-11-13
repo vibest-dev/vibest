@@ -4,15 +4,7 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
-import {
-  ACK_ROUTE,
-  HARNESS_HEADER,
-  parseHookRoute,
-  PLUGIN_VERSION_HEADER,
-  POLL_ROUTE,
-  PROJECT_HEADER,
-  PROTOCOL_HEADER,
-} from "@vibest/protocol/protocol"
+import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -20,7 +12,7 @@ import type { ServeError } from "effect/http/HttpServerError"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
-import { admit, checkProtocol, identify, reader } from "./gates.ts"
+import { admit, checkProtocol, identify, integrationOf, processOf, reader } from "./gates.ts"
 import { services } from "./services.ts"
 
 export type Request = {
@@ -33,9 +25,6 @@ export type Reply = { readonly status: number; readonly body?: unknown }
 const failure = (status: number, error: string): Reply => ({ status, body: { error } })
 const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { status: 200, body })
 
-const AckBody = Schema.fromJsonString(
-  Schema.Struct({ ids: Schema.Array(Schema.Number), release: Schema.optional(Schema.Array(Schema.Number)) }),
-)
 const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
 export const make = Effect.gen(function* () {
@@ -63,7 +52,7 @@ export const make = Effect.gen(function* () {
       const harness = read(HARNESS_HEADER)
       if (harness !== who.row.harness)
         return failure(403, `session ${who.row.id} runs ${who.row.harness}, not ${harness ?? "(no vibest-harness)"}`)
-      return who.row
+      return { ...who.row, process: processOf(read) }
     })
 
   const admitted = <R>(label: string, settlement: boolean, body: Effect.Effect<Reply, never, R>) =>
@@ -73,43 +62,31 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const who = yield* caller(request.headers)
       if ("status" in who) return who
-      if (request.path === POLL_ROUTE || request.path === ACK_ROUTE) {
-        if (who.agent !== "coordinator") return failure(403, `session ${who.id} is not its project's main agent`)
-        if (harnesses.find(who.harness)?.inbox !== "poll")
-          return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
-        if (request.path === POLL_ROUTE) return ok(yield* inbox.poll(who.projectId))
-        const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
-        if (Option.isNone(body)) return failure(400, "the body is not { ids: number[], release?: number[] }")
-        return yield* admitted(
-          "inbox ack",
-          true,
-          Effect.map(inbox.ack(who.projectId, body.value.ids, body.value.release), (acked) => ok({ acked })),
-        )
+      if (request.path === TAKE_ROUTE) {
+        if (!inbox.pulls(who.harness)) return failure(403, `session ${who.id} runs ${who.harness}, which does not pull`)
+        return ok(yield* inbox.take(who.id, who.process))
       }
       if (request.path === "/session/ready") {
         const pid = Option.getOrUndefined(
           yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
         )?.pid
-        const read = reader(request.headers)
-        const version = read(PLUGIN_VERSION_HEADER)
-        const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
-        yield* integration.ready(
-          who.id,
-          pid,
-          version === undefined ? undefined : { version, protocol: Number.isFinite(protocol) ? protocol : 0 },
-        )
-        return ok()
+        const current = yield* integration.ready(who.id, pid, integrationOf(reader(request.headers)), who.process)
+        return ok(current === undefined ? undefined : { process: current })
       }
       const hook = parseHookRoute(request.path)
       const adapter = hook && harnesses.find(hook.harness)
       if (!hook || adapter === undefined) return failure(404, `no route ${request.path}`)
       if (hook.harness !== who.harness)
         return failure(403, `session ${who.id} runs ${who.harness}, not ${hook.harness}`)
-      if (hook.hook === "turn-end")
-        return yield* admitted("hook turn-end", true, integration.turnEnd(who, request.body).pipe(Effect.as(ok())))
+      if (hook.hook === "execution-end")
+        return yield* admitted(
+          "hook execution-end",
+          true,
+          integration.executionEnd(who, request.body).pipe(Effect.as(ok())),
+        )
       if (hook.hook === "prompt")
         return yield* admitted("hook prompt", true, integration.prompt(who, request.body).pipe(Effect.as(ok())))
-      return yield* integration.guard(who.agent, request.body, who.projectId).pipe(
+      return yield* integration.guard(who.id, request.body).pipe(
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
         Effect.catch((e) =>
           Effect.succeed(ok({ deny: `vibest could not check this tool call (${String(e)}); it is refused.` })),

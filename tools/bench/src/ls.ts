@@ -4,6 +4,7 @@ import path from "node:path"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/db"
+import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Layer } from "effect"
 
 const checkout = path.resolve(import.meta.dirname, "../../..")
@@ -97,9 +98,8 @@ const seed = (file: string, directory: string, n: number) =>
           status: "unknown",
           startedAt: now,
           exitedAt: null,
-          turnState: "none",
-          turnPromptedAt: 0,
-          metadata: {},
+          executionState: "none",
+          executionPromptedAt: 0,
           createdAt: now,
           lastActive: now,
         },
@@ -115,6 +115,7 @@ const seed = (file: string, directory: string, n: number) =>
       Db.layer.pipe(
         Layer.provide(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES })),
         Layer.provide(Bus.layer),
+        Layer.provide(SessionLive.layer),
       ),
     ),
     Effect.scoped,

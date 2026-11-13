@@ -1,6 +1,6 @@
-import { type ExecutionOutcome, type InboxKind, type ProcessEndReason } from "@vibest/schema/event"
+import { ExecutionOutcome, type InboxKind, ProcessEndReason } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
-import { AgentStatus, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
+import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
 import { Schema } from "effect"
 
 import { Routing } from "./plugins.ts"
@@ -8,29 +8,7 @@ import { Routing } from "./plugins.ts"
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
 export const encodeAddress = Schema.encodeSync(AddressJson)
 
-const Live = {
-  integration: Schema.optional(Schema.Struct({ version: Schema.String, protocol: Schema.Number })),
-  pid: Schema.optional(Schema.Number),
-  ready: Schema.optional(Schema.Number),
-}
-
-const Metadata = Schema.Struct({
-  ...Live,
-  routing: Schema.optional(Routing),
-  archived: Schema.optional(Schema.Boolean),
-  removed: Schema.optional(Schema.Boolean),
-  attempts: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        harness: Schema.String,
-        provider: Schema.optional(Schema.String),
-        outcome: Schema.Literal("limited"),
-        at: Schema.Number,
-      }),
-    ),
-  ),
-})
-export const SessionRow = Schema.Struct({
+const NewSessionFields = {
   id: Schema.String,
   projectId: Schema.String,
   agent: Schema.String,
@@ -44,33 +22,122 @@ export const SessionRow = Schema.Struct({
   status: AgentStatus,
   startedAt: Schema.NullOr(Schema.Number),
   exitedAt: Schema.NullOr(Schema.Number),
-  turnState: TurnState,
-  turnPromptedAt: Schema.Number,
-  metadata: Schema.fromJsonString(Metadata),
+  executionState: ExecutionState,
+  executionPromptedAt: Schema.Number,
+  routing: Schema.optional(Routing),
   createdAt: Schema.Number,
   lastActive: Schema.Number,
+}
+export const NewSession = Schema.Struct(NewSessionFields)
+export type NewSession = typeof NewSession.Type
+
+const IntegrationShape = Schema.Struct({ version: Schema.String, protocol: Schema.Number })
+
+export const SessionProcess = Schema.Struct({
+  id: Schema.Number,
+  harness: Schema.String,
+  provider: Schema.NullOr(Schema.String),
+  model: Schema.NullOr(Schema.String),
+  routing: Schema.NullOr(Routing),
+  runtime: Schema.String,
+  machine: Schema.String,
+  terminal: Schema.NullOr(Schema.String),
+  pid: Schema.NullOr(Schema.Number),
+  conversation: Schema.NullOr(Schema.String),
+  placedAt: Schema.NullOr(Schema.Number),
+  readyAt: Schema.NullOr(Schema.Number),
+  endedAt: Schema.NullOr(Schema.Number),
+  endReason: Schema.NullOr(ProcessEndReason),
+  integration: Schema.NullOr(IntegrationShape),
+})
+
+export const OpenExecution = Schema.Struct({
+  id: Schema.Number,
+  process: Schema.NullOr(Schema.Number),
+  startedAt: Schema.Number,
+  acceptedAt: Schema.NullOr(Schema.Number),
+})
+
+export const LastExecution = Schema.Struct({
+  id: Schema.Number,
+  process: Schema.NullOr(Schema.Number),
+  outcome: ExecutionOutcome,
+  startedAt: Schema.Number,
+  endedAt: Schema.NullOr(Schema.Number),
+  reply: Schema.NullOr(Schema.String),
+  failure: Schema.NullOr(Schema.Struct({ message: Schema.String, kind: Schema.optional(Schema.Literal("limit")) })),
+})
+
+export const SessionRow = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  agent: Schema.String,
+  name: Schema.String,
+  status: AgentStatus,
+  createdAt: Schema.Number,
+  lastActive: Schema.Number,
+  endedAt: Schema.NullOr(Schema.Number),
+  parentId: Schema.NullOr(Schema.String),
+  entry: Schema.Boolean,
+  process: Schema.NullOr(SessionProcess),
+  openExecution: Schema.NullOr(OpenExecution),
+  lastExecution: Schema.NullOr(LastExecution),
 })
 export type SessionRow = typeof SessionRow.Type
 
-export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent" | "createdAt" | "runtime">> & {
-  readonly end?: ProcessEndReason
+export const archived = (row: Pick<SessionRow, "entry" | "endedAt">) => !row.entry && row.endedAt !== null
+
+export const exitedAt = (row: Pick<SessionRow, "entry" | "endedAt" | "process">) =>
+  row.entry ? row.endedAt : (row.process?.endedAt ?? null)
+
+export const sessionEnded = (row: SessionRow | undefined) =>
+  row === undefined || exitedAt(row) !== null || archived(row)
+
+export const terminalOf = (row: Pick<SessionRow, "process">): RuntimeAddress => ({
+  machine: "local",
+  id: row.process?.terminal ?? "",
+})
+
+export const runtimeOf = (row: Pick<SessionRow, "process">) => row.process?.runtime ?? ""
+
+export const harnessIdOf = (row: Pick<SessionRow, "process">) => row.process?.harness ?? ""
+
+export const placedTerminal = (row: Pick<SessionRow, "process">) => {
+  const process = row.process
+  return process === null || process.endedAt !== null || process.terminal === null || process.runtime === ""
+    ? undefined
+    : { runtime: process.runtime, address: { machine: "local", id: process.terminal } }
 }
 
-export const CoordinatorRow = Schema.Struct({
-  id: Schema.String,
-  projectId: Schema.String,
-  harnessId: Schema.String,
-  harnessSessionId: Schema.NullOr(Schema.String),
-  runtime: Schema.NullOr(Schema.String),
-  address: Schema.NullOr(AddressJson),
-  projectDirectory: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
-  provider: Schema.NullOr(Schema.String),
-  model: Schema.NullOr(Schema.String),
-  routing: Schema.optional(Routing),
-  ...Live,
-})
-export type CoordinatorRow = typeof CoordinatorRow.Type
+export const startOf = (row: Pick<SessionRow, "process">): ProcessStart => {
+  const process = row.process
+  return {
+    harness: process?.harness ?? "",
+    ...(process?.provider ? { provider: process.provider } : {}),
+    ...(process?.model ? { model: process.model } : {}),
+    ...(process?.routing ? { routing: process.routing } : {}),
+    runtime: process?.runtime ?? "",
+    terminal: "",
+    ...(process?.conversation ? { resume: process.conversation } : {}),
+  }
+}
+
+export const pidOf = (row: Pick<SessionRow, "process">) => row.process?.pid ?? undefined
+
+export const reportedOf = (row: SessionRow | undefined) =>
+  row?.process == null
+    ? undefined
+    : {
+        pid: row.process.pid ?? undefined,
+        ready: row.process.readyAt ?? undefined,
+        integration: row.process.integration ?? undefined,
+      }
+
+export const executionStateOf = (row: Pick<SessionRow, "openExecution" | "lastExecution">) =>
+  row.openExecution !== null ? "open" : (row.lastExecution?.outcome ?? "none")
+
+export const executionStartedAt = (row: Pick<SessionRow, "openExecution" | "lastExecution">) =>
+  row.openExecution?.startedAt ?? row.lastExecution?.startedAt ?? 0
 
 export type NewInboxRow = {
   readonly sessionId: string
@@ -111,8 +178,6 @@ export const attemptsOf = (raw: string | null) => {
   return seen
 }
 
-export const storedStatus = (status: InboxStatus) => (status === "sending" ? "delivering" : status)
-
 export type InboxSql = {
   readonly id: number
   readonly sessionId: string
@@ -124,7 +189,7 @@ export type InboxSql = {
 
 export type ExecutionEnd = {
   readonly outcome: typeof ExecutionOutcome.Type
-  readonly failure?: { readonly message: string }
+  readonly failure?: { readonly message: string; readonly kind?: "limit" }
   readonly conversation?: string
   readonly reply?: string
 }
@@ -140,7 +205,7 @@ export const toInbox = (row: InboxSql) => {
     recipient: row.sessionId,
     kind,
     message: row.content,
-    status: row.status === "delivering" ? "sending" : row.status,
+    status: row.status,
   }
 }
 

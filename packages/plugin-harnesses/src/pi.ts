@@ -64,26 +64,14 @@ export const pi: Harness.HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  resultField: "text",
+  replyField: "text",
   inbox: "subscribe",
   ready: "integration",
   checkProvider: () => undefined,
   launchArgs: (i) => [
-    "--session-id",
-    i.sessionId!,
+    ...opt("--session-id", i.sessionId),
     "--append-system-prompt",
     i.systemPromptFile,
-    "-e",
-    extension(i.pluginDir),
-    ...providerModel(i.provider, i.model),
-  ],
-  coordinatorArgs: (i) => [
-    ...opt("--session-id", i.sessionId),
-    "--system-prompt",
-    i.systemPromptFile,
-    "--tools",
-    "read,bash,codemode,grep,find,ls,write,edit",
-    "--no-mcp",
     "-e",
     extension(i.pluginDir),
     ...providerModel(i.provider, i.model),
@@ -97,17 +85,19 @@ export const pi: Harness.HarnessDefinition = {
     answer: piModels,
   },
   subscription: (home) => piSubscription(home).pipe(Effect.provide(platform)),
-  userPrompt: (event, coordinator) => {
-    if (coordinator || event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
+  userPrompt: (event) => {
+    if (event.type === "accepted")
+      return typeof event.execution === "number" ? { execution: event.execution } : undefined
+    if (event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
     if (typeof event.text !== "string" || event.text.trim() === "") return undefined
     return { text: event.text }
   },
-  turnEnd: (event, coordinator) => {
-    if (coordinator || event.type !== "agent_settled") return undefined
+  executionEnd: (event) => {
+    if (event.type !== "agent_settled") return undefined
     const aborted = event.aborted === true
     const error = typeof event.error === "string" ? event.error : ""
     return {
-      result: {
+      end: {
         text: typeof event.text === "string" ? event.text : "",
         error: error || (aborted ? "aborted" : ""),
         aborted,

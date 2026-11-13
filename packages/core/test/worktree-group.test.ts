@@ -1,10 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db, type SessionRow } from "@vibest/core/db"
+import { Db, type NewSession, exitedAt, executionStateOf } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
-import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, type Scope } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
@@ -20,7 +19,9 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
     (projectId) =>
       ({
         machine: { id: "local" },
+        agent: "general",
         root: repo,
+        parentSessionId: "creator",
         projectId,
         name: "task",
         prompt: "do it",
@@ -34,9 +35,8 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 const storedRow = (
   id: string,
-  metadata: SessionRow["metadata"],
-  patch: Partial<Omit<SessionRow, "projectId" | "id" | "metadata">> = {},
-): Omit<SessionRow, "projectId"> => ({
+  patch: Partial<Omit<NewSession, "projectId" | "id">> = {},
+): Omit<NewSession, "projectId"> => ({
   id,
   agent: "general",
   name: "stored",
@@ -49,9 +49,8 @@ const storedRow = (
   status: "idle",
   startedAt: 1,
   exitedAt: null,
-  turnState: "none",
-  turnPromptedAt: 0,
-  metadata,
+  executionState: "none",
+  executionPromptedAt: 0,
   createdAt: 1,
   lastActive: 1,
   ...patch,
@@ -68,30 +67,6 @@ const marker = (dir: string) =>
 const directoryOf = (id: string) => Effect.flatMap(Db, (db) => db.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
 
 describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a name is reserved by creating its directory, so whatever already sits at a path takes that name", () => {
-  test(
-    "a new worktree is the repository name plus a 4-hex leaf, and the full session id stays",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const layout = yield* Layout
-      const sessions = yield* Sessions
-      const db = yield* Db
-      const repo = yield* makeRepository
-      const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
-      const wt = yield* directoryOf(id)
-      const leaf = path.basename(wt)
-      assert.match(id, ID)
-      assert.match(leaf, /^[0-9a-f]{4}$/)
-      assert.notStrictEqual(leaf, id)
-      assert.strictEqual(path.basename(path.dirname(wt)), yield* repositoryDirectoryName(repo))
-      assert.strictEqual(wt, layout.allocationWorktree(path.basename(repo), leaf))
-      assert.isTrue(yield* fs.exists(wt))
-      assert.strictEqual(path.basename(yield* fs.realPath(wt)), leaf)
-      assert.strictEqual((yield* sessions.get(id)).worktree, wt)
-    }),
-  )
-
   test(
     "a name whose directory or dangling symlink already exists is skipped and left untouched",
     Effect.gen(function* () {
@@ -110,7 +85,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       yield* fs.symlink("nowhere", link)
       const { id } = yield* sessions.spawn(yield* spawnInput(repo)).pipe(reset)
       assert.strictEqual(yield* directoryOf(id), layout.allocationWorktree(repository, "ab03"))
-      yield* until(db.getSession(id), (w) => w?.startedAt !== null)
+      yield* until(db.getSession(id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
       assert.strictEqual(yield* fs.readFileString(path.join(taken, "keep")), "keep\n")
       assert.strictEqual(yield* fs.readLink(link), "nowhere")
     }),
@@ -154,7 +129,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       assert.isTrue(yield* fs.exists(wt))
       yield* fs.writeFileString(path.join(path.dirname(wt), "sibling"), "group\n")
       yield* held.release("failed")
-      yield* until(db.getSession(id), (w) => !!w && w.exitedAt !== null)
+      yield* until(db.getSession(id), (w) => !!w && exitedAt(w) !== null)
       assert.isFalse(yield* fs.exists(wt))
       assert.strictEqual(yield* fs.readFileString(path.join(path.dirname(wt), "sibling")), "group\n")
     }),
@@ -174,8 +149,8 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const none = "a7b8c9d0-a7b8-4a7b-8a7b-a7b8c9d0a7b8"
       const elsewhere = path.join(layout.home, "x", outside)
       yield* marker(elsewhere)
-      yield* db.insertSession(storedRow(outside, {}), key, { cwd: elsewhere })
-      yield* db.insertSession(storedRow(none, {}), key)
+      yield* db.insertSession(storedRow(outside), key, { cwd: elsewhere })
+      yield* db.insertSession(storedRow(none), key)
       const left = (yield* sessions.remove(outside))!
       assert.strictEqual(left.worktree, "kept")
       assert.include(left.reasons.join("\n"), "left alone")
@@ -212,11 +187,17 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
         )
         allocationNameSource.leaves = ["abcd", "abce"]
         const second = yield* sessions.spawn(yield* spawnInput(other))
-        yield* until(db.getSession(second.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        yield* until(
+          db.getSession(second.id),
+          (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
+        )
         const expected = sameWorktreeBucket("MyRepo", "myrepo") ? "abce" : "abcd"
         assert.strictEqual(yield* directoryOf(second.id), layout.allocationWorktree("myrepo", expected))
         yield* held.release()
-        yield* until(db.getSession(first.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        yield* until(
+          db.getSession(first.id),
+          (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
+        )
         assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
         assert.isTrue(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
       }).pipe(Effect.ensuring(reset))

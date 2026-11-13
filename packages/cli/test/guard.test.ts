@@ -1,7 +1,8 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
+import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
-import { coordinator, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
+import { check, shellBlock, splitCommand } from "@vibest/core/guard"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { type Runtime, Runtimes, type RuntimesShape } from "@vibest/core/runtimes"
@@ -31,15 +32,22 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
-import { FakeGit, HARNESSES, harnessesLayer, makeRepository, runVibest, tempDirectory, testLayer } from "./fakes.ts"
+import {
+  agentsLayer,
+  FakeGit,
+  HARNESSES,
+  harnessesLayer,
+  makeRepository,
+  runVibest,
+  tempDirectory,
+  testLayer,
+} from "./fakes.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
-const CLIS = new Set(HARNESSES.map((definition) => definition.binary))
 const RUNTIME_PROGRAMS = new Set(["herdr"])
-const both = (command: string) => [
-  shellBlock(command, source, true, CLIS, RUNTIME_PROGRAMS),
-  shellBlock(command, source, false, CLIS, RUNTIME_PROGRAMS),
-]
+const bareGuard = (agent: string, tool: string, input: Record<string, unknown>) =>
+  guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, input, "/")
+const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAMS)
 const namedRuntimes = (ids: ReadonlyArray<string>) =>
   Layer.succeed(Runtimes, {
     all: Effect.succeed(ids.map((id) => ({ id }) as Runtime)),
@@ -47,10 +55,9 @@ const namedRuntimes = (ids: ReadonlyArray<string>) =>
 
 describe("Shell denials", () => {
   it("vibest connect and vibest machine are refused for every agent", () => {
-    for (const command of ["vibest connect", "vibest machine add mb root@h", "vibest machine ls"]) {
-      for (const refused of both(command)) assert.include(refused ?? "", "only the user runs it", command)
-    }
-    assert.deepStrictEqual(both("vibest run pi -- 'vibest machine add x y'"), [undefined, undefined])
+    for (const command of ["vibest connect", "vibest machine add mb root@h", "vibest machine ls"])
+      assert.include(blocked(command) ?? "", "only the user runs it", command)
+    assert.isUndefined(blocked("vibest run pi -- 'vibest machine add x y'"))
   })
 
   it("run anything no rule names: unlisted programs, env prefixes, any shell syntax, quoted task data, any vibest command", () => {
@@ -87,7 +94,7 @@ describe("Shell denials", () => {
       "vibest run pi 'herdr pane list; vibest integration stop'",
       "git commit -m 'herdr pane list'",
       'rg "vibest integration stop" src',
-      "/usr/bin/bun /src/main.ts report -- 'env -u VIBEST_AGENT vibest rm x'",
+      "/usr/bin/bun /src/main.ts report -- 'env -u VIBEST_SESSION_ID vibest rm x'",
       "vibest run pi - <<'EOF'\nherdr pane list\nvibest integration stop\nEOF",
       "ls # herdr pane list",
       "echo 'claude -p x' && echo \"gh auth token\"",
@@ -106,9 +113,9 @@ describe("Shell denials", () => {
       "/usr/local/bin/vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send x -- integration stop",
       "echo $VIBEST_SESSION_ID",
-      "printenv VIBEST_AGENT",
+      "env -u VIBEST_AGENT vibest ls",
     ])
-      assert.deepStrictEqual(both(command), [undefined, undefined], command)
+      assert.isUndefined(blocked(command), command)
   })
 
   it("refuse herdr control wherever it runs: wrapped, nested, by path", () => {
@@ -126,43 +133,37 @@ describe("Shell denials", () => {
       "echo a | xargs -n 1 herdr pane close",
       "cat <<EOF\nx\nEOF\nherdr pane list",
     ])
-      for (const reason of both(command))
-        assert.match(reason ?? "", /^Agents must not control a terminal runtime/, command)
+      assert.match(blocked(command) ?? "", /^Agents must not control a terminal runtime/, command)
     for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
-      assert.deepStrictEqual(
-        both(command),
-        [undefined, "Sessions do not run a terminal runtime; vibest manages it."],
-        command,
-      )
-    assert.isUndefined(shellBlock("hc pane list", source, true, CLIS, RUNTIME_PROGRAMS))
+      assert.isUndefined(blocked(command), command)
+    assert.isUndefined(blocked("hc pane list"))
     assert.match(
-      shellBlock("hc pane list", source, true, CLIS, new Set(["hc"])) ?? "",
+      shellBlock("hc pane list", source, new Set(["hc"])) ?? "",
       /^Agents must not control a terminal runtime/,
     )
   })
 
   it("refuse vibest with its identity variables changed or cleared, however it is wrapped or spelled", () => {
     for (const command of [
-      "env -u VIBEST_AGENT vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
-      "env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest machine ls",
-      "env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest daemon restart",
+      "env -u VIBEST_SESSION_ID vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "env -u VIBEST_SESSION_ID vibest machine ls",
+      "env -u VIBEST_SESSION_ID vibest daemon restart",
       "env -uVIBEST_SESSION_ID vibest ls",
-      "env --unset=VIBEST_AGENT vibest ls",
+      "env --unset=VIBEST_SESSION_ID vibest ls",
       "env -i PATH=/bin vibest interrupt abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "env - vibest ls",
-      "VIBEST_AGENT= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "VIBEST_SESSION_ID= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "VIBEST_SESSION_ID=x /usr/bin/bun /src/main.ts send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "env VIBEST_SESSION_ID= /usr/local/bin/vibest ls",
       "unset VIBEST_SESSION_ID; vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
-      "export VIBEST_AGENT=coordinator && vibest ls",
+      "export VIBEST_SESSION_ID=other && vibest ls",
       "VIBEST_SESSION_ID=; vibest ls",
-      "sh -c 'env -u VIBEST_AGENT vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd'",
-      "echo $(VIBEST_AGENT= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd)",
+      "sh -c 'env -u VIBEST_SESSION_ID vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd'",
+      "echo $(VIBEST_SESSION_ID= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd)",
       "nohup env -i vibest daemon restart",
-      "echo a | VIBEST_AGENT= xargs vibest rm",
+      "echo a | VIBEST_SESSION_ID= xargs vibest rm",
     ])
-      for (const reason of both(command))
-        assert.match(reason ?? "", /^vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT/, command)
+      assert.match(blocked(command) ?? "", /^vibest runs with the agent's own VIBEST_SESSION_ID/, command)
   })
 
   it("refuse vibest integration stop, prompt and ready, the harness's hooks, however they are wrapped", () => {
@@ -175,32 +176,15 @@ describe("Shell denials", () => {
       "nohup timeout 5 vibest integration stop",
       "bash -c 'vibest integration stop'",
     ])
-      for (const reason of both(command))
-        assert.match(reason ?? "", /^vibest integration stop is the harness's turn-end hook/, command)
-    for (const reason of both("vibest integration prompt --harness claude"))
-      assert.match(reason ?? "", /^vibest integration prompt is the harness's user-prompt hook/)
-    for (const reason of both("vibest integration ready --harness cursor"))
-      assert.match(reason ?? "", /^vibest integration ready is the harness's session-start hook/)
-  })
-
-  it("the coordinator also does not start harness CLIs (they would report as it) or run gh's credential and config commands", () => {
-    for (const command of [
-      "claude -p x",
-      "pi -p x",
-      "cursor-agent -p x",
-      "/usr/local/bin/claude",
-      "env A=1 pi",
-      "gh auth token",
-      "gh config set pager x",
-      "gh alias set x y",
-      "gh extension install a/b",
-      "gh ext install a/b",
-    ]) {
-      assert.isString(shellBlock(command, source, true, CLIS), command)
-      assert.isUndefined(shellBlock(command, source, false, CLIS), command)
-    }
-    assert.isUndefined(shellBlock("cursor-agent -p x", source, true, new Set(["pi"])))
-    assert.isString(shellBlock("my-agent run", source, true, new Set(["my-agent"])))
+      assert.match(blocked(command) ?? "", /^vibest integration stop is the harness's execution-end hook/, command)
+    assert.match(
+      blocked("vibest integration prompt --harness claude") ?? "",
+      /^vibest integration prompt is the harness's user-prompt hook/,
+    )
+    assert.match(
+      blocked("vibest integration ready --harness cursor") ?? "",
+      /^vibest integration ready is the harness's session-start hook/,
+    )
   })
 
   it("splits at unquoted separators, leaves out redirections and here-documents, and adds substitutions", () => {
@@ -227,8 +211,27 @@ describe("Shell denials", () => {
   })
 })
 
-layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"])))("role rules", (it) => {
-  it.effect("Coordinator: file edits only in its project folder (VIBEST_PROJECT_DIR), symlinks and .. followed", () =>
+const guardOf =
+  (vibestHome: string, home: string, agent: string, projectDir: string) =>
+  (tool: string, input: Record<string, unknown>, cwd: string) =>
+    check(
+      { id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", agent, projectDir },
+      JSON.stringify({ tool_name: tool, tool_input: input, cwd }),
+    ).pipe(
+      Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
+      Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
+    )
+
+layer(
+  Layer.mergeAll(
+    Platform.services,
+    harnessesLayer(),
+    namedRuntimes(["herdr"]),
+    agentsLayer,
+    Layer.succeed(VibestCommand, source),
+  ),
+)("agent guard", (it) => {
+  it.effect("coordinator: file edits only in its project folder, symlinks and .. followed", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -239,15 +242,8 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
       yield* fs.makeDirectory(path.join(own, "artifacts"), { recursive: true })
       yield* fs.makeDirectory(other, { recursive: true })
       yield* fs.symlink(other, path.join(own, "artifacts", "out"))
-      const asCoordinator = (tool: string, input: Record<string, unknown>, dir: string | null = own) =>
-        coordinator({ tool, input, cwd: home }).pipe(
-          Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-          Effect.provide(
-            ConfigProvider.layer(
-              ConfigProvider.fromUnknown(dir === null ? { HOME: home } : { HOME: home, VIBEST_PROJECT_DIR: dir }),
-            ),
-          ),
-        )
+      const asCoordinator = (tool: string, input: Record<string, unknown>, dir: string = own) =>
+        guardOf(vibestHome, home, "coordinator", dir)(tool, input, home)
       for (const [tool, input] of [
         ["Write", { file_path: path.join(own, "artifacts", "plan.md"), content: "x" }],
         ["Edit", { file_path: path.join(own, "memories", "a.md"), old_string: "a", new_string: "b" }],
@@ -264,7 +260,13 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
         ["Write", {}],
       ] as const)
         assert.isString(yield* asCoordinator(tool, input), JSON.stringify(input))
-      assert.isString(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "plan.md") }, null))
+      assert.isString(
+        yield* asCoordinator(
+          "Write",
+          { file_path: path.join(own, "artifacts", "plan.md") },
+          path.join(vibestHome, "projects", "missing"),
+        ),
+      )
     }),
   )
 
@@ -286,18 +288,8 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
       yield* fs.symlink(path.join(own, "artifacts", "plan.md"), path.join(own, "artifacts", "alias"))
       yield* fs.symlink("loop", path.join(own, "artifacts", "loop"))
       yield* fs.symlink(stolen, path.join(work, "leak"))
-      const provide =
-        (rules: Rules, dir: string | null) => (tool: string, input: Record<string, unknown>, cwd: string) =>
-          rules({ tool, input, cwd }).pipe(
-            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(
-              ConfigProvider.layer(
-                ConfigProvider.fromUnknown(dir === null ? { HOME: home } : { HOME: home, VIBEST_PROJECT_DIR: dir }),
-              ),
-            ),
-          )
-      const asCoordinator = provide(coordinator, own)
-      const asSession = provide(session, own)
+      const asCoordinator = guardOf(vibestHome, home, "coordinator", own)
+      const asSession = guardOf(vibestHome, home, "general", own)
       const edits =
         "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
       const offLimits =
@@ -331,16 +323,10 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
       yield* fs.writeFileString(path.join(work, "file.txt"), "x")
       yield* fs.writeFileString(path.join(own, "artifacts", "file.txt"), "x")
       const asSession = (tool: string, input: Record<string, unknown>) =>
-        session({ tool, input, cwd: work }).pipe(
-          Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
-        )
+        guardOf(vibestHome, home, "general", own)(tool, input, work)
       assert.isUndefined(yield* asSession("Bash", { command: `cat ${path.join(work, "file.txt")}/x` }))
       const asCoordinator = (input: Record<string, unknown>) =>
-        coordinator({ tool: "Write", input, cwd: work }).pipe(
-          Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
-        )
+        guardOf(vibestHome, home, "coordinator", own)("Write", input, work)
       assert.isUndefined(
         yield* asCoordinator({ file_path: path.join(own, "artifacts", "file.txt", "x"), content: "y" }),
       )
@@ -348,7 +334,7 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
   )
 
   it.effect(
-    "Session: only its own project folder (VIBEST_PROJECT_DIR) under projects; another project's folder, the projects directory itself and everything without VIBEST_PROJECT_DIR are refused; no herdr",
+    "every agent: only its own project folder under projects; another project's folder, the projects directory itself and everything when the project folder is missing are refused; no herdr",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -364,15 +350,9 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
         for (const dir of [own, other])
           for (const kind of ["docs", "memories", "artifacts"])
             yield* fs.makeDirectory(path.join(dir, kind), { recursive: true })
+        const missing = path.join(projects, "missing")
         const asSession = (tool: string, input: Record<string, unknown>, dir: string | null = own) =>
-          session({ tool, input, cwd: worktree }).pipe(
-            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(
-              ConfigProvider.layer(
-                ConfigProvider.fromUnknown(dir === null ? { HOME: home } : { HOME: home, VIBEST_PROJECT_DIR: dir }),
-              ),
-            ),
-          )
+          guardOf(vibestHome, home, "general", dir ?? missing)(tool, input, worktree)
         const offLimits =
           "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
         const calls = (dir: string, file: string) =>
@@ -408,17 +388,18 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
         ] as const)
           assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
         for (const [tool, input] of calls(own, path.join(own, "notes.md")))
-          assert.strictEqual(yield* asSession(tool, input, null), offLimits, `no VIBEST_PROJECT_DIR: ${tool}`)
+          assert.strictEqual(yield* asSession(tool, input, null), offLimits, `no project folder: ${tool}`)
         assert.strictEqual(yield* asSession("Read", { file_path: "link/x.md" }, null), offLimits)
         assert.isUndefined(yield* asSession("Read", { file_path: path.join(worktree, "src/a.ts") }, null))
         assert.isUndefined(yield* asSession("Grep", { pattern: "x" }))
         for (const command of ["herdr pane list", "herdr --help", "cd /tmp && herdr"])
           assert.isString(yield* asSession("Bash", { command }), command)
+        assert.isUndefined(yield* asSession("Read", { file_path: path.join(vibestHome, "vibest.json") }))
       }),
   )
 
   it.effect(
-    "Session: a shell whose cwd is in another project is refused (bare names are its files); its own folder or worktree is fine",
+    "every agent: a shell whose cwd is in another project is refused (bare names are its files); its own folder or worktree is fine",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -431,10 +412,7 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
         yield* fs.makeDirectory(path.join(other, "docs"), { recursive: true })
         yield* fs.symlink(other, path.join(home, "p"))
         const asSession = (tool: string, command: string, cwd: string) =>
-          session({ tool, input: { command }, cwd }).pipe(
-            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
-          )
+          guardOf(vibestHome, home, "general", own)(tool, { command }, cwd)
         for (const tool of ["Bash", "Shell"]) {
           for (const cwd of [other, path.join(other, "docs"), path.join(home, "p"), path.join(vibestHome, "projects")])
             for (const command of ["cat preferences.md", "cat a.md", "ls"])
@@ -451,7 +429,7 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
   )
 
   it.effect(
-    "Session: paths are followed as the system would (.. anywhere, symlinks, relative, globs) and searches above the project refused",
+    "every agent: paths are followed as the system would (.. anywhere, symlinks, relative, globs) and searches above the project refused",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -471,12 +449,7 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
         yield* fs.symlink(path.join(other, "docs", "sub"), path.join(work, "deep"))
         yield* fs.symlink(path.join(project, "docs", "sub"), path.join(work, "mine"))
         const asSession = (tool: string, input: Record<string, unknown>) =>
-          session({ tool, input, cwd: home }).pipe(
-            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(
-              ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: project })),
-            ),
-          )
+          guardOf(vibestHome, home, "general", project)(tool, input, home)
         const tilde = "~/.vibest/projects/own/artifacts/w1"
         for (const [tool, input] of [
           ["Write", { file_path: `${work}/notes.md` }],
@@ -534,16 +507,11 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
   )
 
   it.effect(
-    "Both roles, every shell shape: vibest goes to vibest's own checks unless the command changes who it speaks as",
+    "every agent, every shell shape: vibest goes to vibest's own checks unless the command changes who it speaks as",
     () =>
       Effect.gen(function* () {
-        const as = (rules: Rules, tool: string, command: string) =>
-          rules({ tool, input: { command }, cwd: "/" }).pipe(
-            Effect.provideService(VibestCommand, source),
-            Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
-            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
-          )
-        for (const rules of [coordinator, session]) {
+        const as = (agent: string, tool: string, command: string) => bareGuard(agent, tool, { command })
+        for (const agent of ["coordinator", "general"]) {
           for (const tool of ["Bash", "Shell"]) {
             for (const command of [
               "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
@@ -552,37 +520,110 @@ layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"
               "jq . a.json > /tmp/b",
               "git log $REV",
             ])
-              assert.isUndefined(yield* as(rules, tool, command), `${tool}: ${command}`)
+              assert.isUndefined(yield* as(agent, tool, command), `${agent} ${tool}: ${command}`)
             for (const command of [
-              "env -u VIBEST_AGENT vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+              "env -u VIBEST_SESSION_ID vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
               "VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
               "vibest integration stop",
+              "vibest integration prompt",
+              "vibest integration ready",
+              "vibest connect",
               "herdr pane list",
             ])
-              assert.isString(yield* as(rules, tool, command), `${tool}: ${command}`)
+              assert.isString(yield* as(agent, tool, command), `${agent} ${tool}: ${command}`)
           }
+          assert.isString(yield* bareGuard(agent, "Bash", {}))
         }
-        for (const rules of [coordinator, session])
-          assert.isString(
-            yield* rules({ tool: "Bash", input: {}, cwd: "/" }).pipe(
-              Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
-              Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
-            ),
-          )
       }),
   )
 
-  it.effect("Coordinator: no file edits by any tool, unknown tools allowed", () =>
+  it.effect("the coordinator does not start harness CLIs or run gh's credential and config commands", () =>
     Effect.gen(function* () {
-      const as = (tool: string, input: Record<string, unknown>) =>
-        coordinator({ tool, input, cwd: "/" }).pipe(
-          Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
+      const as = (agent: string, command: string) => bareGuard(agent, "Bash", { command })
+      for (const command of [
+        "claude -p x",
+        "pi -p x",
+        "cursor-agent -p x",
+        "/usr/local/bin/claude",
+        "env A=1 pi",
+        "gh auth token",
+        "gh config set pager x",
+        "gh alias set x y",
+        "gh extension install a/b",
+        "gh ext install a/b",
+      ]) {
+        assert.isString(yield* as("coordinator", command), command)
+        assert.isUndefined(yield* as("general", command), command)
+      }
+      assert.isUndefined(yield* as("coordinator", "gh pr view 12"))
+    }),
+  )
+
+  it.effect("a general agent does not run a terminal runtime at all, not even to ask for help", () =>
+    Effect.gen(function* () {
+      const as = (agent: string, command: string) => bareGuard(agent, "Bash", { command })
+      for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
+        assert.strictEqual(
+          yield* as("general", command),
+          "Sessions do not run a terminal runtime; vibest manages it.",
+          command,
         )
-      for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit"])
-        assert.isString(yield* as(tool, { file_path: "a" }), tool)
+      assert.isUndefined(yield* as("coordinator", "herdr --help"))
+    }),
+  )
+
+  it.effect("the coordinator writes only inside the project folder; tools that write no file are not its concern", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("vibest-guard-")
+      const vibestHome = path.join(home, ".vibest")
+      const project = path.join(vibestHome, "projects", "own")
+      yield* fs.makeDirectory(project, { recursive: true })
+      const as = (tool: string, input: Record<string, unknown>) =>
+        guardOf(vibestHome, home, "coordinator", project)(tool, input, project)
+      for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit"]) {
+        assert.isString(yield* as(tool, { file_path: path.join(home, "a") }), tool)
+        assert.isString(yield* as(tool, {}), tool)
+        assert.isUndefined(
+          yield* as(tool, { file_path: path.join(project, "a.md"), notebook_path: path.join(project, "a.md") }),
+          tool,
+        )
+      }
       for (const tool of ["TodoWrite", "WebFetch", "Task", "mcp__x__y"]) assert.isUndefined(yield* as(tool, {}), tool)
     }),
+  )
+
+  it.effect("a session whose agent definition is not registered has every tool call refused", () =>
+    Effect.gen(function* () {
+      const reason = yield* bareGuard("gone", "Read", { file_path: "/tmp/a" })
+      assert.include(reason ?? "", "agent definition gone")
+      assert.include(reason ?? "", "not registered")
+    }),
+  )
+
+  it.effect("a definition without a guard meets the floor only; a guard that throws is a refusal", () =>
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      yield* agents.transform((editor) => {
+        editor.add({ id: "plain", description: "no guard", system: "" })
+        editor.add({
+          id: "broken",
+          description: "guard throws",
+          system: "",
+          guard: () => {
+            throw new Error("boom")
+          },
+        })
+      })
+      const as = bareGuard
+      assert.isUndefined(yield* as("plain", "Bash", { command: "git push" }))
+      assert.isString(yield* as("plain", "Bash", { command: "herdr pane list" }))
+      assert.isString(yield* as("plain", "Bash", { command: "vibest integration stop" }))
+      const refused = yield* as("broken", "Bash", { command: "ls" })
+      assert.include(refused ?? "", "guard of agent broken failed")
+      assert.include(refused ?? "", "boom")
+    }).pipe(Effect.scoped),
   )
 })
 
@@ -651,7 +692,6 @@ describe("wizard entry", () => {
             ConfigProvider.layer(
               ConfigProvider.fromUnknown({
                 VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
-                VIBEST_AGENT: "general",
                 HOME: "/nonexistent",
               }),
             ),
@@ -667,7 +707,7 @@ describe("wizard entry", () => {
         assert.match(error instanceof Forbidden ? error.message : "", /an agent may not run vibest daemon restart/)
         assert.include(
           error instanceof Forbidden ? error.message : "",
-          "This shell carries agent session abcd1234-abcd-4abc-8abc-abcd1234abcd. If you are the user, run it as env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest daemon restart",
+          "This shell carries agent session abcd1234-abcd-4abc-8abc-abcd1234abcd. If you are the user, run it as env -u VIBEST_SESSION_ID vibest daemon restart",
         )
         assert.deepStrictEqual(touched, { spawn: false, exec: false, host: false, socket: false })
       }),
@@ -721,7 +761,7 @@ describe("vibest --session inside herdr", () => {
           Effect.exit,
           Effect.ensuring(Effect.sync(() => process.chdir(back))),
         )
-        assert.strictEqual(Exit.isFailure(exit), true, "vibest started the main agent")
+        assert.strictEqual(Exit.isFailure(exit), true, "vibest started the entry session")
         assert.strictEqual(touched.exec, false)
         assert.strictEqual(touched.host, false)
       }),
@@ -795,7 +835,6 @@ describe("vibest integration guard through vibestd", () => {
             {
               HOME: layout.home,
               VIBEST_HOME: layout.home,
-              VIBEST_AGENT: "general",
               VIBEST_SESSION_ID: id,
               VIBEST_PROJECT_ID: String(identity.projectId),
             },

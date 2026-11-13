@@ -2,9 +2,11 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel } from "../fake-model.ts"
-import { answerOf, expect, herdr, readDb, Skip, until, type World } from "../world.ts"
+import { ask, claudeEnv, fakeAnthropic, heldModel } from "../fake-model.ts"
+import { expect, herdr, readDb, replyOf, Skip, until, type World } from "../world.ts"
+import { configurePlugins } from "../world/plugins.ts"
 import { piShadow } from "../world/shadow.ts"
+import { dropHerdrSession, project } from "./inbox.ts"
 
 type Entry = {
   id: string
@@ -44,6 +46,24 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
   return file
 }
 
+const withoutDefaultHarness = async (w: World) => {
+  await configurePlugins(w, (plugins) => [...plugins, "-harness-default"])
+  await until(
+    "harness-default removed",
+    async () => (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "harness-default"),
+    30_000,
+  )
+}
+
+const withDefaultHarness = async (w: World) => {
+  await configurePlugins(w, (plugins) => plugins.filter((p) => p !== "-harness-default"))
+  await until(
+    "harness-default back",
+    async () => (await w.json<Array<{ id: string }>>(["plugins"])).some((p) => p.id === "harness-default"),
+    30_000,
+  )
+}
+
 const fakePi = async (w: World, name: string) => {
   const model = heldModel()
   model.release()
@@ -61,26 +81,26 @@ const sessions = (w: World, cwd = w.repository) =>
 
 const entry = async (w: World, id: string) => (await sessions(w)).find((e) => e.id === id)
 
-const runId = async (w: World, args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
-  const printed = JSON.parse(await w.ok(["run", ...args], { env, timeoutMs: 90_000 })) as { id: string }
+const runId = async (w: World, args: ReadonlyArray<string>) => {
+  const printed = JSON.parse(await w.okViaEntry(["run", ...args], { timeoutMs: 90_000 })) as { id: string }
   expect(Object.keys(printed).join() === "id", `vibest run prints only the id: ${JSON.stringify(printed)}`)
   return printed.id
 }
 
 const resultOf = (w: World, id: string, marker: string) =>
-  until(`the answer of ${marker}`, async () => (await answerOf(w, id)).includes(`done-${marker}`), 90_000)
+  until(`the answer of ${marker}`, async () => (await replyOf(w, id)).includes(`done-${marker}`), 90_000)
 
-const mainSession = async (w: World) => {
-  let main: Entry | undefined
+const entrySession = async (w: World) => {
+  let entry: Entry | undefined
   await until(
-    "the main agent in vibest ls",
+    "the entry session in vibest ls",
     async () => {
-      main = (await sessions(w)).find((e) => e.agent === "main")
-      return main !== undefined
+      entry = (await sessions(w)).find((e) => e.agent === "coordinator")
+      return entry !== undefined
     },
     60_000,
   )
-  return main!
+  return entry!
 }
 
 const factLines = (file: string): Promise<Array<string>> =>
@@ -122,17 +142,13 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before picks the harness: without it `vibest run -- <task>` with nothing to inherit fails; with it the run starts Pi, ls names the plugin as the harness's decider, and its answer arrives",
+      "a routing plugin's agent.start.before picks the harness: with it the run starts Pi, ls names the plugin as the harness's decider, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
-        const before = await w.vibest(["run", "--", ask("unrouted")], { timeoutMs: 60_000 })
-        expect(
-          before.code !== 0 && before.stderr.includes("no harness to inherit"),
-          `run without a router: ${before.code} ${before.stderr}`,
-        )
+        await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
         await writePlugin(
           w,
           "router",
@@ -161,7 +177,9 @@ const checks: ReadonlyArray<Check> = [
         await fs.writeFile(path.join(bin, "pi-wrapped"), `#!/bin/sh\necho ran >> '${marker}'\nexec pi "$@"\n`, {
           mode: 0o755,
         })
-        await w.daemon({ env: { PI_CODING_AGENT_DIR: dir, PATH: `${bin}:${w.env().PATH}` } })
+        const daemonEnv = { PI_CODING_AGENT_DIR: dir, PATH: `${bin}:${w.env().PATH}` }
+        await w.daemon({ env: daemonEnv })
+        await w.entry({ processEnv: daemonEnv })
         const piBinary = async () =>
           (await w.json<Array<Listed>>(["harness", "list"], { timeoutMs: 60_000 })).find((h) => h.harness === "pi")
         const file = await writePlugin(
@@ -184,38 +202,28 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H5",
     title:
-      "`vibest run` without a harness takes the main agent's harness, provider and model, from the main agent and from a plain terminal; a named harness drops provider and model; with nothing to inherit it fails `no harness to inherit`",
+      "`vibest run` without a harness takes the harness, provider and model of the entry session that runs it; a named harness drops provider and model",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "inherit")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
-        const nothing = await w.vibest(["run", "--", ask("nothing")], { timeoutMs: 60_000 })
-        expect(
-          nothing.code !== 0 && nothing.stderr.includes("no harness to inherit"),
-          `run with nothing to inherit: ${nothing.code} ${nothing.stderr}`,
-        )
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           extra: ["--provider", "second", "--model", "m2"],
           env: { PI_CODING_AGENT_DIR: dir },
           timeoutMs: 90_000,
         })
-        const main = await mainSession(w)
+        const entryRow = await entrySession(w)
         expect(
-          main.harness === "pi" && main.provider === "second" && main.model === "m2",
-          `main agent: ${JSON.stringify(main)}`,
+          entryRow.harness === "pi" && entryRow.provider === "second" && entryRow.model === "m2",
+          `entry session: ${JSON.stringify(entryRow)}`,
         )
-        const inherits = async (label: string, env: Record<string, string>) => {
-          const e = await entry(w, await runId(w, ["--", ask(label)], env))
-          expect(e?.harness === "pi" && e.provider === "second" && e.model === "m2", `${label}: ${JSON.stringify(e)}`)
-        }
-        await inherits("plain", {})
-        await inherits("frommain", {
-          VIBEST_AGENT: "coordinator",
-          VIBEST_SESSION_ID: main.id,
-          VIBEST_PROJECT_ID: main.projectId,
-        })
+        const inherited = await entry(w, await runId(w, ["--", ask("frommain")]))
+        expect(
+          inherited?.harness === "pi" && inherited.provider === "second" && inherited.model === "m2",
+          `frommain: ${JSON.stringify(inherited)}`,
+        )
         const named = await entry(w, await runId(w, ["pi", "--", ask("named")]))
         expect(
           named?.harness === "pi" && named.provider === null && named.model === null,
@@ -229,19 +237,21 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H6",
     title:
-      "`vibest` without `--harness`: a project's first start fails asking for it; after the Pi main agent exits, it restarts that harness",
+      "`vibest` without `--harness`: a project's first start with the default deliberately removed (`-harness-default`) fails asking for it; with the default back, a Pi entry session that exits is restarted on Pi (the default does not override reuse)",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "reuse")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await withoutDefaultHarness(w)
         const first = await w.vibest(["--headless"], { timeoutMs: 60_000 })
         expect(
           first.code !== 0 && /no harness to inherit: pass --harness/.test(first.stderr + first.stdout),
           `first start without --harness: ${first.code} ${first.stderr}${first.stdout}`,
         )
-        await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
-        const main = await mainSession(w)
+        await withDefaultHarness(w)
+        await w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
+        const entryRow = await entrySession(w)
         const processes = () => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
@@ -249,15 +259,15 @@ const checks: ReadonlyArray<Check> = [
               .query<{ harness: string; readyAt: number | null; endedAt: number | null }, [string]>(
                 "SELECT harness, ready_at AS readyAt, ended_at AS endedAt FROM process WHERE session_id = ? ORDER BY id",
               )
-              .all(main.id)
+              .all(entryRow.id)
           } finally {
             db.close()
           }
         }
-        await until("the main agent ready", () => processes().some((p) => p.readyAt !== null), 60_000)
+        await until("the entry session ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-        await herdr(socket, "pane.close", { pane_id: main.address.id.split("/").pop() })
-        await until("the main agent's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
+        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop() })
+        await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)
         await until("a second start", () => processes().length === 2, 30_000)
@@ -270,7 +280,120 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
+    id: "H7",
+    title:
+      "the default harness is Claude: a project's first bare `vibest` without --harness starts its entry session on Claude; a user plugin that picks Pi wins over the default; when Claude cannot start it fails `no harness to inherit`",
+    run: async (w) => {
+      needs("claude", "pi", "herdr")
+      const anthropic = fakeAnthropic(() => "ok")
+      const { model, dir } = await fakePi(w, "dflt")
+      const session = `${w.herdrSession}-dflt`
+      const startedIn = async (name: string, env: Record<string, string>) => {
+        const repo = await project(w, name)
+        await w.startEntry({ session, cwd: repo, env, timeoutMs: 120_000 })
+        let main: Entry | undefined
+        await until(
+          `the entry session of ${name}`,
+          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "coordinator")) !== undefined,
+          60_000,
+        )
+        return main!
+      }
+      try {
+        await w.daemon()
+        const claude = await startedIn("dflt-claude", await claudeEnv(w, "dflt", anthropic.url, w.config.claude))
+        expect(claude.harness === "claude", `first start without --harness: ${JSON.stringify(claude)}`)
+
+        const router = await writePlugin(
+          w,
+          "router",
+          `ctx.agent.hook("start.before", () => Effect.succeed({ harness: "pi" }))`,
+        )
+        const pi = await startedIn("dflt-pi", { PI_CODING_AGENT_DIR: dir })
+        expect(pi.harness === "pi", `a plugin picking Pi: ${JSON.stringify(pi)}`)
+        await fs.rm(router)
+        await until("router gone", async () =>
+          (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "router"),
+        )
+
+        await writePlugin(
+          w,
+          "no-claude",
+          `ctx.harness.transform((editor) => editor.update("claude", (d) => { d.binary = "claude-not-installed" }))`,
+        )
+        await until(
+          "claude not startable",
+          async () =>
+            (await w.json<Array<Listed>>(["harness", "list"], { timeoutMs: 60_000 })).some(
+              (h) => h.harness === "claude" && !h.available,
+            ),
+          30_000,
+        )
+        const repo = await project(w, "dflt-none")
+        const refused = await w.vibest(["--headless"], { cwd: repo, timeoutMs: 60_000 })
+        expect(
+          refused.code !== 0 && /no harness to inherit/.test(refused.stderr + refused.stdout),
+          `claude unavailable: ${refused.code} ${refused.stderr}${refused.stdout}`,
+        )
+      } finally {
+        model.stop()
+        anthropic.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "G14",
+    title:
+      "`-<id>` in vibest.json removes a builtin plugin by exact id and `-*` does not; while slow user plugins are still importing, a first start already sees the removal (no Claude chosen); deleting the line brings the builtin back without restarting vibestd",
+    run: async (w) => {
+      needs("herdr")
+      const slow = [1, 2, 3, 4, 5, 6, 7].map((n) => path.join(w.vibestHome, "slow", `slow-${n}.ts`))
+      await fs.mkdir(path.join(w.vibestHome, "slow"), { recursive: true })
+      for (const [n, file] of slow.entries())
+        await fs.writeFile(
+          file,
+          `import { Plugin } from "@vibest/plugin"
+import { Effect } from "effect"
+await new Promise((resolve) => setTimeout(resolve, 4800))
+export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
+`,
+        )
+      await configurePlugins(w, () => ["-*", "-harness-default", ...slow])
+      await w.daemon()
+      const pid = await w.daemonPid()
+      const started = await w.vibest(["--headless"], { timeoutMs: 60_000 })
+      expect(
+        started.code !== 0 && /no harness to inherit/.test(started.stderr + started.stdout),
+        `first start while plugins import: ${started.code} ${started.stderr}${started.stdout}`,
+      )
+      const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
+      expect(
+        log.includes("plugins still activating; going on with the active ones"),
+        "the start did not run before the first activation finished",
+      )
+      const active = async () =>
+        (await w.json<Array<{ id: string; status: string }>>(["plugins"], { timeoutMs: 60_000 })).filter(
+          (p) => p.status === "active",
+        )
+      await until(
+        "the slow plugins active",
+        async () => (await active()).filter((p) => p.id.startsWith("slow-")).length === 7,
+        60_000,
+      )
+      const ids = (await active()).map((p) => p.id)
+      expect(
+        !ids.includes("harness-default") && ids.includes("runtime-choice"),
+        `after -* and -harness-default: ${ids}`,
+      )
+      await configurePlugins(w, () => ["-*", ...slow])
+      await until("harness-default back", async () => (await active()).some((p) => p.id === "harness-default"), 60_000)
+      expect((await w.daemonPid()) === pid, "vibestd restarted")
+    },
+  },
+  {
     id: "G12",
+    covers: ["G2"],
     title:
       "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, execution.started, execution.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
     run: async (w) => {
@@ -294,6 +417,7 @@ const checks: ReadonlyArray<Check> = [
       }
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
         await save(observer(first, JSON.stringify({ types: ordered })))
         await until("the observer active", async () =>
           (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
@@ -344,6 +468,7 @@ const checks: ReadonlyArray<Check> = [
       const file = path.join(w.vibestHome, "plugins", "promised.ts")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
         await fs.mkdir(path.dirname(file), { recursive: true })
         await fs.writeFile(`${file}.tmp`, promised(facts, cleanup))
         await fs.rename(`${file}.tmp`, file)

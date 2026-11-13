@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
+import { Db, harnessIdOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Sessions } from "@vibest/core/sessions"
@@ -26,7 +27,9 @@ import { makeRepository, testLayer, type TestOptions, type TestServices } from "
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
+    agent: "general",
     root: repo,
+    parentSessionId: "creator",
     projectId,
     name: "task",
     prompt: extra.prompt ?? "do it",
@@ -65,9 +68,9 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
       const row = (yield* db.getSession(s.id))!
-      assert.strictEqual(row.harnessId, "claude")
-      assert.strictEqual(row.model, "claude-haiku-5-5")
-      assert.deepStrictEqual(row.metadata.routing?.decidedBy, {
+      assert.strictEqual(harnessIdOf(row), "claude")
+      assert.strictEqual(row.process?.model ?? null, "claude-haiku-5-5")
+      assert.deepStrictEqual(row.process?.routing?.decidedBy, {
         harness: "route",
         model: "route",
       })
@@ -218,6 +221,7 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(
         listed.map((p) => [p.id, p.status]),
         [
+          ["vibest.agent", "active"],
           ["runtime-choice", "active"],
           ["session", "failed"],
           ["worker", "failed"],
@@ -227,10 +231,10 @@ describe("plugins: spawn hook", () => {
         ],
       )
       const supported = "agent.start.before, agent.fail"
-      assert.include(listed[1]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
-      assert.include(listed[2]!.error, `unsupported hook "agent.worker.spawn"`)
-      assert.include(listed[3]!.error, `unsupported hook "agent.session.start"`)
-      assert.include(listed[4]!.error, `unsupported hook "agent.toString"`)
+      assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
+      assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
+      assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
+      assert.include(listed[5]!.error, `unsupported hook "agent.toString"`)
     }),
     {
       plugins: [
@@ -270,6 +274,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(subscriptionsLayer),
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
+      Effect.provide(Agents.layer),
       Effect.provide(Bus.layer),
     ),
   )
@@ -300,6 +305,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(subscriptionsLayer),
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
+      Effect.provide(Agents.layer),
       Effect.provide(Bus.layer),
     ),
   )
@@ -343,6 +349,7 @@ describe("plugins: spawn hook", () => {
         Effect.provide(subscriptionsLayer),
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
+        Effect.provide(Agents.layer),
         Effect.provide(Bus.layer),
       ),
   )
@@ -369,6 +376,7 @@ const loaded = (dir: string) =>
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
+    Layer.provide(Agents.layer),
     Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
@@ -376,7 +384,7 @@ const loaded = (dir: string) =>
 
 const event = {
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   prompt: "p",
   harness: undefined,
