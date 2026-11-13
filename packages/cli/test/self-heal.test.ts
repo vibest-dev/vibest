@@ -7,9 +7,10 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { SessionLive } from "@vibest/core/session/live"
-import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
-import { PingResult, VERSION } from "@vibest/protocol/rpc"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import { PingResult } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { PROTOCOL } from "@vibest/schema/version"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
 import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
@@ -18,6 +19,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { replaceDaemon, type Timing } from "../src/replace.ts"
+import { VERSION } from "../src/version.ts"
 import {
   PATH_WITHOUT_HARNESS_CLIS,
   noteRecorded,

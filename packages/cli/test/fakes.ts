@@ -1,6 +1,7 @@
 import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
+import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
@@ -16,13 +17,16 @@ import {
   runtimesLayer,
   subscriptionsLayer,
 } from "@vibest/core/test/lib/harnesses"
+import { NOT_CHECKED } from "@vibest/protocol/rpc"
 import { readDaemonInfo } from "@vibest/server/daemon"
+import { UpdateCheck } from "@vibest/server/update-check"
 import { Effect, FileSystem, Layer, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
 import { commandOf, note } from "../../../tools/reap.ts"
+import { VERSION } from "../src/version.ts"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
 
@@ -131,11 +135,12 @@ export {
   restartSessions,
   PluginHost,
   callerPlugin,
-  sessionFrom as testLayer,
   type PluginEntry,
-  type TestOptions,
   type TestServices,
 } from "@vibest/core/test/lib/session"
+import { sessionFrom, type TestOptions } from "@vibest/core/test/lib/session"
+
+export type { TestOptions }
 export {
   GaveUp,
   EXECUTIONS,
@@ -256,3 +261,10 @@ export const wire = Effect.gen(function* () {
     ),
   } satisfies Wire
 })
+
+export const hostReplacements = [
+  App.node.replace(Layer.succeed(App, { version: VERSION })),
+  UpdateCheck.node.replace(Layer.succeed(UpdateCheck, Effect.succeed(NOT_CHECKED))),
+]
+
+export const testLayer = (options: TestOptions = {}) => sessionFrom({ version: VERSION, ...options })

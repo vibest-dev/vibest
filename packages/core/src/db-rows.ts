@@ -1,9 +1,8 @@
 import { ExecutionOutcome, type InboxKind, ProcessEndReason } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
+import { Routing } from "@vibest/schema/plugin"
 import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
 import { Schema } from "effect"
-
-import { Routing } from "./plugins.ts"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
 export const encodeAddress = Schema.encodeSync(AddressJson)

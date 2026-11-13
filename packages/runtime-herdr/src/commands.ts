@@ -1,6 +1,6 @@
 import readline from "node:readline"
 
-import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
+import type { Claim, VibestClient, VibestClients } from "@vibest/client/client"
 import { isLimited } from "@vibest/plugin"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -195,9 +195,6 @@ const claim = (directory: string): Claim => ({ _tag: "cli", repositoryRoot: dire
 const callerEnvOf = (): Record<string, string> =>
   Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
 
-const ask = <A, E, R>(directory: string, f: (client: VibestClient) => Effect.Effect<A, E, R>) =>
-  withVibest(claim(directory), f)
-
 const toLive = (session: SessionInfo): LiveSession => ({
   id: session.id,
   agent: session.agent,
@@ -206,53 +203,63 @@ const toLive = (session: SessionInfo): LiveSession => ({
   paneId: parseTerminal(session.address)?.paneId,
 })
 
-const theDaemon = {
-  republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
-  openEntry: (directory: string) =>
-    Effect.gen(function* () {
-      const focused = yield* ask(directory, (client) => client["Project.FocusEntry"]({}))
-      if (focused)
-        return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
-      const self = yield* VibestCommand
-      const opened = yield* ask(directory, (client) =>
-        client.Launch({ argv: [...self], agent: "coordinator", focus: true, runtime: KIND, callerEnv: callerEnvOf() }),
-      )
-      return { action: "opened" as const, place: opened.place }
-    }),
-  spawn: (directory: string, prompt: string) =>
-    Effect.gen(function* () {
-      return (yield* ask(directory, (client) => client.Spawn({ prompt, agent: "general", callerEnv: callerEnvOf() })))
-        .id
-    }),
-  interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
-  list: (directory: string | undefined) =>
-    ask(directory ?? "/", (client) => client.List(directory === undefined ? { all: true } : {})).pipe(
-      Effect.map((listed) =>
-        listed.sessions.filter((row) => row.exitedAt === null && row.machine === undefined).map(toLive),
-      ),
-    ),
-  usage: () =>
-    ask("/", (client) => client.Subscriptions()).pipe(
-      Effect.map((rows) =>
-        rows.flatMap((row) =>
-          row.limits.map((limit): UsageWindow => ({
-            harness: row.provider === "" ? row.harness : `${row.harness} ${row.provider}`,
-            window: limit.window,
-            percent: limit.percent,
-            status: limit.status,
-            resetTime: limit.resetTime,
-            ...(row.error ? { error: row.error } : {}),
-          })),
+const daemonOn = ({ withVibest }: VibestClients) => {
+  const ask = <A, E, R>(directory: string, f: (client: VibestClient) => Effect.Effect<A, E, R>) =>
+    withVibest(claim(directory), f)
+  return {
+    republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
+    openEntry: (directory: string) =>
+      Effect.gen(function* () {
+        const focused = yield* ask(directory, (client) => client["Project.FocusEntry"]({}))
+        if (focused)
+          return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
+        const self = yield* VibestCommand
+        const opened = yield* ask(directory, (client) =>
+          client.Launch({
+            argv: [...self],
+            agent: "coordinator",
+            focus: true,
+            runtime: KIND,
+            callerEnv: callerEnvOf(),
+          }),
+        )
+        return { action: "opened" as const, place: opened.place }
+      }),
+    spawn: (directory: string, prompt: string) =>
+      Effect.gen(function* () {
+        return (yield* ask(directory, (client) => client.Spawn({ prompt, agent: "general", callerEnv: callerEnvOf() })))
+          .id
+      }),
+    interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
+    list: (directory: string | undefined) =>
+      ask(directory ?? "/", (client) => client.List(directory === undefined ? { all: true } : {})).pipe(
+        Effect.map((listed) =>
+          listed.sessions.filter((row) => row.exitedAt === null && row.machine === undefined).map(toLive),
         ),
       ),
-    ),
+    usage: () =>
+      ask("/", (client) => client.Subscriptions()).pipe(
+        Effect.map((rows) =>
+          rows.flatMap((row) =>
+            row.limits.map((limit): UsageWindow => ({
+              harness: row.provider === "" ? row.harness : `${row.harness} ${row.provider}`,
+              window: limit.window,
+              percent: limit.percent,
+              status: limit.status,
+              resetTime: limit.resetTime,
+              ...(row.error ? { error: row.error } : {}),
+            })),
+          ),
+        ),
+      ),
+  }
 }
 
-type LiveSteps = ReturnType<(typeof theDaemon)[keyof typeof theDaemon]>
+type LiveSteps = ReturnType<ReturnType<typeof daemonOn>[keyof ReturnType<typeof daemonOn>]>
 export type DaemonError = LiveSteps extends Effect.Effect<any, infer E, any> ? E : never
 export type DaemonServices = LiveSteps extends Effect.Effect<any, any, infer R> ? R : never
 
-export const liveDaemon = (): HerdrDaemon<DaemonError, DaemonServices> => theDaemon
+export const liveDaemon = (clients: VibestClients): HerdrDaemon<DaemonError, DaemonServices> => daemonOn(clients)
 
 const stdinLines = () => {
   let reader: readline.Interface | undefined
@@ -285,7 +292,10 @@ const DESCRIPTIONS: Record<Verb, string> = {
   palette: "A numbered menu of the herdr plugin actions",
 }
 
-export const herdrCommands = <E, R>(refuseAgent: (command: string) => Effect.Effect<void, E, R>) =>
+export const herdrCommands = <E, R>(
+  refuseAgent: (command: string) => Effect.Effect<void, E, R>,
+  clients: VibestClients,
+) =>
   Command.make("herdr").pipe(
     Command.withDescription(
       "Commands the herdr plugin runs. The project directory comes from HERDR_PLUGIN_CONTEXT_JSON, not the working directory.",
@@ -303,7 +313,7 @@ export const herdrCommands = <E, R>(refuseAgent: (command: string) => Effect.Eff
                 const io = stdinLines()
                 yield* Effect.ensuring(
                   Effect.gen(function* () {
-                    const result = yield* perform(verb, context, liveDaemon(), io.readLine, Console.log)
+                    const result = yield* perform(verb, context, liveDaemon(clients), io.readLine, Console.log)
                     if (result !== "") yield* Console.log(result)
                   }),
                   Effect.sync(() => io.close()),
