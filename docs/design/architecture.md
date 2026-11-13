@@ -768,10 +768,13 @@ running one as it is (not torn down or set up again, and neither are the plugins
 both revisions, while with changed options it is failed and the old one is not restored; one whose setup fails falls
 back to the previous one; neither is retried until it changes; a plugin file found in the plugins
 directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
-last mention; an activation latch gates entry points; builtin plugins activate while vibestd's
-layers are built, before it listens, so a request that routes to a builtin runtime never finds it unregistered
-(user plugins activate afterwards, in the background; a runtime a user plugin registers can still be missing for
-a request admitted before that). A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`
+last mention; an activation latch gates `agent.start.before` and `agent.fail`. They wait up to 10 s
+for the pending generation; if it is still not active the operation fails with `PluginsNotActive`, naming the
+plugins still loading, and does not run on the plugins already active. `vibest plugins` and machine hooks keep
+their current reads. Builtin plugins activate while vibestd's layers are built, before it listens, so a request
+that routes to a builtin runtime never finds it unregistered. User plugins activate afterwards, in the background,
+and a start during that activation is refused rather than admitted without them. Choosing a place and reading the
+caller's runtime do not wait, so the first start waits once, at this gate. A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`
 does), because every builtin setup runs before vibestd listens and a slow one would push startup past the
 client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and module file changes, debounced by
 100 ms.
@@ -1272,4 +1275,5 @@ Paths are in `anomalyco/opencode` at `f0944f0`. These are sources to read when i
 
 Where vibest differs: protocol, persistence, delivery, and daemon come from omac (§15), not from OpenCode;
 graphs are per Project, not per directory; decision points survive restarts; notify hooks have a timeout; no
-coding-agent domain; harness adapters sit on top of an external runtime (herdr).
+coding-agent domain; harness adapters sit on top of an external runtime (herdr). Plugin activation is a gate with
+a 10 s bound that refuses with `PluginsNotActive`, not an unbounded wait.

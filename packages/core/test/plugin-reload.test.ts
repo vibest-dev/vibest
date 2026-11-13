@@ -4,7 +4,16 @@ import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Layout } from "@vibest/core/paths"
-import { Builtins, type Candidate, DEBOUNCE, makeHost, PluginLoader, Plugins, RECHECK } from "@vibest/core/plugins"
+import {
+  Builtins,
+  type Candidate,
+  DEBOUNCE,
+  makeHost,
+  PluginLoader,
+  Plugins,
+  PluginsNotActive,
+  RECHECK,
+} from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
 import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"
 import { TestClock } from "effect/testing"
@@ -56,8 +65,11 @@ const event = {
 }
 const takeEvents = Effect.sync(() => events.splice(0))
 
-const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E>) =>
-  makeHost().pipe(
+const host = <A, E>(
+  f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E>,
+  timeout?: Duration.Input,
+) =>
+  makeHost(timeout === undefined ? {} : { timeout }).pipe(
     Effect.flatMap(f),
     Effect.scoped,
     Effect.provide(subscriptionsLayer),
@@ -488,5 +500,32 @@ describe("plugins: supervisor", () => {
         Effect.provide(Platform.services),
       ),
     15_000,
+  )
+
+  it.effect("a start during setup is refused and names the plugins still loading", () =>
+    host(
+      (h) =>
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const slow = Plugin.define({
+            id: "slow",
+            effect: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          })
+          h.ready.closeUnsafe()
+          const activating = yield* Effect.forkChild(
+            h.activate([candidate("slow", "1", slow), candidate("later", "1", logged("later", "later"))]),
+          )
+          yield* Deferred.await(entered)
+          const starting = yield* Effect.forkChild(h.service.start(event))
+          yield* TestClock.adjust("10 seconds")
+          const failed = yield* Effect.flip(Fiber.join(starting))
+          assert.ok(failed instanceof PluginsNotActive)
+          assert.deepStrictEqual(failed.plugins, ["slow", "later"])
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(activating)
+        }),
+      "30 seconds",
+    ),
   )
 })

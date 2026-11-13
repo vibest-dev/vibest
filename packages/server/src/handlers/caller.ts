@@ -1,6 +1,5 @@
 import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
 import { Db } from "@vibest/core/db"
-import { Plugins } from "@vibest/core/plugins"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { NotInRepository } from "@vibest/core/worktree"
@@ -20,7 +19,6 @@ export type Agent = Extract<CallerShape, { _tag: "Cli" | "Session" }>
 
 export const make = Effect.gen(function* () {
   const db = yield* Db
-  const plugins = yield* Plugins
   const runtimes = yield* Runtimes
 
   const agent = (method: MethodOf<"agent" | "owner">) =>
@@ -66,7 +64,7 @@ export const make = Effect.gen(function* () {
     readonly runtimeSession?: string | undefined
   }) =>
     Effect.gen(function* () {
-      const specs = yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))
+      const specs = yield* runtimes.callers
       const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
       return { id: "local", ...(target !== undefined ? { target } : {}) }
     })

@@ -3682,6 +3682,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/UnknownAgentEncoded"
               }
             ]
@@ -3854,6 +3857,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },
@@ -7050,6 +7075,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
@@ -7345,6 +7373,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },
@@ -10894,6 +10944,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/HarnessUnavailableEncoded"
               },
               {
@@ -11056,6 +11109,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },
@@ -13729,6 +13804,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
@@ -14164,6 +14242,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },

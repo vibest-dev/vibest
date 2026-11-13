@@ -7,6 +7,10 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **A start while plugins are still loading is refused** (users; RPC clients of `Spawn`, `Launch`,
+  `Project.StartEntry` and `Peer.Spawn`): `agent.start.before` and `agent.fail` wait up to 10 s for plugin
+  activation and then fail with `PluginsNotActive`, naming the plugins still loading, instead of running with only
+  the plugins already active. Retry once `vibest plugins` shows them active. Listing plugins is unchanged.
 - **A `vibest.json` plugin entry must be a folder** (plugin authors, users with single-file entries): an entry that names
   a file is skipped with a warning, as OpenCode does. Put the file in `~/.vibest/plugins/`, or move it to a folder with
   an `index.ts` (or a `package.json` with `exports`) and name the folder. The shipped Cursor plugin is now

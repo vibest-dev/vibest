@@ -8,8 +8,7 @@ import type {
   SubscriptionReport,
   Transform,
 } from "@vibest/plugin"
-import type { HookFailed, PluginInfo, TraceEntry } from "@vibest/schema/plugin"
-import type { AgentRefused } from "@vibest/schema/plugin"
+import type { AgentRefused, HookFailed, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
 import type { HarnessUnavailable, NoRuntime } from "@vibest/schema/session"
 import type { Subscription } from "@vibest/schema/subscription"
 import type { Effect, Stream } from "effect"
@@ -47,10 +46,13 @@ export interface AgentsShape {
 }
 
 export interface PluginsShape {
-  readonly start: (input: StartInput) => Effect.Effect<SpawnDecision, AgentRefused>
+  readonly start: (input: StartInput) => Effect.Effect<SpawnDecision, AgentRefused | PluginsNotActive>
   readonly fail: (
     input: FailInput,
-  ) => Effect.Effect<{ readonly move: AgentMove | undefined; readonly trace: ReadonlyArray<TraceEntry> }, HookFailed>
+  ) => Effect.Effect<
+    { readonly move: AgentMove | undefined; readonly trace: ReadonlyArray<TraceEntry> },
+    HookFailed | PluginsNotActive
+  >
   readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   readonly settled: Effect.Effect<boolean>
   readonly machine: (
