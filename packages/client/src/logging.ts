@@ -1,6 +1,6 @@
 import { Config, Effect, Formatter, Layer, Logger, Option, Random, References } from "effect"
 
-export const logfmt = (run: string) =>
+const logfmt = (run: string) =>
   Logger.map(Logger.formatStructured, (output) => {
     const messages = Array.isArray(output.message) ? output.message : [output.message]
     return [
