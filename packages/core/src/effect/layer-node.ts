@@ -1,4 +1,4 @@
-import { Brand, Context, Effect, Layer, type Scope } from "effect"
+import { Brand, Context, Duration, Effect, Fiber, Layer, Scope } from "effect"
 
 export * as LayerNode from "./layer-node.ts"
 
@@ -306,7 +306,9 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
       if (cached) return cached
       const dependencies = node.dependencies.map(build)
       const implementation = Layer.suspend(() => node.implementation.pipe(Layer.provide([ambient, ...dependencies])))
-      const layer = Layer.fromBuild((_, scope) => buildContext(implementation, node.shared ? memoMap : local, scope))
+      const layer = Layer.fromBuild((_, scope) =>
+        trackRelease(node.name, scope, () => buildContext(implementation, node.shared ? memoMap : local, scope)),
+      )
       layers.set(node, layer)
       return layer
     }
@@ -316,6 +318,29 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
       scope,
     )
   }) as Layer.Layer<A, E>
+}
+
+const RELEASE_WARN_AFTER = Duration.seconds(5)
+
+export function trackRelease<A, E, R>(name: string, scope: Scope.Scope, build: () => Effect.Effect<A, E, R>) {
+  return Effect.gen(function* () {
+    let watcher: Fiber.Fiber<void> | undefined
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.suspend(() => (watcher === undefined ? Effect.void : Fiber.interrupt(watcher))),
+    )
+    const result = yield* build()
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.gen(function* () {
+        watcher = yield* Effect.sleep(RELEASE_WARN_AFTER).pipe(
+          Effect.andThen(Effect.logWarning(`layer ${name} is still releasing`)),
+          Effect.forkDetach,
+        )
+      }),
+    )
+    return result
+  })
 }
 
 class BuildResult extends Context.Service<BuildResult, Context.Context<never>>()("vibest/LayerNode/BuildResult") {}
