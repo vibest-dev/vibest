@@ -1,6 +1,6 @@
 import { capture } from "@vibest/plugin"
 import { Effect } from "effect"
-import { ChildProcessSpawner } from "effect/process"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 export type Spawner = ChildProcessSpawner.ChildProcessSpawner["Service"]
 

@@ -3,7 +3,7 @@ import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import type { Harness } from "@vibest/plugin"
 import { Effect, FileSystem, Layer, Path } from "effect"
-import { ChildProcessSpawner } from "effect/process"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { noProvider, opt } from "./models.ts"
 import { cursorSubscription } from "./subscriptions/cursor.ts"
