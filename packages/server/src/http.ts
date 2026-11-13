@@ -25,6 +25,21 @@ export type Reply = { readonly status: number; readonly body?: unknown }
 const failure = (status: number, error: string): Reply => ({ status, body: { error } })
 const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { status: 200, body })
 
+const REASON_LIMIT = 1024
+const boundReason = (reason: string) =>
+  reason.length <= REASON_LIMIT
+    ? reason
+    : reason.slice(0, REASON_LIMIT) + `... (${reason.length - REASON_LIMIT} more chars)`
+
+const schemaRejection = (reason: string) =>
+  Effect.logWarning("schema rejection").pipe(
+    Effect.annotateLogs({ kind: "Payload", reason }),
+    Effect.as({
+      status: 400,
+      body: { _tag: "InvalidRequestError", message: reason, kind: "Payload" },
+    } satisfies Reply),
+  )
+
 const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
 export const make = Effect.gen(function* () {
@@ -68,7 +83,7 @@ export const make = Effect.gen(function* () {
       }
       if (request.path === "/session/ready") {
         const decoded = yield* Effect.result(Schema.decodeUnknownEffect(ReadyBody)(request.body))
-        if (decoded._tag === "Failure") return failure(400, decoded.failure.message)
+        if (decoded._tag === "Failure") return yield* schemaRejection(boundReason(decoded.failure.message))
         const current = yield* integration.ready(
           who.id,
           decoded.success.pid,

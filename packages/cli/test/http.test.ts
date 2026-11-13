@@ -6,8 +6,9 @@ import { PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Http from "@vibest/server/http"
-import { Clock, Effect, type Scope } from "effect"
+import { Clock, Effect, Logger, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
+import { CurrentLogAnnotations } from "effect/References"
 import { TestClock } from "effect/testing"
 
 import {
@@ -104,11 +105,31 @@ describe("vibestd's HTTP API", () => {
       const reportedPid = yield* pid()
       yield* TestClock.adjust("1 second")
       const now = yield* Clock.currentTimeMillis
+      const logs: Array<{
+        readonly message: unknown
+        readonly level: unknown
+        readonly annotations: Readonly<Record<string, unknown>>
+      }> = []
+      const watched = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(
+          Effect.provide(
+            Logger.layer([
+              Logger.make(({ fiber, logLevel, message }) => {
+                logs.push({ message, level: logLevel, annotations: { ...fiber.getRef(CurrentLogAnnotations) } })
+              }),
+            ]),
+          ),
+        )
       const rejected = (body: string, message: string) =>
         Effect.gen(function* () {
-          const reply = yield* ready(body)
+          const reply = yield* watched(ready(body))
           assert.strictEqual(reply.status, 400)
-          assert.deepStrictEqual(reply.body, { error: message })
+          assert.deepStrictEqual(reply.body, { _tag: "InvalidRequestError", message, kind: "Payload" })
+          assert.deepStrictEqual(logs.at(-1), {
+            message: ["schema rejection"],
+            level: "Warn",
+            annotations: { kind: "Payload", reason: message },
+          })
           assert.strictEqual(yield* db.readyAt(worker), readyAt)
           assert.strictEqual(yield* pid(), reportedPid)
         })
