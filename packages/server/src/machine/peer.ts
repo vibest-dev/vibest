@@ -1,3 +1,10 @@
+import { Bus } from "@vibest/core/bus"
+import { Db, type OutboxRow } from "@vibest/core/db"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import { Git } from "@vibest/core/git"
+import { VibestdIdentity } from "@vibest/core/identity"
+import { repositoryIdentity } from "@vibest/core/repository-url"
+import { defaultSessionName, Sessions } from "@vibest/core/sessions"
 import type { PayloadOf } from "@vibest/protocol/rpc"
 import {
   NoCommit,
@@ -9,14 +16,6 @@ import {
 } from "@vibest/schema/machine"
 import { NoRuntime } from "@vibest/schema/session"
 import { Context, Effect, Layer, Stream } from "effect"
-
-import { Bus } from "./bus.ts"
-import { Db, type OutboxRow } from "./db.ts"
-import { LayerNode } from "./effect/layer-node.ts"
-import { Git } from "./git.ts"
-import { VibestdIdentity } from "./identity.ts"
-import { repositoryIdentity } from "./repository-url.ts"
-import { defaultSessionName, Sessions } from "./sessions.ts"
 
 export const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }

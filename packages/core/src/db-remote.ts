@@ -3,8 +3,9 @@ import { Effect } from "effect"
 import type { Statement } from "effect/sql"
 
 import type { Store } from "./db-store.ts"
-import type { PeerScope } from "./remote.ts"
 import { noticeEnvelope, sessionEnvelope } from "./replies.ts"
+
+export type PeerScope = { readonly peer: string; readonly project: string; readonly session?: string }
 
 export type MachineRow = {
   readonly name: string

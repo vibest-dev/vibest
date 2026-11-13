@@ -1,4 +1,10 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
+import { Db, type MachineRow } from "@vibest/core/db"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import { VibestdIdentity } from "@vibest/core/identity"
+import { keyedLock } from "@vibest/core/keyed-lock"
+import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugins"
+import { Runtimes } from "@vibest/core/runtimes"
 import { reconnectSchedule, type Runtime } from "@vibest/plugin"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
@@ -33,13 +39,6 @@ import {
 } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
-
-import { Db, type MachineRow } from "./db.ts"
-import { LayerNode } from "./effect/layer-node.ts"
-import { VibestdIdentity } from "./identity.ts"
-import { keyedLock } from "./keyed-lock.ts"
-import { errorMessage, type MachineHook, type PluginNote, Plugins } from "./plugins.ts"
-import { Runtimes } from "./runtimes.ts"
 
 export type PipeExit = { readonly code: number | undefined; readonly stderr: string }
 
