@@ -34,6 +34,7 @@ import { vi } from "vitest"
 
 import { extension, services, skillsDir } from "../src/extension.ts"
 import { Pi } from "../src/pi.ts"
+import presentation from "../src/presentation.ts"
 
 const valuesStoredByRefSet = vi.hoisted(() => [] as Array<unknown>)
 vi.mock("effect", async (importOriginal) => {
@@ -67,7 +68,7 @@ const test = <E>(
   timeout?: number,
 ) => it.effect(name, () => program.pipe(Effect.scoped, Effect.provide(served)), timeout)
 
-const session = (env: Record<string, string>) =>
+const session = (env: Record<string, string>, withPresentation = false) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -126,6 +127,7 @@ const session = (env: Record<string, string>) =>
     yield* Effect.promise(() =>
       Pi.runMain(api, extension.pipe(Layer.provide(Layer.merge(services, noTty)), Layer.provide(config))),
     )
+    if (withPresentation) presentation(api)
     yield* Effect.addFinalizer(() => emit("session_shutdown"))
     return { handlers, messages, renderers, statuses, emit }
   })
@@ -331,7 +333,7 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Session TUI: grouped tools and the user-message lease, released at shutdown and taken again after a reload",
+    "Session TUI: the essential extension alone leaves the TUI untouched; the presentation extension groups tools and holds the user-message lease, released at shutdown and taken again after a reload",
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
       const paint = Object.getOwnPropertyDescriptor(TuiAltScreen.prototype, "doRender")?.value
@@ -342,7 +344,12 @@ describe("pi-vibest", () => {
         },
       ]) {
         for (const _load of ["startup", "reload"]) {
-          const s = yield* session(env)
+          const essential = yield* session(env)
+          yield* essential.emit("session_start", { reason: "startup" }, tuiStart)
+          assert.strictEqual(essential.renderers.length, 0)
+          assert.isUndefined(lease())
+          yield* essential.emit("session_shutdown")
+          const s = yield* session(env, true)
           assert.strictEqual(s.renderers.length, 1)
           assert.isTrue(s.handlers.has("message_start") && s.handlers.has("tool_execution_end"))
           assert.deepStrictEqual(
