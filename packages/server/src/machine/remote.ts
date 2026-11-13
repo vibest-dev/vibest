@@ -1,20 +1,21 @@
 import type { PipeClient } from "@vibest/client/pipe"
+import { callerKind } from "@vibest/core/caller"
+import { Db } from "@vibest/core/db"
+import type { PeerScope } from "@vibest/core/db-remote"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import { Git } from "@vibest/core/git"
+import { VibestdIdentity } from "@vibest/core/identity"
+import { repositoryIdentity } from "@vibest/core/repository-url"
+import { Runtimes } from "@vibest/core/runtimes"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { type ListedMachine, MachineFailed } from "@vibest/schema/machine"
 import { Context, Effect, Layer } from "effect"
 
-import { callerKind } from "./caller.ts"
-import { Db } from "./db.ts"
-import { LayerNode } from "./effect/layer-node.ts"
-import { Git } from "./git.ts"
-import { VibestdIdentity } from "./identity.ts"
 import { Machines } from "./machines.ts"
-import { repositoryIdentity } from "./repository-url.ts"
-import { Runtimes } from "./runtimes.ts"
 
-export type Address =
+type Address =
   | { readonly _tag: "Local"; readonly id: string }
   | { readonly _tag: "Remote"; readonly machine: string; readonly id: string }
 
@@ -27,15 +28,13 @@ export const address = (input: string): Address => {
 
 export type At = Extract<Address, { readonly _tag: "Remote" }>
 
-export type PeerScope = { readonly peer: string; readonly project: string; readonly session?: string }
-
 export type ListScope =
   | { readonly _tag: "All" }
   | { readonly _tag: "Project"; readonly id: string }
   | { readonly _tag: "Nothing" }
   | ({ readonly _tag: "Peer" } & PeerScope)
 
-export type Forwarded<A, E> = (
+type Forwarded<A, E> = (
   client: PipeClient,
   at: At,
   options: { readonly headers: Record<string, string> },
