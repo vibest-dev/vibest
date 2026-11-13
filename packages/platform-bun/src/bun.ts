@@ -340,7 +340,13 @@ export const replacements: LayerNode.Replacements = [
   ),
   MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
   PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
-  builtinsNode.replace(Layer.succeed(Builtins, pre)),
+  builtinsNode.replace(
+    LayerNode.make({
+      name: "vibest/Builtins",
+      layer: Layer.effect(Builtins, pre),
+      deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
+    }),
+  ),
   HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
   ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
   Server.socketServerLayer.replace(
