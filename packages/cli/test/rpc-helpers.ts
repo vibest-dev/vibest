@@ -1,6 +1,6 @@
 import { it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"

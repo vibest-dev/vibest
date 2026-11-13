@@ -13,7 +13,7 @@ import {
   Plugins,
   PluginsNotActive,
   RECHECK,
-} from "@vibest/core/plugins"
+} from "@vibest/core/plugin"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin/effect"
 import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { MACHINE_TIMEOUT } from "@vibest/core/plugins"
-import type { SpawnInput } from "@vibest/core/sessions"
+import { MACHINE_TIMEOUT } from "@vibest/core/plugin"
+import type { SpawnInput } from "@vibest/core/session"
 import { type MachineEvent, Plugin } from "@vibest/plugin/effect"
 import { REPAIR_PAUSE } from "@vibest/server/machine/machines"
 import { Duration, Effect, Fiber, PubSub, Stream } from "effect"

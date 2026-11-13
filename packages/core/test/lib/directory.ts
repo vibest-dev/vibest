@@ -1,4 +1,4 @@
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Effect, FileSystem } from "effect"
 
 export const projectOf = (directory: string) =>

@@ -15,14 +15,14 @@ import {
   runtimeOf,
   type SessionRow,
   terminalOf,
-} from "../db.ts"
+} from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Harness, type HarnessId, Harnesses } from "../harness.ts"
-import type { HarnessDefinition, HarnessesShape } from "../host.ts"
 import { entryCommand, restartArgv } from "../launch.ts"
 import { Layout, VibestCommand } from "../paths.ts"
-import { errorMessage } from "../plugins.ts"
+import { errorMessage } from "../plugin.ts"
+import type { HarnessDefinition, HarnessesShape } from "../plugin/host.ts"
 import { Processes } from "../processes.ts"
 import { noticeEnvelope } from "../replies.ts"
 import { agentState, type AgentSeen, peekHint, type Runtime, Runtimes, stateOf, type Terminal } from "../runtimes.ts"

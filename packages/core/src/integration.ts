@@ -1,16 +1,16 @@
 import { Clock, Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 
 import { Agents } from "./agents.ts"
-import { Db, runtimeOf, terminalOf } from "./db.ts"
+import { Db, runtimeOf, terminalOf } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import * as Guard from "./guard.ts"
 import { Harnesses } from "./harness.ts"
-import type { HarnessDefinition } from "./host.ts"
 import { Layout, VibestCommand } from "./paths.ts"
+import type { HarnessDefinition } from "./plugin/host.ts"
 import { jsonObject, promptOf, executionEndOf } from "./replies.ts"
 import { alive, Runtimes } from "./runtimes.ts"
-import { Sessions } from "./sessions.ts"
+import { Sessions } from "./session.ts"
 
 export type HookCaller = {
   readonly id: string

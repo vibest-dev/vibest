@@ -27,7 +27,7 @@ import {
   terminalOf,
   exitedAt,
   archived,
-} from "../db.ts"
+} from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { encodeCommand, Harness, Harnesses, type HarnessUnavailable } from "../harness.ts"
@@ -39,7 +39,7 @@ import {
   discardIsolatedWorktrees,
   listProjectRepositories,
   projectRoot,
-} from "../project-create.ts"
+} from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
 import { projectText, removeSystemPrompt, systemPrompt, writeSystemPrompt } from "../system-prompt.ts"

@@ -1,6 +1,6 @@
 import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
-import type { HarnessDefinition, HarnessesShape } from "@vibest/core/host"
 import { normalizeModels } from "@vibest/core/models"
+import type { HarnessDefinition, HarnessesShape } from "@vibest/core/plugin/host"
 import { HostEnv, Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Effect, Layer, type Scope } from "effect"

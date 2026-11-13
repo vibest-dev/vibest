@@ -4,7 +4,14 @@ import type { Taken } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus, TerminalExited } from "./bus.ts"
-import { Db, type InboxRow, type NewInboxRow, type RuntimeAddress, type SessionRow, harnessIdOf } from "./db.ts"
+import {
+  Db,
+  type InboxRow,
+  type NewInboxRow,
+  type RuntimeAddress,
+  type SessionRow,
+  harnessIdOf,
+} from "./database/db.ts"
 import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { Harnesses } from "./harness.ts"

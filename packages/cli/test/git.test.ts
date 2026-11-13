@@ -1,6 +1,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db, type NewSession } from "@vibest/core/db"
+import { Db, type NewSession } from "@vibest/core/database/db"
 import { Git } from "@vibest/core/git"
 import { Layout } from "@vibest/core/paths"
 import {
@@ -8,8 +8,8 @@ import {
   createProject,
   listProjectRepositories,
   projectRoot,
-} from "@vibest/core/project-create"
-import { locateProject, resolveProject } from "@vibest/core/project-identity"
+} from "@vibest/core/project/create"
+import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { SessionLive } from "@vibest/core/session/live"
 import { copyIncluded, gitState, mainCheckout } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"

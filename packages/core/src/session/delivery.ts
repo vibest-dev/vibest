@@ -17,12 +17,21 @@ import {
 
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
-import { Db, type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf, archived } from "../db.ts"
+import {
+  Db,
+  type SessionRow,
+  harnessIdOf,
+  runtimeOf,
+  terminalOf,
+  exitedAt,
+  executionStateOf,
+  archived,
+} from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Harnesses } from "../harness.ts"
 import { Inbox, text as inboxText } from "../inbox.ts"
-import { errorMessage } from "../plugins.ts"
+import { errorMessage } from "../plugin.ts"
 import * as Reactor from "../reactor.ts"
 import { alive, agentState, type Runtime, Runtimes, RuntimeError, stateOf, type Terminal } from "../runtimes.ts"
 import { busy, Executions, STOP_WAIT } from "./executions.ts"
