@@ -242,3 +242,7 @@ release. Each release lists what broke, who is affected and how to migrate under
 - The entry session's row in `vibest ls` (and `--json`) now shows the git state of its directory and the repository
   root git reports for it, like any session working in that directory; it used to show no git state and its directory
   as the repository root.
+- vibestd stops within 10 seconds (plus a 1.5 s log flush) when asked to stop by SIGTERM, SIGINT, a terminal hangup or
+  `vibest daemon restart`, even if a layer such as a plugin teardown never finishes: it logs and prints the layers
+  still releasing, with how long each has been, and exits; a second signal exits at once. The start and readiness waits
+  of `vibest daemon` and `vibest daemon restart` grew from 10 s to 21.5 s so a replacement outlasts that deadline.
