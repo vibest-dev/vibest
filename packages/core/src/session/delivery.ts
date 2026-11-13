@@ -1,7 +1,19 @@
-import { Forbidden } from "@vibest/protocol/rpc"
 import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Predicate, Ref } from "effect"
+import {
+  Cause,
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schema,
+} from "effect"
 
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
@@ -18,6 +30,10 @@ import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+
+export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused", {
+  message: Schema.String,
+}) {}
 
 export const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
   Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
@@ -162,6 +178,15 @@ const make = Effect.gen(function* () {
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
 
+  const toEntry = (id: string, message: string, request?: string, sender?: string) =>
+    Effect.gen(function* () {
+      if (!(yield* db.insertSend(id, message, request, sender)))
+        return yield* new NoSuchSession({
+          id,
+          message: `${id} is the entry session of this project and is not running`,
+        })
+    })
+
   const deliverTo = Effect.fn("Delivery.deliverTo")(function* (
     id: string,
     message: string,
@@ -169,11 +194,7 @@ const make = Effect.gen(function* () {
     sender?: string,
   ) {
     if (!(yield* db.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender)
-    if (!(yield* db.insertSend(id, message, request, sender)))
-      return yield* new NoSuchSession({
-        id,
-        message: `${id} is the entry session of this project and is not running`,
-      })
+    return yield* toEntry(id, message, request)
   })
 
   const admit = Effect.fn("Delivery.admit")(function* (
@@ -192,22 +213,21 @@ const make = Effect.gen(function* () {
     const id = yield* db.resolveSession(input)
     const target = yield* db.sessionIdentity(id)
     if (target?.projectId !== sender.projectId)
-      return yield* new Forbidden({
-        method: "Send",
+      return yield* new SendRefused({
         message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
       })
     const creator = (yield* db.creatorOf(sender.sessionId)) ?? undefined
     const mine = creator !== undefined && "local" in creator ? creator.local : undefined
     if (!(yield* db.maySend(sender.sessionId, id)))
-      return yield* new Forbidden({
-        method: "Send",
+      return yield* new SendRefused({
         message: `${id} is not the agent that started you, and you did not start it${mine === undefined ? "" : `; you may send to ${mine}`}`,
       })
     const session = yield* db.getSession(id)
     const stopped = !session || archived(session)
     if (!(stopped && mine === id)) {
       if (stopped && !target.entry) return yield* new NoSuchSession({ id, message: `${id} was archived` })
-      yield* deliverTo(id, message, request, sender.sessionId)
+      if (target.entry) yield* toEntry(id, message, request, sender.sessionId)
+      else yield* send(id, message, request, sender.sessionId)
       return { id }
     }
     const heir = yield* db.nearestAlive(sender.sessionId)
@@ -224,7 +244,8 @@ const make = Effect.gen(function* () {
         })
       return { id: heir.session }
     }
-    yield* deliverTo(heir.local, message, request, sender.sessionId)
+    if ((yield* db.sessionIdentity(heir.local))?.entry) yield* toEntry(heir.local, message, request, sender.sessionId)
+    else yield* send(heir.local, message, request, sender.sessionId)
     return { id: heir.local }
   })
 

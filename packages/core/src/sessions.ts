@@ -1,4 +1,3 @@
-import type { Forbidden } from "@vibest/protocol/rpc"
 import { messageOf } from "@vibest/schema/error"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
@@ -24,7 +23,7 @@ import { projectRoot, workspaceGit } from "./project-create.ts"
 import type * as Remove from "./remove.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
 import { Archive } from "./session/archive.ts"
-import { Delivery, unreachable } from "./session/delivery.ts"
+import { Delivery, type SendRefused, unreachable } from "./session/delivery.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { Placement } from "./session/placement.ts"
@@ -35,7 +34,6 @@ import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
 
 export {
   AllocationFailed,
-  type AmbiguousSession,
   LaunchFailed,
   LimitReached,
   NoCallingSession,
@@ -126,7 +124,7 @@ export class Sessions extends Context.Service<
       input: string,
       message: string,
       request?: string,
-    ) => Effect.Effect<{ readonly id: string }, NoSuchSession | AmbiguousSession | Forbidden>
+    ) => Effect.Effect<{ readonly id: string }, NoSuchSession | AmbiguousSession | SendRefused>
     readonly interrupt: (
       id: string,
     ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>

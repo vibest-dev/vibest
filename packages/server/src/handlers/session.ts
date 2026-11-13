@@ -105,7 +105,14 @@ export const make = (
         routed.Send(p, (input) =>
           Effect.gen(function* () {
             const caller = yield* Caller
-            if (caller._tag === "Session") return yield* sessions.admit(caller, input, p.message, p.request)
+            if (caller._tag === "Session")
+              return yield* sessions
+                .admit(caller, input, p.message, p.request)
+                .pipe(
+                  Effect.catchTag("SendRefused", (e) =>
+                    Effect.fail(new Forbidden({ method: "Send", message: e.message })),
+                  ),
+                )
             const { c, scope } = yield* reach("Send")
             const target = yield* db.resolveSession(input, scope)
             if (c === undefined && scope !== undefined && !(yield* startedByPeer(scope, target, true)))
@@ -113,9 +120,8 @@ export const make = (
                 method: "Send",
                 message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
               })
-            const id = (yield* db.sessionIdentity(target))?.entry ? target : yield* managed("Send", input)
-            yield* sessions.deliverTo(id, p.message, p.request, caller._tag === "Peer" ? caller.session : undefined)
-            return { id }
+            yield* sessions.deliverTo(target, p.message, p.request, caller._tag === "Peer" ? caller.session : undefined)
+            return { id: target }
           }),
         ),
 
