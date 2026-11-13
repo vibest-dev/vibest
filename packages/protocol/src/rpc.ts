@@ -306,6 +306,14 @@ export const WatchEvent = Schema.Union([
 ])
 export type WatchEvent = typeof WatchEvent.Type
 
+export const EventsFact = Schema.Struct({
+  aggregate: Schema.String,
+  seq: Schema.Number,
+  at: Schema.Number,
+  type: Schema.String,
+  data: Schema.Unknown,
+})
+
 export class WatchLagged extends Schema.TaggedError<WatchLagged>()("WatchLagged", { message: Schema.String }) {}
 
 export class VibestRpcs extends RpcGroup.make(
@@ -499,6 +507,18 @@ export class VibestRpcs extends RpcGroup.make(
         }),
       ),
       error: Schema.Union([Forbidden]),
+    }),
+  ),
+  scoped(
+    Rpc.make("Events", {
+      payload: {
+        session: Schema.optional(Schema.String),
+        after: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+        follow: Schema.optional(Schema.Boolean),
+      },
+      success: EventsFact,
+      error: Schema.Union([Forbidden, NoSuchSession]),
+      stream: true,
     }),
   ),
   scoped(Rpc.make("Watch", { success: WatchEvent, error: Schema.Union([Forbidden, WatchLagged]), stream: true })),
@@ -855,6 +875,7 @@ export const ACCESS = {
   "Inbox.Subscribe": "session",
   "Inbox.Take": "session",
   Watch: "cli",
+  Events: "cli",
   "Session.Seen": "cli",
   "Project.Open": "cli",
   "Project.EntryPlace": "cli",
@@ -903,6 +924,7 @@ export const CAPABILITIES = {
   handoff: true,
   requests: true,
   watch: true,
+  events: true,
   projects: true,
   spawnRuntime: true,
 } as const

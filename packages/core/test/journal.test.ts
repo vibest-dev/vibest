@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { withChanges } from "@vibest/core/bus"
-import { equalToReplay, installLedger, makeJournal, rebuild } from "@vibest/core/journal"
+import { equalToReplay, followFacts, installLedger, makeJournal, rebuild } from "@vibest/core/journal"
 import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { Catalog, type Fact } from "@vibest/schema/event"
-import { Effect, Exit, Fiber, Layer } from "effect"
+import { Effect, Exit, Fiber, Layer, Queue, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { memorySqlite } from "./platform/bun.ts"
@@ -801,6 +801,107 @@ describe("journal rebuild", () => {
       assert.include(error.message, `event ${SUB} 99`)
       const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
       assert.strictEqual(sessions!.n, 3)
+    }).pipe(Effect.provide(memory())),
+  )
+})
+
+describe("journal reads by cursor", () => {
+  const project = { projectId: P, data: { directory: "/w/app", repositories: [] } }
+  const session = (sessionId: string) => ({
+    sessionId,
+    data: { project: P, agent: "main", name: "n", directory: "" },
+  })
+  const seqs = (n: number) => Array.from({ length: n }, (_, i) => i + 1)
+
+  it.effect("a session read pages past 1000 facts in seq order and a log read keeps each seq rising", () =>
+    Effect.gen(function* () {
+      const { journal, sql } = yield* ledger
+      yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.emit(Catalog["project.created"], project)
+          yield* journal.emit(Catalog["session.created"], session(MAIN))
+          yield* journal.emit(Catalog["session.created"], session(SUB))
+          for (let i = 0; i < 1100; i++)
+            yield* journal.emit(Catalog["session.renamed"], {
+              sessionId: i < 1050 ? MAIN : SUB,
+              data: { name: `n${i}` },
+            })
+        }),
+      )
+      const read = (cursor: Parameters<typeof followFacts>[2]) =>
+        Stream.runCollect(followFacts(sql, Effect.void, cursor, false)).pipe(Effect.map((rows) => Array.from(rows)))
+      const own = yield* read({ session: MAIN, after: 0 })
+      assert.deepStrictEqual(
+        own.map((r) => r.seq),
+        seqs(1051),
+      )
+      const all = yield* read({ log: 0 })
+      assert.strictEqual(all.length, 1103)
+      for (const aggregate of [P, MAIN, SUB]) {
+        const mine = all.filter((r) => r.aggregate === aggregate)
+        assert.deepStrictEqual(
+          mine.map((r) => r.seq),
+          seqs(mine.length),
+        )
+      }
+    }).pipe(Effect.provide(memory())),
+  )
+
+  it.effect("a follow started before two commits yields each fact once and in order", () =>
+    Effect.gen(function* () {
+      const { journal, sql } = yield* ledger
+      const wake = yield* Queue.unbounded<void>()
+      const fiber = yield* Stream.runCollect(
+        followFacts(sql, Queue.take(wake), { session: MAIN, after: 0 }, true).pipe(Stream.take(2)),
+      ).pipe(Effect.forkChild)
+      yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.emit(Catalog["project.created"], project)
+          yield* journal.emit(Catalog["session.created"], session(MAIN))
+        }),
+      )
+      yield* Queue.offer(wake, undefined)
+      yield* journal.commit(journal.emit(Catalog["session.renamed"], { sessionId: MAIN, data: { name: "x" } }))
+      yield* Queue.offer(wake, undefined)
+      const rows = Array.from(yield* Fiber.join(fiber))
+      assert.deepStrictEqual(
+        rows.map((r) => [r.seq, r.type]),
+        [
+          [1, "session.created"],
+          [2, "session.renamed"],
+        ],
+      )
+    }).pipe(Effect.provide(memory())),
+  )
+
+  it.effect("a finite read stops at the watermark taken when it starts and a resume starts after a seq", () =>
+    Effect.gen(function* () {
+      const { journal, sql } = yield* ledger
+      yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.emit(Catalog["project.created"], project)
+          yield* journal.emit(Catalog["session.created"], session(MAIN))
+        }),
+      )
+      const rename = (name: string) =>
+        journal.commit(journal.emit(Catalog["session.renamed"], { sessionId: MAIN, data: { name } }))
+      const read = (cursor: Parameters<typeof followFacts>[2]) =>
+        Stream.runCollect(followFacts(sql, Effect.void, cursor, false).pipe(Stream.tap(() => rename("late")))).pipe(
+          Effect.map((rows) => Array.from(rows)),
+        )
+      const own = yield* read({ session: MAIN, after: 0 })
+      assert.deepStrictEqual(
+        own.map((r) => r.seq),
+        [1],
+      )
+      const whole = yield* read({ log: 0 })
+      assert.strictEqual(whole.length, 3)
+      yield* rename("x")
+      const resumed = yield* Stream.runCollect(followFacts(sql, Effect.void, { session: MAIN, after: 1 }, false))
+      assert.deepStrictEqual(
+        Array.from(resumed).map((r) => r.seq),
+        seqs(6).slice(1),
+      )
     }).pipe(Effect.provide(memory())),
   )
 })
