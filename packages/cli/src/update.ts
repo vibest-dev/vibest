@@ -6,7 +6,6 @@ import {
   type VibestClient,
   readPing,
   runCaptured,
-  withVibest,
 } from "@vibest/client/client"
 import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/client/release"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
@@ -21,6 +20,7 @@ import { RpcClient } from "effect/rpc"
 
 import { askYesNo, interactive } from "./ask.ts"
 import { userOnly } from "./caller.ts"
+import { withVibest } from "./client.ts"
 import { type ReplaceFailed, replaceAnyway, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
 import { VERSION } from "./version.ts"
 

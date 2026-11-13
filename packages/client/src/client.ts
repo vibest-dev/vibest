@@ -12,7 +12,6 @@ import { PROTOCOL } from "@vibest/schema/version"
 import {
   Cause,
   Config,
-  Context,
   Duration,
   Effect,
   Exit,
@@ -32,9 +31,7 @@ import * as Socket from "effect/socket/Socket"
 import { SocketConnector } from "./socket-connector.ts"
 export { SocketConnector } from "./socket-connector.ts"
 
-export class ClientInfo extends Context.Service<ClientInfo, { readonly version: string }>()("vibest/ClientInfo") {}
-
-export type ClientServices = ClientInfo | Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
+export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
 
 export const DAEMON_START_TIMEOUT = Duration.seconds(10)
 
@@ -349,37 +346,46 @@ export const startDaemon = Effect.gen(function* () {
   })
 })
 
-export const withVibest = <A, E, R>(
-  claim: Claim,
-  f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
-  options?: { readonly start?: boolean; readonly needs?: Needs },
-) =>
-  Effect.gen(function* () {
-    const layout = yield* Layout
-    const up = yield* readPing(layout.socket)
-    if (Option.isNone(up)) {
-      if (options?.start === false)
+const withVibest =
+  (version: string) =>
+  <A, E, R>(
+    claim: Claim,
+    f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
+    options?: { readonly start?: boolean; readonly needs?: Needs },
+  ) =>
+    Effect.gen(function* () {
+      const layout = yield* Layout
+      const up = yield* readPing(layout.socket)
+      if (Option.isNone(up)) {
+        if (options?.start === false)
+          return yield* new DaemonUnavailable({
+            socket: layout.socket,
+            message: `vibestd is unreachable on ${layout.socket} (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon`,
+          })
+        yield* startDaemon
+      }
+      const ping = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* readPing(layout.socket))
+      if (ping === undefined)
         return yield* new DaemonUnavailable({
           socket: layout.socket,
-          message: `vibestd is unreachable on ${layout.socket} (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon`,
+          message: `vibestd did not answer Ping on ${layout.socket}`,
         })
-      yield* startDaemon
-    }
-    const ping = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* readPing(layout.socket))
-    if (ping === undefined)
-      return yield* new DaemonUnavailable({
-        socket: layout.socket,
-        message: `vibestd did not answer Ping on ${layout.socket}`,
-      })
-    const incompatible = incompatibleDaemon(
-      layout.socket,
-      ping,
-      { version: (yield* ClientInfo).version, command: yield* VibestCommand },
-      options?.needs,
-    )
-    if (incompatible) return yield* incompatible
-    return yield* RpcClient.withHeaders(
-      connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
-      yield* claimHeaders(claim),
-    )
-  }).pipe(Effect.scoped)
+      const incompatible = incompatibleDaemon(
+        layout.socket,
+        ping,
+        { version, command: yield* VibestCommand },
+        options?.needs,
+      )
+      if (incompatible) return yield* incompatible
+      return yield* RpcClient.withHeaders(
+        connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
+        yield* claimHeaders(claim),
+      )
+    }).pipe(Effect.scoped)
+
+export interface ClientOptions {
+  readonly version: string
+}
+
+export const makeClient = (options: ClientOptions) => ({ withVibest: withVibest(options.version) })
+export type VibestClients = ReturnType<typeof makeClient>

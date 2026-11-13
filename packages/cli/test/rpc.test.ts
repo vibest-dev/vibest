@@ -1,7 +1,7 @@
 import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, incompatibleDaemon, protocolHeaders, withVibest } from "@vibest/client/client"
+import { cliHeaders, incompatibleDaemon, protocolHeaders } from "@vibest/client/client"
 import { Db, executionStateOf } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { projectRoot } from "@vibest/core/project-create"
@@ -16,6 +16,7 @@ import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effec
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
+import { withVibest } from "../src/client.ts"
 import { VERSION } from "../src/version.ts"
 import { authed, FakeRuntime, makeRepository, tempDirectory, until, writeEnd, projectOf } from "./fakes.ts"
 import { served, test, client, asCli, asEntry, asSession, failureTag } from "./rpc-helpers.ts"

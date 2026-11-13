@@ -1,5 +1,4 @@
 import { it } from "@effect/vitest"
-import { ClientInfo } from "@vibest/client/client"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
@@ -10,20 +9,18 @@ import { Cause, Effect, Exit, Layer, Option, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
-import { VERSION } from "../src/version.ts"
 import { authed, projectOf, testLayer, type TestOptions, type TestServices } from "./fakes.ts"
 
 export const served = (options?: TestOptions) =>
   Server.layer.pipe(
     Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
-    Layer.provideMerge(Layer.succeed(ClientInfo, { version: VERSION })),
     Layer.provideMerge(testLayer(options)),
   )
 
 export const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, TestServices | Project | Scope.Scope | ClientInfo>,
+  program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>,
   options?: TestOptions,
   timeout?: number,
 ) => it.effect(name, () => program.pipe(Effect.provide(served(options))), timeout)

@@ -33,6 +33,7 @@ export const pre: ReadonlyArray<Builtin> = [
   builtin(harnessDefaultPlugin()),
 ]
 
-export const commands = <E, R>(refuseAgent: (command: string) => Effect.Effect<void, E, R>) => [
-  herdrCommands(refuseAgent),
-]
+export const commands = <E, R>(
+  refuseAgent: (command: string) => Effect.Effect<void, E, R>,
+  clients: Parameters<typeof herdrCommands>[1],
+) => [herdrCommands(refuseAgent, clients)]

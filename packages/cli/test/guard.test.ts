@@ -1,5 +1,4 @@
 import { assert, describe, it, layer } from "@effect/vitest"
-import { ClientInfo } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
@@ -33,7 +32,6 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
-import { VERSION } from "../src/version.ts"
 import {
   agentsLayer,
   FakeGit,
@@ -712,7 +710,7 @@ describe("wizard entry", () => {
           "This shell carries agent session abcd1234-abcd-4abc-8abc-abcd1234abcd. If you are the user, run it as env -u VIBEST_SESSION_ID vibest daemon restart",
         )
         assert.deepStrictEqual(touched, { spawn: false, exec: false, host: false, socket: false })
-      }).pipe(Effect.provideService(ClientInfo, { version: VERSION })),
+      }),
     15_000,
   )
 })
@@ -766,7 +764,7 @@ describe("vibest --session inside herdr", () => {
         assert.strictEqual(Exit.isFailure(exit), true, "vibest started the entry session")
         assert.strictEqual(touched.exec, false)
         assert.strictEqual(touched.host, false)
-      }).pipe(Effect.provideService(ClientInfo, { version: VERSION })),
+      }),
     15_000,
   )
 
@@ -805,7 +803,7 @@ describe("vibest --session inside herdr", () => {
       const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
       assert.notInclude(message, secret)
       assert.strictEqual(Exit.isFailure(exit), true)
-    }).pipe(Effect.provide(Platform.services), Effect.provideService(ClientInfo, { version: VERSION })),
+    }).pipe(Effect.provide(Platform.services)),
   )
 })
 

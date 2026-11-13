@@ -7,7 +7,6 @@ import {
   probe,
   readPing,
   startDaemon,
-  withVibest,
 } from "@vibest/client/client"
 import { UpdateError } from "@vibest/client/release"
 import { type Ping } from "@vibest/protocol/rpc"
@@ -43,6 +42,7 @@ import { RpcClientError as ClientError } from "effect/rpc"
 
 import { askLine, askYesNo, interactive } from "./ask.ts"
 import { caller, json, userOnly, vibest } from "./caller.ts"
+import { clients, withVibest } from "./client.ts"
 import { doctor } from "./doctor.ts"
 import { connectCommand, machine, projectAdd } from "./machine-commands.ts"
 import { replaceDaemon } from "./replace.ts"
@@ -845,7 +845,7 @@ export const command = (host: Daemon.Host, replacements: Daemon.Replacements, ex
       integration(),
       doctor,
       update,
-      ...commands(userOnly),
+      ...commands(userOnly, clients),
       connectCommand,
       machine,
     ]),

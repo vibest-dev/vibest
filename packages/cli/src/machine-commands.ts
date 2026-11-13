@@ -1,4 +1,4 @@
-import { probe, startDaemon, type VibestClient, withVibest } from "@vibest/client/client"
+import { probe, startDaemon, type VibestClient } from "@vibest/client/client"
 import { shortId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import type { MachineNote } from "@vibest/schema/machine"
@@ -6,6 +6,7 @@ import { Console, Effect, Path } from "effect"
 import { Argument, Command } from "effect/cli"
 
 import { json, userOnly, vibest } from "./caller.ts"
+import { withVibest } from "./client.ts"
 import { pipeStdio } from "./connect.ts"
 
 export const connectCommand = Command.make("connect", {}, () =>
