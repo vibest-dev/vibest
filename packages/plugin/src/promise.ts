@@ -77,7 +77,17 @@ export const fromPromise =
       )
       const iterable = <A>(stream: Stream.Stream<A>): AsyncIterable<A> => ({
         [Symbol.asyncIterator]: () => {
-          const iterator = Stream.toAsyncIterableWith(stream, scope)[Symbol.asyncIterator]()
+          const source = Stream.toAsyncIterableWith(stream, scope)[Symbol.asyncIterator]()
+          const forget = () => void iterators.delete(iterator)
+          const iterator: AsyncIterator<A> = {
+            next: () =>
+              source.next().then(
+                (result) => (result.done === true ? (forget(), result) : result),
+                (error) => (forget(), Promise.reject(error)),
+              ),
+            return: () =>
+              (source.return?.() ?? Promise.resolve({ done: true as const, value: undefined })).finally(forget),
+          }
           iterators.add(iterator)
           return iterator
         },
