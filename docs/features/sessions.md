@@ -17,7 +17,9 @@ it as its creator. `vibest run` in a terminal that is not a session is refused a
 `vibest result` has no `reply` before a session's first execution ends and then holds its reply as `reply` (the latest ended
 execution's status and reply text, kept in the execution row; an execution vibestd ended itself, lost or by an exit, has no text; a
 reply that arrives after vibestd gave up its execution as lost is an execution of its own, not attached back); `vibest status` says vibestd is
-running and which process it is; `vibest ls` lists the entry session and each session with its latest reply; after
+running and which process it is; `vibest ls` lists the entry session and each session with its latest reply. When one session's worktree cannot be read,
+the list still has every session: that row's `git.unknown` is the error (`git cannot read it` when the folder is gone)
+and the other rows keep their git state. After
 `vibest archive`, only `vibest ls --all` lists the session, as exited.
 
 ## S6. Archiving

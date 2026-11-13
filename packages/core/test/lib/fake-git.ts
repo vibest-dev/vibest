@@ -1,6 +1,6 @@
 import { Git, GitError, type GitState } from "@vibest/core/git"
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, FileSystem, Layer } from "effect"
+import { Context, Effect, FileSystem, Layer, PlatformError } from "effect"
 
 export interface RepositoryFacts {
   readonly branch?: string
@@ -17,6 +17,7 @@ export interface RepositoryFacts {
 export interface CheckoutFacts {
   readonly branch?: string
   readonly state?: GitState
+  readonly stateError?: string
   readonly refuseRemove?: string
 }
 
@@ -167,6 +168,15 @@ export class FakeGit extends Context.Service<
             const found = yield* locate(worktree)
             if (found === undefined)
               return { branch: "", pushed: false, saved: false, why: "commits not on any branch" }
+            if (found.checkout.facts.stateError !== undefined)
+              return yield* Effect.fail(
+                PlatformError.systemError({
+                  _tag: "Unknown",
+                  module: "Git",
+                  method: "state",
+                  description: found.checkout.facts.stateError,
+                }),
+              )
             return found.checkout.facts.state ?? { branch: branchOf(found), pushed: false, saved: true, why: "" }
           }),
       })
