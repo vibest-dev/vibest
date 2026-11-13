@@ -1050,6 +1050,16 @@
               }
             ]
           },
+          "after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "follow": {
             "anyOf": [
               {

@@ -511,7 +511,11 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     Rpc.make("Events", {
-      payload: { session: Schema.optional(Schema.String), follow: Schema.optional(Schema.Boolean) },
+      payload: {
+        session: Schema.optional(Schema.String),
+        after: Schema.optional(Schema.Int),
+        follow: Schema.optional(Schema.Boolean),
+      },
       success: EventsFact,
       error: Schema.Union([Forbidden, NoSuchSession]),
       stream: true,

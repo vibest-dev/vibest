@@ -873,4 +873,35 @@ describe("journal reads by cursor", () => {
       )
     }).pipe(Effect.provide(memory())),
   )
+
+  it.effect("a finite read stops at the watermark taken when it starts and a resume starts after a seq", () =>
+    Effect.gen(function* () {
+      const { journal, sql } = yield* ledger
+      yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.emit(Catalog["project.created"], project)
+          yield* journal.emit(Catalog["session.created"], session(MAIN))
+        }),
+      )
+      const rename = (name: string) =>
+        journal.commit(journal.emit(Catalog["session.renamed"], { sessionId: MAIN, data: { name } }))
+      const read = (cursor: Parameters<typeof followFacts>[2]) =>
+        Stream.runCollect(followFacts(sql, Effect.void, cursor, false).pipe(Stream.tap(() => rename("late")))).pipe(
+          Effect.map((rows) => Array.from(rows)),
+        )
+      const own = yield* read({ session: MAIN, after: 0 })
+      assert.deepStrictEqual(
+        own.map((r) => r.seq),
+        [1],
+      )
+      const whole = yield* read({ log: 0 })
+      assert.strictEqual(whole.length, 3)
+      yield* rename("x")
+      const resumed = yield* Stream.runCollect(followFacts(sql, Effect.void, { session: MAIN, after: 1 }, false))
+      assert.deepStrictEqual(
+        Array.from(resumed).map((r) => r.seq),
+        seqs(6).slice(1),
+      )
+    }).pipe(Effect.provide(memory())),
+  )
 })

@@ -50,11 +50,24 @@ const readLog = (sql: SqlClient.SqlClient, after: number) =>
 
 export type Cursor = { readonly session: string; readonly after: number } | { readonly log: number }
 
-const readPage = (sql: SqlClient.SqlClient, cursor: Cursor) =>
+const readPage = (sql: SqlClient.SqlClient, cursor: Cursor, until: number | undefined) =>
   "session" in cursor
     ? sql<Row>`SELECT aggregate, seq, at, type, data
-        FROM event WHERE aggregate = ${cursor.session} AND seq > ${cursor.after} ORDER BY seq LIMIT ${REPLAY_PAGE}`
-    : readLog(sql, cursor.log)
+        FROM event WHERE aggregate = ${cursor.session} AND seq > ${cursor.after} AND seq <= ${until ?? Number.MAX_SAFE_INTEGER}
+        ORDER BY seq LIMIT ${REPLAY_PAGE}`
+    : sql<Logged>`SELECT position, aggregate, seq, at, type, data
+        FROM event WHERE position > ${cursor.log} AND position <= ${until ?? Number.MAX_SAFE_INTEGER}
+        ORDER BY position LIMIT ${REPLAY_PAGE}`
+
+const watermark = (sql: SqlClient.SqlClient, cursor: Cursor) =>
+  (
+    ("session" in cursor
+      ? sql<{ latest: number }>`SELECT coalesce(max(seq), 0) AS latest FROM event WHERE aggregate = ${cursor.session}`
+      : sql<{ latest: number }>`SELECT coalesce(max(position), 0) AS latest FROM event`) as Effect.Effect<
+      ReadonlyArray<{ latest: number }>,
+      SqlError.SqlError
+    >
+  ).pipe(Effect.map((rows) => rows[0]!.latest))
 
 const advance = (cursor: Cursor, page: ReadonlyArray<Row>): Cursor => {
   const last = page[page.length - 1]! as Logged
@@ -67,17 +80,21 @@ export const followFacts = (
   start: Cursor,
   follow: boolean,
 ): Stream.Stream<Row, SqlError.SqlError> =>
-  Stream.unfold(start, (cursor) =>
-    readPage(sql, cursor).pipe(
-      Effect.flatMap((page) =>
-        page.length > 0
-          ? Effect.succeed([page, advance(cursor, page)] as const)
-          : follow
-            ? wake.pipe(Effect.andThen(Effect.succeed([[], cursor] as const)))
-            : Effect.undefined,
-      ),
+  Stream.unwrap(
+    Effect.map(follow ? Effect.undefined : watermark(sql, start), (until) =>
+      Stream.unfold(start, (cursor) =>
+        readPage(sql, cursor, until).pipe(
+          Effect.flatMap((page) =>
+            page.length > 0
+              ? Effect.succeed([page, advance(cursor, page)] as const)
+              : follow
+                ? wake.pipe(Effect.andThen(Effect.succeed([[], cursor] as const)))
+                : Effect.undefined,
+          ),
+        ),
+      ).pipe(Stream.flattenIterable),
     ),
-  ).pipe(Stream.flattenIterable)
+  )
 
 const replayFrom = (sql: SqlClient.SqlClient, after: number): Effect.Effect<void, SqlError.SqlError | UnknownFact> =>
   readLog(sql, after).pipe(

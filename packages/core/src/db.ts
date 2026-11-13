@@ -651,8 +651,14 @@ const make = Effect.gen(function* () {
       tx(clearEntryAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     canResumeConversation,
-    facts: (o: { readonly session?: string | undefined; readonly follow: boolean }) =>
-      Stream.unwrap(
+    facts: (o: {
+      readonly session?: string | undefined
+      readonly after?: number | undefined
+      readonly follow: boolean
+    }) => {
+      const start = o.session === undefined ? ({ log: 0 } as const) : { session: o.session, after: o.after ?? 0 }
+      if (!o.follow) return followFacts(sql, Effect.void, start, false).pipe(Stream.orDie)
+      return Stream.unwrap(
         Effect.gen(function* () {
           const wake = yield* Queue.sliding<void>(1)
           yield* Stream.fromSubscription(yield* bus.subscribe).pipe(
@@ -663,14 +669,10 @@ const make = Effect.gen(function* () {
             ),
             Effect.forkScoped,
           )
-          return followFacts(
-            sql,
-            Queue.take(wake),
-            o.session === undefined ? { log: 0 } : { session: o.session, after: 0 },
-            o.follow,
-          ).pipe(Stream.orDie)
+          return followFacts(sql, Queue.take(wake), start, true).pipe(Stream.orDie)
         }),
-      ),
+      )
+    },
     ...inboxMethods(store),
   }
 })

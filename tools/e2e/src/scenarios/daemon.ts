@@ -138,6 +138,25 @@ const checks: ReadonlyArray<Check> = [
           "the whole log lacks facts of the session",
         )
 
+        const cut = Math.max(1, Math.floor(own.length / 2))
+        const rest = printed((await events("--session", sub, "--after", String(cut))).stdout)
+        expect(
+          rest.map((f) => f.seq).join() ===
+            own
+              .slice(cut)
+              .map((f) => f.seq)
+              .join(),
+          `--after ${cut} printed seqs ${rest.map((f) => f.seq).join(", ")}, not ${own
+            .slice(cut)
+            .map((f) => f.seq)
+            .join(", ")}`,
+        )
+        const orphan = await events("--after", "1")
+        expect(
+          orphan.code !== 0 && orphan.stdout === "",
+          `--after without --session exited ${orphan.code}: ${orphan.stdout}`,
+        )
+
         follower = Bun.spawn([binary, "events", "--session", sub, "--follow"], {
           cwd: p.repo,
           env: w.env(p.env),

@@ -578,6 +578,10 @@ const events = Command.make(
       Flag.withDescription("Only this session's facts (its id, or a unique prefix of at least 8 characters)"),
       Flag.optional,
     ),
+    after: Flag.Int("after").pipe(
+      Flag.withDescription("With --session: only facts after this seq (the seq of the last fact already seen)"),
+      Flag.optional,
+    ),
     follow: Flag.Boolean("follow").pipe(
       Flag.withDescription("Keep running and print facts as they are recorded"),
       Flag.withDefault(false),
@@ -593,13 +597,20 @@ const events = Command.make(
             return yield* new LaunchFailed({
               message: "this vibestd does not serve events; run vibest daemon restart",
             })
-          yield* Stream.runForEach(client.Events({ session: Option.getOrUndefined(o.session), follow: o.follow }), json)
+          yield* Stream.runForEach(
+            client.Events({
+              session: Option.getOrUndefined(o.session),
+              after: Option.getOrUndefined(o.after),
+              follow: o.follow,
+            }),
+            json,
+          )
         }),
       )
     }),
 ).pipe(
   Command.withDescription(
-    "The event log as JSON lines: one session's facts (--session) or all of them; --follow keeps printing new ones",
+    "The event log as JSON lines: one session's facts (--session, from after --after) or all of them; --follow keeps printing new ones",
   ),
 )
 

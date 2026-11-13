@@ -237,10 +237,15 @@ export const make = (
           ),
         ),
 
-      Events: ({ session, follow }) =>
+      Events: ({ session, after, follow }) =>
         Stream.unwrap(
           Effect.gen(function* () {
             yield* cliOnly("Events")
+            if (after !== undefined && session === undefined)
+              return yield* new Forbidden({
+                method: "Events",
+                message: "after resumes one session's facts; give the session too",
+              })
             const id =
               session === undefined
                 ? undefined
@@ -251,7 +256,7 @@ export const make = (
                         Effect.fail(new NoSuchSession({ id: session, message: e.message })),
                       ),
                     )
-            return db.facts({ session: id, follow: follow === true }).pipe(
+            return db.facts({ session: id, after, follow: follow === true }).pipe(
               Stream.map(({ aggregate, seq, at, type, data }) => ({
                 aggregate,
                 seq,

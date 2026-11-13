@@ -52,4 +52,4 @@ confirmation the running vibestd is replaced by the new version.
 
 `vibest events --session <id>` prints that session's facts, one JSON line each, in `seq` order from 1, the same types the
 session recorded. `vibest events` prints every fact, each aggregate's in `seq` order. `--follow` keeps running and prints
-facts committed after it started, once each. An unknown session fails with NoSuchSession and prints nothing.
+facts committed after it started, once each. `--session <id> --after <seq>` prints only that session's facts with a greater `seq` (the last line already seen is the cursor), then follows if `--follow` is given, with no gap and no repeat; `--after` without `--session` is refused. Without `--follow` the output ends at the last fact recorded when the command started. An unknown session fails with NoSuchSession and prints nothing.
