@@ -1,8 +1,15 @@
 import type { AgentStatus } from "@vibest/schema/session"
-import { Context, Effect, HashMap, Layer, Option, Ref, SynchronizedRef } from "effect"
+import { Context, Deferred, Effect, HashMap, Layer, Option, Ref, SynchronizedRef } from "effect"
 
 import type { Integration } from "../db-rows.ts"
 import { LayerNode } from "../effect/layer-node.ts"
+
+export interface Restarted {
+  readonly id: string
+  readonly projectId: string
+  readonly ok: boolean
+  readonly message: string
+}
 
 export interface Tracked {
   readonly endedAt: Ref.Ref<number | undefined>
@@ -30,6 +37,7 @@ const make = Effect.gen(function* () {
   const integrations = new Map<string, Integration>()
   const archiveOnIdle = new Set<string>()
   const restarting = new Set<string>()
+  const restartOwners = new Map<string, Deferred.Deferred<Restarted>>()
 
   const track = Effect.fn("SessionLive.track")((id: string) =>
     SynchronizedRef.modifyEffect(tracked, (map) =>
@@ -133,6 +141,23 @@ const make = Effect.gen(function* () {
     }),
   )
 
+  const ownRestart = Effect.fn("SessionLive.restarting.own")((id: string, restart: Effect.Effect<Restarted>) =>
+    Effect.suspend(() => {
+      const owner = restartOwners.get(id)
+      if (owner !== undefined) return Deferred.await(owner)
+      const done = Deferred.makeUnsafe<Restarted>()
+      restartOwners.set(id, done)
+      return restart.pipe(
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            restartOwners.delete(id)
+            Deferred.doneUnsafe(done, exit)
+          }),
+        ),
+      )
+    }),
+  )
+
   const size = Effect.gen(function* () {
     return { tracked: HashMap.size(yield* SynchronizedRef.get(tracked)), statuses: statuses.size }
   })
@@ -151,7 +176,7 @@ const make = Effect.gen(function* () {
     archiveWhenIdle,
     ended,
     size,
-    restarting: { has: isRestarting, mark: markRestarting, clear: clearRestarting },
+    restarting: { has: isRestarting, mark: markRestarting, clear: clearRestarting, own: ownRestart },
   }
 })
 

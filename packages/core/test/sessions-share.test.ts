@@ -1,14 +1,13 @@
 import { assert, describe } from "@effect/vitest"
 import { Db, terminalOf, exitedAt } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
-import { shareAdmitPause } from "@vibest/core/sessions"
 import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { TestClock } from "effect/testing"
 
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { until } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
+import { makeRepository, type TestOptions } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
@@ -22,12 +21,33 @@ describe.concurrent("Sessions", () => {
       )
     })
 
-  const parkAdmitBeforeInsert = Effect.gen(function* () {
-    const reached = yield* Deferred.make<void>()
-    const go = yield* Deferred.make<void>()
-    shareAdmitPause.wait = Deferred.succeed(reached, undefined).pipe(Effect.andThen(Deferred.await(go)))
-    return { reached: Deferred.await(reached), release: Deferred.succeed(go, undefined).pipe(Effect.asVoid) }
-  })
+  const parkedInsert = () => {
+    const reached = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    const state = { armed: false }
+    const options: TestOptions = {
+      db: (db) => ({
+        ...db,
+        insertSession: (...args) =>
+          state.armed
+            ? Deferred.succeed(reached, undefined).pipe(
+                Effect.andThen(Deferred.await(go)),
+                Effect.andThen(db.insertSession(...args)),
+              )
+            : db.insertSession(...args),
+      }),
+    }
+    return {
+      options,
+      arm: Effect.sync(() => {
+        state.armed = true
+      }),
+      reached: Deferred.await(reached),
+      release: Deferred.succeed(go, undefined).pipe(Effect.asVoid),
+    }
+  }
+
+  const parked = parkedInsert()
 
   test(
     "owner archive cannot delete a clean worktree while run --share is admitted",
@@ -38,16 +58,10 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
       const worktree = yield* sessionWorktree(owner.id)
-      const parked = yield* parkAdmitBeforeInsert
+      yield* parked.arm
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
-      const reset = Effect.sync(() => {
-        shareAdmitPause.wait = Effect.void
-      }).pipe(
-        Effect.andThen(
-          Effect.all([cwd.release(), split.release(), parked.release], { discard: true }).pipe(Effect.ignore),
-        ),
-      )
+      const reset = Effect.all([cwd.release(), split.release(), parked.release], { discard: true }).pipe(Effect.ignore)
       yield* Effect.gen(function* () {
         const spawning = yield* Effect.forkChild(
           owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id }),
@@ -84,8 +98,7 @@ describe.concurrent("Sessions", () => {
         yield* Fiber.join(spawning)
       }).pipe(Effect.ensuring(reset))
     }),
-    undefined,
-    true,
+    parked.options,
   )
 
   test(
@@ -120,6 +133,8 @@ describe.concurrent("Sessions", () => {
     }),
   )
 
+  const parkedBehindShare = parkedInsert()
+
   test(
     "run --share of an exited session takes the directory's lock, so another archive cannot delete the shared tree",
     Effect.gen(function* () {
@@ -138,26 +153,22 @@ describe.concurrent("Sessions", () => {
       yield* herdr.runtime.close({ id: midPane })
       yield* owner.db.endProcess(mid.id, "exited")
       yield* owner.db.setStatus(mid.id, "unknown")
-      const parked = yield* parkAdmitBeforeInsert
+      yield* parkedBehindShare.arm
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
-      const reset = Effect.sync(() => {
-        shareAdmitPause.wait = Effect.void
-      }).pipe(
-        Effect.andThen(
-          Effect.all([cwd.release(), split.release(), parked.release], { discard: true }).pipe(Effect.ignore),
-        ),
+      const reset = Effect.all([cwd.release(), split.release(), parkedBehindShare.release], { discard: true }).pipe(
+        Effect.ignore,
       )
       yield* Effect.gen(function* () {
         const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: mid.id }))
-        yield* parked.reached
+        yield* parkedBehindShare.reached
         const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
         const listed = yield* Effect.race(
           cwd.reached.pipe(Effect.as(true)),
           TestClock.withLive(Effect.sleep("2 seconds")).pipe(Effect.as(false)),
         )
         if (listed) {
-          yield* parked.release
+          yield* parkedBehindShare.release
           yield* until(sharersOfDirectory(owner.id), (rows) =>
             rows.some((s) => s.id !== mid.id && exitedAt(s) === null),
           )
@@ -167,7 +178,7 @@ describe.concurrent("Sessions", () => {
             "owner archive listed before share-of-share insert and removed the tree: worktree=" + archived.worktree,
           )
         }
-        yield* parked.release
+        yield* parkedBehindShare.release
         yield* until(sharersOfDirectory(owner.id), (rows) => rows.some((s) => s.id !== mid.id))
         yield* cwd.release()
         const archived = (yield* Fiber.join(archiving))!
@@ -177,8 +188,7 @@ describe.concurrent("Sessions", () => {
         yield* Fiber.join(spawning)
       }).pipe(Effect.ensuring(reset))
     }),
-    undefined,
-    true,
+    parkedBehindShare.options,
   )
 
   test(

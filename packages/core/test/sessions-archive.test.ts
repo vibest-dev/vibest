@@ -27,8 +27,7 @@ const withPulling = (options: TestOptions = {}): TestOptions => ({
   ...options,
   harnesses: [...HARNESSES, PULLING_PI, PULLING_CLAUDE],
 })
-const test: typeof plainTest = (name, program, options, touches) =>
-  plainTest(name, program, withPulling(options), touches)
+const test: typeof plainTest = (name, program, options) => plainTest(name, program, withPulling(options))
 const slowTest: typeof plainSlowTest = (name, program, options) => plainSlowTest(name, program, withPulling(options))
 
 const makeArchiveGate = () => {
@@ -334,7 +333,6 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
     archiveGate.options,
-    true,
   )
 
   test(
