@@ -2,15 +2,16 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db, pidOf } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Sessions } from "@vibest/core/sessions"
-import { PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
+import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { PROTOCOL } from "@vibest/schema/version"
 import * as Http from "@vibest/server/http"
 import { Clock, Effect, Logger, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { CurrentLogAnnotations } from "effect/References"
 import { TestClock } from "effect/testing"
 
+import { VERSION } from "../src/version.ts"
 import {
   CLAUDE,
   CURSOR,

@@ -1,3 +1,4 @@
+import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -48,10 +49,11 @@ export const make = Effect.gen(function* () {
   const integration = yield* Integration
   const drain = yield* Drain
   const harnesses = yield* Harnesses
+  const { version } = yield* App
   const caller = (headers: Headers.Headers) =>
     Effect.gen(function* () {
       const read = reader(headers)
-      const rejected = yield* checkProtocol(db, read)
+      const rejected = yield* checkProtocol(db, read, version)
       if (rejected)
         return {
           status: 409,
@@ -152,5 +154,5 @@ export const httpServer = LayerNode.make({
 export const node = LayerNode.make({
   name: "vibest/HttpServer",
   layer,
-  deps: [services, Db.node, Drain.node, Harnesses.node, Inbox.node, Integration.node, httpServer],
+  deps: [services, Db.node, Drain.node, Harnesses.node, Inbox.node, Integration.node, httpServer, App.node],
 })

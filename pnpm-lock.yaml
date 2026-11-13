@@ -358,6 +358,9 @@ importers:
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../../protocol
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../../schema
 
   packages/integration/cursor: {}
 

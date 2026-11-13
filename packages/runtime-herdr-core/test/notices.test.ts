@@ -133,7 +133,7 @@ const fakeCore = Effect.gen(function* () {
     Stream.runForEach((e) => Queue.offer(seen, e)),
     Effect.forkScoped,
   )
-  yield* Effect.sleep("50 millis")
+  assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
   const follow = Effect.gen(function* () {
     yield* runtime.process(terminal)
     const sub = yield* Queue.take(subscribers)

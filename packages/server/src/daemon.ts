@@ -1,11 +1,11 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand } from "@vibest/client/client"
+import { App } from "@vibest/core/app"
 import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"
 import type { ReplayDiffers } from "@vibest/core/journal"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { VERSION } from "@vibest/protocol/rpc"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
@@ -116,6 +116,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
     const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
+    const app = yield* App.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
     const identity = {
       pid: facts.pid,
       instance: yield* newId(),
@@ -135,7 +136,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     )
     yield* fs.chmod(layout.socket, 0o600)
     yield* fs.chmod(layout.httpSocket, 0o600)
-    const info: DaemonInfo = { ...identity, version: VERSION, socket: layout.socket }
+    const info: DaemonInfo = { ...identity, version: app.version, socket: layout.socket }
     yield* acquired.write(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)
     yield* fs.remove(`${layout.home}/vibestd.lock`, { force: true }).pipe(Effect.ignore)
     yield* Effect.log(`vibestd listening on ${layout.socket}`)

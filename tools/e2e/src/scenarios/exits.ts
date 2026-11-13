@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
-import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
+import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
 import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
@@ -541,11 +541,16 @@ const checks: ReadonlyArray<Check> = [
         await until("idle", () => p.idle(sub), 60_000)
         const message = ask("again")
         const send = () =>
-          rpc(path.join(w.vibestHome, "vibest.sock"), "Send", { id: sub, message, request: "e2e-request-1" }, [
-            ["vibest-protocol", String(PROTOCOL)],
-            ["vibest-caller", "cli"],
-            ["vibest-repository", p.repo],
-          ])
+          rpc(
+            path.join(w.vibestHome, "vibest.sock"),
+            "Send",
+            { id: sub, message, request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" },
+            [
+              ["vibest-protocol", String(PROTOCOL)],
+              ["vibest-caller", "cli"],
+              ["vibest-repository", p.repo],
+            ],
+          )
         const first = await send()
         const second = await send()
         expect(

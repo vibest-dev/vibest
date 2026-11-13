@@ -1,6 +1,8 @@
-import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
+import { type Claim, type VibestClient } from "@vibest/client/client"
 import { Forbidden } from "@vibest/protocol/rpc"
 import { Config, Console, Effect, Option, Path, Schema } from "effect"
+
+import { withVibest } from "./client.ts"
 
 export const caller = Effect.gen(function* () {
   const path = yield* Path.Path

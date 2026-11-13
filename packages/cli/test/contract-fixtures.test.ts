@@ -5,12 +5,12 @@ import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders } from "@vibest/client/client"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
-import { VERSION } from "@vibest/protocol/rpc"
 import * as Server from "@vibest/server/server"
 import { Effect, Layer, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
+import { VERSION } from "../src/version.ts"
 import { type Line, makeRepository, tempDirectory, testLayer, type TestServices, wire } from "./fakes.ts"
 
 const FIXTURES = path.join(import.meta.dirname, "..", "..", "..", "packages", "protocol", "contract", "fixtures")

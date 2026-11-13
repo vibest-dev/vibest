@@ -1,4 +1,5 @@
 import { Agents } from "@vibest/core/agents"
+import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -19,7 +20,6 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { EntrySession } from "@vibest/core/session/entry"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import * as UpdateCheckNode from "@vibest/core/update-check"
 import { Git } from "@vibest/core/worktree"
 import { VibestRpcs } from "@vibest/protocol/rpc"
 import { Context, Effect, Layer } from "effect"
@@ -38,6 +38,7 @@ import { remoteHandlers } from "./handlers/remote.ts"
 import * as SessionHandlers from "./handlers/session.ts"
 import { sessionListing } from "./listing.ts"
 import { services } from "./services.ts"
+import { UpdateCheck } from "./update-check.ts"
 
 export { Identity, Shutdown } from "./handlers/daemon.ts"
 export { WATCH_BACKLOG } from "./handlers/session.ts"
@@ -109,7 +110,8 @@ export const node = LayerNode.make({
     Shutdown.node,
     SshHosts.node,
     Subscriptions.node,
-    UpdateCheckNode.node,
+    UpdateCheck.node,
+    App.node,
     VibestdIdentity.node,
     socketServer,
     PlatformNode.childProcessSpawner,

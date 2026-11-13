@@ -20,6 +20,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
+import { clients } from "../src/client.ts"
 import {
   authed,
   FakeGit,
@@ -414,10 +415,10 @@ describe("multi-repository isolated workspace", () => {
       assert.isUndefined(yield* db.projectAt(workspace))
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.project, root)
 
-      const listed = yield* liveDaemon().list(workspace)
+      const listed = yield* liveDaemon(clients).list(workspace)
       assert.deepStrictEqual(listed.map((session) => session.agent).sort(), ["coordinator", "general"])
       assert.deepStrictEqual(
-        (yield* liveDaemon().list(root)).map((session) => session.id).sort(),
+        (yield* liveDaemon(clients).list(root)).map((session) => session.id).sort(),
         listed.map((session) => session.id).sort(),
       )
 

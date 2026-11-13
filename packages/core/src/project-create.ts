@@ -1,9 +1,7 @@
-import { ProjectCreateFailed } from "@vibest/protocol/rpc"
+import { ProjectCreateFailed } from "@vibest/schema/project"
 import { Effect, Exit, FileSystem, Option, Path, type PlatformError } from "effect"
 
 import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
-
-export { ProjectCreateFailed }
 import {
   addWorktree,
   copyIncluded,

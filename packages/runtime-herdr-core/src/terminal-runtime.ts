@@ -456,6 +456,6 @@ export const make = (deps: {
       present,
       seen,
       see,
-      events: Stream.fromPubSub(events),
+      events: RuntimeApi.eventsFrom(events),
     } satisfies Runtime
   })

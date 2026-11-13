@@ -8,6 +8,7 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { pre } from "@vibest/builtins"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
+import { App } from "@vibest/core/app"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
@@ -24,10 +25,11 @@ import { messageOf } from "@vibest/schema/error"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
+import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
-import { Effect, Layer, Stdio, Stream } from "effect"
+import { Effect, Layer, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
-import { FetchHttpClient } from "effect/http"
+import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { SqlClient } from "effect/sql"
@@ -363,6 +365,19 @@ export const replacements: LayerNode.Replacements = [
   ),
   HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
 ]
+
+export const app = (info: App["Service"]) => App.node.replace(Layer.succeed(App, info))
+
+export const updateCheck = (
+  construct: Effect.Effect<UpdateCheck["Service"], never, Scope.Scope | HttpClient.HttpClient>,
+) =>
+  UpdateCheck.node.replace(
+    LayerNode.make({
+      service: UpdateCheck,
+      layer: Layer.effect(UpdateCheck, construct),
+      deps: [PlatformNode.httpClient],
+    }),
+  )
 
 export const daemon: Host = { lock, checkDatabase }
 
