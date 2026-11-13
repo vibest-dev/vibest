@@ -5,7 +5,7 @@ import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
-import { Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import type { ServeError } from "effect/http/HttpServerError"
@@ -139,7 +139,15 @@ export const layer = Layer.unwrap(
   ),
 )
 
-export const httpServer = LayerNode.unbound<ServeError>()(HttpServer.HttpServer)
+export class HttpServerLayer extends Context.Service<HttpServerLayer, Layer.Layer<HttpServer.HttpServer, ServeError>>()(
+  "vibest/HttpServerLayer",
+) {}
+export const httpServerLayer = LayerNode.unbound(HttpServerLayer)
+export const httpServer = LayerNode.make({
+  service: HttpServer.HttpServer,
+  layer: Layer.unwrap(Effect.map(HttpServerLayer, (layer) => layer)),
+  deps: [httpServerLayer],
+})
 
 export const node = LayerNode.make({
   name: "vibest/HttpServer",

@@ -325,10 +325,12 @@ export const replacements: LayerNode.Replacements = [
   PlatformNode.path.replace(platformNode),
   PlatformNode.crypto.replace(platformNode),
   PlatformNode.childProcessSpawner.replace(platformNode),
-  PlatformNode.sqlClient.replace(
+  PlatformNode.sqlClientLayer.replace(
     LayerNode.make({
       name: "vibest/Sqlite",
-      layer: Layer.unwrap(Effect.map(Layout, (layout) => sqlite(layout.database))),
+      layer: Layer.unwrap(
+        Effect.map(Layout, (layout) => Layer.succeed(PlatformNode.SqlClientLayer, sqlite(layout.database))),
+      ),
       deps: [PlatformNode.layout],
     }),
   ),
@@ -337,17 +339,23 @@ export const replacements: LayerNode.Replacements = [
   builtinsNode.replace(Layer.succeed(Builtins, pre)),
   HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
   ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
-  Server.socketServer.replace(
+  Server.socketServerLayer.replace(
     LayerNode.make({
       name: "vibest/SocketServer",
-      layer: Layer.unwrap(Effect.map(Layout, (layout) => socketServer(layout.socket))),
+      layer: Layer.unwrap(
+        Effect.map(Layout, (layout) => Layer.succeed(Server.SocketServerLayer, socketServer(layout.socket))),
+      ),
       deps: [PlatformNode.layout],
     }),
   ),
-  Http.httpServer.replace(
+  Http.httpServerLayer.replace(
     LayerNode.make({
       name: "vibest/HttpServer/unix",
-      layer: Layer.unwrap(Effect.map(Layout, (layout) => BunHttpServer.layerServer({ unix: layout.httpSocket }))),
+      layer: Layer.unwrap(
+        Effect.map(Layout, (layout) =>
+          Layer.succeed(Http.HttpServerLayer, BunHttpServer.layerServer({ unix: layout.httpSocket })),
+        ),
+      ),
       deps: [PlatformNode.layout],
     }),
   ),
