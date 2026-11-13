@@ -2,15 +2,16 @@ import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } fr
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Console, Effect, Option } from "effect"
-import { Command } from "effect/cli"
 import { RpcClient } from "effect/rpc"
 
-import { extraVibests, type Finding, updateNotice } from "./update.ts"
-import { VERSION } from "./version.ts"
+import { Runtime } from "../../framework/runtime.ts"
+import { extraVibests, type Finding, updateNotice } from "../../update.ts"
+import { VERSION } from "../../version.ts"
+import { Commands } from "../commands.ts"
 
 const MARKS = { ok: "✓", problem: "✗", note: "·" } as const
 
-export const doctor = Command.make("doctor", {}, () =>
+export default Runtime.handler(Commands.commands.doctor, () =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const sections: Array<{ readonly title: string; readonly findings: ReadonlyArray<Finding> }> = []
@@ -153,8 +154,4 @@ export const doctor = Command.make("doctor", {}, () =>
     yield* Console.log(lines.join("\n"))
     yield* updateNotice
   }),
-).pipe(
-  Command.withDescription(
-    "Check that vibest can work here: the coding agents, vibestd, each runtime agents run in, and plugins, each problem with how to fix it; starts vibestd when it is not running",
-  ),
 )
