@@ -110,7 +110,7 @@ manages it. Items marked planned are not built.
 - **Harnesses registered by plugins**: a plugin adds a `HarnessDefinition` with
   `context.harness.transform((editor) => editor.add(definition))`, like a runtime with `context.runtime.transform`.
   The two builtin harnesses are the plugins `harness-pi` and `harness-claude` in
-  `packages/plugin-harnesses`, loaded first (Cursor is the same kind of plugin, built to `harnesses/cursor/plugin.js`
+  `packages/plugin-harnesses`, loaded first (Cursor is the same kind of plugin, built to `harnesses/cursor/index.js`
   and added by the user); their integration files stay in `packages/integration/*`. A harness id is
   a plain string: a harness the database names but no plugin provides is unavailable ("no plugin provides harness
   X; loaded: …"), never a decode failure.

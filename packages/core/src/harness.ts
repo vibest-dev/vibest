@@ -1,6 +1,6 @@
 import type { HarnessOption } from "@vibest/plugin"
-import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { VibestCommand } from "@vibest/schema/layout"
+import type { HarnessChoice } from "@vibest/schema/session"
 import { addPluginHint, HarnessUnavailable } from "@vibest/schema/session"
 import { Cache, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"

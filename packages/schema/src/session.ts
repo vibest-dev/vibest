@@ -45,6 +45,13 @@ export const InboxRow = Schema.Struct({
 })
 export type InboxRow = typeof InboxRow.Type
 
+export type Taken = {
+  readonly execution: number
+  readonly ids: ReadonlyArray<number>
+  readonly line: string
+  readonly text: string
+}
+
 export type HarnessId = string
 
 export const addPluginHint =
@@ -150,3 +157,18 @@ export const describeSpawn = (s: {
   const by = plugins.length === 0 ? "" : ` (chosen by plugin ${plugins.join(", ")})`
   return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
 }
+
+export const HarnessModel = Schema.Struct({
+  provider: Schema.NullOr(Schema.String),
+  model: Schema.String,
+  name: Schema.String,
+  default: Schema.Boolean,
+})
+
+export const HarnessChoice = Schema.Struct({
+  harness: Schema.String,
+  binary: Schema.String,
+  problem: Schema.NullOr(Schema.String),
+  models: Schema.Array(HarnessModel),
+})
+export type HarnessChoice = typeof HarnessChoice.Type

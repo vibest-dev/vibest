@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { VERSION } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Effect } from "effect"
 import { Command } from "effect/cli"
@@ -7,8 +6,12 @@ import { Command } from "effect/cli"
 import * as Platform from "#platform"
 
 import * as Cli from "./cli.ts"
+import { updater } from "./update-check.ts"
+import { VERSION } from "./version.ts"
 
-Cli.command(Platform.daemon, Platform.replacements, Platform.exec).pipe(
+const replacements = [...Platform.replacements, Platform.app({ version: VERSION }), Platform.updateCheck(updater)]
+
+Cli.command(Platform.daemon, replacements, Platform.exec).pipe(
   Command.run({ version: VERSION }),
   Cli.printFailure,
   Effect.provide(Layout.layer),

@@ -1,6 +1,6 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
 import { reconnectSchedule, type Runtime } from "@vibest/plugin"
-import { peerHeaders, PROTOCOL } from "@vibest/protocol/protocol"
+import { peerHeaders } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import {
@@ -15,6 +15,7 @@ import {
   type RuntimeView,
   UnknownMachine,
 } from "@vibest/schema/machine"
+import { PROTOCOL } from "@vibest/schema/version"
 import {
   Clock,
   Context,

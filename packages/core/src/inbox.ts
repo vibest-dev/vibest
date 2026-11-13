@@ -1,6 +1,6 @@
-import type { Taken } from "@vibest/protocol/protocol"
 import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued } from "@vibest/schema/event"
 import { shortId } from "@vibest/schema/id"
+import type { Taken } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus, TerminalExited } from "./bus.ts"
