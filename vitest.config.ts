@@ -13,6 +13,7 @@ export default defineConfig({
       "packages/runtime-herdr-core/test/**/*.test.ts",
       "packages/integration/pi/test/**/*.test.ts",
       "packages/integration/cursor/test/**/*.test.ts",
+      "packages/integration/agy/test/**/*.test.ts",
       "packages/schema/test/**/*.test.ts",
       "packages/core/src/**/*.test.ts",
       "packages/core/test/**/*.test.ts",

@@ -13,5 +13,6 @@ packages/integration/claude/.claude-plugin/
 tools/e2e/evidence/
 packages/integration/cursor/.cursor-plugin/
 packages/integration/cursor/hooks/
+packages/integration/agy/status.sh
 packages/cli/harnesses/
 packages/integration/pi/dist/
