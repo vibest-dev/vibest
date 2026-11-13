@@ -4,7 +4,7 @@ import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule 
 import { awaitEvent, awaitOn, Bus, type EngineEvent } from "../bus.ts"
 import { Db, type SessionRow, harnessIdOf } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import { Harnesses } from "../harness.ts"
+import { Harnesses, runtimeLifecycle } from "../harness.ts"
 import type { HarnessDefinition } from "../host.ts"
 import {
   agentState,
@@ -32,6 +32,9 @@ export const busyOf = (seen: AgentSeen) => {
 
 const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 
+const usable = (seen: AgentSeen, adapter: HarnessDefinition) =>
+  runtimeLifecycle(adapter) ? seen === "idle" : settled(seen)
+
 const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
 
 const make = Effect.gen(function* () {
@@ -49,7 +52,7 @@ const make = Effect.gen(function* () {
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
           const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-          const ready = (yield* db.readyAt(id)) !== undefined || (!reports && settled(seen))
+          const ready = (yield* db.readyAt(id)) !== undefined || (!reports && usable(seen, adapter))
           return { seen, ready }
         })
         return yield* look.pipe(

@@ -7,7 +7,7 @@ import { Db, type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, exec
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import * as Engine from "../engine.ts"
-import { Harnesses } from "../harness.ts"
+import { Harnesses, runtimeLifecycle } from "../harness.ts"
 import { Inbox, text as inboxText } from "../inbox.ts"
 import { errorMessage } from "../plugins.ts"
 import { alive, agentState, type Runtime, Runtimes, RuntimeError, stateOf, type Terminal } from "../runtimes.ts"
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
     const session = yield* getRow(id)
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
     if (
-      session.entry ||
+      (session.entry && !runtimeLifecycle(harnesses.find(harnessIdOf(session)))) ||
       executionStateOf(session) === "open" ||
       session.status === "blocked" ||
       ((session.process?.placedAt ?? null) === null && exitedAt(session) === null) ||

@@ -49,6 +49,9 @@ export class Harnesses extends Context.Service<Harnesses, HarnessesShape>()("vib
   static readonly node = LayerNode.make({ service: Harnesses, layer: Harnesses.layer, deps: [] })
 }
 
+export const runtimeLifecycle = (definition: HarnessDefinition | undefined) =>
+  definition !== undefined && definition.executionEnd === undefined
+
 export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
 
 export const MODELS_TTL = Duration.minutes(5)

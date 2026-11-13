@@ -16,7 +16,7 @@ import {
 } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as Engine from "../engine.ts"
-import { Harnesses } from "../harness.ts"
+import { Harnesses, runtimeLifecycle } from "../harness.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import { agentState, alive, paneTail, peekHint, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
@@ -139,6 +139,10 @@ const make = Effect.gen(function* () {
     }
     yield* Ref.set(r.blockedNotified, false)
     if (!ended) return yield* Ref.set(r.endedAt, undefined)
+    if (runtimeLifecycle(harnesses.find(harnessIdOf(session)))) {
+      if (execution !== undefined) yield* db.closeExecution(id, execution, "completed")
+      return
+    }
     const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
     const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
     if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkSession(id))
@@ -162,6 +166,8 @@ const make = Effect.gen(function* () {
       const session = working ? yield* db.getSession(id) : undefined
       const execution = session && !inbox.pulls(harnessIdOf(session)) ? yield* db.openExecution(id) : undefined
       if (execution !== undefined) yield* db.acceptExecution(id, execution)
+      else if (session && runtimeLifecycle(harnesses.find(harnessIdOf(session))))
+        yield* db.startObserved(id, undefined, yield* Clock.currentTimeMillis, undefined, true)
       yield* checkSession(id)
     })
 

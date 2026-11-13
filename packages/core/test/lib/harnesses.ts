@@ -112,6 +112,18 @@ export const CURSOR: HarnessDefinition = {
   },
 }
 
+export const RUNTIME_ONLY: HarnessDefinition = {
+  id: "runtime-only",
+  binary: "runtime-only",
+  ownSessionId: false,
+  systemPromptInPrompt: true,
+  interruptKey: "esc",
+  replyField: "text",
+  ready: "runtime",
+  launchArgs: () => [],
+  models: { args: () => [], answer: () => undefined },
+}
+
 export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", inbox: "subscribe" }
 export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", inbox: "poll" }
 
