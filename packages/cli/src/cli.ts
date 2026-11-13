@@ -21,7 +21,6 @@ import {
   LaunchFailed,
   NoCallingSession,
 } from "@vibest/schema/session"
-import { VERSION } from "@vibest/schema/version"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,
@@ -48,6 +47,7 @@ import { doctor } from "./doctor.ts"
 import { connectCommand, machine, projectAdd } from "./machine-commands.ts"
 import { replaceDaemon } from "./replace.ts"
 import { LEFT, noticeFrom, restartAgents, update, updateNotice } from "./update.ts"
+import { VERSION } from "./version.ts"
 
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
 

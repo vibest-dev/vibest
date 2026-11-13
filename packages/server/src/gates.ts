@@ -31,8 +31,9 @@ import {
   ProtocolRejected,
   type CallerShape,
 } from "@vibest/protocol/rpc"
+import { App } from "@vibest/schema/app"
 import { ID } from "@vibest/schema/id"
-import { PROTOCOL, VERSION } from "@vibest/schema/version"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Effect, Layer, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 
@@ -96,7 +97,7 @@ export const identify = (db: Db["Service"], read: Read) =>
 export const noteOpen = (db: Db["Service"], read: Read, sessionId: string) =>
   read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(db, read)) : Effect.void
 
-export const checkProtocol = (db: Db["Service"], read: Read) =>
+export const checkProtocol = (db: Db["Service"], read: Read, version: string) =>
   Effect.gen(function* () {
     yield* noteIntegration(db, read)
     const sent = read(PROTOCOL_HEADER)
@@ -106,7 +107,7 @@ export const checkProtocol = (db: Db["Service"], read: Read) =>
       mismatch: protocolMismatch(
         sent === undefined ? undefined : Number(sent),
         PROTOCOL,
-        VERSION,
+        version,
         read(PLUGIN_VERSION_HEADER),
       ),
     }
@@ -201,9 +202,10 @@ export const ProtocolGateLive = Layer.effect(
   ProtocolGate,
   Effect.gen(function* () {
     const db = yield* Db
+    const { version } = yield* App
     return ProtocolGate.of((effect, { headers, rpc }) =>
       Effect.gen(function* () {
-        const rejected = yield* checkProtocol(db, reader(headers))
+        const rejected = yield* checkProtocol(db, reader(headers), version)
         if (rejected)
           return yield* new ProtocolRejected({ method: rpc._tag, protocol: rejected.sent, mismatch: rejected.mismatch })
         return yield* effect

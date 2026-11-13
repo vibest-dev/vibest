@@ -37,7 +37,7 @@ import { remoteHandlers } from "./handlers/remote.ts"
 import * as SessionHandlers from "./handlers/session.ts"
 import { sessionListing } from "./listing.ts"
 import { services } from "./services.ts"
-import * as UpdateCheckNode from "./update-check.ts"
+import { UpdateCheck } from "./update-check.ts"
 
 export { Identity, Shutdown } from "./handlers/daemon.ts"
 export { WATCH_BACKLOG } from "./handlers/session.ts"
@@ -100,7 +100,8 @@ export const node = LayerNode.make({
     Shutdown.node,
     SshHosts.node,
     Subscriptions.node,
-    UpdateCheckNode.node,
+    UpdateCheck.node,
+    PlatformNode.app,
     VibestdIdentity.node,
     socketServer,
     PlatformNode.childProcessSpawner,

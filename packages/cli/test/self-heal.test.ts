@@ -10,7 +10,7 @@ import { SessionLive } from "@vibest/core/session/live"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { PingResult } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { PROTOCOL, VERSION } from "@vibest/schema/version"
+import { PROTOCOL } from "@vibest/schema/version"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
 import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
@@ -19,6 +19,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { replaceDaemon, type Timing } from "../src/replace.ts"
+import { VERSION } from "../src/version.ts"
 import {
   PATH_WITHOUT_HARNESS_CLIS,
   noteRecorded,

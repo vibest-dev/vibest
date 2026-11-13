@@ -20,10 +20,12 @@ import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/co
 import { HostEnv } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
+import { App } from "@vibest/schema/app"
 import { messageOf } from "@vibest/schema/error"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
+import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
@@ -33,6 +35,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { SqlClient } from "effect/sql"
 
 import { graph, keyLocalImports, load, packageName, watch } from "./plugin-source.ts"
+import * as UpdateCheckNode from "./update-check.ts"
 
 const unrefStdio = Layer.effect(
   Stdio.Stdio,
@@ -351,8 +354,11 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.layout],
     }),
   ),
+  UpdateCheck.node.replace(UpdateCheckNode.node),
   HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
 ]
+
+export const app = (version: string) => PlatformNode.app.replace(Layer.succeed(App, { version }))
 
 export const daemon: Host = { lock, checkDatabase }
 

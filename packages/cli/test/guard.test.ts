@@ -8,6 +8,7 @@ import { Project } from "@vibest/core/project"
 import { type Runtime, Runtimes, type RuntimesShape } from "@vibest/core/runtimes"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
 import { Forbidden } from "@vibest/protocol/rpc"
+import { App } from "@vibest/schema/app"
 import type { Host } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
 import {
@@ -32,6 +33,7 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
+import { VERSION } from "../src/version.ts"
 import {
   agentsLayer,
   FakeGit,
@@ -710,7 +712,7 @@ describe("wizard entry", () => {
           "This shell carries agent session abcd1234-abcd-4abc-8abc-abcd1234abcd. If you are the user, run it as env -u VIBEST_SESSION_ID vibest daemon restart",
         )
         assert.deepStrictEqual(touched, { spawn: false, exec: false, host: false, socket: false })
-      }),
+      }).pipe(Effect.provideService(App, { version: VERSION })),
     15_000,
   )
 })
@@ -764,7 +766,7 @@ describe("vibest --session inside herdr", () => {
         assert.strictEqual(Exit.isFailure(exit), true, "vibest started the entry session")
         assert.strictEqual(touched.exec, false)
         assert.strictEqual(touched.host, false)
-      }),
+      }).pipe(Effect.provideService(App, { version: VERSION })),
     15_000,
   )
 
@@ -803,7 +805,7 @@ describe("vibest --session inside herdr", () => {
       const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
       assert.notInclude(message, secret)
       assert.strictEqual(Exit.isFailure(exit), true)
-    }).pipe(Effect.provide(Platform.services)),
+    }).pipe(Effect.provide(Platform.services), Effect.provideService(App, { version: VERSION })),
   )
 })
 

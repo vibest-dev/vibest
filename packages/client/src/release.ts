@@ -1,5 +1,4 @@
 import { messageOf } from "@vibest/schema/error"
-import { VERSION } from "@vibest/schema/version"
 import { Config, Effect, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 
@@ -28,7 +27,7 @@ const latestVersion = (
   HttpClient.get(url).pipe(
     Effect.filterOrFail(
       (r) => r.status !== 404,
-      () => new Error(`no vibest release is published there yet; this vibest ${VERSION} stays as it is`),
+      () => new Error(`no vibest release is published there yet`),
     ),
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.flatMap(read),

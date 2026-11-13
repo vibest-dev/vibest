@@ -5,9 +5,9 @@ import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"
 import type { ReplayDiffers } from "@vibest/core/journal"
 import { Layout, VibestCommand } from "@vibest/core/paths"
+import { App } from "@vibest/schema/app"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
-import { VERSION } from "@vibest/schema/version"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
@@ -116,6 +116,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
     const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
+    const app = yield* App.pipe(Effect.provide(LayerNode.compile(PlatformNode.app, { replacements })))
     const identity = {
       pid: facts.pid,
       instance: yield* newId(),
@@ -135,7 +136,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     )
     yield* fs.chmod(layout.socket, 0o600)
     yield* fs.chmod(layout.httpSocket, 0o600)
-    const info: DaemonInfo = { ...identity, version: VERSION, socket: layout.socket }
+    const info: DaemonInfo = { ...identity, version: app.version, socket: layout.socket }
     yield* acquired.write(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)
     yield* fs.remove(`${layout.home}/vibestd.lock`, { force: true }).pipe(Effect.ignore)
     yield* Effect.log(`vibestd listening on ${layout.socket}`)

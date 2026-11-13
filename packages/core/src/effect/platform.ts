@@ -1,3 +1,4 @@
+import { App } from "@vibest/schema/app"
 import { Layout } from "@vibest/schema/layout"
 import { Crypto, FileSystem, Path } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/http"
@@ -15,4 +16,5 @@ export const sqlClient = LayerNode.unbound<DatabaseOpenFailed | SchemaMismatch |
   SqlClient.SqlClient,
 )
 export const layout = LayerNode.unbound(Layout)
+export const app = LayerNode.unbound(App)
 export const httpClient = LayerNode.make({ service: HttpClient.HttpClient, layer: FetchHttpClient.layer, deps: [] })

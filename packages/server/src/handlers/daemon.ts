@@ -8,8 +8,9 @@ import { Plugins } from "@vibest/core/plugins"
 import { machinesListing, Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Caller, CAPABILITIES, type DaemonIdentity, Forbidden, WrongInstance } from "@vibest/protocol/rpc"
+import { App } from "@vibest/schema/app"
 import { LaunchFailed } from "@vibest/schema/session"
-import { PROTOCOL, VERSION } from "@vibest/schema/version"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Context, Deferred, Effect } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -33,6 +34,7 @@ export const make = ({ cliOnly }: Checks) =>
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
     const updateStatus = yield* UpdateCheck
+    const { version } = yield* App
     const shutdown = yield* Shutdown
     const drain = yield* Drain
     const bus = yield* Bus
@@ -53,7 +55,7 @@ export const make = ({ cliOnly }: Checks) =>
           Effect.zip(updateStatus),
           Effect.map(([rows, update]) => ({
             protocol: PROTOCOL,
-            version: VERSION,
+            version,
             runtimes: rows,
             update,
             ...identity,

@@ -1,10 +1,12 @@
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
+import { App } from "@vibest/schema/app"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -33,10 +35,11 @@ export const make = Effect.gen(function* () {
   const integration = yield* Integration
   const drain = yield* Drain
   const harnesses = yield* Harnesses
+  const { version } = yield* App
   const caller = (headers: Headers.Headers) =>
     Effect.gen(function* () {
       const read = reader(headers)
-      const rejected = yield* checkProtocol(db, read)
+      const rejected = yield* checkProtocol(db, read, version)
       if (rejected)
         return {
           status: 409,
@@ -122,5 +125,5 @@ export const httpServer = LayerNode.unbound<ServeError>()(HttpServer.HttpServer)
 export const node = LayerNode.make({
   name: "vibest/HttpServer",
   layer,
-  deps: [services, Db.node, Drain.node, Harnesses.node, Inbox.node, Integration.node, httpServer],
+  deps: [services, Db.node, Drain.node, Harnesses.node, Inbox.node, Integration.node, httpServer, PlatformNode.app],
 })

@@ -1,6 +1,6 @@
 # Protocol Versioning
 
-1. `PROTOCOL` (`packages/protocol/src/protocol.ts`) is one integer, sent in the `vibest-protocol` header for RPC and HTTP alike. HTTP paths carry no version.
+1. `PROTOCOL` (`packages/schema/src/version.ts`) is one integer, sent in the `vibest-protocol` header for RPC and HTTP alike. HTTP paths carry no version.
 2. An additive feature is a boolean flag in Ping's capabilities and does not bump `PROTOCOL`.
 3. No compatibility with old versions. A mismatch is refused with a structured answer `{protocol, version, message, action}`: the message tells the user what happened, the action is the command to run (`vibest update`).
 4. HTTP is plain POST routes on `${VIBEST_HOME}/vibest-http.sock`: a pulling integration asks `/inbox/take` every second while idle, and the answer is the batch with its execution id. No long polling.

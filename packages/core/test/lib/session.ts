@@ -20,6 +20,7 @@ import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin"
 import type { DaemonIdentity } from "@vibest/protocol/rpc"
+import { App as VibestApp } from "@vibest/schema/app"
 import { randomId } from "@vibest/schema/id"
 import {
   Clock,
@@ -40,6 +41,8 @@ import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import * as App from "../../../server/src/app.ts"
 import * as Server from "../../../server/src/server.ts"
+import { NOT_CHECKED, UpdateCheck } from "../../../server/src/update-check.ts"
+import pkg from "../../package.json" with { type: "json" }
 import { tempDirectory } from "./directory.ts"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, KIND, type FakeRuntimeOptions } from "./fake-runtime.ts"
@@ -196,12 +199,16 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       fakeGit,
       runtimeNode,
       App.services,
+      PlatformNode.app,
+      UpdateCheck.node,
       plugins,
       Agents.node,
       readyOnStart,
     ]),
     [
       PlatformNode.layout.replace(home),
+      PlatformNode.app.replace(Layer.succeed(VibestApp, { version: pkg.version })),
+      UpdateCheck.node.replace(Layer.succeed(UpdateCheck, Effect.succeed(NOT_CHECKED))),
       Runtimes.node.replace(runtimes),
       Harness.node.replace(harnessLayer()),
       Harnesses.node.replace(harnessesLayer()),
@@ -310,6 +317,7 @@ export const restartSessions = Effect.gen(function* () {
     PlatformNode.crypto.replace(Layer.succeed(Crypto.Crypto, yield* Crypto.Crypto)),
     PlatformNode.fileSystem.replace(Layer.succeed(FileSystem.FileSystem, yield* FileSystem.FileSystem)),
     PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
+    PlatformNode.app.replace(Layer.succeed(VibestApp, yield* VibestApp)),
     PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
     Spawn.node.replace(defaultSpawn),
   ]

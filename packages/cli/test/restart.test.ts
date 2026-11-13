@@ -7,11 +7,12 @@ import { SessionLive } from "@vibest/core/session/live"
 import { CONTINUE, continueText, type Restarted } from "@vibest/core/session/restart"
 import { Sessions } from "@vibest/core/sessions"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { PROTOCOL, VERSION } from "@vibest/schema/version"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Clock, Effect, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import { daemonPlan } from "../src/update.ts"
+import { VERSION } from "../src/version.ts"
 import {
   CLAUDE,
   CURSOR,

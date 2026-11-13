@@ -4,11 +4,12 @@ import { Inbox } from "@vibest/core/inbox"
 import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { PROTOCOL, VERSION } from "@vibest/schema/version"
+import { PROTOCOL } from "@vibest/schema/version"
 import * as Http from "@vibest/server/http"
 import { Effect, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 
+import { VERSION } from "../src/version.ts"
 import {
   CLAUDE,
   CURSOR,

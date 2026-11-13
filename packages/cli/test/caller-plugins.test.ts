@@ -12,6 +12,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
+import { appReplacement } from "./fakes.ts"
 import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
 
 const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
@@ -250,6 +251,7 @@ describe("caller runtimes", () => {
       })
       const replacements = [
         ...Platform.replacements,
+        appReplacement,
         builtinsNode.replace(
           Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
         ),

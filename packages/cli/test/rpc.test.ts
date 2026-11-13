@@ -10,12 +10,13 @@ import { Sessions } from "@vibest/core/sessions"
 import { Plugin } from "@vibest/plugin"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
 import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
-import { PROTOCOL, VERSION } from "@vibest/schema/version"
+import { PROTOCOL } from "@vibest/schema/version"
 import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
+import { VERSION } from "../src/version.ts"
 import { authed, FakeRuntime, makeRepository, tempDirectory, until, writeEnd, projectOf } from "./fakes.ts"
 import { served, test, client, asCli, asEntry, asSession, failureTag } from "./rpc-helpers.ts"
 import { session as draftSession } from "./unit-helpers.ts"
@@ -706,13 +707,17 @@ describe("vibest.sock", () => {
         "ok",
       )
       assert.strictEqual(
-        incompatibleDaemon(newer.layout.socket, { protocol: PROTOCOL, version: "9.9.9", runtimes: [] }, ["vibest"]),
+        incompatibleDaemon(
+          newer.layout.socket,
+          { protocol: PROTOCOL, version: "9.9.9", runtimes: [] },
+          { version: VERSION, command: ["vibest"] },
+        ),
         undefined,
       )
       const olderClient = incompatibleDaemon(
         newer.layout.socket,
         { protocol: PROTOCOL + 1, version: "9.9.9", runtimes: [] },
-        ["vibest"],
+        { version: VERSION, command: ["vibest"] },
       )?.message
       assert.include(
         olderClient,

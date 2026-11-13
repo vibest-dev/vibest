@@ -14,13 +14,14 @@ import {
   SocketConnector,
   withVibest,
 } from "@vibest/client/client"
+import { App } from "@vibest/schema/app"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { VERSION } from "@vibest/schema/version"
 import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
 import { Pi } from "./pi.ts"
 import toolGroups from "./tui/tool-groups.ts"
 import compactUserMessages from "./tui/user-message-padding.ts"
+import { VERSION } from "./version.ts"
 
 export const skillsDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "skills")
 
@@ -285,6 +286,7 @@ export const services = Layer.mergeAll(
   NodeFileSystem.layer,
   Layer.succeed(SocketConnector, (endpoint) => NodeSocket.makeNet({ path: endpoint })),
   vibestCommand,
+  Layer.succeed(App, { version: VERSION }),
 ).pipe(Layer.provideMerge(NodePath.layer))
 
 export default (api: ExtensionAPI) => Pi.runMain(api, extension.pipe(Layer.provide(services)))

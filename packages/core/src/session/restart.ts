@@ -1,4 +1,5 @@
-import { PROTOCOL, VERSION } from "@vibest/schema/version"
+import { App } from "@vibest/schema/app"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule, type Scope } from "effect"
 
 import { Agents } from "../agents.ts"
@@ -54,8 +55,7 @@ export const CONTINUE =
 
 export const continueText = (version: string) => `${CONTINUE} vibest is now ${version}.`
 
-export const current = (integration: { readonly version: string; readonly protocol: number } | undefined) =>
-  integration !== undefined && integration.version === VERSION && integration.protocol === PROTOCOL
+type Integration = { readonly version: string; readonly protocol: number }
 
 export const blockedOf = (
   adapter: HarnessDefinition | undefined,
@@ -81,7 +81,7 @@ type LiveNow = Effect.Effect<
   | {
       readonly pid?: number | undefined
       readonly ready?: number | undefined
-      readonly integration?: Parameters<typeof current>[0]
+      readonly integration?: Integration | undefined
     }
   | undefined
 >
@@ -105,6 +105,7 @@ interface Target {
 }
 
 const sessionRestart = (deps: {
+  readonly version: string
   readonly db: Db["Service"]
   readonly bus: Bus["Service"]
   readonly runtimes: Runtimes["Service"]
@@ -129,7 +130,9 @@ const sessionRestart = (deps: {
     text: string,
   ) => Effect.Effect<string | undefined, unknown>
 }) => {
-  const { db, runtimes, harnesses, processes } = deps
+  const { db, runtimes, harnesses, processes, version } = deps
+  const current = (integration: Integration | undefined) =>
+    integration !== undefined && integration.version === version && integration.protocol === PROTOCOL
 
   const routed = (kind: string | null | undefined) =>
     kind ? runtimes.route(kind).pipe(Effect.orElseSucceed(() => undefined)) : Effect.succeed(undefined)
@@ -238,7 +241,7 @@ const sessionRestart = (deps: {
               h,
               (yield* db.getSession(id)) ?? session,
               terminalOf(session),
-              noticeEnvelope(continueText(VERSION)),
+              noticeEnvelope(continueText(version)),
             )
             return missed === undefined
               ? { id, projectId, ok: true, message: `${id} restarted; its interrupted execution continues` }
@@ -285,7 +288,7 @@ const sessionRestart = (deps: {
             const missed =
               row === undefined
                 ? "it is gone"
-                : yield* deps.prompt(h, row, place.address, noticeEnvelope(continueText(VERSION)))
+                : yield* deps.prompt(h, row, place.address, noticeEnvelope(continueText(version)))
             return missed === undefined
               ? { id, projectId, ok: true, message: `${label} restarted; its interrupted execution continues` }
               : { id, projectId, ok: false, message: `${label} restarted, but ${missed}` }
@@ -460,6 +463,7 @@ const make = Effect.gen(function* () {
     )
 
   return sessionRestart({
+    version: (yield* App).version,
     db,
     bus,
     runtimes,
@@ -485,6 +489,7 @@ export class Restart extends Context.Service<Restart, Effect.Success<typeof make
     service: Restart,
     layer: Restart.layer,
     deps: [
+      PlatformNode.app,
       Agents.node,
       Bus.node,
       Db.node,
