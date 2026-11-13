@@ -1,4 +1,5 @@
-import type { Plugin as AnyPlugin } from "@vibest/plugin/host"
+import type { Plugin as PromisePlugin } from "@vibest/plugin"
+import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
@@ -52,6 +53,8 @@ const ConfigEntry = Schema.Union([
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
 type ConfigFile = typeof ConfigFile.Type
 const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Unknown }))
+export type AnyPlugin = EffectPlugin.Plugin | PromisePlugin.Plugin
+
 const isPlugin = (u: unknown): u is AnyPlugin =>
   typeof u === "object" &&
   u !== null &&

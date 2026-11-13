@@ -1,8 +1,8 @@
 import { Cause, Duration, Effect, Exit, Option, Ref, Schema, type Scope, Stream } from "effect"
 
 import type { MachineEvent, MachineHooks, MachineNote } from "./effect/index.ts"
+import type { Plugin } from "./effect/plugin.ts"
 import type * as Runtime from "./effect/runtime.ts"
-import { effectOf, type Plugin } from "./host.ts"
 
 export type { RuntimeDefinition } from "./effect/runtime.ts"
 
@@ -222,7 +222,7 @@ export const machineHooks = (
       },
     }
     const registration = { dispose: Effect.void }
-    yield* effectOf(plugin)({
+    yield* plugin.effect({
       options,
       agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
       machine: {

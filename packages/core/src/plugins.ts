@@ -1,5 +1,5 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
-import { effectOf, type Plugin as AnyPlugin } from "@vibest/plugin/host"
+import { fromPromise } from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
@@ -14,7 +14,7 @@ import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
 import type { PluginsShape } from "./host.ts"
-import { type Candidate, keyOf, makeSources, PluginLoader } from "./plugin-sources.ts"
+import { type AnyPlugin, type Candidate, keyOf, makeSources, PluginLoader } from "./plugin-sources.ts"
 import { supervise } from "./plugin-supervisor.ts"
 import { logFailure } from "./reactor.ts"
 import * as Registry from "./registry.ts"
@@ -53,6 +53,8 @@ export interface SpawnDecision extends Routing {
 
 type Stats = Hooks.Stats
 const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
+const effectOf = (plugin: AnyPlugin) => ("effect" in plugin ? plugin.effect : fromPromise(plugin))
+
 type Loaded = Candidate & { readonly plugin: AnyPlugin }
 export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plugins/Builtins", {
   defaultValue: () => [],
