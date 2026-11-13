@@ -65,7 +65,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
       Stream.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Stream.failCause(cause)
-          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`)).pipe(
+          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended`, cause)).pipe(
               Stream.drain,
               Stream.concat(Stream.fail("reconnect")),
             ),

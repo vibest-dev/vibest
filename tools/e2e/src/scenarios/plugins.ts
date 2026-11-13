@@ -86,7 +86,7 @@ const checks: ReadonlyArray<Check> = [
       )
       const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
       expect(
-        /ERROR[^\n]*failed to clean up plugin[\s\S]*"plugin\.id": "unclean"[\s\S]*e2e teardown boom/.test(log),
+        /level=ERROR[^\n]*failed to clean up plugin[^\n]*plugin\.id=unclean[^\n]*e2e teardown boom/.test(log),
         `the failed teardown was not logged: ${log.slice(-2000)}`,
       )
       await fs.rm(file)
