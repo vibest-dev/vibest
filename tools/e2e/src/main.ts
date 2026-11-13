@@ -124,7 +124,7 @@ const selected = shard === undefined ? everySelected : shardOf(everySelected, sh
 if (shard !== undefined) console.log(`SHARD ${shard.index}/${shard.count}: ${selected.map((c) => c.id).join(" ")}`)
 for (const id of elsewhere) console.log(`ELSEWHERE ${id}: not run here; another machine's run proves it`)
 
-for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
+for (const built of [binary, path.join(harnesses, "pi/extension.mjs"), path.join(harnesses, "pi/presentation.mjs")]) {
   if (!(await Bun.file(built).exists())) {
     console.error(`no ${built}; run pnpm run build first`)
     process.exit(1)
