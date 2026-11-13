@@ -1,18 +1,20 @@
-import { Formatter, Logger } from "effect"
+import { Config, Effect, Formatter, Layer, Logger, Option, Random, References } from "effect"
 
-const logfmt = Logger.map(Logger.formatStructured, (output) => {
-  const messages = Array.isArray(output.message) ? output.message : [output.message]
-  return [
-    ["timestamp", output.timestamp],
-    ["level", output.level],
-    ...messages.flatMap((value) => (plain(value) ? flatten(value) : [["message", value] as const])),
-    ...(output.cause === undefined ? [] : [["cause", output.cause] as const]),
-    ...flatten(output.spans),
-    ...flatten(output.annotations),
-  ]
-    .map(([key, value]) => `${key}=${format(value)}`)
-    .join(" ")
-})
+export const logfmt = (run: string) =>
+  Logger.map(Logger.formatStructured, (output) => {
+    const messages = Array.isArray(output.message) ? output.message : [output.message]
+    return [
+      ["timestamp", output.timestamp],
+      ["level", output.level],
+      ["run", run],
+      ...messages.flatMap((value) => (plain(value) ? flatten(value) : [["message", value] as const])),
+      ...(output.cause === undefined ? [] : [["cause", output.cause] as const]),
+      ...flatten(output.spans),
+      ...flatten(output.annotations),
+    ]
+      .map(([key, value]) => `${key}=${format(value)}`)
+      .join(" ")
+  })
 
 function flatten(
   input: Record<string, unknown>,
@@ -40,4 +42,21 @@ function format(input: unknown) {
   return /^[^\s="\\]+$/.test(value) ? value : JSON.stringify(value)
 }
 
-export const layer = Logger.layer([Logger.withConsoleError(logfmt)])
+const levels = { DEBUG: "Debug", INFO: "Info", WARN: "Warn", ERROR: "Error" } as const
+
+const minimumLogLevel = Layer.effect(
+  References.MinimumLogLevel,
+  Config.option(Config.String("VIBEST_LOG_LEVEL")).pipe(
+    Effect.map((value) => {
+      const name = Option.getOrElse(value, () => "").toUpperCase()
+      return name in levels ? levels[name as keyof typeof levels] : levels.INFO
+    }),
+    Effect.orElseSucceed(() => levels.INFO),
+  ),
+)
+
+const runLogger = Random.nextIntBetween(0, 0xffffffff).pipe(
+  Effect.map((n) => Logger.withConsoleError(logfmt(n.toString(16).padStart(8, "0")))),
+)
+
+export const layer = Layer.mergeAll(Logger.layer([runLogger]), minimumLogLevel)
