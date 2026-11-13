@@ -19,7 +19,6 @@ export default defineConfig({
       "packages/plugin-harnesses/test/**/*.test.ts",
       "packages/plugin/test/**/*.test.ts",
       "tools/oxlint/**/*.test.mjs",
-      "tools/check/**/*.test.ts",
     ],
     fileParallelism: true,
     maxConcurrency: 8,

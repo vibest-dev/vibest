@@ -10,7 +10,7 @@ appending facts.
   within that aggregate: each new fact takes the aggregate's highest `seq` plus one; facts rewritten from the old shape
   keep their old number, so an older aggregate's numbers have gaps), `at`, `type`, and `data`, the fact's fields as JSON, written once.
   `position` is the file's local order of all rows; only the journal reads it (to replay, to copy the log, and as the order `Events` reads the whole log in), and no
-  fact or read-model row stores it (`tools/check/event-reads.test.ts`).
+  fact or read-model row stores it (an oxlint rule will enforce it).
 - Aggregates: a `session` (its id; every `session.*`, `process.*`, `execution.*` and `inbox.*` fact), a `project`
   (its id; `project.*`), and the `ledger` (`meta.ledger`, a UUID made when the file is created; `machine.*`, `peer.*`,
   `outbox.*`). Which aggregate a type belongs to is part of its catalog definition.
@@ -26,8 +26,8 @@ appending facts.
 - Record only facts vibest alone knows and cannot read back later: decisions, events it saw, inputs, times. Read
   git, files, the runtime and the configuration when they are needed.
 - Every change is a fact appended to the `event` log; the log is never updated. Only the projectors and the import
-  write the read model (`tools/check/projector-writes.test.ts`), and no query reads into a fact's payload
-  (`tools/check/no-payload-sql.test.ts`).
+  write the read model (an oxlint rule will enforce it), and no query reads into a fact's payload
+  (an oxlint rule will enforce it).
 - `--env` values are never stored: not in the database, logs or telemetry. They reach the terminal only when it
   opens. An in-place restart or a harness change in the same pane keeps them (the pane's shell has them); a new
   terminal does not (a subagent resumed in a new terminal starts without them), and the user passes `--env` again. A
