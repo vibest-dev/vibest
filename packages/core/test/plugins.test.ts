@@ -382,6 +382,9 @@ const loaded = (dir: string) =>
     Effect.map(Context.get(Plugins)),
   )
 
+const settledAfterLoad = (dir: string) =>
+  loaded(dir).pipe(Effect.tap((plugins) => until(plugins.settled, (activated) => activated)))
+
 const event = {
   project: "/r",
   agent: "general",
@@ -431,7 +434,7 @@ describe("plugins: loading", () => {
           )
 
         yield* config(["./x", "./y", "-b", "vibest-plugin-npm@1.0.0", "./a-file.ts"])
-        const first = yield* loaded(dir)
+        const first = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* first.list).map((p) => [p.id, p.status]),
           [
@@ -449,14 +452,14 @@ describe("plugins: loading", () => {
         assert.strictEqual((yield* first.start(event)).model, "from-y")
 
         yield* config(["./x", "file://["])
-        const invalid = yield* loaded(dir)
+        const invalid = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* invalid.list).map((p) => p.id),
           [],
         )
 
         yield* config(["-*", "./y", "./x"])
-        const second = yield* loaded(dir)
+        const second = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* second.list).map((p) => p.id),
           ["y", "x"],
