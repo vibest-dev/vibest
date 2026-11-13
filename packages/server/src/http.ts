@@ -1,6 +1,7 @@
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
@@ -117,7 +118,7 @@ export const layer = Layer.unwrap(
   ),
 )
 
-export const httpServer = LayerNode.unbound<ServeError>()(HttpServer.HttpServer)
+export const httpServer = PlatformNode.hostProvided<ServeError>()(HttpServer.HttpServer)
 
 export const node = LayerNode.make({
   name: "vibest/HttpServer",

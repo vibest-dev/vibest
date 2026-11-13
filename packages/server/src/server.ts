@@ -71,7 +71,7 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
 
-export const socketServer = LayerNode.unbound<SocketServer.SocketServerError>()(SocketServer.SocketServer)
+export const socketServer = PlatformNode.hostProvided<SocketServer.SocketServerError>()(SocketServer.SocketServer)
 
 export const node = LayerNode.make({
   name: "vibest/RpcServer",
