@@ -4,7 +4,7 @@ import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { herdrCommands } from "@vibest/runtime-herdr/commands"
 import { plugin as runtimeHerdr } from "@vibest/runtime-herdr/plugin"
-import type { Effect } from "effect"
+import { Effect } from "effect"
 
 import { agentPlugin } from "./agent.ts"
 import { harnessDefaultPlugin } from "./harness-default.ts"
@@ -23,15 +23,19 @@ const builtin = (plugin: Plugin.Plugin): Builtin => ({
   plugin,
 })
 
-export const pre: ReadonlyArray<Builtin> = [
-  builtin(agentPlugin),
-  builtin(piPlugin),
-  builtin(claudePlugin),
-  builtin(runtimeHerdrCore),
-  builtin(runtimeHerdr),
-  builtin(choicePlugin()),
-  builtin(harnessDefaultPlugin()),
-]
+export const pre = Effect.gen(function* () {
+  const pi = yield* piPlugin
+  const claude = yield* claudePlugin
+  return [
+    builtin(agentPlugin),
+    builtin(pi),
+    builtin(claude),
+    builtin(runtimeHerdrCore),
+    builtin(runtimeHerdr),
+    builtin(choicePlugin()),
+    builtin(harnessDefaultPlugin()),
+  ]
+})
 
 export const commands = <E, R>(refuseAgent: (command: string) => Effect.Effect<void, E, R>) => [
   herdrCommands(refuseAgent),
