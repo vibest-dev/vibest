@@ -27,7 +27,7 @@ export interface Emit<D extends Definition> {
 const Buffer = Context.Reference<
   | {
       readonly events: Array<unknown>
-      readonly after: Array<Effect.Effect<void>>
+      readonly after: Array<() => void>
       readonly fiberId: number
       closed: boolean
     }
@@ -181,14 +181,14 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
           Effect.gen(function* () {
             const buffer = {
               events: [] as Array<Fact | Signal>,
-              after: [] as Array<Effect.Effect<void>>,
+              after: [] as Array<() => void>,
               fiberId: yield* Effect.fiberId,
               closed: false,
             }
             const result = yield* sql
               .withTransaction(restore(Effect.provideService(body, Buffer, buffer)))
               .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
-            yield* Effect.all(buffer.after, { discard: true })
+            for (const apply of buffer.after) apply()
             if (buffer.events.length > 0) yield* published(buffer.events)
             return result
           }),
@@ -233,11 +233,11 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
         else yield* published([signal])
       })
 
-    const afterCommit = (effect: Effect.Effect<void>) =>
+    const afterCommit = (apply: () => void) =>
       Effect.gen(function* () {
         const buffer = yield* Buffer
-        if (buffer !== undefined && !buffer.closed) buffer.after.push(effect)
-        else yield* effect
+        if (buffer !== undefined && !buffer.closed) buffer.after.push(apply)
+        else apply()
       })
 
     return { commit, emit, notify, afterCommit, rebuild }

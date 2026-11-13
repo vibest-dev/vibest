@@ -81,6 +81,7 @@ const make = Effect.gen(function* () {
     moving,
     emit,
     afterCommit,
+    afterCommitLive,
     tx,
     notify,
     projectPrefixTaken,
@@ -349,7 +350,7 @@ const make = Effect.gen(function* () {
                   }),
             },
           })
-          if (archives) yield* afterCommit(sessionLive.archiveWhenIdle(row.id))
+          if (archives) yield* afterCommitLive(sessionLive.archiveWhenIdle(row.id))
           const processAt = row.startedAt ?? row.createdAt
           const process = yield* startProcess(
             row.id,
@@ -385,7 +386,7 @@ const make = Effect.gen(function* () {
                 data: { execution, outcome: row.executionState },
               })
           }
-          yield* afterCommit(sessionLive.setStatus(row.id, row.status))
+          yield* afterCommitLive(sessionLive.setStatus(row.id, row.status))
           return true
         }),
       ).pipe(Effect.orDie),
@@ -540,7 +541,7 @@ const make = Effect.gen(function* () {
                 content: start.firstInput,
                 status: "delivered",
               })
-            yield* afterCommit(Effect.sync(() => moving.delete(project)))
+            yield* afterCommit(() => void moving.delete(project))
             if (!movingHere || fresh) yield* dropWaiting(project)
             return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project }
           }),
@@ -599,7 +600,7 @@ const make = Effect.gen(function* () {
             yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
             return current.id
           }
-          if (integration !== undefined) yield* sessionLive.setIntegration(id, integration)
+          if (integration !== undefined) yield* afterCommitLive(sessionLive.setIntegration(id, integration))
           yield* emit(ProcessReady, {
             sessionId: id,
             at: patch.ready as number,

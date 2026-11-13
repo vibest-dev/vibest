@@ -640,7 +640,7 @@ describe("journal", () => {
     Effect.gen(function* () {
       const { journal } = yield* ledger
       const ran: Array<string> = []
-      const mark = (name: string) => journal.afterCommit(Effect.sync(() => void ran.push(name)))
+      const mark = (name: string) => journal.afterCommit(() => void ran.push(name))
       yield* journal.commit(mark("rolled back").pipe(Effect.andThen(Effect.fail("stop")))).pipe(Effect.exit)
       assert.deepStrictEqual(ran, [])
       yield* journal.commit(
