@@ -92,7 +92,7 @@ describe("the runtime registry", () => {
       Effect.gen(function* () {
         const dropped: Array<string> = []
         const bus = yield* Bus
-        const seen = yield* bus.subscribe
+        const seen = yield* bus.subscribe()
         const runtimes = yield* makeRuntimes.pipe(
           Effect.provideService(HostEnv, { drop: (names) => void dropped.push(...names) }),
         )

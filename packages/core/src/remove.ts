@@ -48,7 +48,7 @@ export const stopAgent = (
         Effect.gen(function* () {
           if ((yield* detached).result === "moved") return { result: "moved" as const }
           const gone = processes.liveness(pid).pipe(Effect.map((l) => l === "exited"))
-          const subscription = yield* (yield* Bus).subscribe
+          const subscription = yield* (yield* Bus).subscribe()
           const exited =
             (yield* processes.terminate(pid)) === "sent" &&
             (yield* awaitOn(

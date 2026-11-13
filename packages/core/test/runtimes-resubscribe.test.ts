@@ -14,7 +14,7 @@ const follow = (events: Stream.Stream<RuntimeApi.RuntimeEvent>) =>
     const bus = yield* Bus
     const runtimes = yield* Runtimes
     const seen = yield* Queue.unbounded<BusEvent>()
-    yield* bus.subscribe.pipe(
+    yield* bus.subscribe().pipe(
       Effect.flatMap((subscription) =>
         Stream.fromSubscription(subscription).pipe(Stream.runForEach((event) => Queue.offer(seen, event))),
       ),

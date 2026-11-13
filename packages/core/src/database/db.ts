@@ -1,4 +1,5 @@
 import {
+  Catalog,
   ProcessEnded,
   type ProcessEndReason,
   ProcessPid,
@@ -662,7 +663,7 @@ const make = Effect.gen(function* () {
       return Stream.unwrap(
         Effect.gen(function* () {
           const wake = yield* Queue.sliding<void>(1)
-          yield* Stream.fromSubscription(yield* bus.subscribe).pipe(
+          yield* Stream.fromSubscription(yield* bus.subscribe(Object.values(Catalog))).pipe(
             Stream.runForEach((event) =>
               "seq" in event && (o.session === undefined || event.aggregate === o.session)
                 ? Queue.offer(wake, undefined)

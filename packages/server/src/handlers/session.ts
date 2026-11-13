@@ -206,7 +206,7 @@ export const make = (
         Stream.unwrap(
           Effect.gen(function* () {
             yield* cliOnly("Watch")
-            const subscription = yield* bus.subscribe
+            const subscription = yield* bus.subscribe()
             const backlog = yield* Queue.bounded<BusEvent, WatchLagged>(WATCH_BACKLOG)
             yield* Stream.fromSubscription(subscription).pipe(
               Stream.runForEach((event) =>

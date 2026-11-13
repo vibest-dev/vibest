@@ -21,10 +21,8 @@ export const make = Effect.gen(function* () {
       handle: (event: EventOf<T>) => Effect.Effect<unknown, unknown>,
     ) =>
       Effect.gen(function* () {
-        const types = new Set<string>(definitions.map((definition) => definition.type))
-        const subscription = yield* bus.subscribe
+        const subscription = yield* bus.subscribe(definitions)
         yield* Stream.fromSubscription(subscription).pipe(
-          Stream.filter((event): event is EventOf<T> => types.has(event.type)),
           Stream.runForEach((event) =>
             FiberSet.run(handlers, logFailure(`handle ${event.type}`)(Effect.suspend(() => handle(event)))),
           ),
