@@ -2,7 +2,7 @@
 
 Status: vibestd keeps an append-only log of facts (the `event` table) and a read model projected from it, in one SQLite
 file, `vibest.db`. The facts are the catalog in `packages/schema/src/event.ts`; `packages/core/src/bus.ts` appends
-them and `packages/core/src/database/projectors.ts` turns each into its read-model rows. The `Db` service
+them and the projectors of `packages/core/src/project/projector.ts`, `session/projector.ts` and `remote/projector.ts`, each registered with `bus.project`, turn each into its read-model rows; a replay reaching a fact type with no registered projector fails. The `Db` service
 (`packages/core/src/database/db.ts` and its `db-*.ts` modules) answers its callers from the read model and changes nothing but by
 appending facts.
 

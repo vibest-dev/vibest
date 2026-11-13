@@ -1,11 +1,27 @@
 import type { Runtime } from "@vibest/plugin/effect"
-import { Catalog, decodeRow, encodeData, type Fact, type FactType, type Row, UnknownFact } from "@vibest/schema/event"
+import {
+  Catalog,
+  decodeRow,
+  encodeData,
+  type Fact,
+  type FactOf,
+  type FactType,
+  type Row,
+  UnknownFact,
+} from "@vibest/schema/event"
 import type { RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Context, type Duration, Effect, Layer, Option, PubSub, Queue, Schema, type Scope, Stream } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { ledgerOf, LOG_SCHEMA, MIGRATION_TABLE, setMeta } from "./database/db-schema.ts"
-import { project, PROJECTION_SCHEMA, PROJECTION_TABLES, PROJECTION_VERSION } from "./database/projectors.ts"
+import {
+  ledgerOf,
+  LOG_SCHEMA,
+  MIGRATION_TABLE,
+  PROJECTION_SCHEMA,
+  PROJECTION_TABLES,
+  PROJECTION_VERSION,
+  setMeta,
+} from "./database/db-schema.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 
@@ -38,7 +54,12 @@ export interface Subscribe {
   ): Effect.Effect<PubSub.Subscription<EventOf<T>>, never, Scope.Scope>
 }
 
-type Definition = (typeof Catalog)[FactType]
+export type Definition = (typeof Catalog)[FactType]
+
+export type Projector<D extends Definition> = (
+  fact: FactOf<D["type"]>,
+  sql: SqlClient.SqlClient,
+) => Effect.Effect<unknown, SqlError.SqlError>
 
 export interface PublishInput<D extends Definition> {
   readonly sessionId?: string
@@ -113,10 +134,37 @@ const followFacts = (
     ),
   )
 
+const dropProjection = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    const objects = yield* sql<{ type: string; name: string }>`SELECT type, name FROM sqlite_schema
+      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event', 'meta', ${MIGRATION_TABLE})
+      ORDER BY type = 'index'`
+    for (const object of objects)
+      yield* sql.unsafe(`DROP ${object.type === "table" ? "TABLE" : "INDEX"} IF EXISTS "${object.name}"`)
+  })
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const pubsub = yield* PubSub.unbounded<BusEvent>()
   const typed = new Map<string, Set<PubSub.PubSub<BusEvent>>>()
+  const projectors = new Map<string, (fact: never, sql: SqlClient.SqlClient) => ReturnType<Projector<Definition>>>()
+
+  const project = <D extends Definition>(definition: D, projector: Projector<D>) =>
+    Effect.sync(() => void projectors.set(definition.type, projector))
+
+  const projectFact = (fact: Fact, target: SqlClient.SqlClient) => {
+    const projector = projectors.get(fact.type)
+    return projector === undefined
+      ? Effect.fail(
+          new UnknownFact({
+            aggregate: fact.aggregate,
+            seq: fact.seq,
+            type: fact.type,
+            message: `event ${fact.aggregate} ${fact.seq}: ${fact.type} has no projector`,
+          }),
+        )
+      : projector(fact as never, target)
+  }
 
   const deliverTyped = (event: BusEvent) =>
     Effect.forEach(typed.get(event.type) ?? [], (subscriber) => PubSub.publish(subscriber, event), { discard: true })
@@ -196,7 +244,7 @@ const make = Effect.gen(function* () {
         VALUES (${aggregate}, (SELECT coalesce(max(seq), 0) + 1 FROM event WHERE aggregate = ${aggregate}), ${at},
           ${type}, ${data}) RETURNING seq`
       const fact = yield* decodeRow({ aggregate, seq: row!.seq, at, type, data })
-      yield* project(fact, sql)
+      yield* projectFact(fact, sql)
       return fact
     })
 
@@ -253,7 +301,30 @@ const make = Effect.gen(function* () {
     )
   }
 
-  return { observe, subscribe, publish, transaction, afterCommit, log }
+  const replayFrom = (
+    target: SqlClient.SqlClient,
+    after: number,
+  ): Effect.Effect<void, SqlError.SqlError | UnknownFact> =>
+    readLog(target, after).pipe(
+      Effect.flatMap((rows) =>
+        Effect.gen(function* () {
+          for (const row of rows) yield* projectFact(yield* decodeRow(row), target)
+          if (rows.length === REPLAY_PAGE) yield* replayFrom(target, rows[rows.length - 1]!.position)
+        }),
+      ),
+    )
+
+  const rebuild = (target: SqlClient.SqlClient) =>
+    target.withTransaction(
+      Effect.gen(function* () {
+        yield* dropProjection(target)
+        for (const statement of PROJECTION_SCHEMA) yield* target.unsafe(statement)
+        yield* replayFrom(target, 0)
+        yield* setMeta(target, "projection", PROJECTION_VERSION)
+      }),
+    )
+
+  return { observe, subscribe, publish, transaction, afterCommit, log, project, rebuild }
 })
 
 export class Bus extends Context.Service<Bus, Effect.Success<typeof make>>()("vibest/Bus") {
@@ -261,37 +332,6 @@ export class Bus extends Context.Service<Bus, Effect.Success<typeof make>>()("vi
 
   static readonly node = LayerNode.make({ service: Bus, layer: Bus.layer, deps: [PlatformNode.sqlClient] })
 }
-
-const replayFrom = (sql: SqlClient.SqlClient, after: number): Effect.Effect<void, SqlError.SqlError | UnknownFact> =>
-  readLog(sql, after).pipe(
-    Effect.flatMap((rows) =>
-      Effect.gen(function* () {
-        for (const row of rows) yield* project(yield* decodeRow(row), sql)
-        if (rows.length === REPLAY_PAGE) yield* replayFrom(sql, rows[rows.length - 1]!.position)
-      }),
-    ),
-  )
-
-const dropProjection = (sql: SqlClient.SqlClient) =>
-  Effect.gen(function* () {
-    const objects = yield* sql<{ type: string; name: string }>`SELECT type, name FROM sqlite_schema
-      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event', 'meta', ${MIGRATION_TABLE})
-      ORDER BY type = 'index'`
-    for (const object of objects)
-      yield* sql.unsafe(`DROP ${object.type === "table" ? "TABLE" : "INDEX"} IF EXISTS "${object.name}"`)
-  })
-
-export const rebuild = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-  yield* sql.withTransaction(
-    Effect.gen(function* () {
-      yield* dropProjection(sql)
-      for (const statement of PROJECTION_SCHEMA) yield* sql.unsafe(statement)
-      yield* replayFrom(sql, 0)
-      yield* setMeta(sql, "projection", PROJECTION_VERSION)
-    }),
-  )
-})
 
 const dump = (sql: SqlClient.SqlClient, table: keyof typeof PROJECTION_TABLES) =>
   sql.unsafe<Record<string, unknown>>(`SELECT * FROM ${table} ORDER BY ${PROJECTION_TABLES[table]}`)
@@ -337,6 +377,7 @@ const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient)
 export const equalToReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const scratch = yield* SqlClient.SqlClient
+    const bus = yield* Bus
     const tables = Object.keys(PROJECTION_TABLES) as Array<keyof typeof PROJECTION_TABLES>
     const storedTables = yield* stored.withTransaction(
       Effect.gen(function* () {
@@ -344,7 +385,7 @@ export const equalToReplay = (stored: SqlClient.SqlClient) =>
         return yield* Effect.forEach(tables, (table) => dump(stored, table))
       }),
     )
-    yield* rebuild
+    yield* bus.rebuild(scratch)
     for (const [i, table] of tables.entries()) {
       const difference = firstDifference(table, PROJECTION_TABLES[table], storedTables[i]!, yield* dump(scratch, table))
       if (difference !== undefined) return difference
@@ -360,8 +401,9 @@ export const checkReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const [projection] = yield* stored<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`
     if (Number(projection?.value) !== PROJECTION_VERSION) {
-      yield* copyWholeLog(stored, yield* SqlClient.SqlClient)
-      return yield* rebuild
+      const scratch = yield* SqlClient.SqlClient
+      yield* copyWholeLog(stored, scratch)
+      return yield* (yield* Bus).rebuild(scratch)
     }
     const difference = yield* equalToReplay(stored)
     if (difference !== undefined)

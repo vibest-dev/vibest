@@ -239,7 +239,7 @@ describe("ledger access rules", () => {
       "3 vibest(projector-writes)",
       "4 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(source, core("database/projectors.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("session/projector.ts"))).toEqual([])
   })
 
   it("projector-writes: db.ts may hold only its one opening write", () => {

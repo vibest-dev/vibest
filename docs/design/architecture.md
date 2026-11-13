@@ -653,8 +653,9 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
 - Files keep one writer each and are written to a temporary file and renamed (omac write model): system prompt
   files by the daemon (the entry session's by `vibest`); never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
-- Events reach the reactions through one in-memory Bus (`core/bus.ts`): the Db publishes a committed transaction's facts
-  in seq order, and observations the schema does not store (signals: `terminal.*`, `runtime.reset`, `session.changed`, `project.changed`) are published only. A waiter subscribes before
+- Events reach the reactions through one in-memory Bus (`core/bus.ts`): the Bus itself appends facts (`Bus.publish` inside `Bus.transaction`), applies each through the projector its domain registered
+  (`bus.project`, from `project/`, `session/` and `remote/` `projector.ts`) and publishes a committed transaction's facts
+  in seq order, and observations the schema does not store (signals: `terminal.*`, `runtime.reset`, `session.changed`, `project.changed`) are published only. `bus.subscribe(definitions)` enqueues only the requested types, in publish order across them; `bus.subscribe()` takes every event. A waiter subscribes before
   the action whose consequence it waits for (`awaitEvent` before its first look), so an event in between is not lost.
   The Reactor (`core/reactor.ts`, a scoped constructor each reacting service calls: `reactor.on([definitions], handler)` hands the handler the typed event) knows events, not sessions or projects: each handler runs in a fiber of its own, a
   failing one is logged and stops nothing else, and none depends on the order events arrive in. Each re-derives what
@@ -1108,7 +1109,7 @@ prompt from the entry session or from vibest's own delivery is ignored). Of the 
 - `Events({ session?, after?, follow? })` (user only, `events` capability, this machine only, never forwarded to a peer) streams
   facts as `{ aggregate, seq, at, type, data }`: one session's by its `seq` (an ended session too; an unknown id fails
   with `NoSuchSession`), or the whole log in commit order with each aggregate's `seq` rising. It reads the log by cursor in
-  pages and uses the Bus only to wake, so no fact is skipped or repeated whatever order the Bus published commits in;
+  pages (`Bus.log`) and uses the Bus subscription only to wake, so no fact is skipped or repeated whatever order the Bus published commits in;
   A read without `follow` stops at the latest `seq` (or log position) captured when it starts; `follow` continues past it and keeps the stream open for facts committed later, and only a following read subscribes to the Bus. `after` (valid only with `session`) starts after that `seq` with no gap or repeat; the whole log has no resume cursor, and the log position never leaves vibestd.
 - `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and
   watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as

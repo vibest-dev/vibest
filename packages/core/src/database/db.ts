@@ -34,6 +34,7 @@ import {
 } from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
 import { apply } from "./migration.ts"
+import * as Projectors from "./projectors.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
 export { InboxKind, type ProcessEndReason } from "@vibest/schema/event"
@@ -673,6 +674,6 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
   static readonly node = LayerNode.make({
     service: Db,
     layer: Db.layer,
-    deps: [Bus.node, SessionLive.node, PlatformNode.sqlClient],
+    deps: [Bus.node, Projectors.node, SessionLive.node, PlatformNode.sqlClient],
   })
 }

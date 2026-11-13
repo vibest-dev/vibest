@@ -54,7 +54,9 @@ const noPayloadSql = textRule({
 const writeStatement = /INSERT INTO|UPDATE |DELETE FROM/
 const writers = [
   "/packages/core/src/bus.ts",
-  "/packages/core/src/database/projectors.ts",
+  "/packages/core/src/project/projector.ts",
+  "/packages/core/src/session/projector.ts",
+  "/packages/core/src/remote/projector.ts",
   "/packages/core/src/database/db-schema.ts",
   "/packages/core/src/import/",
   "/packages/core/src/database/migration",

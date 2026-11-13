@@ -5,6 +5,7 @@ import { assert, layer } from "@effect/vitest"
 import { accepts, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { SessionLive } from "@vibest/core/session/live"
 import { sessionHeaders } from "@vibest/protocol/protocol"
@@ -264,6 +265,7 @@ layer(Platform.services)(
           }).pipe(
             Effect.provide(
               Db.layer.pipe(
+                Layer.provide(Projectors.layer),
                 Layer.provide(Bus.layer),
                 Layer.provide(SessionLive.layer),
                 Layer.provide(Platform.sqlite(layout.database)),
@@ -301,6 +303,7 @@ layer(Platform.services)(
             ).pipe(
               Effect.provide(
                 Db.layer.pipe(
+                  Layer.provide(Projectors.layer),
                   Layer.provide(Bus.layer),
                   Layer.provide(SessionLive.layer),
                   Layer.provide(Platform.sqlite(layout.database)),

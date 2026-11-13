@@ -11,6 +11,7 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
 import { checkReplay } from "@vibest/core/bus"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
@@ -130,7 +131,7 @@ export const checkDatabase: Host["checkDatabase"] = (filename) =>
     if (!(yield* Effect.promise(() => Bun.file(filename).exists()))) return
     if ((yield* inspectFile(filename)) !== "ready") return
     yield* checkReplay(yield* readOnly(filename)).pipe(
-      Effect.provide(sqliteLayer(":memory:", false)),
+      Effect.provide(Projectors.replay.pipe(Layer.provideMerge(sqliteLayer(":memory:", false)))),
       Effect.catchTag("SqlError", (e) => new DatabaseOpenFailed({ file: filename, message: e.message })),
     )
   }).pipe(Effect.scoped)

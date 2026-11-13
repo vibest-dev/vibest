@@ -4,8 +4,9 @@ import url from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { APPLICATION_ID, Db, executionStateOf } from "@vibest/core/database/db"
+import { PROJECTION_VERSION } from "@vibest/core/database/db-schema"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
-import { PROJECTION_VERSION } from "@vibest/core/database/projectors"
+import * as Projectors from "@vibest/core/database/projectors"
 import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -30,6 +31,7 @@ const fact = (
 
 const memoryDb = () =>
   Db.layer.pipe(
+    Layer.provide(Projectors.layer),
     Layer.provideMerge(Bus.layer),
     Layer.provide(SessionLive.layer),
     Layer.provideMerge(Platform.sqlite(":memory:")),
@@ -619,6 +621,7 @@ describe("Db", () => {
 
   const brokenInstall = (file: string, how: "fail" | "interrupt") =>
     Db.layer.pipe(
+      Layer.provide(Projectors.layer),
       Layer.provide(Bus.layer),
       Layer.provide(SessionLive.layer),
       Layer.provide(
@@ -940,6 +943,9 @@ describe("Db", () => {
       const script = yield* fileAt(dir, "open.ts")
       const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/database/db.ts", import.meta.url))
       const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
+      const projectorsModule = url.fileURLToPath(
+        new URL("../../../packages/core/src/database/projectors.ts", import.meta.url),
+      )
       const liveModule = url.fileURLToPath(new URL("../../../packages/core/src/session/live.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../../platform-bun/src/bun.ts", import.meta.url))
       yield* fs.writeFileString(
@@ -947,10 +953,11 @@ describe("Db", () => {
         [
           'import { Effect, Layer } from "effect"',
           `import { Bus } from ${JSON.stringify(busModule)}`,
+          `import * as Projectors from ${JSON.stringify(projectorsModule)}`,
           `import { SessionLive } from ${JSON.stringify(liveModule)}`,
           `import { Db } from ${JSON.stringify(dbModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Bus.layer), Layer.provide(SessionLive.layer), Layer.provide(Platform.sqlite(process.argv[2]!))))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Projectors.layer), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer), Layer.provide(Platform.sqlite(process.argv[2]!))))))",
           "",
         ].join("\n"),
       )

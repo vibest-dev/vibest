@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus, equalToReplay, rebuild, RuntimeReset, TerminalExited } from "@vibest/core/bus"
+import { Bus, equalToReplay, RuntimeReset, TerminalExited } from "@vibest/core/bus"
+import { PROJECTION_VERSION } from "@vibest/core/database/db-schema"
 import { installLedger } from "@vibest/core/database/migration"
-import { PROJECTION_VERSION } from "@vibest/core/database/projectors"
+import * as Projectors from "@vibest/core/database/projectors"
 import { Catalog, type Fact, type FactOf } from "@vibest/schema/event"
 import { Effect, Exit, Fiber, Layer, PubSub, Stream } from "effect"
 import { SqlClient } from "effect/sql"
@@ -18,7 +19,7 @@ const MACHINE = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 const ITEM = "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f"
 const ITEM_2 = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
 
-const memory = () => Bus.layer.pipe(Layer.provideMerge(Layer.fresh(memorySqlite)))
+const memory = () => Projectors.replay.pipe(Layer.provideMerge(Layer.fresh(memorySqlite)))
 
 const ledger = Effect.gen(function* () {
   yield* installLedger
@@ -804,7 +805,7 @@ describe("rebuild", () => {
       yield* sql`UPDATE meta SET value = '0' WHERE key = 'projection'`
       yield* sql`CREATE TABLE answer (execution INTEGER PRIMARY KEY)`
       yield* sql`DELETE FROM inbox`
-      yield* rebuild
+      yield* (yield* Bus).rebuild(sql)
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT value FROM meta WHERE key = 'projection'"), [
         { value: String(PROJECTION_VERSION) },
       ])
@@ -819,12 +820,26 @@ describe("rebuild", () => {
     Effect.gen(function* () {
       const { sql } = yield* story
       yield* sql`INSERT INTO event (aggregate, seq, at, type, data) VALUES (${SUB}, 99, 1, 'session.purged', '{}')`
-      const error = yield* rebuild.pipe(Effect.flip)
+      const error = yield* (yield* Bus).rebuild(sql).pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
       assert.include(error.message, `event ${SUB} 99`)
       const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
       assert.strictEqual(sessions!.n, 3)
     }).pipe(Effect.provide(memory())),
+  )
+})
+
+describe("project", () => {
+  it.effect("a replay reaching a fact type no domain registered a projector for fails and names it", () =>
+    Effect.gen(function* () {
+      yield* installLedger
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
+        VALUES (${PEER}, 1, 1, 'peer.seen', '{"id":"p","name":"a"}')`
+      const error = yield* (yield* Bus).rebuild(sql).pipe(Effect.flip)
+      assert.strictEqual(error._tag, "UnknownFact")
+      assert.include(error.message, `event ${PEER} 1: peer.seen has no projector`)
+    }).pipe(Effect.provide(Bus.layer.pipe(Layer.provideMerge(Layer.fresh(memorySqlite))))),
   )
 })
 

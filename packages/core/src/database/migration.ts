@@ -1,11 +1,18 @@
-import { CATALOG_VERSION, type UnknownFact } from "@vibest/schema/event"
+import { CATALOG_VERSION } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Clock, Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { rebuild } from "../bus.ts"
-import { inspectSchema, LOG_SCHEMA, MIGRATION_TABLE, objectCount, setMeta } from "./db-schema.ts"
-import { PROJECTION_SCHEMA, PROJECTION_VERSION } from "./projectors.ts"
+import { Bus } from "../bus.ts"
+import {
+  inspectSchema,
+  LOG_SCHEMA,
+  MIGRATION_TABLE,
+  objectCount,
+  PROJECTION_SCHEMA,
+  PROJECTION_VERSION,
+  setMeta,
+} from "./db-schema.ts"
 
 export type Migration = {
   readonly id: string
@@ -62,15 +69,16 @@ const projectionVersion = (sql: SqlClient.SqlClient) =>
     Effect.map((rows) => Number(rows[0]?.value)),
   )
 
-const openLedger = (
-  sql: SqlClient.SqlClient,
-): Effect.Effect<void, SqlError.SqlError | UnknownFact, SqlClient.SqlClient> =>
-  sql.withTransaction(
-    Effect.gen(function* () {
-      if ((yield* projectionVersion(sql)) !== PROJECTION_VERSION) yield* rebuild
-      yield* sql`UPDATE meta SET value = ${String(CATALOG_VERSION)} WHERE key = 'catalog'`
-    }),
-  )
+const openLedger = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    const bus = yield* Bus
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        if ((yield* projectionVersion(sql)) !== PROJECTION_VERSION) yield* bus.rebuild(sql)
+        yield* sql`UPDATE meta SET value = ${String(CATALOG_VERSION)} WHERE key = 'catalog'`
+      }),
+    )
+  })
 
 export const apply = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
