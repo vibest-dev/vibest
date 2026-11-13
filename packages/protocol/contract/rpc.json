@@ -1335,6 +1335,16 @@
                   },
                   "why": {
                     "type": "string"
+                  },
+                  "unknown": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -3926,6 +3936,16 @@
                         },
                         "why": {
                           "type": "string"
+                        },
+                        "unknown": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -14567,6 +14587,16 @@
                             },
                             "why": {
                               "type": "string"
+                            },
+                            "unknown": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
                           },
                           "required": [
@@ -15115,6 +15145,16 @@
                           },
                           "why": {
                             "type": "string"
+                          },
+                          "unknown": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
