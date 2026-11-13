@@ -157,7 +157,13 @@ const checks: ReadonlyArray<Check> = [
           `--after without --session exited ${orphan.code}: ${orphan.stdout}`,
         )
 
-        follower = Bun.spawn([binary, "events", "--session", sub, "--follow"], {
+        const negative = await events("--session", sub, "--after=-1")
+        expect(
+          negative.code !== 0 && negative.stdout === "",
+          `--after=-1 exited ${negative.code}: ${negative.stdout}${negative.stderr}`,
+        )
+
+        follower = Bun.spawn([binary, "events", "--session", sub, "--after", String(cut), "--follow"], {
           cwd: p.repo,
           env: w.env(p.env),
           stdin: "ignore",
@@ -170,7 +176,7 @@ const checks: ReadonlyArray<Check> = [
           for await (const chunk of follower!.stdout as ReadableStream<Uint8Array>) heard += decoder.decode(chunk)
         })()
         const lines = () => printed(heard.slice(0, heard.lastIndexOf("\n") + 1))
-        await until("the follower printed the facts so far", () => lines().length >= own.length, 30_000)
+        await until("the follower printed the facts so far", () => lines().length >= own.length - cut, 30_000)
         await p.vibestSend(sub, ask("d10-again"))
         await until(
           "the follower printed the second execution",
@@ -180,11 +186,14 @@ const checks: ReadonlyArray<Check> = [
         const followed = lines()
         const seqs = followed.map((f) => f.seq)
         expect(
-          new Set(seqs).size === seqs.length && seqs.every((seq, i) => seq === i + 1),
+          new Set(seqs).size === seqs.length && seqs.every((seq, i) => seq === cut + i + 1),
           `follow printed seqs ${seqs.join(", ")}`,
         )
         expect(
-          followed.map((f) => f.type).join() === factsOf(w, sub).slice(0, followed.length).join(),
+          followed.map((f) => f.type).join() ===
+            factsOf(w, sub)
+              .slice(cut, cut + followed.length)
+              .join(),
           "follow printed facts that differ from the recorded ones",
         )
 

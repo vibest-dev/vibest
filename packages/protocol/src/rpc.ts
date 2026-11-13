@@ -513,7 +513,7 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Events", {
       payload: {
         session: Schema.optional(Schema.String),
-        after: Schema.optional(Schema.Int),
+        after: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
         follow: Schema.optional(Schema.Boolean),
       },
       success: EventsFact,
