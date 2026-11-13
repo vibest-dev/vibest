@@ -7,13 +7,7 @@ import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Sessions } from "@vibest/core/sessions"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin } from "@vibest/plugin"
-import {
-  AgentRefused as PluginRefused,
-  Plugin,
-  type AgentRoute,
-  type AgentStartBefore,
-  type Registration,
-} from "@vibest/plugin/effect"
+import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin/effect"
 import type { Fact } from "@vibest/schema/event"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -38,9 +32,10 @@ const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: st
     ...extra,
   }))
 
-const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<AgentRoute | void, PluginRefused>) =>
+const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void, PluginRefused>) =>
   Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) })
-const write = (id: string, f: (e: AgentStartBefore) => AgentRoute | void) => hook(id, (e) => Effect.sync(() => f(e)))
+const write = (id: string, f: (e: AgentStartBefore) => Partial<AgentStartBefore> | void) =>
+  hook(id, (e) => Effect.sync(() => void Object.assign(e, f(e))))
 
 const HARNESS_MODELS = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
 
@@ -84,7 +79,7 @@ describe("plugins: spawn hook", () => {
         hook("route", (e) =>
           Effect.sync(() => {
             assert.strictEqual(e.project.endsWith("/sub"), false)
-            return e.prompt.startsWith("research:") ? { harness: "claude", model: "claude-haiku-5-5" } : undefined
+            if (e.prompt.startsWith("research:")) Object.assign(e, { harness: "claude", model: "claude-haiku-5-5" })
           }),
         ),
       ],
@@ -146,7 +141,10 @@ describe("plugins: spawn hook", () => {
     }),
     {
       plugins: [
-        write("untyped", () => ({ prompt: undefined, machine: undefined, model: "m" }) as unknown as AgentRoute),
+        write(
+          "untyped",
+          () => ({ prompt: undefined, machine: undefined, model: "m" }) as unknown as Partial<AgentStartBefore>,
+        ),
       ],
     },
   )
@@ -366,7 +364,7 @@ const packageHome = Effect.gen(function* () {
 
 const source = (id: string, model: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
-export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed({ model: ${JSON.stringify(model)} })) })
+export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${JSON.stringify(model)} })) })
 `
 
 const loaded = (dir: string) =>

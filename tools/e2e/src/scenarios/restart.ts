@@ -580,7 +580,7 @@ const checks: ReadonlyArray<Check> = [
 import { Effect } from "effect"
 export default Plugin.define({
   id: "move-e2e",
-  effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "pi", provider: "second", model: "m" })),
+  effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi", provider: "second", model: "m" }))),
 })
 `,
         },
@@ -655,7 +655,9 @@ export default Plugin.define({
         ),
       )
       yield* ctx.agent.hook("fail", (e) =>
-        Effect.succeed({ harness: "pi", provider: e.provider === "first" ? "second" : "first", model: "m" }),
+        Effect.sync(() => {
+          e.move = { harness: "pi", provider: e.provider === "first" ? "second" : "first", model: "m" }
+        }),
       )
     }),
 })

@@ -725,18 +725,19 @@ starting it, not its life.
 
 **Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
 
-| Hook                 | Returns                                                                                      | Runs                                                     |
-| -------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `agent.start.before` | `AgentRoute`: any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime`, or void | before every Agent starts, the entry session included    |
-| `agent.fail`         | `AgentMove` (`{ harness, provider?, model? }`) or void                                       | a started Agent's execution failed (today a usage limit) |
+| Hook                 | Changes (by assigning to the event)                                   | Runs                                                     |
+| -------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every Agent starts, the entry session included    |
+| `agent.fail`         | `move` (`{ harness, provider?, model? }`)                             | a started Agent's execution failed (today a usage limit) |
 
-Every event carries the Project, the caller, the current Subscriptions, and the earlier tries, and is read-only:
-each callback gets a frozen copy (its object fields frozen too), so assigning to it throws and counts as that
-plugin crashing. Callbacks run sequentially in plugin order and return what they decide; core applies each
-returned value before the next callback, so a later plugin sees (and may override) what an earlier one decided. On
-`agent.start.before` the fields a route names replace the event's (`undefined`
-unsets `harness`, `provider`, `model` or `runtime`, and leaves `prompt` and `machine` as they are); on
-`agent.fail` the last move returned wins. The trace attributes each field to the plugin that returned it
+Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. A callback returns
+nothing and changes the event by assigning to its fields (OpenCode's shared mutated event). Each callback gets its own
+copy of the event as decided so far and core copies the changed fields back only when the callback succeeded within
+its deadline, so a callback that times out, fails or writes after its deadline leaves no partial or late write. Callbacks
+run sequentially in plugin order, so a later plugin sees (and may override) what an earlier one decided. On
+`agent.start.before` an assigned `undefined` unsets `harness`, `provider`, `model` or `runtime`, and is ignored for
+`prompt` and `machine`; fields outside that list are not copied back; on `agent.fail` the last `move` assigned wins.
+The trace attributes each field to the plugin that changed it
 last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
 crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On
@@ -761,10 +762,10 @@ poll of a harness that reads usage. `agent.fail`'s `reason` is a union with one 
 
 **Counters and traces** (omac `plugins.ts`): per plugin and hook, calls, changes, crashes, timeouts, refusals,
 and the last error, shown by `vibest plugins`; every trace entry is `{ plugin, hook, ms, outcome:
-"ok" | "refused" | "crashed" | "timeout", changes }`, where `changes` is the value that callback returned, field by
+"ok" | "refused" | "crashed" | "timeout", changes }`, where `changes` is what that callback changed, field by
 field, with the value it replaced.
 
-**Dispatch:** sequential in plugin order; each callback gets a frozen view of the event as decided so far; every
+**Dispatch:** sequential in plugin order; each callback gets a copy of the event as decided so far, committed only on success; every
 callback is bounded by a 5 s timeout (waiting on its fiber, so an uninterruptible region still returns on
 time).
 

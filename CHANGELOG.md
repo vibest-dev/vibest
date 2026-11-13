@@ -7,6 +7,13 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Agent hooks change the event instead of returning a decision** (plugin authors): `agent.hook("start.before" | "fail", callback)`
+  callbacks return nothing (`Effect<void, …>`, Promise `void`) and assign to the event: `start.before` events have
+  mutable `prompt`, `harness`, `provider`, `model`, `machine` and `runtime`; `fail` events have a mutable `move`.
+  `AgentRoute` and `AgentResults` are gone. Each callback works on its own copy and the host copies the changed fields
+  back only when it succeeded within its 5 s deadline, so a timeout or failure changes nothing. Migrate
+  `Effect.succeed({ harness: "pi" })` to `Effect.sync(() => { event.harness = "pi" })` and a returned move to
+  `event.move = { harness, … }`. Machine hooks still return notes.
 - **A start while plugins are still loading is refused** (users; RPC clients of `Spawn`, `Launch`,
   `Project.StartEntry` and `Peer.Spawn`): `agent.start.before` and `agent.fail` wait up to 10 s for plugin
   activation and then fail with `PluginsNotActive`, naming the plugins still loading, instead of running with only

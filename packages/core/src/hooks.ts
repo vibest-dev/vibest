@@ -12,8 +12,8 @@ export interface Events {
 }
 
 export interface Results extends Record<keyof Events, unknown> {
-  readonly "agent.start.before": VibestPlugin.AgentRoute
-  readonly "agent.fail": VibestPlugin.AgentMove
+  readonly "agent.start.before": void
+  readonly "agent.fail": void
   readonly "machine.connect": ReadonlyArray<VibestPlugin.MachineNote>
   readonly "machine.remove": ReadonlyArray<VibestPlugin.MachineNote>
 }

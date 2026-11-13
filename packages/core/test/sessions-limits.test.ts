@@ -345,7 +345,7 @@ describe.concurrent("Sessions", () => {
       plugins: [
         Plugin.define({
           id: "stuck",
-          effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "pi" })),
+          effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi" }))),
         }),
       ],
     },
@@ -379,8 +379,8 @@ describe.concurrent("Sessions", () => {
               )
               yield* ctx.agent.hook("fail", (event) =>
                 Effect.sync(() => {
-                  if (!event.attempts.some((attempt) => attempt.harness === "claude")) return { harness: "claude" }
-                  return undefined
+                  if (!event.attempts.some((attempt) => attempt.harness === "claude"))
+                    event.move = { harness: "claude" }
                 }),
               )
             }),
@@ -455,11 +455,10 @@ describe.concurrent("Sessions", () => {
           id: "once",
           effect: (ctx) => {
             let first = true
-            return ctx.agent.hook("fail", () =>
+            return ctx.agent.hook("fail", (event) =>
               Effect.sync(() => {
-                const move = first ? { harness: "claude" } : undefined
+                if (first) event.move = { harness: "claude" }
                 first = false
-                return move
               }),
             )
           },
@@ -517,11 +516,10 @@ describe.concurrent("Sessions", () => {
           id: "close-fails",
           effect: (ctx) => {
             let first = true
-            return ctx.agent.hook("fail", () =>
+            return ctx.agent.hook("fail", (event) =>
               Effect.sync(() => {
-                const move = first ? { harness: "claude" } : undefined
+                if (first) event.move = { harness: "claude" }
                 first = false
-                return move
               }),
             )
           },

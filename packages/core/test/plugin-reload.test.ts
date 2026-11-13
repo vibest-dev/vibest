@@ -30,7 +30,7 @@ const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.voi
       Effect.gen(function* () {
         events.push(`setup ${tag}`)
         yield* Effect.addFinalizer(() => Effect.sync(() => events.push(`close ${tag}`)))
-        yield* ctx.agent.hook("start.before", () => Effect.succeed({ model: tag }))
+        yield* ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = tag)))
         yield* setup
       }),
   })
@@ -146,10 +146,10 @@ describe("plugins: activation", () => {
           effect: (ctx) =>
             Effect.gen(function* () {
               yield* Effect.addFinalizer(() => Effect.sync(() => events.push("close slow")))
-              yield* ctx.agent.hook("start.before", () =>
+              yield* ctx.agent.hook("start.before", (e) =>
                 Deferred.succeed(entered, undefined).pipe(
                   Effect.andThen(Deferred.await(gate)),
-                  Effect.as({ model: "slow" }),
+                  Effect.andThen(Effect.sync(() => void (e.model = "slow"))),
                 ),
               )
             }),
@@ -206,7 +206,7 @@ const c = (globalThis.__vibestReload ??= {})
 c["import:${key}"] = (c["import:${key}"] ?? 0) + 1
 export default Plugin.define({
   id: ${JSON.stringify(id)},
-  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.succeed({ model: ${model} })))),
+  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${model} })))),
 })
 `
 
@@ -380,7 +380,7 @@ describe("plugins: supervisor", () => {
     candidate(
       `builtin:${id}`,
       id,
-      Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed(undefined)) }),
+      Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.void) }),
     )
   const startedWith = (plugins: Plugins["Service"]) =>
     plugins.start(event).pipe(Effect.map((s) => s.trace.map((t) => t.plugin)))
@@ -587,7 +587,7 @@ describe("plugins: supervisor", () => {
         assert.strictEqual((yield* service.start(event)).model, "a1")
         yield* fs.writeFileString(
           file,
-          `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: (ctx) => Effect.promise(() => { globalThis.__vibestGate.gate.entered = true; return globalThis.__vibestGate.released }).pipe(Effect.andThen(ctx.agent.hook("start.before", () => Effect.succeed({ model: "a2" })))) })\n`,
+          `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: (ctx) => Effect.promise(() => { globalThis.__vibestGate.gate.entered = true; return globalThis.__vibestGate.released }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = "a2" })))) })\n`,
         )
         yield* rescanned(
           Effect.sync(() => gate.entered),
@@ -723,7 +723,7 @@ describe("plugins: supervisor", () => {
       const release = yield* Deferred.make<void>()
       const failing = Plugin.define({
         id: "a",
-        effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "pi" })),
+        effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi" }))),
       })
       yield* makeHost().pipe(
         Effect.flatMap((h) =>

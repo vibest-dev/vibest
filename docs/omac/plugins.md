@@ -122,13 +122,14 @@ export default Plugin.define({
     ctx.agent.hook("start.before", (e) =>
       Effect.sync(() => {
         if (e.model) return // Don't override if already selected by coordinator or earlier plugin (convention)
-        if (/^(research|investigate)\b/i.test(e.prompt)) return { harness: "claude", model: "claude-haiku-5-5" }
-        if (/refactor|migrat/i.test(e.prompt))
-          return {
+        if (/^(research|investigate)\b/i.test(e.prompt))
+          Object.assign(e, { harness: "claude", model: "claude-haiku-5-5" })
+        else if (/refactor|migrat/i.test(e.prompt))
+          Object.assign(e, {
             harness: "claude",
             model: "claude-opus-5-5",
             prompt: `${e.prompt}\n\nRun the full test suite before reporting.`,
-          }
+          })
       }),
     ),
 })
@@ -154,7 +155,11 @@ import { Plugin } from "@omac/plugin"
 export default Plugin.define({
   id: "cheap-second",
   effect: (ctx) =>
-    ctx.agent.hook("fail", (e) => Effect.succeed(e.reason === "limited" ? { harness: "cursor" } : undefined)),
+    ctx.agent.hook("fail", (e) =>
+      Effect.sync(() => {
+        if (e.reason === "limited") e.move = { harness: "cursor" }
+      }),
+    ),
 })
 ```
 
