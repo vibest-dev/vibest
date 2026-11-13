@@ -200,22 +200,10 @@ export const machineHooks = (
       readonly callback: (event: MachineEvent) => Effect.Effect<ReadonlyArray<MachineNote> | void>
     }> = []
     const editor: Runtime.RuntimeEditor = {
-      get: (id) => runtimes.find((definition) => definition.id === id),
       add: (definition) => {
         const at = runtimes.findIndex((existing) => existing.id === definition.id)
         if (at === -1) runtimes.push(definition)
         else runtimes[at] = definition
-      },
-      remove: (id) => {
-        const at = runtimes.findIndex((definition) => definition.id === id)
-        if (at !== -1) runtimes.splice(at, 1)
-      },
-      update: (id, update) => {
-        const at = runtimes.findIndex((definition) => definition.id === id)
-        if (at === -1) return
-        const copy = { ...runtimes[at]! }
-        update(copy)
-        runtimes[at] = copy
       },
     }
     const registration = { dispose: Effect.void }

@@ -1,5 +1,5 @@
 import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
-import { Schema, type Types } from "effect"
+import { Schema } from "effect"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
@@ -173,10 +173,7 @@ export interface AgentDefinition {
 }
 
 export interface AgentEditor {
-  get(id: string): AgentDefinition | undefined
   add(definition: AgentDefinition): void
-  update(id: string, update: (definition: Types.Mutable<AgentDefinition>) => void): void
-  remove(id: string): void
 }
 
 export interface MachineHooks {

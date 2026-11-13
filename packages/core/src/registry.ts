@@ -201,14 +201,11 @@ export interface Keyed {
 }
 
 export interface ListEditor<D extends Keyed> {
-  get(id: string): D | undefined
   add(definition: D): void
   update(id: string, update: (definition: { -readonly [K in keyof D]: D[K] }) => void): void
-  remove(id: string): void
 }
 
 export const listEditor = <D extends Keyed>(state: Array<D>): ListEditor<D> => ({
-  get: (id) => state.find((definition) => definition.id === id),
   add: (definition) => {
     const at = state.findIndex((existing) => existing.id === definition.id)
     if (at >= 0) state[at] = definition
@@ -220,10 +217,6 @@ export const listEditor = <D extends Keyed>(state: Array<D>): ListEditor<D> => (
     const copy = { ...state[at]! }
     update(copy)
     state[at] = copy
-  },
-  remove: (id) => {
-    const at = state.findIndex((existing) => existing.id === id)
-    if (at >= 0) state.splice(at, 1)
   },
 })
 

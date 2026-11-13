@@ -53,7 +53,7 @@ lists every plugin, builtins first, with its status and counters.
 
 **Hooks** run in plugin order; each callback gets a read-only event, returns what it decides, and has 5 seconds.
 Assigning to the event throws, and counts as the plugin crashing. **Transforms** take a synchronous
-editor (`get`, `add`, `update`, `remove`) and apply in registration order, so a later plugin sees and may
+editor (`add`; the harness editor also has `update`) and apply in registration order, so a later plugin sees and may
 change what earlier ones, builtins included, defined. Load effectful data before registering a transform. A transform that throws fails the whole plugin and removes what it registered.
 
 `hook` and `transform` return a `Registration`. Its `dispose` removes it early (a second call does nothing); the

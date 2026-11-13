@@ -3,7 +3,7 @@ import type { Effect, Types } from "effect"
 
 import type { Transform } from "./registration.ts"
 
-export interface LaunchInput {
+interface LaunchInput {
   readonly worktree: string
   readonly projectDir: string
   readonly systemPromptFile: string
@@ -69,10 +69,8 @@ export interface HarnessDefinition {
 }
 
 export interface HarnessEditor {
-  get(id: string): HarnessDefinition | undefined
   add(definition: HarnessDefinition): void
   update(id: string, update: (definition: Types.Mutable<HarnessDefinition>) => void): void
-  remove(id: string): void
 }
 
 export interface HarnessDomain {

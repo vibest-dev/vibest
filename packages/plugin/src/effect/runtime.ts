@@ -1,4 +1,4 @@
-import { Effect, PubSub, Schema, Stream, type Types } from "effect"
+import { Effect, PubSub, Schema, Stream } from "effect"
 
 import type { Transform } from "./registration.ts"
 
@@ -115,10 +115,7 @@ export interface RuntimeDefinition {
 }
 
 export interface RuntimeEditor {
-  get(id: string): RuntimeDefinition | undefined
   add(definition: RuntimeDefinition): void
-  update(id: string, update: (definition: Types.Mutable<RuntimeDefinition>) => void): void
-  remove(id: string): void
 }
 
 export interface RuntimeDomain {
