@@ -1,7 +1,7 @@
 import { Console, Effect } from "effect"
 
 import { json, userOnly, vibest } from "../../../caller.ts"
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { Commands } from "../../commands.ts"
 
 export default Runtime.handler(Commands.commands.project.commands.create, (o) =>

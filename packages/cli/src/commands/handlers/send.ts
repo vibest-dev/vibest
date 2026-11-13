@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 
 import { json } from "../../caller.ts"
-import * as Runtime from "../../framework/runtime.ts"
+import { Runtime } from "../../framework/runtime.ts"
 import { input } from "../../input.ts"
 import { requested } from "../../requested.ts"
 import { Commands } from "../commands.ts"

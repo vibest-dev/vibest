@@ -4,7 +4,7 @@ import { Effect } from "effect"
 
 import { userOnly } from "../../caller.ts"
 import { pipeStdio } from "../../connect.ts"
-import * as Runtime from "../../framework/runtime.ts"
+import { Runtime } from "../../framework/runtime.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.connect, () =>

@@ -1,7 +1,7 @@
 import { ProjectKind } from "@vibest/schema/project"
 import { Argument, Flag } from "effect/cli"
 
-import * as Spec from "../framework/spec.ts"
+import { Spec } from "../framework/spec.ts"
 
 const text = (name: string) =>
   Argument.String(name).pipe(

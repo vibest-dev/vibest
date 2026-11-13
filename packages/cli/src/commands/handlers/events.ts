@@ -3,7 +3,7 @@ import { Effect, Option, Stream } from "effect"
 
 import { caller, json, userOnly } from "../../caller.ts"
 import { withVibest } from "../../client.ts"
-import * as Runtime from "../../framework/runtime.ts"
+import { Runtime } from "../../framework/runtime.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.events, (o) =>

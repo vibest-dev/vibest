@@ -1,6 +1,6 @@
 import { Effect, Stdio, Stream } from "effect"
 
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { integrationStop } from "../../../integration.ts"
 import { Commands } from "../../commands.ts"
 

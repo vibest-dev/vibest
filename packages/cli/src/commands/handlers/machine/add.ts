@@ -3,7 +3,7 @@ import type { MachineNote } from "@vibest/schema/machine"
 import { Console, Effect } from "effect"
 
 import { userOnly, vibest } from "../../../caller.ts"
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { Commands } from "../../commands.ts"
 
 const printNotes = (notes: ReadonlyArray<MachineNote>) =>

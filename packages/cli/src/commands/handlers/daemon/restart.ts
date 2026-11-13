@@ -3,7 +3,7 @@ import { VibestCommand } from "@vibest/schema/layout"
 import { Console, Effect } from "effect"
 
 import { userOnly } from "../../../caller.ts"
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { replaceDaemon } from "../../../replace.ts"
 import { LEFT, restartAgents } from "../../../update.ts"
 import { VERSION } from "../../../version.ts"

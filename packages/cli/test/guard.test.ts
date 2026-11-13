@@ -25,13 +25,13 @@ import {
   Terminal,
 } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
-import { Command } from "effect/cli"
 import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import * as Cli from "../src/cli.ts"
+import { Commands } from "../src/commands/commands.ts"
+import { Runtime as CliRuntime } from "../src/framework/runtime.ts"
 import { Host as CliHost } from "../src/host.ts"
 import {
   agentsLayer,
@@ -628,6 +628,11 @@ layer(
   )
 })
 
+const entryHandlers = CliRuntime.handlers(Commands, {
+  $: () => import("../src/commands/handlers/default.ts"),
+  daemon: { restart: () => import("../src/commands/handlers/daemon/restart.ts") },
+} as never)
+
 describe("wizard entry", () => {
   it.effect(
     "a confirmed --wizard (Enter picks daemon, the first subcommand, then restart, its only child) reaches the handler, and a session stops at userOnly before spawn, exec or the daemon host",
@@ -655,7 +660,10 @@ describe("wizard entry", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* Command.runWith(Cli.command, { version: "0.0.0-test" })(["--wizard"]).pipe(
+        const exit = yield* CliRuntime.run(Commands, entryHandlers, {
+          version: "0.0.0-test",
+          extra: { after: "update", commands: [] },
+        }).pipe(
           Effect.provideService(CliHost, {
             daemon: host,
             replacements: [],
@@ -687,7 +695,7 @@ describe("wizard entry", () => {
             }),
           ),
           Effect.provide(FileSystem.layerNoop({})),
-          Effect.provide(Stdio.layerTest({})),
+          Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--wizard"]) })),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
           Effect.provide(FetchHttpClient.layer),
@@ -734,12 +742,11 @@ describe("vibest --session inside herdr", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* Command.runWith(Cli.command, { version: "0.0.0-test" })([
-          "--session",
-          "other",
-          "--in-parent",
-          repo,
-        ]).pipe(
+        const exit = yield* CliRuntime.run(Commands, entryHandlers, {
+          version: "0.0.0-test",
+          extra: { after: "update", commands: [] },
+        }).pipe(
+          Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--session", "other", "--in-parent", repo]) })),
           Effect.provideService(CliHost, {
             daemon: host,
             replacements: [],
@@ -792,12 +799,11 @@ describe("vibest --session inside herdr", () => {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
-      const exit = yield* Command.runWith(Cli.command, { version: "0.0.0-test" })([
-        "--harness",
-        "pi",
-        "--env",
-        "MAIN_PROBE=" + secret,
-      ]).pipe(
+      const exit = yield* CliRuntime.run(Commands, entryHandlers, {
+        version: "0.0.0-test",
+        extra: { after: "update", commands: [] },
+      }).pipe(
+        Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]) })),
         Effect.provideService(CliHost, { daemon: host, replacements: [], exec: () => {} }),
         Effect.provideService(SocketConnector, () => {
           herdr.push("connect")

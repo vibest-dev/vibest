@@ -1,7 +1,7 @@
 import { Config, Effect, Stdio, Stream } from "effect"
 
 import { json } from "../../../caller.ts"
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { notify } from "../../../integration.ts"
 import { Commands } from "../../commands.ts"
 

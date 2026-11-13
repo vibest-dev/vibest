@@ -4,7 +4,7 @@ import * as Daemon from "@vibest/server/daemon"
 import { Effect, Option } from "effect"
 
 import { json } from "../../caller.ts"
-import * as Runtime from "../../framework/runtime.ts"
+import { Runtime } from "../../framework/runtime.ts"
 import { noticeFrom } from "../../update.ts"
 import { VERSION } from "../../version.ts"
 import { Commands } from "../commands.ts"

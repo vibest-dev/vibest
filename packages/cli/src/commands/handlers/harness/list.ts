@@ -2,7 +2,7 @@ import { Effect, Option } from "effect"
 
 import { json } from "../../../caller.ts"
 import { catalog } from "../../../catalog.ts"
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { Commands } from "../../commands.ts"
 
 export default Runtime.handler(Commands.commands.harness.commands.list, (o) =>

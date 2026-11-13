@@ -1,7 +1,13 @@
+import { type SocketConnector } from "@vibest/client/socket-connector"
+import { type Layout } from "@vibest/schema/layout"
 import { Effect } from "effect"
 import { Command } from "effect/cli"
+import { type HttpClient } from "effect/http"
 
-import type * as Spec from "./spec.ts"
+import { type Host } from "../host.ts"
+import type { Spec } from "./spec.ts"
+
+export type Environment = Command.Environment | Host | Layout | SocketConnector | HttpClient.HttpClient
 
 export type Input<Value> =
   Value extends Spec.Node<infer _Name, infer Command, infer _Commands>
@@ -10,15 +16,17 @@ export type Input<Value> =
       ? Input
       : never
 
+type RuntimeHandler = (input: unknown) => Effect.Effect<void, unknown, Environment>
 type Loader<Node extends Spec.Any> = () => Promise<{
-  default: (input: Input<Node>) => Effect.Effect<void, any, any>
+  default: (input: Input<Node>) => Effect.Effect<void, any, Environment>
 }>
+type ProvidedCommand = Command.Command<string, unknown, unknown, unknown, Environment>
 
 export type Handlers<Node extends Spec.Any> = keyof Node["commands"] extends never
   ? Loader<Node>
   : { readonly $?: Loader<Node> } & { readonly [Key in keyof Node["commands"]]: Handlers<Node["commands"][Key]> }
 
-type RuntimeLoader = () => Promise<{ default: (input: unknown) => Effect.Effect<void, unknown, unknown> }>
+type RuntimeLoader = () => Promise<{ default: RuntimeHandler }>
 
 type RuntimeHandlers =
   | RuntimeLoader
@@ -29,9 +37,14 @@ interface LazyHandler {
   readonly load: RuntimeLoader
 }
 
-export function handler<const Node extends Spec.Any, Error, Requirements>(
+export interface Extra {
+  readonly after: string
+  readonly commands: ReadonlyArray<Command.Command<any, any, any, any, Environment>>
+}
+
+export function handler<const Node extends Spec.Any, Error>(
   _node: Node,
-  run: (input: Input<Node>) => Effect.Effect<void, Error, Requirements>,
+  run: (input: Input<Node>) => Effect.Effect<void, Error, Environment>,
 ) {
   return run
 }
@@ -39,41 +52,49 @@ export function handler<const Node extends Spec.Any, Error, Requirements>(
 export function handlers<const Root extends Spec.Any>(root: Root, handlers: Handlers<Root>) {
   const result: Array<LazyHandler> = []
 
-  function add(node: Spec.Any, value: RuntimeHandlers) {
+  function add(node: Spec.Any, value: RuntimeHandlers | undefined) {
+    if (value === undefined) return
     if (typeof value === "function") {
       result.push({ spec: node.spec, load: value })
       return
     }
     if (value.$) result.push({ spec: node.spec, load: value.$ })
-    for (const [name, child] of Object.entries(node.commands)) add(child, value[name] as RuntimeHandlers)
+    for (const [name, child] of Object.entries(node.commands)) add(child, value[name])
   }
 
   add(root, handlers as unknown as RuntimeHandlers)
   return result
 }
 
-export function command<Requirements>(
-  root: Spec.Any,
+export function run(
+  commands: Spec.Any,
   handlers: ReadonlyArray<LazyHandler>,
-  extra: ReadonlyArray<Command.Command.Any>,
+  options: { readonly version: string; readonly extra: Extra },
 ) {
-  return provide(root, handlers, extra) as Command.Command<string, unknown, unknown, unknown, Requirements>
+  return Command.run(provide(commands, handlers, options.extra), { version: options.version }) as Effect.Effect<
+    void,
+    unknown,
+    Environment
+  >
 }
 
-function provide(
-  node: Spec.Any,
-  handlers: ReadonlyArray<LazyHandler>,
-  extra: ReadonlyArray<Command.Command.Any> = [],
-): Command.Command.Any {
+function provide(node: Spec.Any, handlers: ReadonlyArray<LazyHandler>, extra?: Extra): ProvidedCommand {
   const handler = handlers.find((handler) => handler.spec === node.spec)
   const spec = handler
     ? node.spec.pipe(
         Command.withHandler((input) => Effect.flatMap(Effect.promise(handler.load), (module) => module.default(input))),
       )
     : node.spec
-  const children = Object.values(node.commands)
-  if (children.length === 0 && extra.length === 0) return spec
+  const children = Object.entries(node.commands).map(([name, child]) => [name, provide(child, handlers)] as const)
+  if (children.length === 0) return spec as ProvidedCommand
+  const at = extra === undefined ? children.length : children.findIndex(([name]) => name === extra.after) + 1
   return spec.pipe(
-    Command.withSubcommands([...children.map((child) => provide(child, handlers)), ...extra]),
-  ) as Command.Command.Any
+    Command.withSubcommands([
+      ...children.slice(0, at).map(([, child]) => child),
+      ...(extra?.commands ?? []),
+      ...children.slice(at).map(([, child]) => child),
+    ]),
+  ) as ProvidedCommand
 }
+
+export * as Runtime from "./runtime.ts"

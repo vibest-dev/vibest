@@ -4,7 +4,7 @@ import { PROTOCOL } from "@vibest/schema/version"
 import { Console, Effect, Option } from "effect"
 import { RpcClient } from "effect/rpc"
 
-import * as Runtime from "../../framework/runtime.ts"
+import { Runtime } from "../../framework/runtime.ts"
 import { extraVibests, type Finding, updateNotice } from "../../update.ts"
 import { VERSION } from "../../version.ts"
 import { Commands } from "../commands.ts"

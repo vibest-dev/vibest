@@ -37,3 +37,4 @@ export function make<
   ) as ChildrenOf<Commands>
   return { name, spec, commands }
 }
+export * as Spec from "./spec.ts"

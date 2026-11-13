@@ -4,7 +4,7 @@ import * as Daemon from "@vibest/server/daemon"
 import { Console, Effect } from "effect"
 
 import { userOnly } from "../../../caller.ts"
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { Host } from "../../../host.ts"
 import { Commands } from "../../commands.ts"
 

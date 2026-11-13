@@ -2,7 +2,7 @@ import { Effect, Path } from "effect"
 
 import { json, userOnly } from "../../../caller.ts"
 import { withVibest } from "../../../client.ts"
-import * as Runtime from "../../../framework/runtime.ts"
+import { Runtime } from "../../../framework/runtime.ts"
 import { openProject } from "../../../open-project.ts"
 import { Commands } from "../../commands.ts"
 

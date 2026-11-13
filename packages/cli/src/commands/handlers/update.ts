@@ -4,7 +4,7 @@ import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
 import { Config, Console, Duration, Effect, FileSystem, Option } from "effect"
 
 import { userOnly } from "../../caller.ts"
-import * as Runtime from "../../framework/runtime.ts"
+import { Runtime } from "../../framework/runtime.ts"
 import { compareVersions, replaceAnyway, versionOf } from "../../replace.ts"
 import {
   daemonPlan,

@@ -2,7 +2,7 @@ import { LaunchFailed, NoCallingSession } from "@vibest/schema/session"
 import { Effect, Option } from "effect"
 
 import { caller, callerEnvOf, json } from "../../caller.ts"
-import * as Runtime from "../../framework/runtime.ts"
+import { Runtime } from "../../framework/runtime.ts"
 import { EmptyInput, input } from "../../input.ts"
 import { requested } from "../../requested.ts"
 import { Commands } from "../commands.ts"
