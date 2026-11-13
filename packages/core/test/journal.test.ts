@@ -823,7 +823,7 @@ describe("journal reads by cursor", () => {
           yield* journal.emit(Catalog["session.created"], session(SUB))
           for (let i = 0; i < 1100; i++)
             yield* journal.emit(Catalog["session.renamed"], {
-              sessionId: i % 2 === 0 ? MAIN : SUB,
+              sessionId: i < 1050 ? MAIN : SUB,
               data: { name: `n${i}` },
             })
         }),
@@ -833,7 +833,7 @@ describe("journal reads by cursor", () => {
       const own = yield* read({ session: MAIN, after: 0 })
       assert.deepStrictEqual(
         own.map((r) => r.seq),
-        seqs(551),
+        seqs(1051),
       )
       const all = yield* read({ log: 0 })
       assert.strictEqual(all.length, 1103)
