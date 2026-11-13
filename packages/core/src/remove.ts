@@ -56,7 +56,7 @@ export const stopAgent = (
               gone.pipe(Effect.map((yes) => (yes ? Option.some(true) : Option.none()))),
               (event) =>
                 Effect.succeed(
-                  event.type === "live.exited" &&
+                  event.type === "terminal.exited" &&
                     event.terminal.machine === terminal.machine &&
                     event.terminal.id === terminal.id
                     ? Option.some(true)

@@ -1,5 +1,5 @@
 import { projectActivity, unseenDone } from "@vibest/core/activity"
-import { type EngineEvent } from "@vibest/core/bus"
+import { type BusEvent } from "@vibest/core/bus"
 import {
   Db,
   executionStateOf,
@@ -148,22 +148,20 @@ export const sessionListing = (deps: {
         .map((row) => row.id)
     })
 
-  const watchDeltas = (events: ReadonlyArray<EngineEvent>) =>
+  const watchDeltas = (events: ReadonlyArray<BusEvent>) =>
     Effect.gen(function* () {
       const projectIds = new Set<string>()
       const sessionIds = new Set<string>()
       for (const event of events) {
-        if ("seq" in event) {
-          if (event.sessionId !== undefined) sessionIds.add(event.sessionId)
-        } else if (event.type === "live.session") sessionIds.add(event.sessionId)
-        else if (event.type === "live.project") projectIds.add(event.projectId)
-        else if (event.type === "live.state" || event.type === "live.exited") {
+        if (event.type === "session.changed") sessionIds.add(event.sessionId)
+        else if (event.type === "project.changed") projectIds.add(event.projectId)
+        else if (event.type === "terminal.state" || event.type === "terminal.exited") {
           const project = yield* db.entryAt(event.runtime, event.terminal)
           const entry = project === undefined ? undefined : yield* db.entryOf(project)
           if (entry !== undefined) sessionIds.add(entry.id)
-        } else if (event.type === "live.seen")
+        } else if (event.type === "terminal.seen")
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
-        else if (event.type === "live.reset")
+        else if (event.type === "runtime.reset")
           for (const info of yield* listed({ _tag: "All" }, false))
             if (info.runtime === event.runtime) sessionIds.add(info.id)
       }

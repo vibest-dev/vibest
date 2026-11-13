@@ -1,6 +1,8 @@
 import { Cause, type Duration, Effect, FiberMap, FiberSet, Stream } from "effect"
 
-import { Bus, type EngineEvent } from "./bus.ts"
+import { Bus, type BusEvent } from "./bus.ts"
+
+type EventOf<T extends BusEvent["type"]> = Extract<BusEvent, { readonly type: T }>
 
 export const logFailure =
   (what: string) =>
@@ -16,10 +18,15 @@ export const make = Effect.gen(function* () {
   const handlers = yield* FiberSet.make()
   const timers = yield* FiberMap.make<string>()
   return {
-    on: (handle: (event: EngineEvent) => Effect.Effect<unknown, unknown>) =>
+    on: <T extends BusEvent["type"]>(
+      definitions: ReadonlyArray<{ readonly type: T }>,
+      handle: (event: EventOf<T>) => Effect.Effect<unknown, unknown>,
+    ) =>
       Effect.gen(function* () {
+        const types = new Set<string>(definitions.map((definition) => definition.type))
         const subscription = yield* bus.subscribe
         yield* Stream.fromSubscription(subscription).pipe(
+          Stream.filter((event): event is EventOf<T> => types.has(event.type)),
           Stream.runForEach((event) => FiberSet.run(handlers, logFailure(`handle ${event.type}`)(handle(event)))),
           Effect.forkScoped,
         )

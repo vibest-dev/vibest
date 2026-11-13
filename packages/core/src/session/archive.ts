@@ -1,7 +1,8 @@
+import { ExecutionEnded, InboxMoved, SessionEnded } from "@vibest/schema/event"
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
-import { Bus, type EngineEvent } from "../bus.ts"
+import { Bus } from "../bus.ts"
 import {
   Db,
   type SessionRow,
@@ -15,11 +16,11 @@ import {
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import * as Engine from "../engine.ts"
 import { Inbox } from "../inbox.ts"
 import { directoryLock } from "../keyed-lock.ts"
 import { errorMessage } from "../plugins.ts"
 import { Processes } from "../processes.ts"
+import * as Reactor from "../reactor.ts"
 import * as Remove from "../remove.ts"
 import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
 import { Git } from "../worktree.ts"
@@ -39,10 +40,10 @@ const make = Effect.gen(function* () {
   const sessionLive = yield* SessionLive
   const { notice, recount } = yield* Placement
   const { interruptAgent, settleAfterInterrupt } = yield* Executions
-  const engine = yield* Engine.make
+  const reactor = yield* Reactor.make
   const archives = yield* FiberSet.make()
   const { locked } = locks
-  const logged = Engine.logFailure
+  const logged = Reactor.logFailure
   const live = (session: SessionRow) => runtimes.route(runtimeOf(session))
   const dropQueue = inbox.dropQueue
   const getRow = (id: string) =>
@@ -223,28 +224,23 @@ const make = Effect.gen(function* () {
       { discard: true },
     )
 
-  const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
-    switch (event.type) {
-      case "execution.ended":
-        return event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void
-      case "inbox.moved":
-        return event.data.to === "pending" || event.data.to === "delivering"
-          ? Effect.void
-          : db.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon))
-      case "session.ended":
-        return db
-          .creatorOf(event.sessionId!)
-          .pipe(
-            Effect.flatMap((creator) =>
-              creator !== undefined && "local" in creator ? archiveSoon([creator.local]) : Effect.void,
-            ),
-          )
-      default:
-        return Effect.void
-    }
-  }
-
-  yield* engine.on(handle)
+  yield* reactor.on([ExecutionEnded], (event) =>
+    event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void,
+  )
+  yield* reactor.on([InboxMoved], (event) =>
+    event.data.to === "pending" || event.data.to === "delivering"
+      ? Effect.void
+      : db.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon)),
+  )
+  yield* reactor.on([SessionEnded], (event) =>
+    db
+      .creatorOf(event.sessionId!)
+      .pipe(
+        Effect.flatMap((creator) =>
+          creator !== undefined && "local" in creator ? archiveSoon([creator.local]) : Effect.void,
+        ),
+      ),
+  )
 
   return { undoCutOffStart, remove, finishArchive }
 })

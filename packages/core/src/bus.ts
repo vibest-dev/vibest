@@ -5,29 +5,32 @@ import { Context, type Duration, Effect, Layer, Option, PubSub, type Scope } fro
 
 import { LayerNode } from "./effect/layer-node.ts"
 
-export type LiveEvent =
+export type Signal =
   | {
-      readonly type: "live.state"
+      readonly type: "terminal.state"
       readonly runtime: string
       readonly terminal: RuntimeAddress
       readonly state: Runtime.AgentState
     }
-  | { readonly type: "live.exited"; readonly runtime: string; readonly terminal: RuntimeAddress }
-  | { readonly type: "live.seen"; readonly runtime: string; readonly terminal: RuntimeAddress }
-  | { readonly type: "live.reset"; readonly runtime: string; readonly machine: string }
-  | { readonly type: "live.drain" }
-  | { readonly type: "live.session"; readonly sessionId: string }
-  | { readonly type: "live.project"; readonly projectId: string }
-  | { readonly type: "live.outbox"; readonly peerId: string }
+  | { readonly type: "terminal.exited"; readonly runtime: string; readonly terminal: RuntimeAddress }
+  | { readonly type: "terminal.seen"; readonly runtime: string; readonly terminal: RuntimeAddress }
+  | { readonly type: "runtime.reset"; readonly runtime: string; readonly machine: string }
+  | { readonly type: "drain.released" }
+  | { readonly type: "session.changed"; readonly sessionId: string }
+  | { readonly type: "project.changed"; readonly projectId: string }
 
-export type EngineEvent = Fact | LiveEvent
+export type BusEvent = Fact | Signal
+
+export const TerminalState = { type: "terminal.state" } as const
+export const TerminalExited = { type: "terminal.exited" } as const
+export const RuntimeReset = { type: "runtime.reset" } as const
 
 const make = Effect.gen(function* () {
-  const pubsub = yield* PubSub.unbounded<EngineEvent>()
+  const pubsub = yield* PubSub.unbounded<BusEvent>()
   return {
-    observe: (event: LiveEvent) => PubSub.publish(pubsub, event).pipe(Effect.asVoid),
+    observe: (event: Signal) => PubSub.publish(pubsub, event).pipe(Effect.asVoid),
     subscribe: PubSub.subscribe(pubsub),
-    published: (events: ReadonlyArray<EngineEvent>) =>
+    published: (events: ReadonlyArray<BusEvent>) =>
       events.length === 0 ? Effect.void : PubSub.publishAll(pubsub, events).pipe(Effect.asVoid),
   }
 })
@@ -39,9 +42,9 @@ export class Bus extends Context.Service<Bus, Effect.Success<typeof make>>()("vi
 }
 
 export const awaitOn = <A, E, R>(
-  subscription: PubSub.Subscription<EngineEvent>,
+  subscription: PubSub.Subscription<BusEvent>,
   look: Effect.Effect<Option.Option<A>, E, R>,
-  match: (event: EngineEvent) => Effect.Effect<Option.Option<A>, E, R>,
+  match: (event: BusEvent) => Effect.Effect<Option.Option<A>, E, R>,
   deadline: Duration.Duration,
   onDeadline: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> => {
@@ -57,7 +60,7 @@ export const awaitOn = <A, E, R>(
 
 export const awaitEvent = <A, E, R>(
   look: Effect.Effect<Option.Option<A>, E, R>,
-  match: (event: EngineEvent) => Effect.Effect<Option.Option<A>, E, R>,
+  match: (event: BusEvent) => Effect.Effect<Option.Option<A>, E, R>,
   deadline: Duration.Duration,
   onDeadline: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, Exclude<R, Scope.Scope> | Bus> =>
@@ -67,3 +70,25 @@ export const awaitEvent = <A, E, R>(
       return yield* awaitOn(subscription, look, match, deadline, onDeadline)
     }),
   )
+
+export const withChanges = (events: ReadonlyArray<BusEvent>): ReadonlyArray<BusEvent> => {
+  const sessions = new Set<string>()
+  const projects = new Set<string>()
+  for (const event of events) {
+    if (event.type === "session.changed") sessions.add(event.sessionId)
+    else if (event.type === "project.changed") projects.add(event.projectId)
+  }
+  const changes: Array<BusEvent> = []
+  for (const event of events) {
+    if (!("seq" in event)) continue
+    if (event.sessionId !== undefined && !sessions.has(event.sessionId)) {
+      sessions.add(event.sessionId)
+      changes.push({ type: "session.changed", sessionId: event.sessionId })
+    }
+    if (event.projectId !== undefined && !projects.has(event.projectId)) {
+      projects.add(event.projectId)
+      changes.push({ type: "project.changed", projectId: event.projectId })
+    }
+  }
+  return [...events, ...changes]
+}

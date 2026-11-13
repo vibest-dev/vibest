@@ -1,5 +1,5 @@
 import { raisesSeen } from "@vibest/core/activity"
-import { Bus, type EngineEvent } from "@vibest/core/bus"
+import { Bus, type BusEvent } from "@vibest/core/bus"
 import { Db, runtimeOf, terminalOf, archived } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { keyedLock } from "@vibest/core/keyed-lock"
@@ -242,7 +242,7 @@ export const make = (
           Effect.gen(function* () {
             yield* cliOnly("Watch")
             const subscription = yield* bus.subscribe
-            const backlog = yield* Queue.bounded<EngineEvent, WatchLagged>(WATCH_BACKLOG)
+            const backlog = yield* Queue.bounded<BusEvent, WatchLagged>(WATCH_BACKLOG)
             yield* Stream.fromSubscription(subscription).pipe(
               Stream.runForEach((event) =>
                 Queue.offerUnsafe(backlog, event)

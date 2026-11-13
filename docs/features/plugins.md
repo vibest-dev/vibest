@@ -69,7 +69,7 @@ does not set it up again; editing the plugin itself does.
 
 A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `process.started`, `execution.started` and
 `execution.ended` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
-subscribes to every fact gets no `live.*` event. After the plugin is edited, the new revision gets the next agent's
+subscribes to every fact gets no signal. After the plugin is edited, the new revision gets the next agent's
 facts and the old one gets nothing more.
 
 ## G13. A plugin written with Promises

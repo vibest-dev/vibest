@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import { withChanges } from "@vibest/core/bus"
 import { equalToReplay, installLedger, makeJournal, rebuild } from "@vibest/core/journal"
 import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { Catalog, type Fact } from "@vibest/schema/event"
@@ -632,6 +633,28 @@ describe("journal", () => {
         [["machine.added", "machine.connected"]],
       )
       assert.isTrue(published[0]![0]!.seq < published[0]![1]!.seq)
+    }).pipe(Effect.provide(memory())),
+  )
+
+  it.effect("a commit publishes its facts and then one change signal per session and per project it touched", () =>
+    Effect.gen(function* () {
+      yield* installLedger
+      const published: Array<ReadonlyArray<unknown>> = []
+      const journal = yield* makeJournal((events) => Effect.sync(() => void published.push(withChanges(events))))
+      yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+          yield* journal.emit(Catalog["session.created"], {
+            sessionId: MAIN,
+            data: { project: P, agent: "main", name: "main", directory: "" },
+          })
+          yield* journal.emit(Catalog["session.renamed"], { sessionId: MAIN, data: { name: "again" } })
+        }),
+      )
+      assert.deepStrictEqual(
+        published[0]!.map((event) => (event as { type: string }).type),
+        ["project.created", "session.created", "session.renamed", "project.changed", "session.changed"],
+      )
     }).pipe(Effect.provide(memory())),
   )
 

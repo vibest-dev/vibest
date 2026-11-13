@@ -1,7 +1,8 @@
+import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
 import { shortId } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Ref } from "effect"
 
-import { Bus, type EngineEvent } from "../bus.ts"
+import { Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
 import {
   Db,
   type SessionRow,
@@ -15,10 +16,10 @@ import {
   archived,
 } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as Engine from "../engine.ts"
 import { Harnesses } from "../harness.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
+import * as Reactor from "../reactor.ts"
 import { agentState, alive, paneTail, peekHint, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
@@ -45,9 +46,9 @@ const make = Effect.gen(function* () {
   const { finishArchive } = yield* Archive
   const { notice, republish } = yield* Placement
   const scope = yield* Effect.scope
-  const engine = yield* Engine.make
+  const reactor = yield* Reactor.make
   const { locked } = locks
-  const logged = Engine.logFailure
+  const logged = Reactor.logFailure
 
   const live = (session: SessionRow) => runtimes.route(runtimeOf(session))
 
@@ -55,8 +56,8 @@ const make = Effect.gen(function* () {
     locks.withLock(id)(
       Effect.gen(function* () {
         if (!sessionEnded(yield* db.getSession(id))) return
-        yield* engine.cancel(`grace:${id}`)
-        yield* engine.cancel(`miss:${id}`)
+        yield* reactor.cancel(`grace:${id}`)
+        yield* reactor.cancel(`miss:${id}`)
         yield* sessionLive.forget(id)
       }),
     )
@@ -94,7 +95,7 @@ const make = Effect.gen(function* () {
     if (state === undefined) {
       if (exited) return yield* exits.recordExit(h, session, execution)
       if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
-        yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
+        yield* reactor.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
     } else yield* Ref.set(r.launchRechecked, false)
     if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && h.session !== undefined) {
       const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
@@ -125,7 +126,7 @@ const make = Effect.gen(function* () {
       if (closed) yield* deliverQueued(h, { ...session, openExecution: null }, terminal)
       return
     }
-    if (unstarted) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
+    if (unstarted) yield* reactor.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
     if (s === "blocked") {
       if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && !session.entry) {
         const since = new Date(yield* Clock.currentTimeMillis)
@@ -141,7 +142,7 @@ const make = Effect.gen(function* () {
     if (!ended) return yield* Ref.set(r.endedAt, undefined)
     const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
     const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
-    if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkSession(id))
+    if (grace > 0) return yield* reactor.arm(`grace:${id}`, Duration.millis(grace), checkSession(id))
     if (execution === undefined) return
     yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     const failure = `the execution ended without a reply: the harness stopped without firing its execution-end hook (an error it has no hook for, such as a usage limit?); ${peekHint(id)}`
@@ -164,27 +165,6 @@ const make = Effect.gen(function* () {
       if (execution !== undefined) yield* db.acceptExecution(id, execution)
       yield* checkSession(id)
     })
-
-  const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
-    switch (event.type) {
-      case "execution.ended":
-        return event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void
-      case "inbox.moved":
-        return event.data.to === "delivered"
-          ? engine.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
-          : Effect.void
-      case "live.state":
-        return onTerminal(event.runtime, event.terminal, event.state === "working")
-      case "live.exited":
-        return onTerminal(event.runtime, event.terminal, false)
-      case "process.ended":
-        return forgetIfDone(event.sessionId!)
-      case "live.reset":
-        return republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })))
-      default:
-        return Effect.void
-    }
-  }
 
   let reconciles = 0
   const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
@@ -214,7 +194,20 @@ const make = Effect.gen(function* () {
   const checkFailed = (id: string) =>
     Effect.forkIn(locked(id, true)(check(id)).pipe(logged(`check ${id}`)), scope).pipe(Effect.asVoid)
 
-  yield* engine.on(handle)
+  yield* reactor.on([ExecutionEnded], (event) =>
+    event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void,
+  )
+  yield* reactor.on([InboxMoved], (event) =>
+    event.data.to === "delivered"
+      ? reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
+      : Effect.void,
+  )
+  yield* reactor.on([TerminalState], (event) => onTerminal(event.runtime, event.terminal, event.state === "working"))
+  yield* reactor.on([TerminalExited], (event) => onTerminal(event.runtime, event.terminal, false))
+  yield* reactor.on([ProcessEnded], (event) => forgetIfDone(event.sessionId!))
+  yield* reactor.on([RuntimeReset], (event) =>
+    republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine }))),
+  )
 
   yield* republish()
   yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)

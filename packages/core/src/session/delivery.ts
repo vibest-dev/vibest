@@ -1,15 +1,16 @@
+import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import { Cause, Clock, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
-import { Bus, type EngineEvent } from "../bus.ts"
+import { Bus } from "../bus.ts"
 import { Db, type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf, archived } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import * as Engine from "../engine.ts"
 import { Harnesses } from "../harness.ts"
 import { Inbox, text as inboxText } from "../inbox.ts"
 import { errorMessage } from "../plugins.ts"
+import * as Reactor from "../reactor.ts"
 import { alive, agentState, type Runtime, Runtimes, RuntimeError, stateOf, type Terminal } from "../runtimes.ts"
 import { busy, Executions, STOP_WAIT } from "./executions.ts"
 import { Exits } from "./exits.ts"
@@ -31,7 +32,7 @@ const make = Effect.gen(function* () {
   const { prompt, interruptAgent } = yield* Executions
   const exits = yield* Exits
   const { worktreeOf, handTask, resume } = yield* Placement
-  const engine = yield* Engine.make
+  const reactor = yield* Reactor.make
   const { locked } = locks
   const { undelivered } = inbox
 
@@ -246,18 +247,10 @@ const make = Effect.gen(function* () {
     )
   })
 
-  const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
-    switch (event.type) {
-      case "execution.ended":
-        return event.data.outcome === "failed" ? Effect.void : deliverNext(event.sessionId!)
-      case "inbox.queued":
-        return queued(event.sessionId!, event.seq)
-      default:
-        return Effect.void
-    }
-  }
-
-  yield* engine.on(handle)
+  yield* reactor.on([ExecutionEnded], (event) =>
+    event.data.outcome === "failed" ? Effect.void : deliverNext(event.sessionId!),
+  )
+  yield* reactor.on([InboxQueued], (event) => queued(event.sessionId!, event.seq))
 
   yield* db.recoverDelivering(
     (sessionId, messages) =>
