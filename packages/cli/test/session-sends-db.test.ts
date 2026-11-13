@@ -116,6 +116,9 @@ describe("sends from sessions", () => {
           const out = yield* db.outboxOf(peer)
           assert.deepInclude(out[0]!, { kind: "send", content: "report", reportTo })
           assert.isFalse(yield* db.sendToPeer(X, "22222222-2222-4222-8222-222222222222", reportTo, "report"))
+          assert.isTrue(yield* db.sendToPeer(X, peer, reportTo, "again", "req-1"))
+          assert.isTrue(yield* db.sendToPeer(X, peer, reportTo, "again", "req-1"))
+          assert.lengthOf(yield* db.outboxOf(peer), 2)
         }),
       ),
   )

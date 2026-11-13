@@ -79,7 +79,7 @@ export const make = (
       p: PayloadOf<"Send">,
     ) =>
       Effect.gen(function* () {
-        const toOrigin = yield* db.sendToOrigin(caller.sessionId, input, p.message)
+        const toOrigin = yield* db.sendToOrigin(caller.sessionId, input, p.message, p.request)
         if (toOrigin === false)
           return yield* new NoSuchSession({
             id: input,
@@ -116,7 +116,7 @@ export const make = (
           return heir
         })
         if ("peer" in to) {
-          if (!(yield* db.sendToPeer(caller.sessionId, to.peer, to.session, p.message)))
+          if (!(yield* db.sendToPeer(caller.sessionId, to.peer, to.session, p.message, p.request)))
             return yield* new NoSuchSession({
               id,
               message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,

@@ -12,7 +12,7 @@ import {
   ExecutionEnded,
   ExecutionStarted,
 } from "@vibest/schema/event"
-import { newId, randomId } from "@vibest/schema/id"
+import { idFrom, newId, randomId } from "@vibest/schema/id"
 import { type AgentStatus, InboxStatus, RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
@@ -387,15 +387,18 @@ export const makeStore = Effect.gen(function* () {
       readonly content: string
       readonly kind: "send" | "notice"
       readonly at?: number
+      readonly request?: string | undefined
     },
   ) =>
     Effect.gen(function* () {
       if (recipientSession === null) return false
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
+      const id = row.request === undefined ? randomId() : idFrom(`${peer}\n${row.sessionId}\n${row.request}`)
+      if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
       yield* emit(OutboxQueued, {
         ...(row.at === undefined ? {} : { at: row.at }),
         data: {
-          id: randomId(),
+          id,
           peer,
           session: row.sessionId,
           recipient: recipientSession,
