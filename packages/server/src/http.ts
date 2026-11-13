@@ -5,7 +5,7 @@ import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
-import { Effect, Layer, Option, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import type { ServeError } from "effect/http/HttpServerError"
@@ -67,10 +67,14 @@ export const make = Effect.gen(function* () {
         return ok(yield* inbox.take(who.id, who.process))
       }
       if (request.path === "/session/ready") {
-        const pid = Option.getOrUndefined(
-          yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
-        )?.pid
-        const current = yield* integration.ready(who.id, pid, integrationOf(reader(request.headers)), who.process)
+        const decoded = yield* Effect.result(Schema.decodeUnknownEffect(ReadyBody)(request.body))
+        if (decoded._tag === "Failure") return failure(400, decoded.failure.message)
+        const current = yield* integration.ready(
+          who.id,
+          decoded.success.pid,
+          integrationOf(reader(request.headers)),
+          who.process,
+        )
         return ok(current === undefined ? undefined : { process: current })
       }
       const hook = parseHookRoute(request.path)
@@ -103,7 +107,10 @@ export const layer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         if (request.method !== "POST") return HttpServerResponse.jsonUnsafe({ error: "POST only" }, { status: 405 })
-        const body = yield* request.text.pipe(Effect.orElseSucceed(() => ""))
+        const read = yield* Effect.result(request.text)
+        if (read._tag === "Failure")
+          return HttpServerResponse.jsonUnsafe({ error: read.failure.message }, { status: 400 })
+        const body = read.success
         const reply = yield* handle({
           path: request.url.replace(/^[a-z]+:\/\/[^/]*/, "").split("?")[0] ?? "",
           headers: request.headers,

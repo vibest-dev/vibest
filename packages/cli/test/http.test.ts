@@ -6,8 +6,9 @@ import { PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Http from "@vibest/server/http"
-import { Effect, type Scope } from "effect"
+import { Clock, Effect, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
+import { TestClock } from "effect/testing"
 
 import {
   CLAUDE,
@@ -88,6 +89,38 @@ describe("vibestd's HTTP API", () => {
         pid: 222,
         integration: { version: "0.0.2-next", protocol: PROTOCOL },
       })
+    }),
+  )
+
+  test(
+    "Ready takes {} and a numeric pid; a malformed body or a wrong pid type is 400 with the decode message and changes nothing",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      yield* until(db.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
+      const process = (yield* db.currentProcessId(worker))!
+      const ready = (body: string) => call("/session/ready", { sessionId: worker, process: String(process) }, body)
+      const pid = () => Effect.map(db.getSession(worker), (session) => pidOf(session!))
+      const readyAt = yield* db.readyAt(worker)
+      const reportedPid = yield* pid()
+      yield* TestClock.adjust("1 second")
+      const now = yield* Clock.currentTimeMillis
+      const rejected = (body: string, message: string) =>
+        Effect.gen(function* () {
+          const reply = yield* ready(body)
+          assert.strictEqual(reply.status, 400)
+          assert.deepStrictEqual(reply.body, { error: message })
+          assert.strictEqual(yield* db.readyAt(worker), readyAt)
+          assert.strictEqual(yield* pid(), reportedPid)
+        })
+      yield* rejected("{", "Expected a valid JSON string")
+      yield* rejected(JSON.stringify({ pid: "x" }), 'Expected number | undefined\n  at ["pid"]')
+      const empty = yield* ready("{}")
+      assert.deepStrictEqual(empty, { status: 200, body: { process } })
+      assert.strictEqual(yield* db.readyAt(worker), now)
+      assert.strictEqual(yield* pid(), reportedPid)
+      const numbered = yield* ready(JSON.stringify({ pid: 1 }))
+      assert.deepStrictEqual(numbered, { status: 200, body: { process } })
+      assert.strictEqual(pidOf((yield* db.getSession(worker))!), 1)
     }),
   )
 })
