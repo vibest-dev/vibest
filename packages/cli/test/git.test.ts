@@ -103,7 +103,7 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
   })
 
 const database = (filename: string) =>
-  Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer))
+  Db.layer.pipe(Layer.provide(Bus.layer), Layer.provide(SessionLive.layer), Layer.provide(Platform.sqlite(filename)))
 
 const session = (id: string): Omit<NewSession, "projectId"> => ({
   id,

@@ -68,6 +68,10 @@ const metaOf = (sql: SqlClient.SqlClient, key: "catalog" | "projection") =>
     Effect.map((rows) => (rows[0] === undefined ? undefined : Number(rows[0].value))),
   )
 
+export const setMeta = (sql: SqlClient.SqlClient, key: "catalog" | "projection", value: number) =>
+  sql`INSERT INTO meta (key, value) VALUES (${key}, ${String(value)})
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+
 export const ledgerOf = (sql: SqlClient.SqlClient) =>
   sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`.pipe(Effect.map((rows) => rows[0]?.value))
 

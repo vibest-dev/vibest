@@ -4,7 +4,6 @@ import url from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { APPLICATION_ID, Db, executionStateOf } from "@vibest/core/database/db"
-import { makeJournal } from "@vibest/core/database/journal"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
 import { PROJECTION_VERSION } from "@vibest/core/database/projectors"
 import { noticeEnvelope } from "@vibest/core/replies"
@@ -25,15 +24,15 @@ const fact = (
   input: { readonly sessionId?: string; readonly projectId?: string; readonly at?: number; readonly data: object },
 ) =>
   Effect.gen(function* () {
-    const journal = yield* makeJournal(() => Effect.void)
-    return yield* journal.commit(journal.emit(Catalog[type] as never, input as never))
+    const bus = yield* Bus
+    return yield* bus.publish(Catalog[type] as never, input as never)
   }).pipe(Effect.orDie)
 
 const memoryDb = () =>
   Db.layer.pipe(
-    Layer.provideMerge(Platform.sqlite(":memory:")),
-    Layer.provide(Bus.layer),
+    Layer.provideMerge(Bus.layer),
     Layer.provide(SessionLive.layer),
+    Layer.provideMerge(Platform.sqlite(":memory:")),
   )
 
 const ENTRY = { agent: "coordinator" } as const
@@ -97,7 +96,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(memoryDb())),
   )
 
-  const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
+  const memory = <A, E>(program: Effect.Effect<A, E, Bus | Db | SqlClient.SqlClient>) =>
     program.pipe(Effect.provide(memoryDb()))
 
   it.effect(
@@ -620,6 +619,8 @@ describe("Db", () => {
 
   const brokenInstall = (file: string, how: "fail" | "interrupt") =>
     Db.layer.pipe(
+      Layer.provide(Bus.layer),
+      Layer.provide(SessionLive.layer),
       Layer.provide(
         Layer.effect(
           SqlClient.SqlClient,
@@ -639,8 +640,6 @@ describe("Db", () => {
           }),
         ).pipe(Layer.provide(Platform.sqlite(file))),
       ),
-      Layer.provide(Bus.layer),
-      Layer.provide(SessionLive.layer),
     )
 
   it.effect("a failed or interrupted install rolls back, then a later open initializes", () =>
@@ -951,7 +950,7 @@ describe("Db", () => {
           `import { SessionLive } from ${JSON.stringify(liveModule)}`,
           `import { Db } from ${JSON.stringify(dbModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer)))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Bus.layer), Layer.provide(SessionLive.layer), Layer.provide(Platform.sqlite(process.argv[2]!))))))",
           "",
         ].join("\n"),
       )

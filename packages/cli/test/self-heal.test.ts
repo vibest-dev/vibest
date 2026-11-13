@@ -264,9 +264,9 @@ layer(Platform.services)(
           }).pipe(
             Effect.provide(
               Db.layer.pipe(
-                Layer.provide(Platform.sqlite(layout.database)),
                 Layer.provide(Bus.layer),
                 Layer.provide(SessionLive.layer),
+                Layer.provide(Platform.sqlite(layout.database)),
               ),
             ),
           )
@@ -301,9 +301,9 @@ layer(Platform.services)(
             ).pipe(
               Effect.provide(
                 Db.layer.pipe(
-                  Layer.provide(Platform.sqlite(layout.database)),
                   Layer.provide(Bus.layer),
                   Layer.provide(SessionLive.layer),
+                  Layer.provide(Platform.sqlite(layout.database)),
                 ),
               ),
             )

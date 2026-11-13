@@ -1,7 +1,7 @@
 # Schema
 
 Status: vibestd keeps an append-only log of facts (the `event` table) and a read model projected from it, in one SQLite
-file, `vibest.db`. The facts are the catalog in `packages/schema/src/event.ts`; `packages/core/src/database/journal.ts` appends
+file, `vibest.db`. The facts are the catalog in `packages/schema/src/event.ts`; `packages/core/src/bus.ts` appends
 them and `packages/core/src/database/projectors.ts` turns each into its read-model rows. The `Db` service
 (`packages/core/src/database/db.ts` and its `db-*.ts` modules) answers its callers from the read model and changes nothing but by
 appending facts.
@@ -9,7 +9,7 @@ appending facts.
 - `event`: the log. Each row is one fact of one aggregate: `aggregate` (the id of what it is about), `seq` (its number
   within that aggregate: each new fact takes the aggregate's highest `seq` plus one; facts rewritten from the old shape
   keep their old number, so an older aggregate's numbers have gaps), `at`, `type`, and `data`, the fact's fields as JSON, written once.
-  `position` is the file's local order of all rows; only the journal reads it (to replay, to copy the log, and as the order `Events` reads the whole log in), and no
+  `position` is the file's local order of all rows; only the bus reads it (to replay, to copy the log, and as the order `Events` reads the whole log in), and no
   fact or read-model row stores it (oxlint rule `vibest/event-reads`).
 - Aggregates: a `session` (its id; every `session.*`, `process.*`, `execution.*` and `inbox.*` fact), a `project`
   (its id; `project.*`), and the `ledger` (`meta.ledger`, a UUID made when the file is created; `machine.*`, `peer.*`,
@@ -83,7 +83,7 @@ folded YAML block), else its first non-empty line.
 PRAGMA application_id = 1986617957;  -- 0x76696265, "vibe"
 
 CREATE TABLE event (                                  -- the log; append-only
-  position  INTEGER PRIMARY KEY AUTOINCREMENT,        -- this file's order; never reused, read only by the journal
+  position  INTEGER PRIMARY KEY AUTOINCREMENT,        -- this file's order; never reused, read only by the bus
   aggregate TEXT    NOT NULL,                         -- a session, project or ledger id
   seq       INTEGER NOT NULL,                         -- 1, 2, … within the aggregate; (aggregate, seq) names one fact
   at        INTEGER NOT NULL,
@@ -208,7 +208,7 @@ session, so a row is named by both.
 ## Facts
 
 `packages/schema/src/event.ts` defines 24 types, each with its aggregate kind (`session`, `project` or `ledger`) and a
-Schema for its data. `Journal.emit` takes the aggregate from the kind: a session fact needs a session id and no project
+Schema for its data. `Bus.publish` takes the aggregate from the kind: a session fact needs a session id and no project
 id, a project fact a project id and no session id, a ledger fact neither. A key marked optional is absent, never null, and a string key that is present is never empty. Encoding and
 decoding refuse keys a definition does not have, and encoding fails when its JSON does not decode back. `Routing` and
 `TraceEntry` (with `Change`) from `packages/schema/src/plugin.ts` are part of the catalog contract through

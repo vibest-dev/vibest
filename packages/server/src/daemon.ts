@@ -1,7 +1,7 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
+import type { ReplayDiffers } from "@vibest/core/bus"
 import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db"
-import type { ReplayDiffers } from "@vibest/core/database/journal"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"

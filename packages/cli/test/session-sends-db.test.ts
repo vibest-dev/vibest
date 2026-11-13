@@ -15,9 +15,9 @@ const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
   program.pipe(
     Effect.provide(
       Db.layer.pipe(
-        Layer.provideMerge(Platform.sqlite(":memory:")),
         Layer.provide(Bus.layer),
         Layer.provide(SessionLive.layer),
+        Layer.provideMerge(Platform.sqlite(":memory:")),
       ),
     ),
   )

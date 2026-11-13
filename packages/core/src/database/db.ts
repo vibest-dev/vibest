@@ -1,5 +1,4 @@
 import {
-  Catalog,
   ProcessEnded,
   type ProcessEndReason,
   ProcessPid,
@@ -15,7 +14,7 @@ import {
 } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { type AgentStatus, AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/session"
-import { Context, Effect, Layer, Queue, Stream, String as Str } from "effect"
+import { Context, Effect, Layer, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
@@ -34,7 +33,6 @@ import {
   type Integration,
 } from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
-import { followFacts } from "./journal.ts"
 import { apply } from "./migration.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
@@ -74,18 +72,17 @@ export type SessionFilter = {
 
 const make = Effect.gen(function* () {
   const store = yield* makeStore
-  const bus = yield* Bus
   const {
     sql,
     reads,
     now,
     sessionLive,
     moving,
-    emit,
+    publish,
     afterCommit,
     afterCommitLive,
     tx,
-    notify,
+    observe,
     projectPrefixTaken,
     repositoriesOf,
     changedRepositories,
@@ -155,10 +152,10 @@ const make = Effect.gen(function* () {
           if (existing !== undefined) {
             const changed = yield* changedRepositories(existing.id, repositories)
             if (changed.length > 0)
-              yield* emit(ProjectRepositoriesChanged, { projectId: existing.id, data: { repositories: changed } })
+              yield* publish(ProjectRepositoriesChanged, { projectId: existing.id, data: { repositories: changed } })
           } else {
             const id = yield* newId(projectPrefixTaken)
-            yield* emit(ProjectCreated, {
+            yield* publish(ProjectCreated, {
               projectId: id,
               data: { ...(directory ? { directory } : {}), repositories: repositoriesOf(repositories) },
             })
@@ -173,7 +170,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const changed = yield* changedRepositories(id, repositories)
           if (changed.length > 0)
-            yield* emit(ProjectRepositoriesChanged, { projectId: id, data: { repositories: changed } })
+            yield* publish(ProjectRepositoriesChanged, { projectId: id, data: { repositories: changed } })
         }),
       ).pipe(Effect.orDie),
 
@@ -200,14 +197,14 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
           const from = row!.directory
-          yield* emit(ProjectMoved, {
+          yield* publish(ProjectMoved, {
             projectId: id,
             data: { from, to, repositories: repositoriesOf(repositories) },
           })
           for (const session of yield* sql<{
             id: string
           }>`SELECT id FROM session WHERE project_id = ${id} AND ended_at IS NULL`)
-            yield* notify({ type: "session.changed", sessionId: session.id })
+            yield* observe({ type: "session.changed", sessionId: session.id })
           return from
         }),
       ).pipe(Effect.orDie),
@@ -332,7 +329,7 @@ const make = Effect.gen(function* () {
             )).length
             if (n >= max) return false
           }
-          yield* emit(SessionCreated, {
+          yield* publish(SessionCreated, {
             sessionId: row.id,
             at: row.createdAt,
             data: {
@@ -368,7 +365,7 @@ const make = Effect.gen(function* () {
             processAt,
           )
           if (row.exitedAt !== null)
-            yield* emit(ProcessEnded, { sessionId: row.id, at: row.exitedAt, data: { process, reason: "exited" } })
+            yield* publish(ProcessEnded, { sessionId: row.id, at: row.exitedAt, data: { process, reason: "exited" } })
           if (task !== undefined)
             yield* queueInbox({
               recipient: row.id,
@@ -382,7 +379,7 @@ const make = Effect.gen(function* () {
             const execution = yield* startExecution(row.id, row.executionPromptedAt)
             yield* linkTask(row.id, execution, row.executionPromptedAt)
             if (row.executionState !== "open")
-              yield* emit(ExecutionEnded, {
+              yield* publish(ExecutionEnded, {
                 sessionId: row.id,
                 at: row.executionPromptedAt,
                 data: { execution, outcome: row.executionState },
@@ -492,20 +489,20 @@ const make = Effect.gen(function* () {
             if (!existing?.entry || fresh) {
               if (existing?.entry) {
                 yield* endProcess(existing.entry, "archived", at)
-                yield* emit(SessionEnded, { sessionId: existing.entry, at, data: { reason: "replaced" } })
+                yield* publish(SessionEnded, { sessionId: existing.entry, at, data: { reason: "replaced" } })
               }
-              yield* emit(SessionCreated, {
+              yield* publish(SessionCreated, {
                 sessionId: id,
                 at,
                 data: { project, agent: start.agent, name: "entry", directory: start.projectDirectory ?? "" },
               })
-              yield* emit(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
+              yield* publish(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
             }
             const entryId = !existing?.entry || fresh ? id : existing.entry
             if (start.projectDirectory) {
               const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${entryId}`
               if (own?.directory === "")
-                yield* emit(SessionDirectoryChanged, {
+                yield* publish(SessionDirectoryChanged, {
                   sessionId: entryId,
                   at,
                   data: { directory: start.projectDirectory },
@@ -599,11 +596,11 @@ const make = Effect.gen(function* () {
             return undefined
           const integration = patch.integration ?? (yield* sessionLive.integration(id))
           if (!ready) {
-            yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
+            yield* publish(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
             return current.id
           }
           if (integration !== undefined) yield* afterCommitLive(sessionLive.setIntegration(id, integration))
-          yield* emit(ProcessReady, {
+          yield* publish(ProcessReady, {
             sessionId: id,
             at: patch.ready as number,
             data: {
@@ -653,28 +650,6 @@ const make = Effect.gen(function* () {
       tx(clearEntryAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     canResumeConversation,
-    facts: (o: {
-      readonly session?: string | undefined
-      readonly after?: number | undefined
-      readonly follow: boolean
-    }) => {
-      const start = o.session === undefined ? ({ log: 0 } as const) : { session: o.session, after: o.after ?? 0 }
-      if (!o.follow) return followFacts(sql, Effect.void, start, false).pipe(Stream.orDie)
-      return Stream.unwrap(
-        Effect.gen(function* () {
-          const wake = yield* Queue.sliding<void>(1)
-          yield* Stream.fromSubscription(yield* bus.subscribe(Object.values(Catalog))).pipe(
-            Stream.runForEach((event) =>
-              "seq" in event && (o.session === undefined || event.aggregate === o.session)
-                ? Queue.offer(wake, undefined)
-                : Effect.void,
-            ),
-            Effect.forkScoped,
-          )
-          return followFacts(sql, Queue.take(wake), start, true).pipe(Stream.orDie)
-        }),
-      )
-    },
     ...inboxMethods(store),
   }
 })

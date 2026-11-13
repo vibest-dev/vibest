@@ -14,6 +14,7 @@ import * as Platform from "#platform"
 
 import { hostReplacements } from "./fakes.ts"
 import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
+import { memoryBus } from "./unit-helpers.ts"
 
 const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
   id,
@@ -132,7 +133,7 @@ describe("the runtime registry", () => {
           (yield* runtimes.all).map((runtime) => runtime.id),
           ["hc"],
         )
-      }).pipe(Effect.scoped, Effect.provide(Bus.layer)),
+      }).pipe(Effect.scoped, Effect.provide(memoryBus)),
   )
 })
 

@@ -113,9 +113,9 @@ const seed = (file: string, directory: string, n: number) =>
   }).pipe(
     Effect.provide(
       Db.layer.pipe(
-        Layer.provide(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES })),
         Layer.provide(Bus.layer),
         Layer.provide(SessionLive.layer),
+        Layer.provide(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES })),
       ),
     ),
     Effect.scoped,

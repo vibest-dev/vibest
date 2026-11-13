@@ -1,10 +1,11 @@
 import { CATALOG_VERSION, type UnknownFact } from "@vibest/schema/event"
+import { randomId } from "@vibest/schema/id"
 import { Clock, Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { inspectSchema, MIGRATION_TABLE, objectCount } from "./db-schema.ts"
-import { installLedger, rebuild } from "./journal.ts"
-import { PROJECTION_VERSION } from "./projectors.ts"
+import { rebuild } from "../bus.ts"
+import { inspectSchema, LOG_SCHEMA, MIGRATION_TABLE, objectCount, setMeta } from "./db-schema.ts"
+import { PROJECTION_SCHEMA, PROJECTION_VERSION } from "./projectors.ts"
 
 export type Migration = {
   readonly id: string
@@ -24,6 +25,14 @@ const markApplied = (sql: SqlClient.SqlClient, id: string) =>
   Effect.gen(function* () {
     yield* sql`INSERT INTO migration (id, time_completed) VALUES (${id}, ${yield* Clock.currentTimeMillis})`
   })
+
+export const installLedger = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA]) yield* sql.unsafe(statement)
+  yield* setMeta(sql, "catalog", CATALOG_VERSION)
+  yield* setMeta(sql, "projection", PROJECTION_VERSION)
+  yield* sql`INSERT INTO meta (key, value) VALUES ('ledger', ${randomId()})`
+})
 
 const bootstrap = (sql: SqlClient.SqlClient) =>
   sql.withTransaction(

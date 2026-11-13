@@ -714,7 +714,7 @@ yet.
 **Observing facts.** `ctx.event.subscribe({ types? })` is a `Stream` of the ledger's own facts (`Fact` from
 `@vibest/schema/event`: `seq`, `at`, `type`, `projectId?`, `sessionId?`, `data`), taken from the post-commit `Bus`.
 It replaces the earlier rule that plugins never read the ledger: a plugin observes facts, and still gets no SQL, no
-`Journal.emit` and no projector of its own. Only catalog facts reach it: every signal is filtered out.
+`Bus.publish` and no projector of its own. Only catalog facts reach it: every signal is filtered out.
 `types` omitted or empty means every fact; an unknown type is logged once per call and ignored, and a non-empty list
 of only unknown types is a stream that never emits. Delivery: this machine only, only after the commit, live from the
 moment the stream is run (no replay, no cursor, no ack); a replaced or unloaded plugin's stream ends with its scope,

@@ -6,8 +6,9 @@ import { Effect, Layer, PubSub, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { noHostEnv } from "./lib/harnesses.ts"
+import { memoryBus } from "./platform/bun.ts"
 
-const layer = Runtimes.layer.pipe(Layer.provideMerge(Bus.layer), Layer.provide(noHostEnv))
+const layer = Runtimes.layer.pipe(Layer.provideMerge(memoryBus), Layer.provide(noHostEnv))
 
 const follow = (events: Stream.Stream<RuntimeApi.RuntimeEvent>) =>
   Effect.gen(function* () {

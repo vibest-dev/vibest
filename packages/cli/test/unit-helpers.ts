@@ -6,8 +6,10 @@ import { Layer } from "effect"
 
 import * as Platform from "#platform"
 
+export const memoryBus = Bus.layer.pipe(Layer.provide(Platform.sqlite(":memory:")))
+
 export const database = (filename: string) =>
-  Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer))
+  Db.layer.pipe(Layer.provide(Bus.layer), Layer.provide(SessionLive.layer), Layer.provide(Platform.sqlite(filename)))
 
 export const session = (
   id: string,

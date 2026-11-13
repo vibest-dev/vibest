@@ -218,10 +218,10 @@ describe("import policy", () => {
 describe("ledger access rules", () => {
   const core = (name) => `packages/core/src/${name}`
 
-  it("event-reads: only the journal reads the event table and position", () => {
+  it("event-reads: only the bus reads the event table and position", () => {
     const source = "export const q = `SELECT * FROM event`\nexport const p = { position: 1 }\n"
     expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
-    expect(oxlintFindings(source, core("database/journal.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("bus.ts"))).toEqual([])
     expect(oxlintFindings(source, core("a.test.ts"))).toEqual([])
   })
 
