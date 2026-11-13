@@ -51,9 +51,12 @@ const swapOnce = (bytes: Buffer, from: string, to: string) => {
   bytes.write(to, at)
 }
 
-const protocolLine = (protocol: number, width: number) => `PROTOCOL = ${String(protocol).padStart(width)}`
-const olderProtocol = (bytes: Buffer, protocol: number) =>
-  swapOnce(bytes, protocolLine(protocol, 0), protocolLine(protocol - 1, String(protocol).length))
+const olderProtocol = (bytes: Buffer, protocol: number) => {
+  const found = [...bytes.toString("latin1").matchAll(new RegExp(`PROTOCOL\\d* = ${protocol}\\b`, "g"))]
+  expect(found.length === 1, `expected one PROTOCOL = ${protocol}, found ${found.length}`)
+  const from = found[0]![0]
+  swapOnce(bytes, from, from.replace(/\d+$/, String(protocol - 1).padStart(String(protocol).length)))
+}
 
 const olderVibest = async (w: World, share: string, version: string, protocol: number) => {
   const dir = path.join(share, "versions", version)
