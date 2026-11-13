@@ -1,5 +1,5 @@
-import * as VibestPlugin from "@vibest/plugin"
-import { reconnectSchedule } from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
+import { reconnectSchedule } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, Stream } from "effect"
@@ -99,7 +99,6 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   const all = Effect.sync(() => registry.get())
   return {
     transform: registry.transform,
-    reload: registry.reload,
     all,
     find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
     route: (id) =>

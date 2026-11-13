@@ -1,4 +1,4 @@
-import type * as VibestPlugin from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Cause, Clock, Duration, Effect, Exit, Option, type Scope } from "effect"
 

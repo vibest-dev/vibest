@@ -1,5 +1,5 @@
-import type * as VibestPlugin from "@vibest/plugin"
-import { capture } from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
+import { capture } from "@vibest/plugin/effect"
 import { Duration, Effect, Option, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 

@@ -1,4 +1,4 @@
-import { type Captured, capture } from "@vibest/plugin"
+import { type Captured, capture } from "@vibest/plugin/effect"
 import { Context, Duration, Effect, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 

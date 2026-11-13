@@ -1,4 +1,5 @@
-import type * as VibestPlugin from "@vibest/plugin"
+import type { Plugin as PromisePlugin } from "@vibest/plugin"
+import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
@@ -30,7 +31,7 @@ export interface Candidate {
   readonly source: string
   readonly revision: string
   readonly options: Readonly<Record<string, unknown>>
-  readonly plugin: VibestPlugin.Plugin.Plugin | { readonly error: string }
+  readonly plugin: AnyPlugin | { readonly error: string }
 }
 
 export const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options])
@@ -52,7 +53,9 @@ const ConfigEntry = Schema.Union([
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
 type ConfigFile = typeof ConfigFile.Type
 const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Unknown }))
-const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
+export type AnyPlugin = EffectPlugin.Plugin | PromisePlugin.Plugin
+
+const isPlugin = (u: unknown): u is AnyPlugin =>
   typeof u === "object" &&
   u !== null &&
   typeof (u as { readonly id?: unknown }).id === "string" &&

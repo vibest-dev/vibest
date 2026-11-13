@@ -1,4 +1,4 @@
-import { Runtime as R } from "@vibest/plugin"
+import { Runtime as R } from "@vibest/plugin/effect"
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
 
 type Runtime = R.RuntimeDefinition

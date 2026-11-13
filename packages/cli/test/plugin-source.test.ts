@@ -20,7 +20,7 @@ it("a dependency is watched in the plugin package until it resolves, even while 
   await write(path.join(dir, "package.json"), JSON.stringify({ name: "e2e-packaged", exports: "./src/main.ts" }))
   await write(
     entry,
-    'import dep from "e2e-dep"\nimport { Effect } from "effect"\nimport { ChildProcess } from "effect/process"\nimport { Plugin } from "@vibest/plugin"\nexport default [dep, Effect, ChildProcess, Plugin]\n',
+    'import dep from "e2e-dep"\nimport { Effect } from "effect"\nimport { ChildProcess } from "effect/process"\nimport { Plugin } from "@vibest/plugin/effect"\nexport default [dep, Effect, ChildProcess, Plugin]\n',
   )
   assert.throws(() => Bun.resolveSync("e2e-dep", path.dirname(entry)))
   assert.deepStrictEqual(Platform.makePluginLoader().graph(entry).unresolved.toSorted(), [

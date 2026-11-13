@@ -15,7 +15,7 @@ const pkg = path.join(import.meta.dirname, "..")
 const binary = path.join(pkg, "dist", "vibest")
 
 const plugins: Record<string, string> = {
-  "shared.ts": `import { AgentRefused, Plugin } from "@vibest/plugin"
+  "shared.ts": `import { AgentRefused, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import * as S from "effect/Schema"
 export default Plugin.define({
@@ -25,7 +25,7 @@ export default Plugin.define({
     : Effect.die("effect/Schema or @vibest/plugin is not usable"),
 })
 `,
-  "bundled/index.ts": `import { Plugin } from "@vibest/plugin"
+  "bundled/index.ts": `import { Plugin } from "@vibest/plugin/effect"
 import * as E from "effect"
 export default Plugin.define({ id: "bundled", effect: (ctx) => ("ownCopy" in E ? E.Effect.die("own copy") : ctx.agent.hook("start.before", () => E.Effect.void)) })
 `,
@@ -139,7 +139,7 @@ it(
     await fs.writeFile(version, versionFileWithTopLevelAwait("v1"))
     await fs.writeFile(
       path.join(home, "plugins", "live.ts"),
-      `import { Plugin } from "@vibest/plugin"
+      `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import fs from "node:fs"
 import { version } from "../shared/version.ts"
@@ -201,7 +201,7 @@ it(
     )
     await fs.writeFile(
       path.join(home, "plugins", "lazy", "index.ts"),
-      `import { Plugin } from "@vibest/plugin"
+      `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import fs from "node:fs"
 const home = process.env.VIBEST_HOME!
@@ -226,7 +226,7 @@ export default Plugin.define({
         await listUntil(list, (l) => l[0]?.status === "active")
         await fs.writeFile(
           path.join(home, "plugins", "zz-other.ts"),
-          `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "other", effect: () => Effect.void })\n`,
+          `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "other", effect: () => Effect.void })\n`,
         )
         await listUntil(list, (l) => l[1]?.status === "active")
         await fs.writeFile(path.join(home, "trigger"), "")

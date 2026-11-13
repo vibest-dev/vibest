@@ -1,5 +1,5 @@
-import type * as VibestPlugin from "@vibest/plugin"
-import { Runtime as RuntimeApi } from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
+import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { ID, randomId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"

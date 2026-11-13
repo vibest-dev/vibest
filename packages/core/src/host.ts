@@ -7,7 +7,7 @@ import type {
   Runtime as PluginRuntime,
   SubscriptionReport,
   Transform,
-} from "@vibest/plugin"
+} from "@vibest/plugin/effect"
 import type { AgentRefused, HookFailed, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
 import type { HarnessUnavailable, NoRuntime } from "@vibest/schema/session"
 import type { Subscription } from "@vibest/schema/subscription"

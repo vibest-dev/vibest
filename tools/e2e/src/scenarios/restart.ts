@@ -576,7 +576,7 @@ const checks: ReadonlyArray<Check> = [
         {
           name: "move",
           limited: (p) => p.startsWith("/v1/"),
-          plugin: `import { Plugin } from "@vibest/plugin"
+          plugin: `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({
   id: "move-e2e",
@@ -638,7 +638,7 @@ export default Plugin.define({
         {
           name: "move-twice",
           limited: () => true,
-          plugin: `import { Plugin } from "@vibest/plugin"
+          plugin: `import { Plugin } from "@vibest/plugin/effect"
 import { Effect, Schedule } from "effect"
 const free = [{ window: "5h", percent: 0, status: "available", resetTime: null }]
 export default Plugin.define({

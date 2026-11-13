@@ -1,58 +1,11 @@
-import type { FactOf, FactType } from "@vibest/schema/event"
 import { Effect, type Scope, Stream } from "effect"
 
-import type { HarnessEditor } from "./harness.ts"
-import type {
-  AgentEditor,
-  AgentHooks,
-  AgentResults,
-  Context,
-  MachineHookOptions,
-  MachineHooks,
-  MachineNote,
-  PluginOptions,
-  SubscriptionReport,
-} from "./index.ts"
-import type { Cleanup, PromisePlugin } from "./plugin.ts"
-import type { Registration } from "./registration.ts"
-import type { RuntimeEditor } from "./runtime.ts"
+import type { Context as EffectContext } from "../effect/index.ts"
+import type { Registration as EffectRegistration } from "../effect/registration.ts"
+import type { Cleanup, Context, Plugin } from "./plugin.ts"
+import type { Definitions, Registration } from "./registration.ts"
 
 type Awaitable<A> = Promise<A> | A
-
-export interface PromiseRegistration {
-  readonly dispose: () => Promise<void>
-}
-
-export interface PromiseDefinitions<Editor> {
-  readonly transform: (callback: (editor: Editor) => void) => Promise<PromiseRegistration>
-  readonly reload: () => Promise<void>
-}
-
-export interface PromiseContext {
-  readonly options: PluginOptions
-  readonly agent: {
-    readonly hook: <Name extends keyof AgentHooks>(
-      name: Name,
-      callback: (event: AgentHooks[Name]) => Awaitable<AgentResults[Name] | void>,
-    ) => Promise<PromiseRegistration>
-    readonly transform: (callback: (editor: AgentEditor) => void) => Promise<PromiseRegistration>
-  }
-  readonly machine: {
-    readonly hook: <Name extends keyof MachineHooks>(
-      name: Name,
-      callback: (event: MachineHooks[Name]) => Awaitable<ReadonlyArray<MachineNote> | void>,
-      options?: MachineHookOptions,
-    ) => Promise<PromiseRegistration>
-  }
-  readonly runtime: PromiseDefinitions<RuntimeEditor>
-  readonly harness: PromiseDefinitions<HarnessEditor>
-  readonly subscription: { readonly report: (input: SubscriptionReport) => Promise<void> }
-  readonly event: {
-    readonly subscribe: <T extends FactType = FactType>(input?: {
-      readonly types?: ReadonlyArray<T>
-    }) => AsyncIterable<FactOf<T>>
-  }
-}
 
 const isRefusal = (e: unknown) => (e as { readonly _tag?: unknown } | undefined)?._tag === "AgentRefused"
 
@@ -64,13 +17,13 @@ const refusable = <A>(callback: () => Awaitable<A>) =>
   )
 
 export const fromPromise =
-  (plugin: PromisePlugin) =>
-  (host: Context): Effect.Effect<void, never, Scope.Scope> =>
+  (plugin: Plugin) =>
+  (host: EffectContext): Effect.Effect<void, never, Scope.Scope> =>
     Effect.gen(function* () {
       const scope = yield* Effect.context<Scope.Scope>()
       const run = Effect.runPromiseWith(scope)
-      const register = (registering: Effect.Effect<Registration, never, Scope.Scope>) =>
-        run(registering).then((registration): PromiseRegistration => ({ dispose: () => run(registration.dispose) }))
+      const register = (registering: Effect.Effect<EffectRegistration, never, Scope.Scope>) =>
+        run(registering).then((registration): Registration => ({ dispose: () => run(registration.dispose) }))
       const iterators = new Set<AsyncIterator<unknown>>()
       yield* Effect.addFinalizer(() =>
         Effect.promise(() => Promise.all(Array.from(iterators, (iterator) => iterator.return?.()))),
@@ -94,11 +47,12 @@ export const fromPromise =
           return iterator
         },
       })
-      const definitions = <Editor>(domain: Context["runtime"] | Context["harness"]): PromiseDefinitions<Editor> => ({
+      const definitions = <Editor>(
+        domain: EffectContext["runtime"] | EffectContext["harness"],
+      ): Definitions<Editor> => ({
         transform: (callback) => register(domain.transform(callback as never)),
-        reload: () => run(domain.reload()),
       })
-      const context: PromiseContext = {
+      const context: Context = {
         options: host.options,
         agent: {
           hook: (name, callback) => register(host.agent.hook(name, (event) => refusable(() => callback(event)))),

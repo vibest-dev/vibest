@@ -199,7 +199,7 @@ describe("restart in place", () => {
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([entryId, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* until(herdr.callsTo("run"), (runs) => runs.some((r) => r.argv[0] === "env"))
-      assert.includeMembers([...(yield* processes.signaled)], [pid, 400])
+      yield* until(processes.signaled, (signaled) => [pid, 400].every((p) => signaled.includes(p)))
       yield* db.patchLive(entryId, { pid: 500, ready: null })
       yield* db.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))

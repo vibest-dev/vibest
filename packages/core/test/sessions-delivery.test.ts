@@ -4,14 +4,14 @@ import { Harnesses } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/sessions"
-import { Clock, Effect, Fiber, Ref } from "effect"
+import { Clock, Effect, Exit, Fiber, Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { CURSOR } from "./lib/harnesses.ts"
+import { CURSOR, PI } from "./lib/harnesses.ts"
 import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
@@ -471,22 +471,25 @@ describe.concurrent("Sessions", () => {
     "a send to a session whose harness no plugin provides any more fails with HarnessUnavailable in its notice",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
-      yield* writeEnd(id, "pi", { text: "status: completed" })
+      const harnesses = yield* Harnesses
+      const loaded = yield* Scope.make()
+      yield* harnesses.transform((editor) => editor.add({ ...PI, id: "leaving-pi" })).pipe(Scope.provide(loaded))
+      const { id, sessions } = yield* spawnWorking(yield* makeRepository, "leaving-pi")
+      yield* writeEnd(id, "leaving-pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      const harnesses = yield* Harnesses
-      yield* harnesses.transform((editor) => editor.remove("pi"))
-      assert.strictEqual((yield* Effect.flip(harnesses.get("pi")))._tag, "HarnessUnavailable")
+      yield* Scope.close(loaded, Exit.void)
+      assert.strictEqual((yield* Effect.flip(harnesses.get("leaving-pi")))._tag, "HarnessUnavailable")
       yield* sessions.send(id, "hello")
       const [notice] = yield* until(sqlNotices(id), (rows) => rows.length === 1)
       assert.match(
         notice!,
-        new RegExp(`^A message to ${id} was not delivered: no plugin provides harness pi; loaded: `),
+        new RegExp(`^A message to ${id} was not delivered: no plugin provides harness leaving-pi; loaded: `),
       )
       assert.strictEqual(notice!.split("\n\n").at(-1), "hello")
       yield* sessions.check(id)
     }),
+    { hooked: ["leaving-pi"] },
   )
 
   test(

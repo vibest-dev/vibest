@@ -29,7 +29,7 @@ const writePlugin = async (w: World, id: string, effect: string) => {
   await fs.mkdir(path.dirname(file), { recursive: true })
   await fs.writeFile(
     `${file}.tmp`,
-    `import { Plugin } from "@vibest/plugin"
+    `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${effect} })
 `,
@@ -109,7 +109,7 @@ const factLines = (file: string): Promise<Array<string>> =>
     () => [],
   )
 
-const observer = (file: string, types: string) => `import { Plugin } from "@vibest/plugin"
+const observer = (file: string, types: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect, Stream } from "effect"
 import fs from "node:fs"
 export default Plugin.define({
@@ -353,7 +353,7 @@ const checks: ReadonlyArray<Check> = [
         await fs.mkdir(folder, { recursive: true })
         await fs.writeFile(
           path.join(folder, "index.ts"),
-          `import { Plugin } from "@vibest/plugin"
+          `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 await new Promise((resolve) => setTimeout(resolve, 4800))
 export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })

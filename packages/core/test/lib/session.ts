@@ -18,7 +18,7 @@ import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import {
@@ -33,6 +33,7 @@ import {
   Layer,
   Path,
   Ref,
+  Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -44,7 +45,7 @@ import * as Server from "../../../server/src/server.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
 import { tempDirectory } from "./directory.ts"
 import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime, KIND, type FakeRuntimeOptions } from "./fake-runtime.ts"
+import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
 import { harnessLayer, harnessesLayer, noHostEnv } from "./harnesses.ts"
 import { compile, fakeGit, fakeProcesses, fakeRuntime, platform } from "./layers.ts"
 
@@ -251,17 +252,29 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly version?: string
 }
 
+const unusedRuntime = (
+  id: string,
+  caller: VibestPlugin.Runtime.RuntimeCaller,
+): VibestPlugin.Runtime.RuntimeDefinition => {
+  const unused = () => Effect.die(new Error(`runtime ${id} is only a caller`))
+  return {
+    id,
+    caller,
+    status: () => Effect.succeed({ status: "online" }),
+    open: unused,
+    send: unused,
+    read: unused,
+    process: unused,
+    close: unused,
+    events: Stream.empty,
+  }
+}
+
 export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
   VibestPlugin.Plugin.define({
     id: `runtime-${id}-caller`,
     effect: (context) =>
-      context.runtime
-        .transform((editor) => {
-          const own = editor.get(id)
-          if (own === undefined) editor.add({ ...editor.get(KIND)!, id, caller })
-          else editor.update(id, (definition) => (definition.caller = caller))
-        })
-        .pipe(Effect.asVoid),
+      context.runtime.transform((editor) => editor.add(unusedRuntime(id, caller))).pipe(Effect.asVoid),
   })
 
 const harnessStandIn = (options: TestOptions) => ({

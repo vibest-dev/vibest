@@ -1,20 +1,5 @@
 import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
-import { type Effect, Schema, type Scope, type Types } from "effect"
-
-import type { EventDomain } from "./event.ts"
-import type { HarnessDomain } from "./harness.ts"
-import type { Hooks, Registration, Transform } from "./registration.ts"
-import type { RuntimeDomain } from "./runtime.ts"
-
-export * as Harness from "./harness.ts"
-export * as Plugin from "./plugin.ts"
-export * as Runtime from "./runtime.ts"
-export type { EventDomain, Fact, FactOf, FactType } from "./event.ts"
-export type { PromiseContext, PromiseDefinitions, PromiseRegistration } from "./promise.ts"
-export type { Hooks, Registration, Transform } from "./registration.ts"
-export type { Subscription, SubscriptionAccount, SubscriptionLimit } from "@vibest/schema/subscription"
-export { capture, type Captured } from "./capture.ts"
-export { reconnectSchedule } from "./reconnect.ts"
+import { Schema } from "effect"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
@@ -66,7 +51,7 @@ export interface SubscriptionReport {
   readonly limits: ReadonlyArray<SubscriptionLimit>
 }
 
-export interface MachineRuntime {
+interface MachineRuntime {
   readonly kind: string
   readonly status: "online" | "offline" | "blocked"
   readonly reason?: string | undefined
@@ -77,7 +62,7 @@ export interface MachineNote {
   readonly fix?: string
 }
 
-export interface MachineRuntimeThere extends MachineRuntime {
+interface MachineRuntimeThere extends MachineRuntime {
   readonly link?: Readonly<Record<string, string>> | undefined
 }
 
@@ -107,7 +92,7 @@ export interface Attempt {
   readonly at: number
 }
 
-export interface AgentContext {
+interface AgentContext {
   readonly project: string
   readonly agent: string
   readonly parentSessionId: string | undefined
@@ -188,16 +173,7 @@ export interface AgentDefinition {
 }
 
 export interface AgentEditor {
-  list(): ReadonlyArray<AgentDefinition>
-  get(id: string): AgentDefinition | undefined
   add(definition: AgentDefinition): void
-  update(id: string, update: (definition: Types.Mutable<AgentDefinition>) => void): void
-  remove(id: string): void
-}
-
-export interface AgentDomain {
-  readonly hook: Hooks<AgentHooks, AgentResults, AgentFailures>
-  readonly transform: Transform<AgentEditor>
 }
 
 export interface MachineHooks {
@@ -209,26 +185,4 @@ export interface MachineHookOptions {
   readonly runtime?: string
 }
 
-export interface MachineDomain {
-  readonly hook: <Name extends keyof MachineHooks>(
-    name: Name,
-    callback: (event: MachineHooks[Name]) => Effect.Effect<ReadonlyArray<MachineNote> | void>,
-    options?: MachineHookOptions,
-  ) => Effect.Effect<Registration, never, Scope.Scope>
-}
-
-export interface SubscriptionDomain {
-  readonly report: (input: SubscriptionReport) => Effect.Effect<void>
-}
-
 export type PluginOptions = Readonly<Record<string, unknown>>
-
-export interface Context {
-  readonly options: PluginOptions
-  readonly agent: AgentDomain
-  readonly machine: MachineDomain
-  readonly runtime: RuntimeDomain
-  readonly harness: HarnessDomain
-  readonly subscription: SubscriptionDomain
-  readonly event: EventDomain
-}

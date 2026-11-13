@@ -1,4 +1,4 @@
-import type { Registration, Transform } from "@vibest/plugin"
+import type { Registration, Transform } from "@vibest/plugin/effect"
 import { Context, Effect, Exit, Scope } from "effect"
 
 export type { Registration, Transform }
@@ -201,16 +201,11 @@ export interface Keyed {
 }
 
 export interface ListEditor<D extends Keyed> {
-  list(): ReadonlyArray<D>
-  get(id: string): D | undefined
   add(definition: D): void
   update(id: string, update: (definition: { -readonly [K in keyof D]: D[K] }) => void): void
-  remove(id: string): void
 }
 
 export const listEditor = <D extends Keyed>(state: Array<D>): ListEditor<D> => ({
-  list: () => [...state],
-  get: (id) => state.find((definition) => definition.id === id),
   add: (definition) => {
     const at = state.findIndex((existing) => existing.id === definition.id)
     if (at >= 0) state[at] = definition
@@ -222,10 +217,6 @@ export const listEditor = <D extends Keyed>(state: Array<D>): ListEditor<D> => (
     const copy = { ...state[at]! }
     update(copy)
     state[at] = copy
-  },
-  remove: (id) => {
-    const at = state.findIndex((existing) => existing.id === id)
-    if (at >= 0) state.splice(at, 1)
   },
 })
 

@@ -1,4 +1,4 @@
-import type { Runtime } from "@vibest/plugin"
+import type { Runtime } from "@vibest/plugin/effect"
 import type { ProjectActivity } from "@vibest/schema/project"
 import type { AgentStatus } from "@vibest/schema/session"
 

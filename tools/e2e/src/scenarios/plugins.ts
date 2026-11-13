@@ -17,12 +17,12 @@ type Info = {
 
 const list = (w: World) => w.json<Array<Info>>(["plugins"])
 
-const plugin = (id: string, hook = "() => Effect.void") => `import { AgentRefused, Plugin } from "@vibest/plugin"
+const plugin = (id: string, hook = "() => Effect.void") => `import { AgentRefused, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", ${hook}) })
 `
 
-const transformThrows = (id: string, counter: string) => `import { Plugin } from "@vibest/plugin"
+const transformThrows = (id: string, counter: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import fs from "node:fs"
 export default Plugin.define({
@@ -41,7 +41,7 @@ const lines = (file: string) =>
   )
 
 const counting = (id: string, file: string) => `import fs from "node:fs"
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({
   id: ${JSON.stringify(id)},
@@ -61,7 +61,7 @@ const write = async (file: string, text: string) => {
   await fs.rename(`${file}.tmp`, file)
 }
 
-const failingTeardown = (id: string) => `import { Plugin } from "@vibest/plugin"
+const failingTeardown = (id: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({
   id: ${JSON.stringify(id)},
@@ -134,7 +134,7 @@ const checks: ReadonlyArray<Check> = [
       await write(path.join(w.vibestHome, "plugins", "broken.ts"), "export default 42\n")
       await write(
         path.join(w.vibestHome, "plugins", "a-throw.ts"),
-        `import { Plugin } from "@vibest/plugin"
+        `import { Plugin } from "@vibest/plugin/effect"
 export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e2e setup throw") } })
 `,
       )

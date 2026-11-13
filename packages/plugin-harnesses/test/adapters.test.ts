@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
@@ -7,7 +7,7 @@ import { pi, piModels } from "../src/pi.ts"
 
 const ADAPTERS = { pi, claude, cursor }
 
-const launchInput: Harness.LaunchInput = {
+const launchInput: Parameters<Harness.HarnessDefinition["launchArgs"]>[0] = {
   worktree: "/h/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd",
   projectDir: "/h/.vibest/projects/0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b",
   systemPromptFile: "/tmp/vibest/abcd1234-abcd-4abc-8abc-abcd1234abcd/system-prompt.md",
