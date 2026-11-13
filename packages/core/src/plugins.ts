@@ -173,6 +173,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
               ? (level === "error" ? Effect.logError : Effect.logWarning)("failed to clean up plugin", {
                   "plugin.id": id,
                   cause: exit.value.cause,
+                  readable: Cause.pretty(exit.value.cause),
                 })
               : Effect.void,
         ),

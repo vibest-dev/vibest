@@ -87,7 +87,9 @@ export const supervise = Effect.fnUntraced(function* (
     )
   yield* publish().pipe(
     Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError("failed to activate plugins", { cause }),
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.void
+        : Effect.logError("failed to activate plugins", { cause, readable: Cause.pretty(cause) }),
     ),
   )
   yield* Stream.fromQueue(builtinTriggers).pipe(
