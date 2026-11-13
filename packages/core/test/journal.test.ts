@@ -636,6 +636,25 @@ describe("journal", () => {
     }).pipe(Effect.provide(memory())),
   )
 
+  it.effect("after-commit effects run only once the outermost transaction commits", () =>
+    Effect.gen(function* () {
+      const { journal } = yield* ledger
+      const ran: Array<string> = []
+      const mark = (name: string) => journal.afterCommit(() => void ran.push(name))
+      yield* journal.commit(mark("rolled back").pipe(Effect.andThen(Effect.fail("stop")))).pipe(Effect.exit)
+      assert.deepStrictEqual(ran, [])
+      yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.commit(mark("nested"))
+          assert.deepStrictEqual(ran, [])
+        }),
+      )
+      assert.deepStrictEqual(ran, ["nested"])
+      yield* mark("outside")
+      assert.deepStrictEqual(ran, ["nested", "outside"])
+    }).pipe(Effect.provide(memory())),
+  )
+
   it.effect("a commit publishes its facts and then one change signal per session and per project it touched", () =>
     Effect.gen(function* () {
       yield* installLedger
