@@ -189,14 +189,17 @@ describe("import policy", () => {
     }
   })
 
-  it("integration packages refuse other vibest packages and Bun; bun.ts and platform/ accept only Bun", () => {
-    const internal = importing("@vibest/core")
-    for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
-      const path = `packages/integration/claude/src/${file}`
-      expect(scopedFindings(internal, path)).toEqual(refused)
-      expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
-    }
-  })
+  it.each(["integration/claude", "plugin-harnesses", "runtime-herdr", "runtime-herdr-core"])(
+    "%s refuses other vibest packages and Bun; bun.ts and platform/ accept only Bun",
+    (root) => {
+      const internal = importing("@vibest/core")
+      for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
+        const path = `packages/${root}/src/${file}`
+        expect(scopedFindings(internal, path)).toEqual(refused)
+        expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
+      }
+    },
+  )
 
   it("the herdr SDKs and tools/verify refuse Bun outside bun.ts and platform/", () => {
     for (const file of ["packages/effect-herdr-sdk/src/bun.ts", "packages/effect-herdr-core-sdk/src/platform/a.ts"])

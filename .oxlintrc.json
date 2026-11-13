@@ -201,7 +201,16 @@
       }
     },
     {
-      "files": ["packages/integration/*/src/**/bun.ts", "packages/integration/*/src/platform/**"],
+      "files": [
+        "packages/integration/*/src/**/bun.ts",
+        "packages/integration/*/src/platform/**",
+        "packages/plugin-harnesses/src/**/bun.ts",
+        "packages/plugin-harnesses/src/platform/**",
+        "packages/runtime-herdr/src/**/bun.ts",
+        "packages/runtime-herdr/src/platform/**",
+        "packages/runtime-herdr-core/src/**/bun.ts",
+        "packages/runtime-herdr-core/src/platform/**"
+      ],
       "rules": {
         "eslint/no-restricted-imports": [
           "error",
