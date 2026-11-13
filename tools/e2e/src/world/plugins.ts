@@ -11,4 +11,4 @@ export const configurePlugins = async (
 }
 
 export const addCursorPlugin = (w: { readonly vibestHome: string }, harnesses: string) =>
-  configurePlugins(w, (plugins) => [...plugins, path.join(harnesses, "cursor", "plugin.js")])
+  configurePlugins(w, (plugins) => [...plugins, path.join(harnesses, "cursor")])

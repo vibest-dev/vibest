@@ -6,13 +6,13 @@ import {
   type VibestClient,
   readPing,
   runCaptured,
-  withVibest,
 } from "@vibest/client/client"
 import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/client/release"
-import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
-import { type Ping, VERSION } from "@vibest/protocol/rpc"
+import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
+import { type Ping } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Cause, Config, Console, Duration, Effect, Exit, FileSystem, Option, Path, Schedule } from "effect"
 import { Command, Flag } from "effect/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -20,7 +20,9 @@ import { RpcClient } from "effect/rpc"
 
 import { askYesNo, interactive } from "./ask.ts"
 import { userOnly } from "./caller.ts"
+import { withVibest } from "./client.ts"
 import { type ReplaceFailed, replaceAnyway, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
+import { VERSION } from "./version.ts"
 
 export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
 

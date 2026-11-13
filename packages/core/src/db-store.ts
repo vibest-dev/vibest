@@ -13,6 +13,7 @@ import {
   ExecutionStarted,
 } from "@vibest/schema/event"
 import { newId, randomId } from "@vibest/schema/id"
+import { Routing } from "@vibest/schema/plugin"
 import { type AgentStatus, InboxStatus, RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
@@ -29,7 +30,6 @@ import {
 } from "./db-rows.ts"
 import { makeJournal } from "./journal.ts"
 import { decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
-import { Routing } from "./plugins.ts"
 import { noticeEnvelope, sessionEnvelope } from "./replies.ts"
 import { SessionLive } from "./session/live.ts"
 

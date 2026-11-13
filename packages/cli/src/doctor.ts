@@ -1,12 +1,12 @@
 import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
-import { PROTOCOL } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Console, Effect, Option } from "effect"
 import { Command } from "effect/cli"
 import { RpcClient } from "effect/rpc"
 
 import { extraVibests, type Finding, updateNotice } from "./update.ts"
+import { VERSION } from "./version.ts"
 
 const MARKS = { ok: "✓", problem: "✗", note: "·" } as const
 

@@ -1,14 +1,14 @@
 import {
   CALLER_HEADER,
   MISMATCH_ACTION,
-  PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
   REPOSITORY_HEADER,
   sessionHeaders,
 } from "@vibest/protocol/protocol"
-import { DaemonIdentity, VibestRpcs, type Ping, VERSION } from "@vibest/protocol/rpc"
+import { DaemonIdentity, VibestRpcs, type Ping } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import {
   Cause,
   Config,
@@ -213,7 +213,12 @@ export interface Needs {
   readonly method: string
 }
 
-export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArray<string>, needs?: Needs) => {
+export const incompatibleDaemon = (
+  socket: string,
+  ping: Ping,
+  client: { readonly version: string; readonly command: ReadonlyArray<string> },
+  needs?: Needs,
+) => {
   const lacks = needs !== undefined && ping.capabilities?.[needs.capability] !== true
   return ping.protocol === PROTOCOL && !lacks
     ? undefined
@@ -222,7 +227,7 @@ export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArr
         daemonVersion: ping.version,
         daemonProtocol: ping.protocol ?? null,
         daemon: { pid: ping.pid, instance: ping.instance, command: ping.command, startedAt: ping.startedAt },
-        client: { version: VERSION, command: self },
+        client,
         ...(ping.protocol === PROTOCOL && needs !== undefined ? { missing: needs.method } : {}),
       })
 }
@@ -341,32 +346,46 @@ export const startDaemon = Effect.gen(function* () {
   })
 })
 
-export const withVibest = <A, E, R>(
-  claim: Claim,
-  f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
-  options?: { readonly start?: boolean; readonly needs?: Needs },
-) =>
-  Effect.gen(function* () {
-    const layout = yield* Layout
-    const up = yield* readPing(layout.socket)
-    if (Option.isNone(up)) {
-      if (options?.start === false)
+const withVibest =
+  (version: string) =>
+  <A, E, R>(
+    claim: Claim,
+    f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
+    options?: { readonly start?: boolean; readonly needs?: Needs },
+  ) =>
+    Effect.gen(function* () {
+      const layout = yield* Layout
+      const up = yield* readPing(layout.socket)
+      if (Option.isNone(up)) {
+        if (options?.start === false)
+          return yield* new DaemonUnavailable({
+            socket: layout.socket,
+            message: `vibestd is unreachable on ${layout.socket} (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon`,
+          })
+        yield* startDaemon
+      }
+      const ping = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* readPing(layout.socket))
+      if (ping === undefined)
         return yield* new DaemonUnavailable({
           socket: layout.socket,
-          message: `vibestd is unreachable on ${layout.socket} (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon`,
+          message: `vibestd did not answer Ping on ${layout.socket}`,
         })
-      yield* startDaemon
-    }
-    const ping = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* readPing(layout.socket))
-    if (ping === undefined)
-      return yield* new DaemonUnavailable({
-        socket: layout.socket,
-        message: `vibestd did not answer Ping on ${layout.socket}`,
-      })
-    const incompatible = incompatibleDaemon(layout.socket, ping, yield* VibestCommand, options?.needs)
-    if (incompatible) return yield* incompatible
-    return yield* RpcClient.withHeaders(
-      connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
-      yield* claimHeaders(claim),
-    )
-  }).pipe(Effect.scoped)
+      const incompatible = incompatibleDaemon(
+        layout.socket,
+        ping,
+        { version, command: yield* VibestCommand },
+        options?.needs,
+      )
+      if (incompatible) return yield* incompatible
+      return yield* RpcClient.withHeaders(
+        connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
+        yield* claimHeaders(claim),
+      )
+    }).pipe(Effect.scoped)
+
+export interface ClientOptions {
+  readonly version: string
+}
+
+export const makeClient = (options: ClientOptions) => ({ withVibest: withVibest(options.version) })
+export type VibestClients = ReturnType<typeof makeClient>

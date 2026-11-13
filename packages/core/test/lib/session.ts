@@ -1,4 +1,5 @@
 import { Agents } from "@vibest/core/agents"
+import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -19,7 +20,7 @@ import { Spawn } from "@vibest/core/session/spawn"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin"
-import type { DaemonIdentity } from "@vibest/protocol/rpc"
+import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import {
   Clock,
@@ -38,8 +39,9 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
-import * as App from "../../../server/src/app.ts"
+import * as ServerApp from "../../../server/src/app.ts"
 import * as Server from "../../../server/src/server.ts"
+import { UpdateCheck } from "../../../server/src/update-check.ts"
 import { tempDirectory } from "./directory.ts"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, KIND, type FakeRuntimeOptions } from "./fake-runtime.ts"
@@ -195,13 +197,17 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Processes.node,
       fakeGit,
       runtimeNode,
-      App.services,
+      ServerApp.services,
+      App.node,
+      UpdateCheck.node,
       plugins,
       Agents.node,
       readyOnStart,
     ]),
     [
       PlatformNode.layout.replace(home),
+      App.node.replace(Layer.succeed(App, { version: "test" })),
+      UpdateCheck.node.replace(Layer.succeed(UpdateCheck, Effect.succeed(NOT_CHECKED))),
       Runtimes.node.replace(runtimes),
       Harness.node.replace(harnessLayer()),
       Harnesses.node.replace(harnessesLayer()),
@@ -242,6 +248,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly transport?: MachineTransport["Service"]
   readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
   readonly identity?: DaemonIdentity
+  readonly version?: string
 }
 
 export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
@@ -272,6 +279,7 @@ export const sessionFrom = (options: TestOptions = {}) =>
       Harness.node.replace(harnessLayer(harnessStandIn(options))),
       Harnesses.node.replace(harnessesLayer(options.harnesses)),
       Spawn.node.replace(Spawn.configured({ maxSessions: options.maxSessions })),
+      ...(options.version === undefined ? [] : [App.node.replace(Layer.succeed(App, { version: options.version }))]),
       ...(options.sessions === undefined ? [] : [sessionsDecorated(options.sessions)]),
       ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
       SshHosts.node.replace(sshHosts(options.sshHosts)),
@@ -310,6 +318,7 @@ export const restartSessions = Effect.gen(function* () {
     PlatformNode.crypto.replace(Layer.succeed(Crypto.Crypto, yield* Crypto.Crypto)),
     PlatformNode.fileSystem.replace(Layer.succeed(FileSystem.FileSystem, yield* FileSystem.FileSystem)),
     PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
+    App.node.replace(Layer.succeed(App, yield* App)),
     PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
     Spawn.node.replace(defaultSpawn),
   ]

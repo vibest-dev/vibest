@@ -1,4 +1,5 @@
-import { hookRoute, isTaken, sessionHeaders, TAKE_ROUTE, type Taken } from "@vibest/protocol/protocol"
+import { hookRoute, isTaken, sessionHeaders, TAKE_ROUTE } from "@vibest/protocol/protocol"
+import type { Taken } from "@vibest/schema/session"
 import type { EngineInterface, On, Register } from "claude-code"
 
 declare const VIBEST_PLUGIN_VERSION: string
