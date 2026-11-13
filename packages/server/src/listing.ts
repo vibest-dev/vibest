@@ -10,11 +10,12 @@ import {
   type SessionBrief,
   terminalOf,
 } from "@vibest/core/db"
-import type { ListScope } from "@vibest/core/remote"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Sessions } from "@vibest/core/sessions"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
+
+import type { ListScope } from "./machine/remote.ts"
 
 const LS_TASK = 500
 const taskForLs = (task: string | null) =>
