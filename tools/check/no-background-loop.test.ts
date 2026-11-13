@@ -23,7 +23,7 @@ const unboundedRepeats = (text: string) => {
 }
 
 const ALLOWED: Record<string, Record<string, { readonly count: number; readonly reason: string }>> = {
-  "packages/core/src/update-check.ts": {
+  "packages/server/src/update-check.ts": {
     "Effect.repeat": { count: 1, reason: "the hourly look-up of the latest vibest, approved by the owner" },
   },
   "packages/core/src/plugin-supervisor.ts": {

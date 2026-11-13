@@ -7,7 +7,6 @@ import { shellQuote } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { machinesListing, Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { UpdateCheck } from "@vibest/core/update-check"
 import { Caller, CAPABILITIES, type DaemonIdentity, Forbidden, WrongInstance } from "@vibest/protocol/rpc"
 import { LaunchFailed } from "@vibest/schema/session"
 import { PROTOCOL, VERSION } from "@vibest/schema/version"
@@ -15,6 +14,7 @@ import { Context, Deferred, Effect } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { stopOnce as stopDaemon } from "../stop.ts"
+import { UpdateCheck } from "../update-check.ts"
 import type { Checks, Handlers } from "./caller.ts"
 
 export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {

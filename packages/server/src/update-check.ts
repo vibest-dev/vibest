@@ -1,10 +1,9 @@
 import { installMethod, latestOf } from "@vibest/client/release"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
+import { VibestCommand } from "@vibest/core/paths"
 import type { UpdateStatus } from "@vibest/protocol/rpc"
 import { Clock, Config, Context, Duration, Effect, Exit, Layer, Option, Ref, Schedule } from "effect"
-
-import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
-import { VibestCommand } from "./paths.ts"
 
 export const UPDATE_CHECK_EVERY = Duration.hours(1)
 
