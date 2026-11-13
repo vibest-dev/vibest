@@ -93,7 +93,7 @@ export const makeStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const bus = yield* Bus
   const journal = yield* makeJournal<Signal>((events: ReadonlyArray<BusEvent>) => bus.published(withChanges(events)))
-  const { emit, commit: tx, notify } = journal
+  const { emit, commit: tx, notify, afterCommit } = journal
   const reads = ledgerReads(sql)
   const now = Clock.currentTimeMillis
   const sessionLive = yield* SessionLive
@@ -259,7 +259,7 @@ export const makeStore = Effect.gen(function* () {
         ...(at === undefined ? {} : { at }),
         data: { process: current.id, reason },
       })
-      yield* sessionLive.dropIntegration(id)
+      yield* afterCommit(sessionLive.dropIntegration(id))
       return true
     })
 
@@ -300,7 +300,7 @@ export const makeStore = Effect.gen(function* () {
           ...(start.pid === undefined ? {} : { pid: start.pid }),
         },
       })
-      yield* sessionLive.dropIntegration(id)
+      yield* afterCommit(sessionLive.dropIntegration(id))
       return seq
     })
 
@@ -340,7 +340,7 @@ export const makeStore = Effect.gen(function* () {
       const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
       if (row === undefined || row.endedAt !== null) return false
       yield* emit(SessionEnded, { sessionId: id, data: { reason: "archived" } })
-      yield* sessionLive.ended(id)
+      yield* afterCommit(sessionLive.ended(id))
       return true
     })
 
@@ -601,6 +601,7 @@ export const makeStore = Effect.gen(function* () {
     moving,
     remember,
     emit,
+    afterCommit,
     tx,
     notify,
     projectPrefixTaken,

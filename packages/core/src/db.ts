@@ -80,6 +80,7 @@ const make = Effect.gen(function* () {
     sessionLive,
     moving,
     emit,
+    afterCommit,
     tx,
     notify,
     projectPrefixTaken,
@@ -348,7 +349,7 @@ const make = Effect.gen(function* () {
                   }),
             },
           })
-          if (archives) yield* sessionLive.archiveWhenIdle(row.id)
+          if (archives) yield* afterCommit(sessionLive.archiveWhenIdle(row.id))
           const processAt = row.startedAt ?? row.createdAt
           const process = yield* startProcess(
             row.id,
@@ -384,7 +385,7 @@ const make = Effect.gen(function* () {
                 data: { execution, outcome: row.executionState },
               })
           }
-          yield* sessionLive.setStatus(row.id, row.status)
+          yield* afterCommit(sessionLive.setStatus(row.id, row.status))
           return true
         }),
       ).pipe(Effect.orDie),
@@ -539,7 +540,7 @@ const make = Effect.gen(function* () {
                 content: start.firstInput,
                 status: "delivered",
               })
-            moving.delete(project)
+            yield* afterCommit(Effect.sync(() => moving.delete(project)))
             if (!movingHere || fresh) yield* dropWaiting(project)
             return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project }
           }),
