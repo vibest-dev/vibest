@@ -93,7 +93,7 @@ export const supervise = Effect.fnUntraced(function* (
         if (next !== undefined) users = next
         const { operations } = yield* sources.operations
         const candidates = [...keptBuiltins(builtins, operations), ...users]
-        const revisions = candidates.map(keyOf).join("\n")
+        const revisions = candidates.map((c) => `${c.source}\n${keyOf(c)}`).join("\n")
         if (revisions === activated) return
         yield* host.activate(candidates)
         activated = revisions
