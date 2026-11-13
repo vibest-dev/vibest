@@ -108,14 +108,12 @@ describe("plugins: builtins follow the latest config", () => {
         yield* until("the removal", () => events.at(-1) === "close")
 
         const spawning = yield* Effect.forkChild(plugins.start(event))
-        yield* TestClock.adjust("6 seconds")
-        yield* TestClock.adjust("300 millis")
-        const decision = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("15 seconds")))
+        release()
+        const decision = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("10 seconds")))
         assert.isFalse(
           decision.trace.some((t) => t.plugin === "harness-x"),
           "the removed builtin ran",
         )
-        release()
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     { timeout: 20_000 },
   )

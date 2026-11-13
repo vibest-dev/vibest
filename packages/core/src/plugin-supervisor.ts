@@ -108,6 +108,7 @@ export const supervise = Effect.fnUntraced(function* (
     Stream.runForEach(() => publish().pipe(logFailure("plugins: builtin update failed"))),
     Effect.forkScoped,
   )
+  let reloading = false
   const reload = Effect.gen(function* () {
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
@@ -116,19 +117,23 @@ export const supervise = Effect.fnUntraced(function* (
     yield* publish(resolved.candidates.filter((c) => !isBuiltin(c)))
   }).pipe(logFailure("plugins: reload failed"))
   yield* Effect.sync(() => {
+    if (reloading) return
     observed++
     if (release === undefined) release = host.holdNow()
     Queue.offerUnsafe(triggers, observed)
   }).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
-  yield* Stream.concat(Stream.succeed(0), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
+  yield* Stream.concat(Stream.succeed(0), Stream.fromQueue(triggers)).pipe(
     Stream.runForEach((target) =>
       Effect.gen(function* () {
+        reloading = true
+        if (target !== 0) yield* Effect.sleep(DEBOUNCE)
+        const seen = observed
         yield* reload
-        if (observed !== target) return
+        if (observed !== seen) return
         const settled = release
         release = undefined
         if (settled) yield* settled
-      }),
+      }).pipe(Effect.ensuring(Effect.sync(() => (reloading = false)))),
     ),
     Effect.forkScoped,
   )

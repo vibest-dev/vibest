@@ -336,24 +336,12 @@ const timers = Effect.gen(function* () {
     isArmed(duration).pipe(Effect.andThen(clock.adjust(Duration.fromInputUnsafe(duration))))
   const clocked = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provideService(effect, Clock.Clock, Object.assign(Object.create(clock) as TestClock.TestClock, { sleep }))
-  const untilOpen = (ready: Effect.Effect<boolean>) =>
-    TestClock.withLive(
-      Effect.gen(function* () {
-        if (!(yield* ready)) return yield* Effect.die("activation did not settle")
-      }),
-    )
   const rescanned = <A, E, R>(f: Effect.Effect<A, E, R>, done: (a: A) => boolean, what: string) =>
     isArmed(RECHECK).pipe(
       Effect.andThen(clock.adjust(RECHECK)),
       Effect.andThen(TestClock.withLive(eventually(clock.adjust(DEBOUNCE).pipe(Effect.andThen(f)), done, what))),
     )
-  const reloaded = (ready: Effect.Effect<boolean>) =>
-    isArmed(RECHECK).pipe(
-      Effect.andThen(clock.adjust(RECHECK)),
-      Effect.andThen(clock.adjust(DEBOUNCE)),
-      Effect.andThen(untilOpen(ready)),
-    )
-  return { armed: isArmed, fire, clocked, rescanned, untilOpen, reloaded }
+  return { armed: isArmed, fire, clocked, rescanned }
 })
 describe("plugins: supervisor", () => {
   const builtinCandidate = (id: string) =>
@@ -375,16 +363,26 @@ describe("plugins: supervisor", () => {
         const config = path.join(dir, "vibest.json")
         const builtins = [builtinCandidate("harness-x"), builtinCandidate("runtime-y"), builtinCandidate("runtime-z")]
         yield* fs.writeFileString(config, `{ "plugins": ["-*", "-runtime.*", "-runtime-*", "-harness-x"] }`)
-        const { clocked, untilOpen, reloaded } = yield* timers
-        const plugins = yield* clocked(supervise(dir, builtins))
-        yield* untilOpen(plugins.settled)
-        assert.deepStrictEqual(yield* startedWith(plugins), ["runtime-y", "runtime-z"])
+        const plugins = yield* TestClock.withLive(supervise(dir, builtins))
+        const active = plugins.list.pipe(
+          Effect.map((rows) =>
+            rows
+              .filter((row) => row.status === "active")
+              .map((row) => row.id)
+              .sort()
+              .join(),
+          ),
+        )
+        const untilActive = (want: string, what: string) =>
+          TestClock.withLive(eventually(active, (ids) => ids === want, what))
+        yield* untilActive("runtime-y,runtime-z", "the kept builtins")
+        assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["runtime-y", "runtime-z"])
         yield* fs.writeFileString(config, `{ "plugins": ["-runtime-y", "-harness-x"] }`)
-        yield* reloaded(plugins.settled)
-        assert.deepStrictEqual(yield* startedWith(plugins), ["runtime-z"])
+        yield* untilActive("runtime-z", "runtime-y removed")
+        assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["runtime-z"])
         yield* fs.writeFileString(config, `{ "plugins": [] }`)
-        yield* reloaded(plugins.settled)
-        assert.deepStrictEqual(yield* startedWith(plugins), ["harness-x", "runtime-y", "runtime-z"])
+        yield* untilActive("harness-x,runtime-y,runtime-z", "the builtins back")
+        assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["harness-x", "runtime-y", "runtime-z"])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     20_000,
   )
@@ -400,18 +398,26 @@ describe("plugins: supervisor", () => {
         yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
         yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a1"`))
         watchGate.hold = true
-        const { clocked, rescanned, untilOpen, reloaded } = yield* timers
-        const service = yield* clocked(supervise(dir))
-        yield* untilOpen(service.settled)
-        assert.strictEqual((yield* service.start(event)).model, "a1")
+        const service = yield* TestClock.withLive(supervise(dir))
+        const model = TestClock.withLive(service.start(event).pipe(Effect.map((s) => s.model)))
+        if (!(yield* TestClock.withLive(service.settled))) return yield* Effect.die("activation did not settle")
+        assert.strictEqual(yield* model, "a1")
         yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a2"`))
-        yield* reloaded(service.settled)
-        assert.strictEqual((yield* service.start(event)).model, "a2")
+        yield* TestClock.withLive(
+          eventually(
+            Effect.sync(() => count("setup:unreported-a")),
+            (n) => n >= 2,
+            "the unreported save",
+          ),
+        )
+        assert.strictEqual(yield* model, "a2")
         const reads = vibestJsonReads.count
-        yield* rescanned(
-          Effect.sync(() => vibestJsonReads.count),
-          (n) => n > reads,
-          "a rescan with nothing changed",
+        yield* TestClock.withLive(
+          eventually(
+            Effect.sync(() => vibestJsonReads.count),
+            (n) => n > reads,
+            "a rescan with nothing changed",
+          ),
         )
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.strictEqual(count("setup:unreported-a"), 2)
