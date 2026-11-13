@@ -1,5 +1,6 @@
 import { Bus } from "@vibest/core/bus"
-import { Db, type OutboxRow } from "@vibest/core/database/db"
+import { Db } from "@vibest/core/database/db"
+import type { OutboxRow } from "@vibest/core/database/db-remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { VibestdIdentity } from "@vibest/core/identity"

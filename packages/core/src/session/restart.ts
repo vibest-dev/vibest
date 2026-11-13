@@ -1,3 +1,5 @@
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import type { HarnessId } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule, type Scope } from "effect"
 
@@ -6,7 +8,6 @@ import { App } from "../app.ts"
 import { awaitEvent, Bus, type BusEvent } from "../bus.ts"
 import {
   archived,
-  Db,
   executionStateOf,
   harnessIdOf,
   pidOf,
@@ -15,12 +16,12 @@ import {
   runtimeOf,
   type SessionRow,
   terminalOf,
-} from "../database/db.ts"
+} from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import { Harness, type HarnessId, Harnesses } from "../harness.ts"
+import { Harness, Harnesses } from "../harness.ts"
 import { entryCommand, restartArgv } from "../launch.ts"
-import { Layout, VibestCommand } from "../paths.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition, HarnessesShape } from "../plugin/host.ts"
 import { Processes } from "../processes.ts"

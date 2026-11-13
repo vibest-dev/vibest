@@ -1,5 +1,6 @@
 import { messageOf } from "@vibest/schema/error"
 import type { AgentRefused, PluginsNotActive } from "@vibest/schema/plugin"
+import type { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AllocationFailed,
   type AmbiguousSession,
@@ -11,16 +12,17 @@ import {
   RuntimeUnreachable,
   SessionBusy,
   type UnknownAgent,
+  HarnessUnavailable,
 } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Db, type SessionFilter, type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db.ts"
+import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
+import { Db, type SessionFilter } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
-import { HarnessUnavailable } from "./harness.ts"
+import { Git, type GitState } from "./git.ts"
 import { projectRoot, workspaceGit } from "./project/create.ts"
-import type * as Remove from "./remove.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
 import { Archive } from "./session/archive.ts"
 import { Delivery, type SendRefused, unreachable } from "./session/delivery.ts"
@@ -30,7 +32,7 @@ import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
 import { type Outdated, Restart, type Restarted } from "./session/restart.ts"
 import { Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
-import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
+import { gitState, mainCheckout } from "./worktree.ts"
 
 export {
   AllocationFailed,
@@ -133,7 +135,7 @@ export class Sessions extends Context.Service<
       id: string,
       options?: { readonly keepWorktree?: boolean | undefined },
     ) => Effect.Effect<
-      Remove.RemoveOutcome | undefined,
+      RemoveOutcome | undefined,
       NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable | RuntimeError
     >
     readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>

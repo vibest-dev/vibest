@@ -1,18 +1,18 @@
 import { type BusEvent } from "@vibest/core/bus"
+import { Db } from "@vibest/core/database/db"
 import {
-  Db,
   executionStateOf,
   exitedAt,
   harnessIdOf,
   runtimeOf,
-  type RuntimeAddress,
   type SessionBrief,
   terminalOf,
-} from "@vibest/core/database/db"
+} from "@vibest/core/database/db-rows"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Sessions } from "@vibest/core/session"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
+import type { RuntimeAddress } from "@vibest/schema/session"
 import { Effect } from "effect"
 
 import type { ListScope } from "./machine/remote.ts"

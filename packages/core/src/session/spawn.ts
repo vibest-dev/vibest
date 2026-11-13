@@ -1,4 +1,5 @@
 import { newId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
 import {
   AllocationFailed,
   describeSpawn,
@@ -9,43 +10,30 @@ import {
   NoSuchSession,
   runnableNote,
   type RuntimeMachine,
+  HarnessUnavailable,
+  type HarnessId,
 } from "@vibest/schema/session"
 import { Clock, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path } from "effect"
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
 import { Agents, unknownAgent } from "../agents.ts"
-import {
-  Db,
-  type NewSession,
-  type PeerStart,
-  type SessionRow,
-  harnessIdOf,
-  runtimeOf,
-  terminalOf,
-  archived,
-} from "../database/db.ts"
+import type { PeerStart } from "../database/db-remote.ts"
+import { type NewSession, type SessionRow, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
 import { directoryLock, type keyedLock } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import {
-  harnessCatalog,
-  harnessOptions,
-  Harness,
-  Harnesses,
-  HarnessUnavailable,
-  type HarnessId,
-  preflight,
-  unprovided,
-} from "../harness.ts"
-import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, safeRepositoryDirectory } from "../paths.ts"
+import { Git } from "../git.ts"
+import { harnessCatalog, harnessOptions, Harness, Harnesses, preflight, unprovided } from "../harness.ts"
+import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
 import { Plugins, type Routing } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, Runtimes } from "../runtimes.ts"
-import { allocationParentBlocked, Git, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
+import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
 import { SessionLocks } from "./locks.ts"
 import { Move, type LimitMove } from "./move.ts"
 import { Placement } from "./placement.ts"

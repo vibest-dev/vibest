@@ -5,6 +5,4 @@ import * as Http from "./http.ts"
 import * as Server from "./server.ts"
 import { services } from "./services.ts"
 
-export { services }
-
 export const daemon = LayerNode.group([VibestdIdentity.node, services, Server.node, Http.node])

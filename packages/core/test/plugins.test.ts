@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Db, harnessIdOf } from "@vibest/core/database/db"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
+import { harnessIdOf } from "@vibest/core/database/db-rows"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugin"
 import { Sessions } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
@@ -15,6 +15,7 @@ import {
   type Registration,
 } from "@vibest/plugin/effect"
 import type { Fact } from "@vibest/schema/event"
+import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
