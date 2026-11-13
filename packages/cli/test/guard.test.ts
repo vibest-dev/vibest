@@ -1,7 +1,7 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { Agents } from "@vibest/core/agents"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { check, shellBlock, splitCommand } from "@vibest/core/guard"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"

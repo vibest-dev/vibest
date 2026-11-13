@@ -1,10 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Db, harnessIdOf } from "@vibest/core/db"
+import { Db, harnessIdOf } from "@vibest/core/database/db"
 import { Layout } from "@vibest/core/paths"
-import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
-import { Sessions } from "@vibest/core/sessions"
+import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Sessions } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin } from "@vibest/plugin"
 import {

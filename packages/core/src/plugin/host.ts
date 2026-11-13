@@ -13,7 +13,7 @@ import type { HarnessUnavailable, NoRuntime } from "@vibest/schema/session"
 import type { Subscription } from "@vibest/schema/subscription"
 import type { Effect, Stream } from "effect"
 
-import type { FailInput, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugins.ts"
+import type { FailInput, MachineHook, PluginNote, SpawnDecision, StartInput } from "../plugin.ts"
 
 export type RuntimeDefinition = PluginRuntime.RuntimeDefinition
 export type HarnessDefinition = PluginHarness.HarnessDefinition

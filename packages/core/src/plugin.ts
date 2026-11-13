@@ -14,18 +14,18 @@ import {
 import { Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
 import { Agents } from "./agents.ts"
-import { timeoutWithoutWaiting } from "./bounded.ts"
 import { Bus, type BusEvent } from "./bus.ts"
+import { timeoutWithoutWaiting } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import { Harnesses } from "./harness.ts"
-import * as Hooks from "./hooks.ts"
-import { errorMessage } from "./hooks.ts"
-import type { PluginsShape } from "./host.ts"
-import { type AnyPlugin, type Candidate, keyOf, makeSources, PluginLoader } from "./plugin-sources.ts"
-import { supervise } from "./plugin-supervisor.ts"
+import * as Hooks from "./plugin/hooks.ts"
+import { errorMessage } from "./plugin/hooks.ts"
+import type { PluginsShape } from "./plugin/host.ts"
+import * as Registry from "./plugin/registry.ts"
+import { type AnyPlugin, type Candidate, keyOf, makeSources, PluginLoader } from "./plugin/sources.ts"
+import { supervise } from "./plugin/supervisor.ts"
 import { logFailure } from "./reactor.ts"
-import * as Registry from "./registry.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 export {
@@ -38,8 +38,8 @@ export {
   TraceEntry,
 } from "@vibest/schema/plugin"
 
-export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
-export { DEBOUNCE, RECHECK } from "./plugin-supervisor.ts"
+export { type Candidate, pluginEntries, PluginLoader } from "./plugin/sources.ts"
+export { DEBOUNCE, RECHECK } from "./plugin/supervisor.ts"
 export { errorMessage }
 
 export const DEFAULT_TIMEOUT = Duration.seconds(5)

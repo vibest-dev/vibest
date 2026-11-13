@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db, exitedAt, executionStateOf } from "@vibest/core/db"
+import { Db, exitedAt, executionStateOf } from "@vibest/core/database/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import {
@@ -9,8 +9,8 @@ import {
   listProjectRepositories,
   projectRepositories,
   projectRoot,
-} from "@vibest/core/project-create"
-import { Sessions } from "@vibest/core/sessions"
+} from "@vibest/core/project/create"
+import { Sessions } from "@vibest/core/session"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { liveDaemon } from "@vibest/runtime-herdr/commands"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"

@@ -2,9 +2,9 @@ import { CATALOG_VERSION, type UnknownFact } from "@vibest/schema/event"
 import { Clock, Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { inspectSchema, MIGRATION_TABLE, objectCount } from "../db-schema.ts"
-import { installLedger, rebuild } from "../journal.ts"
-import { PROJECTION_VERSION } from "../projectors.ts"
+import { inspectSchema, MIGRATION_TABLE, objectCount } from "./db-schema.ts"
+import { installLedger, rebuild } from "./journal.ts"
+import { PROJECTION_VERSION } from "./projectors.ts"
 
 export type Migration = {
   readonly id: string

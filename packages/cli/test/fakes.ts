@@ -2,7 +2,7 @@ import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
 import { agentsLayer } from "@vibest/core/test/lib/agents"

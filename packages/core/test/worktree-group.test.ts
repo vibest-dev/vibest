@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db, type NewSession, exitedAt, executionStateOf } from "@vibest/core/db"
+import { Db, type NewSession, exitedAt, executionStateOf } from "@vibest/core/database/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
-import { allocationNameSource, Sessions } from "@vibest/core/sessions"
+import { allocationNameSource, Sessions } from "@vibest/core/session"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
 import { Effect, FileSystem, Path, type Scope } from "effect"
 

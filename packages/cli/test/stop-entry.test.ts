@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
-import { Db, encodeAddress, harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/db"
+import { Db, encodeAddress, harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/database/db"
 import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"

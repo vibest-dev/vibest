@@ -2,8 +2,8 @@ import { MachineAdded, MachineConnected, MachineRemoved, OutboxAcked, PeerSeen }
 import { Effect } from "effect"
 import type { Statement } from "effect/sql"
 
+import { noticeEnvelope, sessionEnvelope } from "../replies.ts"
 import type { Store } from "./db-store.ts"
-import { noticeEnvelope, sessionEnvelope } from "./replies.ts"
 
 export type PeerScope = { readonly peer: string; readonly project: string; readonly session?: string }
 

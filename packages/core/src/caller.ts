@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 
-import type { Caller } from "./host.ts"
+import type { Caller } from "./plugin/host.ts"
 
 export interface CallerHit {
   readonly id: string

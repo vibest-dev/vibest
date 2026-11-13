@@ -15,11 +15,11 @@ import {
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Db, type SessionFilter, type SessionRow, runtimeOf, terminalOf, exitedAt } from "./db.ts"
+import { Db, type SessionFilter, type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import { HarnessUnavailable } from "./harness.ts"
-import { projectRoot, workspaceGit } from "./project-create.ts"
+import { projectRoot, workspaceGit } from "./project/create.ts"
 import type * as Remove from "./remove.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
 import { Archive } from "./session/archive.ts"
