@@ -1,5 +1,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
+import url from "node:url"
 
 import type { Check } from "../check.ts"
 import { expect, until, type World } from "../world.ts"
@@ -92,15 +93,21 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "G1",
-    title: "plugins lists one from VIBEST_HOME/plugins and one from vibest.json",
+    title:
+      "plugins lists one from VIBEST_HOME/plugins, one from vibest.json, and one named by a file:// URL with an escaped space",
     run: async (w) => {
       await write(path.join(w.vibestHome, "plugins", "home.ts"), plugin("home"))
       const configured = path.join(w.root, "configured", "index.ts")
       await write(configured, plugin("configured"))
-      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: [path.dirname(configured)] }))
-      await until("both plugins active", async () => {
+      const spaced = path.join(w.root, "with space", "index.ts")
+      await write(spaced, plugin("spaced"))
+      await write(
+        path.join(w.vibestHome, "vibest.json"),
+        JSON.stringify({ plugins: [path.dirname(configured), url.pathToFileURL(path.dirname(spaced)).href] }),
+      )
+      await until("all three plugins active", async () => {
         const all = await list(w)
-        return ["home", "configured"].every((id) => all.some((p) => p.id === id && p.status === "active"))
+        return ["home", "configured", "spaced"].every((id) => all.some((p) => p.id === id && p.status === "active"))
       })
     },
   },

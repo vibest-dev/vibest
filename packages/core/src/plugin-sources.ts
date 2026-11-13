@@ -272,7 +272,16 @@ export const makeSources = Effect.fnUntraced(function* (
         configured.push({ type: "add", target, options })
         continue
       }
-      const resolved = target.startsWith("file://") ? target.slice("file://".length) : path.resolve(layout.home, target)
+      const located = yield* (
+        target.startsWith("file://")
+          ? Effect.try(() => new URL(target)).pipe(Effect.flatMap(path.fromFileUrl))
+          : Effect.succeed(path.resolve(layout.home, target))
+      ).pipe(Effect.option)
+      if (Option.isNone(located)) {
+        yield* warn(`vibest.json: plugin path is not a valid file URL: ${target}`)
+        continue
+      }
+      const resolved = located.value
       paths.add(resolved)
       if (!SOURCE.test(resolved) && !(yield* isDirectory(resolved))) {
         yield* warn(`vibest.json: plugin path must be a directory or a .ts/.js file: ${resolved}`)

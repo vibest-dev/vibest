@@ -5,7 +5,8 @@ is and when it counts as working.
 
 ## G1. Listing plugins
 
-`vibest plugins` lists a plugin from the plugins folder and one named in `vibest.json`, both active with zero counters.
+`vibest plugins` lists a plugin from the plugins folder, one named in `vibest.json`, and one named there by a `file://`
+URL whose path has an escaped space, all active with zero counters.
 
 ## G2. Reloading an edited plugin
 
