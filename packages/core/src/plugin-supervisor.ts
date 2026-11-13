@@ -122,14 +122,18 @@ export const supervise = Effect.fnUntraced(function* (
     if (release === undefined) release = host.holdNow()
     Queue.offerUnsafe(triggers, observed)
   }).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
+  const hold = () => {
+    if (release === undefined) release = host.holdNow()
+  }
   yield* Stream.concat(Stream.succeed(0), Stream.fromQueue(triggers)).pipe(
     Stream.runForEach((target) =>
       Effect.gen(function* () {
         reloading = true
+        hold()
         if (target !== 0) yield* Effect.sleep(DEBOUNCE)
         const seen = observed
         yield* reload
-        if (observed !== seen) return
+        if (observed !== seen || Queue.sizeUnsafe(triggers) > 0) return
         const settled = release
         release = undefined
         if (settled) yield* settled

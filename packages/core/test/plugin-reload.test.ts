@@ -239,6 +239,28 @@ const watchGate: {
 }
 const watchSees = (directory: string, name: string) => Effect.sync(() => watchGate.listeners.get(directory)!(name))
 const vibestJsonReads = { count: 0 }
+const readHold: { current: Promise<void> | undefined } = { current: undefined }
+const gateReads = (fs: FileSystem.FileSystem): FileSystem.FileSystem =>
+  new Proxy(fs, {
+    get(target, prop, receiver) {
+      if (prop !== "readFile" && prop !== "readFileString") {
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === "function" ? value.bind(target) : value
+      }
+      const method = Reflect.get(target, prop, target) as (
+        ...args: ReadonlyArray<never>
+      ) => Effect.Effect<unknown, unknown, never>
+      return (...args: ReadonlyArray<never>) => {
+        const pending = readHold.current
+        if (pending !== undefined) {
+          readHold.current = undefined
+          wake()
+        }
+        const read = method.apply(target, args as never)
+        return pending === undefined ? read : Effect.promise(() => pending).pipe(Effect.andThen(() => read))
+      }
+    },
+  })
 const nativeRequire = module.createRequire(import.meta.url)
 const freshRequire = async (entry: string, files: ReadonlyArray<string>) => {
   for (const file of files) delete nativeRequire.cache[file]
@@ -423,6 +445,79 @@ describe("plugins: supervisor", () => {
         assert.strictEqual(count("setup:unreported-a"), 2)
       }).pipe(
         Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
+    20_000,
+  )
+
+  it.effect(
+    "a burst during the delay keeps readiness closed until the queued pass imports an unreported edit",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        const pluginsDir = path.join(dir, "plugins")
+        const file = path.join(pluginsDir, "a.ts")
+        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
+        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a1"`))
+        watchGate.hold = true
+        const { clocked, armed } = yield* timers
+        const service = yield* clocked(supervise(dir))
+        assert.strictEqual((yield* service.start(event)).model, "a1")
+        yield* watchSees(pluginsDir, "a.ts")
+        yield* armed(DEBOUNCE)
+        yield* watchSees(pluginsDir, "a.ts")
+        yield* TestClock.adjust(DEBOUNCE)
+        yield* armed(DEBOUNCE)
+        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a2"`))
+        const starting = yield* Effect.forkChild(service.start(event))
+        yield* TestClock.withLive(Effect.sleep("200 millis"))
+        assert.isUndefined(starting.pollUnsafe(), "a start was admitted before the queued pass")
+        yield* TestClock.adjust(DEBOUNCE)
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        assert.strictEqual(started.model, "a2")
+      }).pipe(
+        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
+    20_000,
+  )
+
+  it.effect(
+    "an otherwise unchanged rescan that outlasts the recheck reopens readiness",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
+        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "slow-scan-a", `"a1"`))
+        const { clocked, armed } = yield* timers
+        const service = yield* clocked(supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, gateReads(fs))))
+        assert.strictEqual((yield* service.start(event)).model, "a1")
+        const setups = count("setup:slow-scan-a")
+        let releaseRead!: () => void
+        readHold.current = new Promise<void>((resolve) => {
+          releaseRead = resolve
+        })
+        yield* armed(RECHECK)
+        yield* TestClock.adjust(RECHECK)
+        yield* armed(DEBOUNCE)
+        yield* TestClock.adjust(DEBOUNCE)
+        yield* untilSignal(() => readHold.current === undefined, "the rescan to start reading")
+        const starting = yield* Effect.forkChild(service.start(event))
+        yield* TestClock.adjust(RECHECK)
+        yield* TestClock.withLive(Effect.sleep("100 millis"))
+        assert.isUndefined(starting.pollUnsafe(), "the recheck during the slow rescan reopened readiness")
+        releaseRead()
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        assert.strictEqual(started.model, "a1")
+        assert.strictEqual(count("setup:slow-scan-a"), setups)
+      }).pipe(
+        Effect.ensuring(Effect.sync(() => void (readHold.current = undefined))),
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
