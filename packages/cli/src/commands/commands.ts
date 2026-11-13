@@ -28,7 +28,7 @@ const providerFlag = Flag.String("provider").pipe(
 
 const hookHarness = Flag.String("harness").pipe(Flag.withDescription("The harness whose hook this is"))
 
-const entryFlags = {
+export const entryFlags = {
   fresh: Flag.Boolean("new").pipe(
     Flag.withDescription("Start a new conversation with the entry session instead of reopening the current one"),
     Flag.withDefault(false),

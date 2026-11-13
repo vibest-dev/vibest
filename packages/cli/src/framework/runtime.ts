@@ -53,7 +53,7 @@ export function handlers<const Root extends Spec.Any>(root: Root, handlers: Hand
   const result: Array<LazyHandler> = []
 
   function add(node: Spec.Any, value: RuntimeHandlers | undefined) {
-    if (value === undefined) return
+    if (value === undefined) throw new Error(`no handler registered for command ${node.name}`)
     if (typeof value === "function") {
       result.push({ spec: node.spec, load: value })
       return

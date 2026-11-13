@@ -30,8 +30,9 @@ import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { Commands } from "../src/commands/commands.ts"
+import { Commands, entryFlags } from "../src/commands/commands.ts"
 import { Runtime as CliRuntime } from "../src/framework/runtime.ts"
+import { Spec } from "../src/framework/spec.ts"
 import { Host as CliHost } from "../src/host.ts"
 import {
   agentsLayer,
@@ -628,10 +629,15 @@ layer(
   )
 })
 
-const entryHandlers = CliRuntime.handlers(Commands, {
+const EntryCommands = Spec.make("vibest", {
+  params: entryFlags,
+  commands: [Spec.make("daemon", { commands: [Commands.commands.daemon.commands.restart] })],
+})
+
+const entryHandlers = CliRuntime.handlers(EntryCommands, {
   $: () => import("../src/commands/handlers/default.ts"),
   daemon: { restart: () => import("../src/commands/handlers/daemon/restart.ts") },
-} as never)
+})
 
 describe("wizard entry", () => {
   it.effect(
@@ -660,9 +666,9 @@ describe("wizard entry", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* CliRuntime.run(Commands, entryHandlers, {
+        const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
           version: "0.0.0-test",
-          extra: { after: "update", commands: [] },
+          extra: { after: "daemon", commands: [] },
         }).pipe(
           Effect.provideService(CliHost, {
             daemon: host,
@@ -742,9 +748,9 @@ describe("vibest --session inside herdr", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* CliRuntime.run(Commands, entryHandlers, {
+        const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
           version: "0.0.0-test",
-          extra: { after: "update", commands: [] },
+          extra: { after: "daemon", commands: [] },
         }).pipe(
           Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--session", "other", "--in-parent", repo]) })),
           Effect.provideService(CliHost, {
@@ -799,9 +805,9 @@ describe("vibest --session inside herdr", () => {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
-      const exit = yield* CliRuntime.run(Commands, entryHandlers, {
+      const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
         version: "0.0.0-test",
-        extra: { after: "update", commands: [] },
+        extra: { after: "daemon", commands: [] },
       }).pipe(
         Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]) })),
         Effect.provideService(CliHost, { daemon: host, replacements: [], exec: () => {} }),
