@@ -86,7 +86,7 @@ export interface AgentStartBefore {
   readonly parentSessionId: string | undefined                // who asked; undefined for the entry session
   readonly access: "read" | "write"
   readonly harnesses: ReadonlyArray<HarnessOption>            // every harness as preflight saw it
-  readonly subscriptions: ReadonlyArray<SubscriptionSnapshot> // logins and usage windows, per (harness, provider)
+  readonly subscriptions: ReadonlyArray<Subscription>         // logins and usage windows, per (harness, provider)
   readonly attempts: ReadonlyArray<Attempt>                   // earlier tries for this session
   prompt: string                                              // mutable: the session receives the final value
   harness: string | undefined                                 // mutable: the caller's preference on entry; validated post-hook by host (§5)

@@ -9,7 +9,7 @@ appending facts.
 - `event`: the log. Each row is one fact of one aggregate: `aggregate` (the id of what it is about), `seq` (its number
   within that aggregate: each new fact takes the aggregate's highest `seq` plus one; facts rewritten from the old shape
   keep their old number, so an older aggregate's numbers have gaps), `at`, `type`, and `data`, the fact's fields as JSON, written once.
-  `position` is the file's local order of all rows; only the journal reads it (to replay and to copy the log), and no
+  `position` is the file's local order of all rows; only the journal reads it (to replay, to copy the log, and as the order `Events` reads the whole log in), and no
   fact or read-model row stores it (`tools/check/event-reads.test.ts`).
 - Aggregates: a `session` (its id; every `session.*`, `process.*`, `execution.*` and `inbox.*` fact), a `project`
   (its id; `project.*`), and the `ledger` (`meta.ledger`, a UUID made when the file is created; `machine.*`, `peer.*`,

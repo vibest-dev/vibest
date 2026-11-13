@@ -6,9 +6,9 @@ const outdir = path.resolve(process.argv[2] ?? path.join(root, "dist"))
 process.chdir(root)
 const version = JSON.parse(await Bun.file("package.json").text()).version
 const result = await Bun.build({
-  entrypoints: [path.join(root, "src/extension.ts")],
+  entrypoints: [path.join(root, "src/extension.ts"), path.join(root, "src/presentation.ts")],
   outdir,
-  naming: "extension.mjs",
+  naming: "[name].mjs",
   target: "node",
   format: "esm",
   external: ["@earendil-works/*"],

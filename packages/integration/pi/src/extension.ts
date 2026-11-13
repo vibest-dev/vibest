@@ -18,8 +18,6 @@ import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
 import { Pi } from "./pi.ts"
-import toolGroups from "./tui/tool-groups.ts"
-import compactUserMessages from "./tui/user-message-padding.ts"
 import { VERSION } from "./version.ts"
 
 const { withVibest } = makeClient({ version: VERSION })
@@ -154,8 +152,6 @@ const terminal = (sessionId: string): Role =>
     Effect.gen(function* () {
       const pi = yield* Pi
       yield* pi.handle("resources_discover", () => Effect.succeed({ skillPaths: [skillsDir] }))
-      yield* pi.load(toolGroups)
-      yield* pi.load(compactUserMessages)
       yield* reportSession(sessionId)
     }),
   )
