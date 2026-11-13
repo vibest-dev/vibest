@@ -93,10 +93,7 @@ const projectorWrites = {
 }
 
 const loopFiles = ["/packages/core/src/", "/packages/server/src/"]
-const approvedLoops = [
-  { file: "/packages/core/src/update-check.ts", kind: "Effect.repeat", count: 1 },
-  { file: "/packages/core/src/plugin-supervisor.ts", kind: "Effect.forever", count: 1 },
-]
+const approvedLoops = [{ file: "/packages/core/src/plugin-supervisor.ts", kind: "Effect.forever", count: 1 }]
 const boundedRepeat = /\b(until|while|times)\b/
 const member = (node, object, property) =>
   node?.type === "MemberExpression" && node.object.name === object && node.property.name === property

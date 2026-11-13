@@ -277,12 +277,7 @@ export const i = setInterval
     expect(oxlintFindings(source, "packages/client/src/a.ts")).toEqual([])
   })
 
-  it("no-background-loop: the approved files keep only their one loop", () => {
-    const repeat = "export const a = Effect.repeat(check, Schedule.spaced(EVERY))\n"
-    expect(oxlintFindings(repeat, "packages/core/src/update-check.ts")).toEqual([])
-    expect(oxlintFindings(repeat + repeat.replace("const a", "const b"), "packages/core/src/update-check.ts")).toEqual([
-      "2 vibest(no-background-loop)",
-    ])
+  it("no-background-loop: the approved file keeps only its one loop", () => {
     const forever = "export const a = pipe(x, Effect.forever)\n"
     expect(oxlintFindings(forever, "packages/core/src/plugin-supervisor.ts")).toEqual([])
     expect(

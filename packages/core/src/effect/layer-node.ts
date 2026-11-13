@@ -1,4 +1,4 @@
-import { Brand, Context, Duration, Effect, Fiber, Layer, Scope } from "effect"
+import { Brand, Context, Effect, Layer, Scope } from "effect"
 
 export * as LayerNode from "./layer-node.ts"
 
@@ -226,12 +226,23 @@ export function group<const Items extends readonly AnyGraph[]>(
 export interface CompileOptions {
   readonly replacements?: Replacements
   readonly shared?: Tag
-  readonly releaseDeadline?: ReleaseDeadline
+  readonly releases?: Releases
 }
 
-export interface ReleaseDeadline {
-  readonly after: Duration.Input
-  readonly expired: (releasing: ReadonlyArray<string>) => Effect.Effect<void>
+const TrackTypeId = Symbol("LayerNode.Releases.track")
+
+export class Releases {
+  [TrackTypeId](name: string) {
+    const key = Symbol(name)
+    this.#entries.set(key, { name, since: Date.now() })
+    return () => void this.#entries.delete(key)
+  }
+
+  readonly #entries = new Map<symbol, { readonly name: string; readonly since: number }>()
+
+  pending(now = Date.now()) {
+    return Array.from(this.#entries.values(), (entry) => ({ name: entry.name, ms: now - entry.since }))
+  }
 }
 
 type Resolved = {
@@ -304,7 +315,7 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
 
   const roots = resolve(root)
   return Layer.fromBuild((memoMap, scope) => {
-    const releasing = new Set<string>()
+    const releases = options.releases ?? new Releases()
     const trackRelease = <B, F, R>(name: string, nodeScope: Scope.Scope, build: () => Effect.Effect<B, F, R>) =>
       Effect.gen(function* () {
         let settle = () => {}
@@ -316,8 +327,7 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
         yield* Scope.addFinalizer(
           nodeScope,
           Effect.sync(() => {
-            releasing.add(name)
-            settle = () => releasing.delete(name)
+            settle = releases[TrackTypeId](name)
           }),
         )
         return result
@@ -338,31 +348,11 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
       layers.set(node, layer)
       return layer
     }
-    return Effect.gen(function* () {
-      let stopDeadline = Effect.void
-      yield* Scope.addFinalizer(
-        scope,
-        Effect.suspend(() => stopDeadline),
-      )
-      const context = yield* buildContext(
-        roots.map(build).reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty),
-        memoMap,
-        scope,
-      )
-      const deadline = options.releaseDeadline
-      if (deadline)
-        yield* Scope.addFinalizer(
-          scope,
-          Effect.gen(function* () {
-            const timer = yield* Effect.sleep(deadline.after).pipe(
-              Effect.andThen(Effect.suspend(() => deadline.expired([...releasing]))),
-              Effect.forkDetach,
-            )
-            stopDeadline = Fiber.interrupt(timer)
-          }),
-        )
-      return context
-    })
+    return buildContext(
+      roots.map(build).reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty),
+      memoMap,
+      scope,
+    )
   }) as Layer.Layer<A, E>
 }
 

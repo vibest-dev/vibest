@@ -382,6 +382,9 @@ const loaded = (dir: string) =>
     Effect.map(Context.get(Plugins)),
   )
 
+const settledAfterLoad = (dir: string) =>
+  loaded(dir).pipe(Effect.tap((plugins) => until(plugins.settled, (activated) => activated)))
+
 const event = {
   project: "/r",
   agent: "general",
@@ -404,7 +407,7 @@ const event = {
 
 describe("plugins: loading", () => {
   it.live(
-    "P1: plugins/ first in path order, then vibest.json in its order (a local entry may be one source file); -x removes; bad entries fail visibly",
+    "P1: plugins/ first in path order, then vibest.json in its order (a configured entry must be a folder); -x removes; bad entries fail visibly",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -431,7 +434,7 @@ describe("plugins: loading", () => {
           )
 
         yield* config(["./x", "./y", "-b", "vibest-plugin-npm@1.0.0", "./a-file.ts"])
-        const first = yield* loaded(dir)
+        const first = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* first.list).map((p) => [p.id, p.status]),
           [
@@ -440,17 +443,23 @@ describe("plugins: loading", () => {
             ["x", "active"],
             ["y", "active"],
             ["vibest-plugin-npm@1.0.0", "failed"],
-            ["f", "active"],
           ],
         )
         const listed = yield* first.list
         assert.include(listed.find((p) => p.id.endsWith("broken.ts"))!.error, "Plugin.define")
         assert.include(listed.find((p) => p.id.startsWith("vibest-plugin-npm"))!.error, "not supported yet")
         assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
-        assert.strictEqual((yield* first.start(event)).model, "from-f")
+        assert.strictEqual((yield* first.start(event)).model, "from-y")
+
+        yield* config(["./x", "file://["])
+        const invalid = yield* settledAfterLoad(dir)
+        assert.deepStrictEqual(
+          (yield* invalid.list).map((p) => p.id),
+          [],
+        )
 
         yield* config(["-*", "./y", "./x"])
-        const second = yield* loaded(dir)
+        const second = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* second.list).map((p) => p.id),
           ["y", "x"],

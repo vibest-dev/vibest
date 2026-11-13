@@ -1,4 +1,5 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
+import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -7,14 +8,14 @@ import { shellQuote } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { machinesListing, Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { UpdateCheck } from "@vibest/core/update-check"
-import { PROTOCOL } from "@vibest/protocol/protocol"
-import { Caller, CAPABILITIES, type DaemonIdentity, Forbidden, VERSION, WrongInstance } from "@vibest/protocol/rpc"
+import { Caller, CAPABILITIES, type DaemonIdentity, Forbidden, WrongInstance } from "@vibest/protocol/rpc"
 import { LaunchFailed } from "@vibest/schema/session"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Context, Deferred, Effect } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { stopOnce as stopDaemon } from "../stop.ts"
+import { UpdateCheck } from "../update-check.ts"
 import type { Checks, Handlers } from "./caller.ts"
 
 export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {
@@ -33,6 +34,7 @@ export const make = ({ cliOnly }: Checks) =>
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
     const updateStatus = yield* UpdateCheck
+    const { version } = yield* App
     const shutdown = yield* Shutdown
     const drain = yield* Drain
     const bus = yield* Bus
@@ -53,7 +55,7 @@ export const make = ({ cliOnly }: Checks) =>
           Effect.zip(updateStatus),
           Effect.map(([rows, update]) => ({
             protocol: PROTOCOL,
-            version: VERSION,
+            version,
             runtimes: rows,
             update,
             ...identity,

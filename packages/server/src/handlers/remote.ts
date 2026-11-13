@@ -1,3 +1,4 @@
+import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/db"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Machines } from "@vibest/core/machines"
@@ -6,7 +7,7 @@ import { address, type At, type ListScope, type PeerScope, Remote } from "@vibes
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import type { NotInRepository } from "@vibest/core/worktree"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
-import { Caller, type CallerShape, Forbidden, type PayloadOf, VERSION } from "@vibest/protocol/rpc"
+import { Caller, type CallerShape, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
 import type { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Stream } from "effect"
 
@@ -43,6 +44,7 @@ export const remoteHandlers = (
   Effect.gen(function* () {
     const db = yield* Db
     const self = yield* VibestdIdentity
+    const { version } = yield* App
     const machines = yield* Machines
     const peers = yield* Peers
     const remote = yield* Remote
@@ -131,7 +133,7 @@ export const remoteHandlers = (
                 message: "Peer.Hello names the vibestd that calls it",
               })
             if (id !== self.id) yield* db.notePeer({ id, name })
-            return { id: self.id, name: self.name, version: VERSION, runtimes: yield* runtimesHere(runtimes) }
+            return { id: self.id, name: self.name, version, runtimes: yield* runtimesHere(runtimes) }
           }),
 
         "Peer.Spawn": (input: PayloadOf<"Peer.Spawn">) =>
