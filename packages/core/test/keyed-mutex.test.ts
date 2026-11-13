@@ -1,11 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { keyedLock } from "@vibest/core/keyed-lock"
+import * as KeyedMutex from "@vibest/core/effect/keyed-mutex"
 import { Deferred, Effect, Fiber } from "effect"
 
-describe("keyedLock", () => {
+describe("KeyedMutex", () => {
   it.effect("one holder per key; the entry goes once released with nobody waiting", () =>
     Effect.gen(function* () {
-      const locks = keyedLock<number>()
+      const locks = yield* KeyedMutex.make<number>()
       const order: Array<string> = []
       const gate = yield* Deferred.make<void>()
       const first = yield* Effect.forkChild(
@@ -20,19 +20,18 @@ describe("keyedLock", () => {
       const second = yield* Effect.forkChild(locks.withLock(1)(Effect.sync(() => order.push("second"))))
       yield* locks.withLock(2)(Effect.sync(() => order.push("other key")))
       yield* Effect.yieldNow
-      assert.strictEqual(locks.size(), 1)
-      assert.isTrue(locks.busy(1))
+      assert.strictEqual(yield* locks.size, 1)
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.join(first)
       yield* Fiber.join(second)
       assert.deepStrictEqual(order, ["first in", "other key", "first out", "second"])
-      assert.strictEqual(locks.size(), 0)
+      assert.strictEqual(yield* locks.size, 0)
     }),
   )
 
   it.effect("a waiter interrupted while it waits and a failed holder leave no entry", () =>
     Effect.gen(function* () {
-      const locks = keyedLock<string>()
+      const locks = yield* KeyedMutex.make<string>()
       const holding = yield* Deferred.make<void>()
       const gate = yield* Deferred.make<void>()
       const holder = yield* Effect.forkChild(
@@ -44,24 +43,24 @@ describe("keyedLock", () => {
       yield* Fiber.interrupt(waiter)
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.join(holder)
-      assert.strictEqual(locks.size(), 0)
+      assert.strictEqual(yield* locks.size, 0)
       yield* Effect.flip(locks.withLock("a")(Effect.fail("boom")))
-      assert.strictEqual(locks.size(), 0)
+      assert.strictEqual(yield* locks.size, 0)
     }),
   )
 
   it.effect("a holder interrupted after it took the lock releases it", () =>
     Effect.gen(function* () {
-      const locks = keyedLock<string>()
+      const locks = yield* KeyedMutex.make<string>()
       const holding = yield* Deferred.make<void>()
       const holder = yield* Effect.forkChild(
         locks.withLock("a")(Deferred.succeed(holding, undefined).pipe(Effect.andThen(Effect.never))),
       )
       yield* Deferred.await(holding)
       yield* Fiber.interrupt(holder)
-      assert.strictEqual(locks.size(), 0)
+      assert.strictEqual(yield* locks.size, 0)
       yield* Effect.exit(locks.withLock("a")(Effect.interrupt))
-      assert.strictEqual(locks.size(), 0)
+      assert.strictEqual(yield* locks.size, 0)
     }),
   )
 })

@@ -38,7 +38,6 @@ import {
   preflight,
   unprovided,
 } from "../harness.ts"
-import { directoryLock, type keyedLock } from "../keyed-lock.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, safeRepositoryDirectory } from "../paths.ts"
 import { Plugins, type Routing } from "../plugins.ts"
 import { listProjectRepositories } from "../project-create.ts"
@@ -46,7 +45,7 @@ import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, Runtimes } from "../runtimes.ts"
 import { allocationParentBlocked, Git, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
-import { SessionLocks } from "./locks.ts"
+import { directoryLock, SessionLocks } from "./locks.ts"
 import { Move, type LimitMove } from "./move.ts"
 import { Placement } from "./placement.ts"
 
@@ -97,7 +96,7 @@ const sessionSpawn = (deps: {
   readonly crypto: Crypto.Crypto
   readonly git: Git["Service"]
   readonly scope: Scope.Scope
-  readonly locks: ReturnType<typeof keyedLock<string>>
+  readonly locks: SessionLocks["Service"]
   readonly options: { readonly maxSessions: number | undefined }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>

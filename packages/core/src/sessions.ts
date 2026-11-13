@@ -256,7 +256,7 @@ export class Sessions extends Context.Service<
       inMemory: Effect.gen(function* () {
         return {
           tracked: (yield* sessionLive.size).tracked,
-          locks: locks.size(),
+          locks: yield* locks.size,
           reconciles: yield* reconcile.reconciles,
         }
       }),

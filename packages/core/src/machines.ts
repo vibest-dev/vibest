@@ -35,9 +35,9 @@ import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
 
 import { Db, type MachineRow } from "./db.ts"
+import * as KeyedMutex from "./effect/keyed-mutex.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { VibestdIdentity } from "./identity.ts"
-import { keyedLock } from "./keyed-lock.ts"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "./plugins.ts"
 import { Runtimes } from "./runtimes.ts"
 
@@ -173,7 +173,7 @@ const make = Effect.gen(function* () {
   const there = new Map<string, { readonly runtimes: ReadonlyArray<RuntimeThere>; readonly at: number }>()
   const noted = new Map<string, Map<string, { readonly notes: ReadonlyArray<PluginNote>; readonly at: number }>>()
   const repairs = new Map<string, { readonly at: number; readonly note: string }>()
-  const lock = keyedLock<string>()
+  const lock = yield* KeyedMutex.make<string>()
 
   const heard = (name: string, runtimes: ReadonlyArray<RuntimeThere> | undefined) =>
     Effect.map(Clock.currentTimeMillis, (at) => void there.set(name, { runtimes: runtimes ?? [], at }))

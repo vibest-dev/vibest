@@ -13,11 +13,11 @@ import {
   type RuntimeAddress,
   type SessionRow,
 } from "../db.ts"
+import * as KeyedMutex from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Harness, harnessOptions, Harnesses, HarnessUnavailable, type HarnessId } from "../harness.ts"
 import { entryIdle } from "../inbox.ts"
-import { keyedLock } from "../keyed-lock.ts"
 import * as Launch from "../launch.ts"
 import { Layout, VibestCommand } from "../paths.ts"
 import { Plugins } from "../plugins.ts"
@@ -65,7 +65,7 @@ const make = Effect.gen(function* () {
   const vibestCommand = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const projectLocked = keyedLock<string>()
+  const projectLocked = yield* KeyedMutex.make<string>()
 
   const withHarness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(

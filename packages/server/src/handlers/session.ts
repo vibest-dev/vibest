@@ -1,8 +1,8 @@
 import { raisesSeen } from "@vibest/core/activity"
 import { Bus, type BusEvent } from "@vibest/core/bus"
 import { Db, runtimeOf, terminalOf, archived } from "@vibest/core/db"
+import * as KeyedMutex from "@vibest/core/effect/keyed-mutex"
 import { Integration } from "@vibest/core/integration"
-import { keyedLock } from "@vibest/core/keyed-lock"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Sessions } from "@vibest/core/sessions"
 import { Caller, type CallerShape, Forbidden, type PayloadOf, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
@@ -27,7 +27,7 @@ export const make = (
     const runtimes = yield* Runtimes
     const bus = yield* Bus
     const integration = yield* Integration
-    const seenLocked = keyedLock<string>()
+    const seenLocked = yield* KeyedMutex.make<string>()
 
     const startedByPeer = (scope: NonNullable<Parameters<typeof db.resolveSession>[1]>, id: string, direct: boolean) =>
       Effect.gen(function* () {
