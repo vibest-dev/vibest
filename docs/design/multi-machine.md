@@ -71,7 +71,7 @@ added as <name> (<id8>); use that name"), decided from the result of the `INSERT
 machine rm` stops the connection and deletes the row (`UnknownMachine` when there is none), with no checks: agents and undelivered messages stay on B.
 
 The ssh command is `ssh -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p <port>] <target>
-<line>` (`sshArgv`, `packages/core/src/machines.ts`), found on vibestd's `PATH`; ssh resolves the target, so
+<line>` (`sshArgv`, `packages/server/src/machine/machines.ts`), found on vibestd's `PATH`; ssh resolves the target, so
 `~/.ssh/config` applies, and a login that needs a password or a new host key fails with ssh's message. The line finds
 vibest on B (`command -v vibest`, else `$HOME/.local/bin/vibest`) and runs `vibest connect`; exit 127 is reported as
 "vibest is not installed on <name>". A name is letters, digits, `-`, `_`, `.`; a target has no `:` before `@` (a
@@ -153,7 +153,7 @@ project and `vibest-peer-by` set to the calling session, or `user`. `List` (and 
 each connected machine's rows (ids `<name>/<id>`, `machine` set), asked of all machines at once; `machines` lists every
 added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`; a connected
 machine whose `List` fails is shown `unreachable` with that failure as its `reason`. The code is
-`core/src/remote.ts` (forwarding, the merged List, the remote Spawn) and `core/src/machines.ts` (add, dial, the
+`server/src/machine/remote.ts` (forwarding, the merged List, the remote Spawn) and `server/src/machine/machines.ts` (add, dial, the
 connection and outbox receiving).
 
 Errors follow hc. An error from B reaches A's caller unchanged, with B's type and message and no machine prefix

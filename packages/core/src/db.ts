@@ -20,7 +20,7 @@ import { SqlClient } from "effect/sql"
 import { Bus } from "./bus.ts"
 import { apply } from "./database/migration.ts"
 import { inboxMethods } from "./db-inbox.ts"
-import { remoteQueries, type PeerStart } from "./db-remote.ts"
+import { remoteQueries, type PeerScope, type PeerStart } from "./db-remote.ts"
 import {
   attemptsOf,
   type NewSession,
@@ -34,7 +34,6 @@ import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessId } from "./harness.ts"
 import { followFacts } from "./journal.ts"
-import type { PeerScope } from "./remote.ts"
 import { SessionLive } from "./session/live.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"

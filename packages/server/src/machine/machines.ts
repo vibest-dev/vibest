@@ -1,4 +1,10 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
+import { Db, type MachineRow } from "@vibest/core/db"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import { VibestdIdentity } from "@vibest/core/identity"
+import { keyedLock } from "@vibest/core/keyed-lock"
+import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugins"
+import { Runtimes } from "@vibest/core/runtimes"
 import { reconnectSchedule, type Runtime } from "@vibest/plugin/effect"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
@@ -34,16 +40,9 @@ import {
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
 
-import { Db, type MachineRow } from "./db.ts"
-import { LayerNode } from "./effect/layer-node.ts"
-import { VibestdIdentity } from "./identity.ts"
-import { keyedLock } from "./keyed-lock.ts"
-import { errorMessage, type MachineHook, type PluginNote, Plugins } from "./plugins.ts"
-import { Runtimes } from "./runtimes.ts"
+type PipeExit = { readonly code: number | undefined; readonly stderr: string }
 
-export type PipeExit = { readonly code: number | undefined; readonly stderr: string }
-
-export interface Pipe {
+interface Pipe {
   readonly socket: Socket.Socket
   readonly exited: Effect.Effect<PipeExit>
 }
@@ -55,23 +54,23 @@ export class MachineTransport extends Context.Service<
   static readonly node = LayerNode.unbound(MachineTransport)
 }
 
-export const ADD_TIMEOUT = Duration.seconds(30)
+const ADD_TIMEOUT = Duration.seconds(30)
 export const RETRY_FIRST = Duration.millis(500)
-export const RETRY_MAX = Duration.seconds(120)
-export const RETRY_RESET = Duration.seconds(60)
+const RETRY_MAX = Duration.seconds(120)
+const RETRY_RESET = Duration.seconds(60)
 const RETRY = reconnectSchedule({ first: RETRY_FIRST, max: RETRY_MAX })
 const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 
-export const cannotShow = (name: string, kind: string) =>
+const cannotShow = (name: string, kind: string) =>
   `${name}'s ${kind} agents cannot be shown here; vibest peek ${name}/<id> reads them`
 
 const shownKind = (here: ReadonlyArray<{ readonly id: string; readonly name?: string }>, kind: string) =>
   here.find((runtime) => runtime.id === kind)?.name ?? kind
 
-export const noteText = (note: PluginNote) => `${note.message}${note.fix === undefined ? "" : `; fix: ${note.fix}`}`
+const noteText = (note: PluginNote) => `${note.message}${note.fix === undefined ? "" : `; fix: ${note.fix}`}`
 
-export interface View {
+interface View {
   readonly terminals: ReadonlyMap<string, Runtime.Terminal>
   readonly as?: string | undefined
   readonly note?: string | undefined
@@ -119,7 +118,7 @@ class MachineDown extends Schema.TaggedError<MachineDown>()("MachineDown", {
   answered: Schema.optional(Schema.String),
 }) {}
 
-export const differentMessage = (name: string, answered: string) =>
+const differentMessage = (name: string, answered: string) =>
   `${name} now answers as a different vibestd (${shortId(answered)}): its database was replaced or the target points elsewhere; remove the machine and add it again`
 
 const exitReason = (name: string, exit: PipeExit) => {
@@ -143,7 +142,7 @@ const isLineError = (e: unknown): e is LineError =>
 const alreadyNamed = (name: string) =>
   `a machine named ${name} is already added; remove it first (vibest machine rm ${name})`
 
-export interface Link {
+interface Link {
   readonly client: PipeClient
   readonly call: <A, E>(
     effect: Effect.Effect<A, E | LineError>,

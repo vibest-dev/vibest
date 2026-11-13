@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { HerdrPool, type SessionEvent } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
-import { Deferred, Effect, Fiber, Logger, Queue, Stream } from "effect"
+import { Cause, Deferred, Effect, Fiber, Logger, Queue, Stream } from "effect"
 import { HerdrError, type HerdrShape, type PushFrame } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
@@ -189,7 +189,9 @@ describe("herdr event stream", () => {
       assert.strictEqual(yield* Queue.size(seen), 0)
     }).pipe(
       Effect.provide(Platform.services),
-      Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(entry.message))])),
+      Effect.provide(
+        Logger.layer([Logger.make((entry) => void logs.push([entry.message, Cause.pretty(entry.cause)]))]),
+      ),
       Effect.scoped,
     )
   })

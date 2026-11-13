@@ -3,7 +3,7 @@ import { fromPromise } from "@vibest/plugin/promise/adapter"
 import { messageOf } from "@vibest/schema/error"
 import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
-import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
+import { Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
 import { Agents } from "./agents.ts"
 import { timeoutWithoutWaiting } from "./bounded.ts"
@@ -173,11 +173,11 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           Option.isNone(exit)
             ? Effect.logWarning(`plugin ${id}: teardown timed out; left to finish on its own`)
             : Exit.isFailure(exit.value)
-              ? (level === "error" ? Effect.logError : Effect.logWarning)("failed to clean up plugin", {
-                  "plugin.id": id,
-                  cause: exit.value.cause,
-                  readable: Cause.pretty(exit.value.cause),
-                })
+              ? (level === "error" ? Effect.logError : Effect.logWarning)(
+                  "failed to clean up plugin",
+                  { "plugin.id": id },
+                  exit.value.cause,
+                )
               : Effect.void,
         ),
       )
@@ -383,7 +383,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         }
         if (ran.outcome === "crashed") {
           trace.push({ ...entry, outcome: "crashed", error: ran.error })
-          yield* Effect.logWarning(`plugin ${hook.plugin} ${name} crashed: ${Cause.pretty(ran.cause)}`)
+          yield* Effect.logWarning(`plugin ${hook.plugin} ${name} crashed`, ran.cause)
           return { plugin: hook.plugin, reason: `plugin ${hook.plugin} crashed: ${ran.error}` } satisfies Stopped
         }
         const changes = ran.value === undefined ? [] : apply(ran.value, hook.plugin)
