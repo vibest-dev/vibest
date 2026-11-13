@@ -370,7 +370,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.a
 
 const loaded = (dir: string) =>
   Plugins.layer.pipe(
-    Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
+    Layer.provide(Layer.succeed(PluginLoader, { ...Platform.makePluginLoader(), prepare: Effect.void })),
     Layer.provide(Layer.succeed(Builtins, [])),
     Layer.provide(subscriptionsLayer),
     Layer.provide(harnessesLayer()),
@@ -470,10 +470,7 @@ describe("plugins: loading", () => {
 })
 
 const held: Array<Fact> = []
-let release = () => {}
-const gate = new Promise<void>((resolve) => {
-  release = resolve
-})
+const { promise: gate, resolve: release } = Promise.withResolvers<void>()
 const watcher = Plugin.define({
   id: "watcher",
   effect: (ctx) =>

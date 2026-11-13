@@ -210,18 +210,11 @@ function makeProvider<Implementation extends Layer.Any, Items extends readonly A
   )
 }
 
-export function unbound<E>(): <R, Shape, const T extends Tag | undefined = undefined>(
-  service: Context.Key<R, Shape>,
-  tag?: T,
-) => Node<R, E, T>
 export function unbound<R, Shape, const T extends Tag | undefined = undefined>(
   service: Context.Key<R, Shape>,
   tag?: T,
-): Node<R, never, T>
-export function unbound(service?: { readonly key: string }, tag?: Tag): unknown {
-  const declare = (service: { readonly key: string }, tag?: Tag) =>
-    new NodeValue({ kind: "unbound", name: service.key }, tag)
-  return service === undefined ? declare : declare(service, tag)
+): Node<R, never, T> {
+  return new NodeValue({ kind: "unbound", name: service.key }, tag as T)
 }
 
 export function group<const Items extends readonly AnyGraph[]>(

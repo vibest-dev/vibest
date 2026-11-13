@@ -93,7 +93,8 @@ export const makeStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const bus = yield* Bus
   const journal = yield* makeJournal<Signal>((events: ReadonlyArray<BusEvent>) => bus.published(withChanges(events)))
-  const { emit, commit: tx, notify } = journal
+  const { emit, commit: tx, notify, afterCommit } = journal
+  const afterCommitLive = (effect: Effect.Effect<void>) => afterCommit(() => Effect.runSync(effect))
   const reads = ledgerReads(sql)
   const now = Clock.currentTimeMillis
   const sessionLive = yield* SessionLive
@@ -259,7 +260,7 @@ export const makeStore = Effect.gen(function* () {
         ...(at === undefined ? {} : { at }),
         data: { process: current.id, reason },
       })
-      yield* sessionLive.dropIntegration(id)
+      yield* afterCommitLive(sessionLive.dropIntegration(id))
       return true
     })
 
@@ -300,7 +301,7 @@ export const makeStore = Effect.gen(function* () {
           ...(start.pid === undefined ? {} : { pid: start.pid }),
         },
       })
-      yield* sessionLive.dropIntegration(id)
+      yield* afterCommitLive(sessionLive.dropIntegration(id))
       return seq
     })
 
@@ -340,7 +341,7 @@ export const makeStore = Effect.gen(function* () {
       const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
       if (row === undefined || row.endedAt !== null) return false
       yield* emit(SessionEnded, { sessionId: id, data: { reason: "archived" } })
-      yield* sessionLive.ended(id)
+      yield* afterCommitLive(sessionLive.ended(id))
       return true
     })
 
@@ -513,7 +514,7 @@ export const makeStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const current = yield* findSession(id)
       if (current === undefined) return
-      yield* remember({ ...current, status })
+      yield* afterCommitLive(remember({ ...current, status }))
       yield* notify({ type: "session.changed", sessionId: id })
     })
 
@@ -601,6 +602,8 @@ export const makeStore = Effect.gen(function* () {
     moving,
     remember,
     emit,
+    afterCommit,
+    afterCommitLive,
     tx,
     notify,
     projectPrefixTaken,

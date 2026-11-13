@@ -9,7 +9,7 @@ import {
   UnknownFact,
 } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
-import { Clock, Context, Effect, Schema } from "effect"
+import { Clock, Context, Effect, Schema, Stream } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
 import { LOG_SCHEMA, ledgerOf, MIGRATION_TABLE } from "./db-schema.ts"
@@ -25,7 +25,13 @@ export interface Emit<D extends Definition> {
 }
 
 const Buffer = Context.Reference<
-  { readonly events: Array<unknown>; readonly fiberId: number; closed: boolean } | undefined
+  | {
+      readonly events: Array<unknown>
+      readonly after: Array<() => void>
+      readonly fiberId: number
+      closed: boolean
+    }
+  | undefined
 >("vibest/JournalBuffer", { defaultValue: () => undefined })
 
 const setMeta = (sql: SqlClient.SqlClient, key: "catalog" | "projection", value: number) =>
@@ -47,6 +53,54 @@ type Logged = Row & { readonly position: number }
 const readLog = (sql: SqlClient.SqlClient, after: number) =>
   sql<Logged>`SELECT position, aggregate, seq, at, type, data
     FROM event WHERE position > ${after} ORDER BY position LIMIT ${REPLAY_PAGE}`
+
+export type Cursor = { readonly session: string; readonly after: number } | { readonly log: number }
+
+const readPage = (sql: SqlClient.SqlClient, cursor: Cursor, until: number | undefined) =>
+  "session" in cursor
+    ? sql<Row>`SELECT aggregate, seq, at, type, data
+        FROM event WHERE aggregate = ${cursor.session} AND seq > ${cursor.after} AND seq <= ${until ?? Number.MAX_SAFE_INTEGER}
+        ORDER BY seq LIMIT ${REPLAY_PAGE}`
+    : sql<Logged>`SELECT position, aggregate, seq, at, type, data
+        FROM event WHERE position > ${cursor.log} AND position <= ${until ?? Number.MAX_SAFE_INTEGER}
+        ORDER BY position LIMIT ${REPLAY_PAGE}`
+
+const watermark = (sql: SqlClient.SqlClient, cursor: Cursor) =>
+  (
+    ("session" in cursor
+      ? sql<{ latest: number }>`SELECT coalesce(max(seq), 0) AS latest FROM event WHERE aggregate = ${cursor.session}`
+      : sql<{ latest: number }>`SELECT coalesce(max(position), 0) AS latest FROM event`) as Effect.Effect<
+      ReadonlyArray<{ latest: number }>,
+      SqlError.SqlError
+    >
+  ).pipe(Effect.map((rows) => rows[0]!.latest))
+
+const advance = (cursor: Cursor, page: ReadonlyArray<Row>): Cursor => {
+  const last = page[page.length - 1]! as Logged
+  return "session" in cursor ? { session: cursor.session, after: last.seq } : { log: last.position }
+}
+
+export const followFacts = (
+  sql: SqlClient.SqlClient,
+  wake: Effect.Effect<void>,
+  start: Cursor,
+  follow: boolean,
+): Stream.Stream<Row, SqlError.SqlError> =>
+  Stream.unwrap(
+    Effect.map(follow ? Effect.undefined : watermark(sql, start), (until) =>
+      Stream.unfold(start, (cursor) =>
+        readPage(sql, cursor, until).pipe(
+          Effect.flatMap((page) =>
+            page.length > 0
+              ? Effect.succeed([page, advance(cursor, page)] as const)
+              : follow
+                ? wake.pipe(Effect.andThen(Effect.succeed([[], cursor] as const)))
+                : Effect.undefined,
+          ),
+        ),
+      ).pipe(Stream.flattenIterable),
+    ),
+  )
 
 const replayFrom = (sql: SqlClient.SqlClient, after: number): Effect.Effect<void, SqlError.SqlError | UnknownFact> =>
   readLog(sql, after).pipe(
@@ -173,10 +227,16 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
         if ((yield* Buffer) !== undefined) return yield* body
         return yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            const buffer = { events: [] as Array<Fact | Signal>, fiberId: yield* Effect.fiberId, closed: false }
+            const buffer = {
+              events: [] as Array<Fact | Signal>,
+              after: [] as Array<() => void>,
+              fiberId: yield* Effect.fiberId,
+              closed: false,
+            }
             const result = yield* sql
               .withTransaction(restore(Effect.provideService(body, Buffer, buffer)))
               .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
+            for (const apply of buffer.after) apply()
             if (buffer.events.length > 0) yield* published(buffer.events)
             return result
           }),
@@ -221,5 +281,12 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
         else yield* published([signal])
       })
 
-    return { commit, emit, notify, rebuild }
+    const afterCommit = (apply: () => void) =>
+      Effect.gen(function* () {
+        const buffer = yield* Buffer
+        if (buffer !== undefined && !buffer.closed) buffer.after.push(apply)
+        else apply()
+      })
+
+    return { commit, emit, notify, afterCommit, rebuild }
   })

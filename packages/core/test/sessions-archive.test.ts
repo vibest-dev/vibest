@@ -31,20 +31,30 @@ const test: typeof plainTest = (name, program, options, touches) =>
   plainTest(name, program, withPulling(options), touches)
 const slowTest: typeof plainSlowTest = (name, program, options) => plainSlowTest(name, program, withPulling(options))
 
-let archiveStartedSignal: { readonly id: string; readonly done: Deferred.Deferred<void> } | undefined
-const gated: TestOptions = {
-  db: (db) => ({
-    ...db,
-    getSession: (id) =>
-      db.getSession(id).pipe(
-        Effect.tap(() => {
-          const gate = archiveStartedSignal?.id === id ? archiveStartedSignal : undefined
-          if (!gate) return Effect.void
-          archiveStartedSignal = undefined
-          return Deferred.succeed(gate.done, undefined)
-        }),
-      ),
-  }),
+const makeArchiveGate = () => {
+  let started: { readonly id: string; readonly done: Deferred.Deferred<void> } | undefined
+  const options: TestOptions = {
+    db: (db) => ({
+      ...db,
+      getSession: (id) =>
+        db.getSession(id).pipe(
+          Effect.tap(() => {
+            const gate = started?.id === id ? started : undefined
+            if (!gate) return Effect.void
+            started = undefined
+            return Deferred.succeed(gate.done, undefined)
+          }),
+        ),
+    }),
+  }
+  const awaitStart = (id: string) =>
+    Deferred.make<void>().pipe(
+      Effect.map((done) => {
+        started = { id, done }
+        return Deferred.await(done)
+      }),
+    )
+  return { options, awaitStart }
 }
 
 describe.concurrent("vibest run --archive-on-idle", () => {
@@ -294,7 +304,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const check = yield* w.herdr.hold("state", w.id)
       const checking = yield* Effect.forkChild(w.sessions.check(w.id))
       yield* check.reached
-      const looked = yield* awaitArchiveStart(w.id)
+      const looked = yield* archiveGate.awaitStart(w.id)
       yield* entryTakes(w)
       assert.strictEqual((yield* lastSentBy(w.id))!.status, "delivered")
       yield* looked
@@ -303,13 +313,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       return { release: check.release().pipe(Effect.andThen(Fiber.join(checking))) }
     })
 
-  const awaitArchiveStart = (id: string) =>
-    Deferred.make<void>().pipe(
-      Effect.map((done) => {
-        archiveStartedSignal = { id, done }
-        return Deferred.await(done)
-      }),
-    )
+  const archiveGate = makeArchiveGate()
 
   const assertArchivesDone = (w: Effect.Success<ReturnType<typeof archiveSession>>) =>
     Effect.gen(function* () {
@@ -329,7 +333,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       assert.lengthOf(yield* w.herdr.callsTo("close"), 1)
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
-    gated,
+    archiveGate.options,
     true,
   )
 

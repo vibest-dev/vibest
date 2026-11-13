@@ -4,7 +4,7 @@ import path from "node:path"
 import { note } from "../../../reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { agentName, binary, expect, readDb, redact, row, Skip, until, writeEvidence, type World } from "../world.ts"
+import { agentName, binary, expect, readDb, row, Skip, until, type World } from "../world.ts"
 import { fakeSsh, sh, stopVibestd, subModel } from "./machines.ts"
 
 type Listed = {
@@ -131,7 +131,10 @@ const setup = async (w: World, evidence: string) => {
   const herdrA = herdrOn("a")
   const profiles = async () => {
     const r = await herdrA("machine", "list", "--json")
-    await fs.appendFile(path.join(evidence, "M7-herdr-machine-list.txt"), redact(`${r.code}\n${r.stdout}${r.stderr}\n`))
+    await fs.appendFile(
+      path.join(evidence, "M7-herdr-machine-list.txt"),
+      w.redact(`${r.code}\n${r.stdout}${r.stderr}\n`),
+    )
     expect(r.code === 0, `herdr machine list on A: ${r.stderr}`)
     return JSON.parse(r.stdout) as Array<Profile>
   }
@@ -163,7 +166,10 @@ const setup = async (w: World, evidence: string) => {
   const herdrB = herdrOn("b")
   const serverB = async (name: string) => {
     const r = await herdrB("--session", sessions.b, "status", "server", "--json")
-    await fs.appendFile(path.join(evidence, `M7-b-server-${name}.json`), redact(`${r.code}\n${r.stdout}${r.stderr}\n`))
+    await fs.appendFile(
+      path.join(evidence, `M7-b-server-${name}.json`),
+      w.redact(`${r.code}\n${r.stdout}${r.stderr}\n`),
+    )
     return JSON.parse(r.stdout) as { running: boolean; capabilities?: { detached_server_daemon: boolean } | null }
   }
   const stopB = async () => {
@@ -187,7 +193,7 @@ const checks: ReadonlyArray<Check> = [
         s = await setup(w, evidence)
         const label = `mb/${s.sessions.b}`
         const bare = await s.herdrA("machine", "add", "bare-host", "--label", "bare", "--remote-session", "x")
-        await writeEvidence(path.join(evidence, "M7-bare-add.txt"), `${bare.code}\n${bare.stdout}${bare.stderr}`)
+        await w.writeEvidence(path.join(evidence, "M7-bare-add.txt"), `${bare.code}\n${bare.stdout}${bare.stderr}`)
         expect(bare.code !== 0, `herdr machine add against a host without herdr: ${bare.stdout}${bare.stderr}`)
         expect((await s.profiles()).length === 0, `a failed herdr machine add saved a machine`)
 
@@ -197,7 +203,7 @@ const checks: ReadonlyArray<Check> = [
           "a plain herdr server is its own session leader",
         )
         const refused = await s.okA(["machine", "add", "mb", "b-host"])
-        await writeEvidence(path.join(evidence, "M7-machine-add-refused.txt"), refused)
+        await w.writeEvidence(path.join(evidence, "M7-machine-add-refused.txt"), refused)
         expect(
           refused.includes(`herdr here could not add ${label}`) &&
             refused.includes("restart that session on mb once no agent runs there"),
@@ -207,7 +213,7 @@ const checks: ReadonlyArray<Check> = [
         await s.stopB()
 
         const listed = JSON.parse(await s.okA(["machine", "ls"])) as Array<MachineView>
-        await writeEvidence(path.join(evidence, "M7-machine-ls-added.json"), JSON.stringify(listed, null, 2))
+        await w.writeEvidence(path.join(evidence, "M7-machine-ls-added.json"), JSON.stringify(listed, null, 2))
         const saved = await s.profiles()
         expect(
           saved.length === 1 && saved[0]!.label === label && saved[0]!.session === s.sessions.b,
@@ -264,7 +270,7 @@ const checks: ReadonlyArray<Check> = [
         const pattern = new RegExp(`^${s.sessions.b}/w\\d+:p\\d+/${name}@${label}$`)
         expect(pattern.test(first?.address?.id ?? ""), `A's row: ${JSON.stringify(first)}`)
         const got = await s.herdrA("--machine", label, "agent", "get", name)
-        await writeEvidence(path.join(evidence, "M7-agent-get.txt"), `${got.code}\n${got.stdout}${got.stderr}`)
+        await w.writeEvidence(path.join(evidence, "M7-agent-get.txt"), `${got.code}\n${got.stdout}${got.stderr}`)
         expect(got.code === 0 && got.stdout.includes(name), `herdr --machine agent get: ${got.stdout}${got.stderr}`)
         await until("the first notice", () => s!.notices(printed.slice(0, 11), "hseven") === 1, 120_000)
 
@@ -320,7 +326,7 @@ const checks: ReadonlyArray<Check> = [
           again.slice(3).startsWith(r.id.slice(0, 8)),
         )
         const reached = await s.herdrA("--machine", label, "agent", "get", agentName(bAgain!.id))
-        await writeEvidence(
+        await w.writeEvidence(
           path.join(evidence, "M7-agent-get-restarted.txt"),
           `${reached.code}\n${reached.stdout}${reached.stderr}`,
         )
@@ -334,7 +340,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect((await s.profiles()).length === 0, `A's herdr after machine rm: ${JSON.stringify(await s.profiles())}`)
         expect(s.notices(printed.slice(0, 11), "hseven") === 1, "the first notice repeated")
-        await writeEvidence(path.join(evidence, "M7-ssh.log"), await fs.readFile(s.log, "utf8"))
+        await w.writeEvidence(path.join(evidence, "M7-ssh.log"), await fs.readFile(s.log, "utf8"))
       } finally {
         await s?.stop()
       }

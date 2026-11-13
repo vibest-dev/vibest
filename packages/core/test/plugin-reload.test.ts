@@ -231,32 +231,35 @@ const freshRequire = async (entry: string, files: ReadonlyArray<string>) => {
   for (const file of files) delete nativeRequire.cache[file]
   return nativeRequire(entry)
 }
-const loader: PluginLoader["Service"] = {
-  ...Platform.plugins,
-  prepare: Effect.void,
-  parseJsonc: (text) => {
-    vibestJsonReads.count++
-    wake()
-    return Platform.plugins.parseJsonc(text)
-  },
-  load: freshRequire,
-  watch: (directory, changed, failed) => {
-    watchGate.listeners.set(directory, changed)
-    watchGate.failures.set(directory, failed)
-    const stop = Platform.plugins.watch(
-      directory,
-      (name) => {
-        if (!watchGate.hold) changed(name)
-      },
-      failed,
-    )
-    watchers.open++
-    watchers.opened++
-    return () => {
-      watchers.open--
-      stop()
-    }
-  },
+const makeLoader = (): PluginLoader["Service"] => {
+  const platform = Platform.makePluginLoader()
+  return {
+    ...platform,
+    prepare: Effect.void,
+    parseJsonc: (text) => {
+      vibestJsonReads.count++
+      wake()
+      return platform.parseJsonc(text)
+    },
+    load: freshRequire,
+    watch: (directory, changed, failed) => {
+      watchGate.listeners.set(directory, changed)
+      watchGate.failures.set(directory, failed)
+      const stop = platform.watch(
+        directory,
+        (name) => {
+          if (!watchGate.hold) changed(name)
+        },
+        failed,
+      )
+      watchers.open++
+      watchers.opened++
+      return () => {
+        watchers.open--
+        stop()
+      }
+    },
+  }
 }
 
 const packageHome = Effect.gen(function* () {
@@ -269,7 +272,7 @@ const packageHome = Effect.gen(function* () {
 
 const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
   Plugins.layer.pipe(
-    Layer.provide(Layer.succeed(PluginLoader, loader)),
+    Layer.provide(Layer.sync(PluginLoader, makeLoader)),
     Layer.provide(Layer.succeed(Builtins, builtins)),
     Layer.provide(subscriptionsLayer),
     Layer.provide(harnessesLayer()),

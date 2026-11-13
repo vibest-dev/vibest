@@ -125,9 +125,8 @@ const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Message))
 const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const decodeEvent = Schema.decodeUnknownEffect(HcEvent)
 
-let nextId = 0
-
 function makeClient(socketPath: string, connect: SocketConnector["Service"]): HcShape {
+  let nextId = 0
   const transport = (method: string) => (e: { readonly message: string }) =>
     new HcTransportError({ method, message: e.message })
   const serverError = (method: string, error: typeof ErrorBody.Type) =>

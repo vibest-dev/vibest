@@ -169,7 +169,7 @@ started, an entry session) cannot answer results with results (rule 4), and that
 **Packages.** Runtime dependencies flow one way: `schema` → `core` and `protocol` → `server`. `client` depends
 on `schema` and `protocol` only. Plugin types derive from the client API. Besides `server`, only `platform-bun` imports `core`; `packages/cli`
 reaches vibestd through `client`, `protocol` and `schema`, and the daemon through `server/daemon`
-(`packages/cli/test/boundaries.test.ts`).
+(to be enforced by an oxlint rule).
 
 | Package              | Role                                                                                                                                                                                                          |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -183,7 +183,7 @@ reaches vibestd through `client`, `protocol` and `schema`, and the daemon throug
 | `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                                        |
 | `plugin-harnesses`   | Builtin plugins `harness-pi`, `harness-claude` (and the Cursor plugin file users add): one `HarnessDefinition` per CLI (launch side, models, subscription reader, guard answer, how its vibest plugin loads). |
 | `integration/claude` | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`.           |
-| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to one `extension.mjs`. Loaded with `pi -e`.                                                                                                     |
+| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to `extension.mjs` (reporting, guard, inbox) and `presentation.mjs` (tool grouping, compact user messages). Both loaded with `pi -e`.            |
 | `integration/cursor` | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                                    |
 | `plugin-git`         | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                                  |
 | `builtins`           | The builtin plugins in load order (`pre`): `harness-pi`, `harness-claude`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `harness-default`. Only the binary's composition root reads it.           |
@@ -201,7 +201,7 @@ the code sits in:
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/schema` (`@vibest/schema`)                     | The contracts `protocol` and `client` need, moved out of core modules: session, inbox and harness schemas and errors, the `project` / `session` / `inbox` / `message` rows (`model.ts`), plugin traces, Project store inputs, `RemoveOutcome`, `Layout`, `messageOf`, `describeSpawn`, `addPluginHint`. Core modules re-export some of them. |
 | `packages/protocol`                                      | `rpc.ts`, `protocol.ts`. Depends on `schema` only.                                                                                                                                                                                                                                                                                           |
-| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (`packages/cli/test/boundaries.test.ts` checks `schema`, `core`, `server`, `protocol`, `client`).                                                                                 |
+| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (an oxlint rule will check `schema`, `core`, `server`, `protocol`, `client`).                                                                                                     |
 | `packages/runtime-herdr`                                 | The Runtime port on herdr: `runtime.ts` and `pool.ts` (omac `herdr-pool.ts`). The only package besides `effect-herdr-sdk` and `packages/cli` that imports herdr.                                                                                                                                                                             |
 | `packages/server`                                        | `server.ts`, `daemon.ts`.                                                                                                                                                                                                                                                                                                                    |
 | `packages/client`                                        | `client.ts`; `release.ts`, the latest-release lookup that `vibest update` and vibestd's hourly check share. Depends on `schema` and `protocol` only.                                                                                                                                                                                         |
@@ -610,9 +610,13 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
   Product identity and runtime are replacements, which is how one core yields several isolated products.
 - Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
   `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
-  left out, and `unbound<E>()(service)` declares the errors a host's replacement may fail with). Each service has a
-  `node` listing its `deps`; what the host supplies (sqlite, the sockets, the platform services, the daemon's
-  identity) is an unbound node. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
+  left out, and `unbound` is infallible). Each service has a `node` listing its `deps`; what the host supplies
+  (the platform services, the daemon's identity) is an unbound node. The SQL client, the socket server and the HTTP
+  server can fail to open, so the host supplies each as an infallible layer token (`SqlClientLayer`,
+  `SocketServerLayer`, `HttpServerLayer`: an unbound node whose value is a `Layer`), and a real provider node
+  (`sqlClient`, `socketServer`, `httpServer`) consumes the token and carries the failure (`DatabaseOpenFailed`,
+  `SchemaMismatch`, `SqlError`, `SocketServerError`, `ServeError`) in its type; a host that omits a token is
+  refused when the graph is compiled. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
   the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
   replacements. The platform (`packages/platform-bun/src/bun.ts`) exports `replacements` for everything it supplies
   (platform services, sqlite, the sockets, the machine transport, the plugin loader, the builtin plugins, the host
@@ -849,7 +853,7 @@ binary as `VIBEST_HARNESSES`; without it the compiled binary looks beside its ow
 `<root>/harnesses`, the link resolved), which is how install.sh's install runs, without Node; a binary run bare from the
 npm package (a pane vibestd opened runs the binary, not the launcher) then tries the `@vibest/cli` package, flat
 (`node_modules/@vibest/cli`) or nested. From source there is no layout to look beside. The adapter loads the plugin into
-each session it starts, and into the entry session: Pi `-e <dir>/extension.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
+each session it starts, and into the entry session: Pi `-e <dir>/extension.mjs -e <dir>/presentation.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
 Each of these adds to what the harness loads; the user's own plugins, extensions and hooks keep loading beside it
 (checked against Pi 1.4, Claude Code 2.1.316 and cursor-agent 2026.10.22). Why not install into the harness's config:
 
@@ -1091,6 +1095,11 @@ prompt from the entry session or from vibest's own delivery is ignored). Of the 
   the runtime's seen mark; a project carries `activity`, the first of blocked, done, working its live sessions show,
   else idle (herdr's order: a finished agent waiting for the user outranks a busy one). `Session.Seen({id, finished})`
   raises that mark to `finished` only when it rises and no further than the runtime's count; anything else writes nothing.
+- `Events({ session?, after?, follow? })` (user only, `events` capability, this machine only, never forwarded to a peer) streams
+  facts as `{ aggregate, seq, at, type, data }`: one session's by its `seq` (an ended session too; an unknown id fails
+  with `NoSuchSession`), or the whole log in commit order with each aggregate's `seq` rising. It reads the log by cursor in
+  pages and uses the Bus only to wake, so no fact is skipped or repeated whatever order the Bus published commits in;
+  A read without `follow` stops at the latest `seq` (or log position) captured when it starts; `follow` continues past it and keeps the stream open for facts committed later, and only a following read subscribes to the Bus. `after` (valid only with `session`) starts after that `seq` with no gap or repeat; the whole log has no resume cursor, and the log position never leaves vibestd.
 - `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and
   watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
   `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a

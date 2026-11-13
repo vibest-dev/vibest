@@ -237,6 +237,37 @@ export const make = (
           ),
         ),
 
+      Events: ({ session, after, follow }) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            yield* cliOnly("Events")
+            if (after !== undefined && session === undefined)
+              return yield* new Forbidden({
+                method: "Events",
+                message: "after resumes one session's facts; give the session too",
+              })
+            const id =
+              session === undefined
+                ? undefined
+                : yield* db
+                    .resolveSession(session)
+                    .pipe(
+                      Effect.catchTag("AmbiguousSession", (e) =>
+                        Effect.fail(new NoSuchSession({ id: session, message: e.message })),
+                      ),
+                    )
+            return db.facts({ session: id, after, follow: follow === true }).pipe(
+              Stream.map(({ aggregate, seq, at, type, data }) => ({
+                aggregate,
+                seq,
+                at,
+                type,
+                data: JSON.parse(data) as unknown,
+              })),
+            )
+          }),
+        ),
+
       Watch: () =>
         Stream.unwrap(
           Effect.gen(function* () {

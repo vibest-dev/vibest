@@ -1,3 +1,4 @@
+import { messageOf } from "@vibest/schema/error"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
@@ -70,10 +71,22 @@ const SESSION_DEPS = [
   PlatformNode.path,
 ] as const
 
+interface SessionGit extends GitState {
+  readonly unknown?: string
+}
+
+const unreadableGit = (error: string): SessionGit => ({
+  branch: "",
+  pushed: false,
+  saved: false,
+  why: "",
+  unknown: error,
+})
+
 export interface SessionView extends SessionRow {
   readonly worktree: string
   readonly repositoryRoot: string | undefined
-  readonly git: GitState | undefined
+  readonly git: SessionGit | undefined
 }
 
 export class Sessions extends Context.Service<
@@ -165,10 +178,9 @@ export class Sessions extends Context.Service<
       return text.trimEnd()
     })
 
-    const view = Effect.fn("Sessions.view")(
-      function* (session: SessionRow) {
-        const worktree = yield* worktreeOf(session)
-        const repos = yield* workspaceGit(worktree).pipe(Effect.orDie)
+    const readGit = (session: SessionRow, worktree: string) =>
+      Effect.gen(function* () {
+        const repos = yield* workspaceGit(worktree)
         if (repos) {
           const unsaved = repos.find((r) => !r.saved)
           const git: GitState = {
@@ -177,15 +189,32 @@ export class Sessions extends Context.Service<
             saved: repos.every((r) => r.saved),
             why: unsaved ? `${unsaved.name}: ${unsaved.why}` : "",
           }
-          const repositoryRoot = (yield* projectRoot(worktree).pipe(Effect.orDie)).root
+          const repositoryRoot = (yield* projectRoot(worktree)).root
           return { ...session, worktree, repositoryRoot, git } satisfies SessionView
         }
-        const g = yield* gitState(worktree).pipe(Effect.orDie)
-        const repositoryRoot = g
-          ? yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
-          : undefined
-        return { ...session, worktree, repositoryRoot, git: g } satisfies SessionView
-      },
+        const state = yield* gitState(worktree)
+        if (state === undefined)
+          return {
+            ...session,
+            worktree,
+            repositoryRoot: undefined,
+            git: unreadableGit("git cannot read it"),
+          } satisfies SessionView
+        const repositoryRoot = yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
+        return { ...session, worktree, repositoryRoot, git: state } satisfies SessionView
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.succeed({
+            ...session,
+            worktree,
+            repositoryRoot: undefined,
+            git: unreadableGit(messageOf(error)),
+          } satisfies SessionView),
+        ),
+      )
+
+    const view = Effect.fn("Sessions.view")(
+      (session: SessionRow) => worktreeOf(session).pipe(Effect.flatMap((worktree) => readGit(session, worktree))),
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
