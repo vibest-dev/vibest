@@ -7,6 +7,11 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **A start while plugins are still loading is refused** (users; RPC clients of `Spawn`, `Launch`,
+  `Project.StartEntry` and `Peer.Spawn`): `agent.start.before` and `agent.fail` wait up to 10 s for plugin
+  activation and then fail with `PluginsNotActive`, naming the plugins still loading, instead of running with only
+  the plugins already active. Retry once `vibest plugins` shows them active. `vibest plugins` no longer waits
+  for activation; it lists the plugins that are active when it is called.
 - **Plugin API members without a caller removed** (plugin authors): `context.runtime.reload` and `context.harness.reload` (`Definitions.reload` of the Promise entry) are gone; the editors of `agent.transform`, `runtime.transform` and `harness.transform` no longer have `list`, `get` and `remove`, the agent and runtime editors no longer have `update` (the editors are `add`, plus `update` on the harness editor; a registration's `dispose` removes what a transform added); `Fact`, `FactOf` and `FactType` are no longer re-exported from either entry (import them from `@vibest/schema/event`); `Harness.LaunchInput` is no longer exported (use `Parameters<HarnessDefinition["launchArgs"]>[0]`). `@vibest/plugin/testing` no longer re-exports `RuntimeDefinition` (import it from `@vibest/plugin/effect` as `Runtime.RuntimeDefinition`) and no longer exports `ContractError`, `ContractFailure` and `ContractOptions`. No longer exported from the entries: `AgentContext`, `MachineRuntime`, `MachineRuntimeThere`, `StartupPane`, `HarnessEvent`, `CallerValues`, `CaptureOptions`, `SubscriptionDomain` (Effect) and `Cleanup`, `Definitions` (Promise). They return when a caller needs them.
 - **Plugin entry points split into Promise and Effect** (plugin authors): `@vibest/plugin` is now the Promise API only
   (`Plugin.define({ id, setup })`, a Promise `Context`) and `@vibest/plugin/effect` is the Effect API

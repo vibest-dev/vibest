@@ -95,7 +95,11 @@ it(
     }
     try {
       await withVibestd(home, async (list) => {
-        const status = Object.fromEntries((await list()).map((p) => [path.basename(p.id), [p.status, p.error]]))
+        const listed = await listUntil(list, (rows) => {
+          const status = Object.fromEntries(rows.map((p) => [path.basename(p.id), p.status]))
+          return status["shared"] === "active" && status["bundled"] === "active" && status["broken.ts"] === "failed"
+        })
+        const status = Object.fromEntries(listed.map((p) => [path.basename(p.id), [p.status, p.error]]))
         assert.deepStrictEqual(status["shared"], ["active", undefined])
         assert.deepStrictEqual(status["bundled"], ["active", undefined])
         assert.strictEqual(status["broken.ts"]?.[0], "failed")

@@ -1,6 +1,5 @@
 import { entryPlace, specHits, filterCallerEnv } from "@vibest/core/caller"
 import { Db } from "@vibest/core/db"
-import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project-create"
 import { resolveProject } from "@vibest/core/project-identity"
@@ -13,7 +12,6 @@ import type { Checks, Handlers } from "./caller.ts"
 export const make = ({ scope, cliOnly, atProject, resolveAt }: Checks) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const plugins = yield* Plugins
     const project = yield* Project
     const runtimes = yield* Runtimes
     return {
@@ -33,7 +31,7 @@ export const make = ({ scope, cliOnly, atProject, resolveAt }: Checks) =>
         Effect.gen(function* () {
           const c = yield* cliOnly("Project.EntryPlace")
           const project = yield* resolveAt(c.repositoryRoot)
-          const specs = yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))
+          const specs = yield* runtimes.callers
           const env = filterCallerEnv(specs, callerEnv)
           const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
           const place = entryPlace({ runtime, hits })

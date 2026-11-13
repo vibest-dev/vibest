@@ -119,8 +119,8 @@ export const pluginsHost = (
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
         if (options.activateLate) {
-          host.ready.closeUnsafe()
-          yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
+          const release = host.holdNow()
+          yield* host.activate(candidates).pipe(Effect.andThen(release), Effect.forkScoped)
         } else yield* host.activate(candidates)
         return Context.make(Plugins, host.service).pipe(
           Context.add(PluginHost, {

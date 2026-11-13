@@ -8,7 +8,7 @@ import { Cause, Clock, Context, Effect, Exit, Layer } from "effect"
 import { Db, type SessionRow, harnessIdOf, pidOf, runtimeOf, startOf, terminalOf } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harness, harnessOptions, Harnesses, preflight } from "../harness.ts"
-import { errorMessage, Plugins } from "../plugins.ts"
+import { errorMessage, Plugins, PluginsNotActive } from "../plugins.ts"
 import { Processes } from "../processes.ts"
 import { RuntimeError, type Runtime, type Terminal } from "../runtimes.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
@@ -188,7 +188,11 @@ const make = Effect.gen(function* () {
           attempts: attempts(),
         })
         .pipe(Effect.exit)
-      if (Exit.isFailure(decided)) return yield* giveUp(`${yield* left()}: ${errorMessage(decided.cause)}`)
+      if (Exit.isFailure(decided)) {
+        const reason = Cause.squash(decided.cause)
+        if (reason instanceof PluginsNotActive) return yield* giveUp(reason.message)
+        return yield* giveUp(`${yield* left()}: ${errorMessage(decided.cause)}`)
+      }
       if (decided.value.move === undefined) {
         const why = limitFailure(rows, harnessIdOf(row), row.process?.provider ?? null ?? undefined, error)
         const tried =
@@ -213,6 +217,10 @@ const make = Effect.gen(function* () {
           machines: [],
         })
         .pipe(Effect.exit)
+      if (Exit.isFailure(decidedStart)) {
+        const reason = Cause.squash(decidedStart.cause)
+        if (reason instanceof PluginsNotActive) return yield* giveUp(reason.message)
+      }
       const next = Exit.isSuccess(decidedStart) ? decidedStart.value : undefined
       if (next === undefined || next.harness === undefined || harnesses.find(next.harness) === undefined) {
         skip(move.harness, "refused")

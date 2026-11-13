@@ -58,7 +58,7 @@ const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
 
 describe("plugins: builtins follow the latest config", () => {
   it.effect(
-    "a removal that arrives while user plugins are still importing takes the builtin off at once, so the 10s fallback does not run it",
+    "a removal that arrives while user plugins are still importing takes the builtin off at once, so a start does not run it",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -108,13 +108,12 @@ describe("plugins: builtins follow the latest config", () => {
         yield* until("the removal", () => events.at(-1) === "close")
 
         const spawning = yield* Effect.forkChild(plugins.start(event))
-        yield* TestClock.adjust("10 seconds")
-        const decision = yield* Fiber.join(spawning)
+        release()
+        const decision = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("10 seconds")))
         assert.isFalse(
           decision.trace.some((t) => t.plugin === "harness-x"),
-          "the removed builtin ran in the fallback",
+          "the removed builtin ran",
         )
-        release()
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     { timeout: 20_000 },
   )

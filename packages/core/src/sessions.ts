@@ -1,5 +1,5 @@
 import { messageOf } from "@vibest/schema/error"
-import type { AgentRefused } from "@vibest/schema/plugin"
+import type { AgentRefused, PluginsNotActive } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
   type AmbiguousSession,
@@ -105,6 +105,7 @@ export class Sessions extends Context.Service<
       | NoHarnessChosen
       | NoRuntime
       | AgentRefused
+      | PluginsNotActive
       | NoSuchSession
     >
     readonly send: (

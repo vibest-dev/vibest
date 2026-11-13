@@ -2,7 +2,15 @@ import * as VibestPlugin from "@vibest/plugin/effect"
 import { fromPromise } from "@vibest/plugin/promise/adapter"
 import { messageOf } from "@vibest/schema/error"
 import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
-import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
+import {
+  AgentRefused,
+  type Change,
+  HookFailed,
+  PluginInfo,
+  PluginsNotActive,
+  Routing,
+  TraceEntry,
+} from "@vibest/schema/plugin"
 import { Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
 import { Agents } from "./agents.ts"
@@ -20,7 +28,15 @@ import { logFailure } from "./reactor.ts"
 import * as Registry from "./registry.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
-export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
+export {
+  AgentRefused,
+  Change,
+  HookFailed,
+  PluginInfo,
+  PluginsNotActive,
+  Routing,
+  TraceEntry,
+} from "@vibest/schema/plugin"
 
 export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
 export { DEBOUNCE, RECHECK } from "./plugin-supervisor.ts"
@@ -160,12 +176,27 @@ type Stopped = { readonly plugin: string; readonly reason: string }
 
 type Broken = { readonly running: Running; readonly refresh: Effect.Effect<void> }
 
+const idOf = (candidate: Candidate): string => ("error" in candidate.plugin ? candidate.source : candidate.plugin.id)
+
 export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
   Effect.gen(function* () {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT
     const root = yield* Effect.scope
     const ready = yield* Latch.make(true)
+    const holds = new Set<object>()
+    let closed = false
     let slots: ReadonlyArray<Slot> = []
+    let pending: ReadonlyArray<string> = []
+    let loading: ReadonlyArray<string> = []
+    const holdNow = () => {
+      if (closed) return Effect.void
+      const token = {}
+      holds.add(token)
+      ready.closeUnsafe()
+      return Effect.sync(() => {
+        if (holds.delete(token) && holds.size === 0 && !closed) ready.openUnsafe()
+      })
+    }
 
     const close = (scope: Scope.Closeable, id: string, level: "error" | "warning" = "error") =>
       timeoutWithoutWaiting(Scope.close(scope, Exit.void), root, timeout).pipe(
@@ -324,6 +355,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       Registry.batch(
         Effect.gen(function* () {
           const { candidates, failures } = keepRunning(incoming)
+          pending = candidates.map(idOf)
+          loading = []
           slots = slots.map((slot) => ({ ...slot, importFailed: failures.get(slot.candidate.source) }))
           let prefix = 0
           while (
@@ -347,28 +380,46 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             if (slot.running) ids.add(slot.running.candidate.plugin.id)
             slots = [...slots, { ...slot, importFailed: failures.get(candidate.source) }]
           }
-        }),
+        }).pipe(Effect.ensuring(Effect.sync(() => (pending = [])))),
       )
 
     yield* Effect.addFinalizer(() =>
-      Registry.shutdown(
-        Effect.forEach(
-          slots.toReversed(),
-          (slot) => (slot.running ? close(slot.running.scope, slot.running.candidate.plugin.id) : Effect.void),
-          { discard: true },
+      Effect.sync(() => {
+        closed = true
+        holds.clear()
+        ready.openUnsafe()
+      }).pipe(
+        Effect.andThen(
+          Registry.shutdown(
+            Effect.forEach(
+              slots.toReversed(),
+              (slot) => (slot.running ? close(slot.running.scope, slot.running.candidate.plugin.id) : Effect.void),
+              { discard: true },
+            ),
+          ),
         ),
       ),
     )
 
     const settled = ready.await.pipe(Effect.timeoutOption(ACTIVATION_WAIT), Effect.map(Option.isSome))
+    const stillLoading = () => {
+      const placed = new Set(slots.map((slot) => idOf(slot.running?.candidate ?? slot.candidate)))
+      return [...new Set([...loading, ...pending].filter((id) => !placed.has(id)))]
+    }
+    const admit = <N extends Hooks.Name>(name: N, runtime?: string) =>
+      Effect.gen(function* () {
+        if (!(yield* settled)) return yield* new PluginsNotActive({ plugins: stillLoading() })
+        return hooksOf(name, runtime)
+      })
 
     const runHook = Effect.fnUntraced(function* <N extends AgentHook>(
       name: N,
+      hooks: ReadonlyArray<Hooks.Entry<N>>,
       event: () => Hooks.Events[N],
       apply: (value: Hooks.Results[N], plugin: string) => ReadonlyArray<typeof Change.Type>,
       trace: Array<TraceEntry>,
     ) {
-      for (const hook of hooksOf(name)) {
+      for (const hook of hooks) {
         const ran = yield* Hooks.run(name, hook, readOnly(event()), root, timeout)
         const entry = { plugin: hook.plugin, hook: name, ms: ran.ms, changes: [] }
         if (ran.outcome === "timeout") {
@@ -424,50 +475,50 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       })
 
     const start = Effect.fn("Plugins.start")(function* (input: StartInput) {
-      return yield* withHooks("agent.start.before", (trace) =>
-        Effect.gen(function* () {
-          const current = yield* subscriptions.list
-          const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
-          let event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
-          const decidedBy: Record<string, string> = {}
-          const route = (patch: VibestPlugin.AgentRoute, plugin: string) => {
-            const fields = routed(patch)
-            const changes = fields.map((field) => decide(field, event[field], patch[field], plugin, decidedBy))
-            event = { ...event, ...Object.fromEntries(fields.map((field) => [field, patch[field]])) }
-            return changes
-          }
-          const stopped = yield* runHook("agent.start.before", () => event, route, trace)
-          if (stopped !== undefined) return yield* refusal(stopped)
-          return {
-            prompt: event.prompt,
-            harness: event.harness,
-            provider: event.provider,
-            model: event.model,
-            machine: event.machine,
-            runtime: event.runtime,
-            decidedBy,
-            trace,
-          } satisfies SpawnDecision
-        }),
-      )
+      const trace: Array<TraceEntry> = []
+      const hooks = yield* admit("agent.start.before")
+      return yield* Effect.gen(function* () {
+        const current = yield* subscriptions.list
+        const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
+        let event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
+        const decidedBy: Record<string, string> = {}
+        const route = (patch: VibestPlugin.AgentRoute, plugin: string) => {
+          const fields = routed(patch)
+          const changes = fields.map((field) => decide(field, event[field], patch[field], plugin, decidedBy))
+          event = { ...event, ...Object.fromEntries(fields.map((field) => [field, patch[field]])) }
+          return changes
+        }
+        const stopped = yield* runHook("agent.start.before", hooks, () => event, route, trace)
+        if (stopped !== undefined) return yield* refusal(stopped)
+        return {
+          prompt: event.prompt,
+          harness: event.harness,
+          provider: event.provider,
+          model: event.model,
+          machine: event.machine,
+          runtime: event.runtime,
+          decidedBy,
+          trace,
+        } satisfies SpawnDecision
+      })
     })
 
     const fail = Effect.fn("Plugins.fail")(function* (input: FailInput) {
-      return yield* withHooks("agent.fail", (trace) =>
-        Effect.gen(function* () {
-          const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list }
-          const decidedBy: Record<string, string> = {}
-          let move: VibestPlugin.AgentMove | undefined
-          const moveTo = (next: VibestPlugin.AgentMove, plugin: string) => {
-            const change = decide("move", move, next, plugin, decidedBy)
-            move = next
-            return [change]
-          }
-          const stopped = yield* runHook("agent.fail", () => event, moveTo, trace)
-          if (stopped !== undefined) return yield* failure(stopped)
-          return { move, trace }
-        }),
-      )
+      const trace: Array<TraceEntry> = []
+      const hooks = yield* admit("agent.fail")
+      return yield* Effect.gen(function* () {
+        const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list }
+        const decidedBy: Record<string, string> = {}
+        let move: VibestPlugin.AgentMove | undefined
+        const moveTo = (next: VibestPlugin.AgentMove, plugin: string) => {
+          const change = decide("move", move, next, plugin, decidedBy)
+          move = next
+          return [change]
+        }
+        const stopped = yield* runHook("agent.fail", hooks, () => event, moveTo, trace)
+        if (stopped !== undefined) return yield* failure(stopped)
+        return { move, trace }
+      })
     })
 
     const machine = Effect.fn("Plugins.machine")(function* (
@@ -496,8 +547,9 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
-    const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, list, settled, machine }), activate, ready }
+    const list = Effect.sync(() => slots.map(info))
+    const importing = (sources: ReadonlyArray<string>) => Effect.sync(() => void (loading = sources))
+    return { service: Plugins.of({ start, fail, list, settled, machine }), activate, holdNow, importing }
   })
 
 export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Plugins") {

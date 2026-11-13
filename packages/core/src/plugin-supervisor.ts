@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
+import { Cause, Duration, Effect, Queue, Semaphore, Stream } from "effect"
 
 import { type Candidate, keyOf, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
 import { logFailure } from "./reactor.ts"
@@ -10,8 +10,11 @@ type Sources = Effect.Success<ReturnType<typeof makeSources>>
 
 interface Host {
   readonly activate: (candidates: ReadonlyArray<Candidate>) => Effect.Effect<void>
-  readonly ready: Latch.Latch
+  readonly holdNow: () => Effect.Effect<void>
+  readonly importing: (sources: ReadonlyArray<string>) => Effect.Effect<void>
 }
+
+const named = (candidate: Candidate): string => ("error" in candidate.plugin ? candidate.source : candidate.plugin.id)
 
 const matches = (selector: string, id: string) =>
   selector === "*" || (selector.endsWith(".*") ? id.startsWith(selector.slice(0, -1)) : selector === id)
@@ -33,8 +36,14 @@ export const keptBuiltins = (builtins: ReadonlyArray<Candidate>, operations: Rea
   return kept
 }
 
-export const resolve = Effect.fnUntraced(function* (sources: Sources, builtins: ReadonlyArray<Candidate> = []) {
+export const resolve = Effect.fnUntraced(function* (
+  sources: Sources,
+  builtins: ReadonlyArray<Candidate> = [],
+  note: (sources: ReadonlyArray<string>) => Effect.Effect<void> = () => Effect.void,
+) {
   const { operations, watched } = yield* sources.operations
+  const loading = operations.flatMap((op) => (op.type === "add" ? [op.target] : []))
+  yield* note([...loading])
   const candidates: Array<Candidate> = [...builtins]
   for (const op of operations) {
     if (op.type === "remove") {
@@ -42,6 +51,12 @@ export const resolve = Effect.fnUntraced(function* (sources: Sources, builtins: 
       continue
     }
     const candidate = yield* sources.load(op, watched)
+    const at = loading.indexOf(op.target)
+    if (at !== -1) {
+      if (candidate === undefined) loading.splice(at, 1)
+      else loading[at] = named(candidate)
+      yield* note([...loading])
+    }
     if (candidate === undefined) continue
     const same = candidates.findIndex((c) => c.source === candidate.source)
     if (same === -1) candidates.push(candidate)
@@ -56,16 +71,16 @@ export const supervise = Effect.fnUntraced(function* (
   builtins: ReadonlyArray<Candidate>,
   sources: Sources,
 ) {
-  const triggers = yield* Queue.sliding<void>(1)
+  const triggers = yield* Queue.sliding<number>(1)
   const builtinTriggers = yield* Queue.sliding<void>(1)
   const changed = new Set<string>()
   let observed = 0
-  host.ready.closeUnsafe()
+  let release: Effect.Effect<void> | undefined = host.holdNow()
   const notify = (file?: string) => {
     if (file !== undefined) changed.add(file)
     observed++
-    host.ready.closeUnsafe()
-    Queue.offerUnsafe(triggers, undefined)
+    if (release === undefined) release = host.holdNow()
+    Queue.offerUnsafe(triggers, observed)
     Queue.offerUnsafe(builtinTriggers, undefined)
   }
   const watcher = yield* makeWatcher(notify)
@@ -80,7 +95,6 @@ export const supervise = Effect.fnUntraced(function* (
         const candidates = [...keptBuiltins(builtins, operations), ...users]
         const revisions = candidates.map(keyOf).join("\n")
         if (revisions === activated) return
-        host.ready.closeUnsafe()
         yield* host.activate(candidates)
         activated = revisions
       }),
@@ -94,21 +108,30 @@ export const supervise = Effect.fnUntraced(function* (
     Stream.runForEach(() => publish().pipe(logFailure("plugins: builtin update failed"))),
     Effect.forkScoped,
   )
+  let reloading = false
   const reload = Effect.gen(function* () {
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
-    let resolved = yield* resolve(sources, builtins)
-    while (yield* watcher.update(resolved.watched)) resolved = yield* resolve(sources, builtins)
+    let resolved = yield* resolve(sources, builtins, host.importing)
+    while (yield* watcher.update(resolved.watched)) resolved = yield* resolve(sources, builtins, host.importing)
     yield* publish(resolved.candidates.filter((c) => !isBuiltin(c)))
   }).pipe(logFailure("plugins: reload failed"))
-  yield* Queue.offer(triggers, undefined).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
-  yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
-    Stream.runForEach(() =>
+  yield* Effect.sync(() => {
+    if (reloading) return
+    observed++
+    if (release === undefined) release = host.holdNow()
+    Queue.offerUnsafe(triggers, observed)
+  }).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
+  yield* Stream.concat(Stream.succeed(0), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
+    Stream.runForEach((target) =>
       Effect.gen(function* () {
-        const target = observed
+        reloading = true
         yield* reload
-        if (observed === target) host.ready.openUnsafe()
-      }),
+        if (observed !== target) return
+        const settled = release
+        release = undefined
+        if (settled) yield* settled
+      }).pipe(Effect.ensuring(Effect.sync(() => (reloading = false)))),
     ),
     Effect.forkScoped,
   )
