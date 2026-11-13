@@ -167,9 +167,9 @@ started, an entry session) cannot answer results with results (rule 4), and that
 ```
 
 **Packages.** Runtime dependencies flow one way: `schema` → `core` and `protocol` → `server`. `client` depends
-on `schema` and `protocol` only. Plugin types derive from the client API. Besides `server`, only the binary's entry
-(`packages/cli/src/main.ts`) and `platform-bun` may import `core`; the rest of `packages/cli` reaches vibestd through
-`client`, `protocol` and `schema`, and the daemon through `server/daemon` (`packages/cli/test/boundaries.test.ts`).
+on `schema` and `protocol` only. Plugin types derive from the client API. Besides `server`, only `platform-bun` imports `core`; `packages/cli`
+reaches vibestd through `client`, `protocol` and `schema`, and the daemon through `server/daemon`
+(`packages/cli/test/boundaries.test.ts`).
 
 | Package              | Role                                                                                                                                                                                                          |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
