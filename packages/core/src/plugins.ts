@@ -77,7 +77,7 @@ export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plug
 })
 export const builtinsNode = LayerNode.make({ service: Builtins, layer: Layer.succeed(Builtins, []), deps: [] })
 type Running = {
-  candidate: Loaded
+  readonly candidate: Loaded
   readonly scope: Scope.Closeable
   readonly hooks: Hooks.Hooks
   broken: string | undefined
@@ -102,7 +102,7 @@ const info = (slot: Slot): PluginInfo => {
   const shown = slot.running?.candidate ?? candidate
   return {
     id: slot.running?.candidate.plugin.id ?? ("error" in candidate.plugin ? candidate.source : candidate.plugin.id),
-    source: shown.source,
+    source: candidate.source,
     revision: shown.revision,
     loadedAt: slot.loadedAt,
     status: running ? "active" : "failed",
@@ -351,11 +351,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       return { candidates, failures }
     }
 
-    const movedTo = (slot: Slot, candidate: Candidate): Slot => {
-      if (slot.running) slot.running.candidate = { ...slot.running.candidate, source: candidate.source }
-      return { ...slot, candidate }
-    }
-
     const activate = (incoming: ReadonlyArray<Candidate>) =>
       Registry.batch(
         Effect.gen(function* () {
@@ -370,7 +365,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             keyOf(slots[prefix]!.candidate) === keyOf(candidates[prefix]!)
           )
             prefix++
-          slots = slots.map((slot, i) => (i < prefix ? movedTo(slot, candidates[i]!) : slot))
+          slots = slots.map((slot, i) => (i < prefix ? { ...slot, candidate: candidates[i]! } : slot))
           if (prefix === candidates.length && prefix === slots.length) return
           const retired = slots.slice(prefix)
           slots = slots.slice(0, prefix)
