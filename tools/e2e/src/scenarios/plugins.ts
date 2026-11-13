@@ -279,7 +279,7 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
   {
     id: "G10",
     title:
-      "a plugin folder loads the existing package.json exports entry (./server, else .), never an unexported index.ts, and recovers once its missing dependency is installed",
+      "a plugin folder loads the existing package.json exports entry (./server, else .), never an unexported index.ts, recovers once its missing dependency is installed, and refuses an entry outside the folder",
     run: async (w) => {
       const folder = path.join(w.vibestHome, "plugins", "packaged")
       await write(
@@ -308,6 +308,21 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       expect(!(await list(w)).some((p) => p.id === "unexported"), "the folder's unexported index.ts was loaded")
       await fs.rm(folder, { recursive: true })
+
+      const outside = path.join(w.root, "outside.ts")
+      await write(outside, plugin("escaped"))
+      const escaping = path.join(w.vibestHome, "plugins", "escaping")
+      await write(
+        path.join(escaping, "package.json"),
+        JSON.stringify({ name: "e2e-escaping", type: "module", exports: path.relative(escaping, outside) }),
+      )
+      await until("the escaping entry reported", async () =>
+        (await list(w)).some(
+          (p) => p.status === "failed" && p.source.endsWith("escaping") && (p.error ?? "").includes("outside"),
+        ),
+      )
+      expect(!(await list(w)).some((p) => p.id === "escaped"), "an entry outside the plugin folder was loaded")
+      await fs.rm(escaping, { recursive: true })
     },
   },
 ]

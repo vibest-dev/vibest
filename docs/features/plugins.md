@@ -60,7 +60,8 @@ once, active, and it runs with the options from `vibest.json`.
 A plugin folder whose `package.json` maps `exports` loads the file the map names for `./server`, else for `.`, skipping a
 file that does not exist, and never a file the map does not export. While a package it imports is not
 installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
-active without editing the plugin or restarting vibestd.
+active without editing the plugin or restarting vibestd. An `exports` entry that resolves outside the plugin folder is
+not loaded; the plugin is listed as failed saying the entry is outside the folder.
 
 ## G11. A plugin disabled by a failing transform
 

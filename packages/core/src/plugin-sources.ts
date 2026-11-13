@@ -150,7 +150,12 @@ export const makeSources = Effect.fnUntraced(function* (
     if (!(yield* isDirectory(target))) return target
     const candidates = yield* entryCandidates(target)
     for (const file of candidates) paths.add(file)
-    for (const file of candidates) if (yield* fs.exists(file)) return file
+    const root = yield* canonical(target)
+    for (const file of candidates) {
+      if (!(yield* fs.exists(file))) continue
+      const real = yield* canonical(file)
+      return path.relative(root, real).startsWith("..") ? ({ outside: file } as const) : file
+    }
     return undefined
   })
 
@@ -206,6 +211,7 @@ export const makeSources = Effect.fnUntraced(function* (
       if (!isLocal(target)) return failed("npm plugins are not supported yet")
       const file = yield* entry(target, paths).pipe(Effect.orElseSucceed(() => undefined))
       if (file !== target) listings.add(target)
+      if (typeof file === "object") return failed(`entry ${file.outside} is outside the plugin folder ${target}`)
       if (file === undefined) {
         yield* warn(`plugin ${target} has no package.json exports, server.* or index.* entry; skipped`)
         return undefined
