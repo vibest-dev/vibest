@@ -17,7 +17,7 @@ import {
 import { NoRuntime } from "@vibest/schema/session"
 import { Context, Effect, Layer, Stream } from "effect"
 
-export const outboxItem = (row: OutboxRow): OutboxItem => {
+const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
   const { read } = new TextEncoder().encodeInto(row.content, new Uint8Array(OUTBOX_ITEM_MAX))
   return read === row.content.length

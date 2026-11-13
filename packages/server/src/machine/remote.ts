@@ -16,7 +16,7 @@ import { Context, Effect, Layer } from "effect"
 
 import { Machines } from "./machines.ts"
 
-export type Address =
+type Address =
   | { readonly _tag: "Local"; readonly id: string }
   | { readonly _tag: "Remote"; readonly machine: string; readonly id: string }
 
@@ -35,7 +35,7 @@ export type ListScope =
   | { readonly _tag: "Nothing" }
   | ({ readonly _tag: "Peer" } & PeerScope)
 
-export type Forwarded<A, E> = (
+type Forwarded<A, E> = (
   client: PipeClient,
   at: At,
   options: { readonly headers: Record<string, string> },
