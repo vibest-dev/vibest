@@ -41,19 +41,17 @@ export const toolCall = (id: string, name: string, input: object) =>
     ],
   }) + done("tool_calls")
 
-const ENTRY_RUN = /vbe-entry-run:(\d+):([A-Za-z0-9+/=]+)/
+const ENTRY_RUN = /vbe-entry-run:([0-9a-f-]+):([A-Za-z0-9+/=]+)/
 const EXIT = /\nvbe-exit:(\d+)\s*$/
 
-export const entryRunMessage = (run: number, command: string) =>
+export const entryRunMessage = (run: string, command: string) =>
   `vbe-entry-run:${run}:${Buffer.from(`${command}; echo vbe-exit:$?`).toString("base64")}`
 
 const entryRunOutputs = new Map<string, string>()
 
-let entryRuns = 0
+export const nextEntryRun = () => crypto.randomUUID()
 
-export const nextEntryRun = () => ++entryRuns
-
-export const entryRunOutput = (run: number) => {
+export const entryRunOutput = (run: string) => {
   const output = entryRunOutputs.get(`entry-run-${run}`)
   const exit = output === undefined ? undefined : EXIT.exec(`\n${output}`)
   return exit ? { code: Number(exit[1]), output: `\n${output}`.slice(1, exit.index) } : undefined

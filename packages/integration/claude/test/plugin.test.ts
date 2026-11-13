@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
+import { afterAll, assert, describe, it } from "@effect/vitest"
 
 type Plugin = {
   register: (on: (event: string, a: unknown, b?: unknown) => { catch: (handler: Function) => void }) => void
@@ -13,17 +13,12 @@ type Plugin = {
   UNREACHABLE: string
 }
 
-let plugin: Plugin
-let built: string
-
-beforeAll(async () => {
-  built = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-claude-plugin-"))
-  const pkg = path.join(import.meta.dirname, "..")
-  const r = childProcess.spawnSync("bun", ["scripts/build.ts", built], { cwd: pkg, encoding: "utf8" })
-  if (r.status !== 0) throw new Error(`build failed: ${r.stderr}`)
-  const hooks = JSON.parse(fs.readFileSync(path.join(built, "hooks/hooks.json"), "utf8")) as { modules: string[] }
-  plugin = (await import(path.join(built, "hooks", hooks.modules[0]!))) as Plugin
-})
+const built = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-claude-plugin-"))
+const pkg = path.join(import.meta.dirname, "..")
+const r = childProcess.spawnSync("bun", ["scripts/build.ts", built], { cwd: pkg, encoding: "utf8" })
+if (r.status !== 0) throw new Error(`build failed: ${r.stderr}`)
+const hooks = JSON.parse(fs.readFileSync(path.join(built, "hooks/hooks.json"), "utf8")) as { modules: string[] }
+const plugin = (await import(path.join(built, "hooks", hooks.modules[0]!))) as Plugin
 
 afterAll(() => fs.rmSync(built, { recursive: true, force: true }))
 

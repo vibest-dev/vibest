@@ -461,10 +461,7 @@ describe("plugins: loading", () => {
 })
 
 const held: Array<Fact> = []
-let release = () => {}
-const gate = new Promise<void>((resolve) => {
-  release = resolve
-})
+const { promise: gate, resolve: release } = Promise.withResolvers<void>()
 const watcher = Plugin.define({
   id: "watcher",
   effect: (ctx) =>

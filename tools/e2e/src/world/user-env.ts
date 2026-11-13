@@ -42,9 +42,12 @@ export const capture = (home = os.homedir(), shell = process.env.SHELL || "/bin/
   return env
 }
 
-let captured: Readonly<Record<string, string>> | undefined
+const once = <A>(make: () => A): (() => A) => {
+  let made: { readonly value: A } | undefined
+  return () => (made ??= { value: make() }).value
+}
 
-export const loginEnv = (): Readonly<Record<string, string>> => (captured ??= capture())
+export const loginEnv: () => Readonly<Record<string, string>> = once(() => capture())
 
 export const historyFiles = (home = os.homedir()) => [
   path.join(home, ".zsh_history"),

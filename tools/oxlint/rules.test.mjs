@@ -151,3 +151,19 @@ export const one = 1
     ])
   })
 })
+
+describe("no-module-let", () => {
+  it("reports module-level let, exported or not, and allows let inside functions and const", () => {
+    expect(
+      oxlintFindings(`let one = 0
+export let two = 0
+export const three = () => {
+  let inner = 0
+  inner += 1
+  return inner
+}
+export const bump = () => ++one + two
+`),
+    ).toEqual(["1 vibest(no-module-let)", "2 vibest(no-module-let)"])
+  })
+})

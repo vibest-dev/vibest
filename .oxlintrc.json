@@ -19,6 +19,7 @@
     "vibest/node-import-style": "error",
     "vibest/no-restricted-disable": "error",
     "vibest/no-comments": "error",
+    "vibest/no-module-let": "error",
     "eslint/no-unused-vars": "error",
     "eslint/no-unused-expressions": [
       "error",
