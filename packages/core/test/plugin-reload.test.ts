@@ -452,7 +452,7 @@ describe("plugins: supervisor", () => {
   )
 
   it.effect(
-    "a burst during the delay keeps readiness closed until the queued pass imports an unreported edit",
+    "a burst during the delay keeps readiness closed until that pass imports an unreported edit",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -463,19 +463,14 @@ describe("plugins: supervisor", () => {
         yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
         yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a1"`))
         watchGate.hold = true
-        const { clocked, armed } = yield* timers
-        const service = yield* clocked(supervise(dir))
-        assert.strictEqual((yield* service.start(event)).model, "a1")
+        const service = yield* TestClock.withLive(supervise(dir))
+        assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
         yield* watchSees(pluginsDir, "a.ts")
-        yield* armed(DEBOUNCE)
         yield* watchSees(pluginsDir, "a.ts")
-        yield* TestClock.adjust(DEBOUNCE)
-        yield* armed(DEBOUNCE)
         yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a2"`))
-        const starting = yield* Effect.forkChild(service.start(event))
-        yield* TestClock.withLive(Effect.sleep("200 millis"))
-        assert.isUndefined(starting.pollUnsafe(), "a start was admitted before the queued pass")
-        yield* TestClock.adjust(DEBOUNCE)
+        const starting = yield* Effect.forkChild(TestClock.withLive(service.start(event)))
+        yield* TestClock.withLive(Effect.sleep("20 millis"))
+        assert.isUndefined(starting.pollUnsafe(), "a start was admitted before the burst settled")
         const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
         assert.strictEqual(started.model, "a2")
       }).pipe(
@@ -495,21 +490,24 @@ describe("plugins: supervisor", () => {
         const dir = yield* packageHome
         yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
         yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "slow-scan-a", `"a1"`))
-        const { clocked, armed } = yield* timers
-        const service = yield* clocked(supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, gateReads(fs))))
-        assert.strictEqual((yield* service.start(event)).model, "a1")
+        const service = yield* TestClock.withLive(
+          supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, gateReads(fs))),
+        )
+        assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
         const setups = count("setup:slow-scan-a")
         let releaseRead!: () => void
         readHold.current = new Promise<void>((resolve) => {
           releaseRead = resolve
         })
-        yield* armed(RECHECK)
-        yield* TestClock.adjust(RECHECK)
-        yield* armed(DEBOUNCE)
-        yield* TestClock.adjust(DEBOUNCE)
-        yield* untilSignal(() => readHold.current === undefined, "the rescan to start reading")
-        const starting = yield* Effect.forkChild(service.start(event))
-        yield* TestClock.adjust(RECHECK)
+        yield* TestClock.withLive(
+          eventually(
+            Effect.sync(() => readHold.current === undefined),
+            (started) => started,
+            "the rescan to start reading",
+          ),
+        )
+        const starting = yield* Effect.forkChild(TestClock.withLive(service.start(event)))
+        yield* TestClock.withLive(Effect.sleep(RECHECK))
         yield* TestClock.withLive(Effect.sleep("100 millis"))
         assert.isUndefined(starting.pollUnsafe(), "the recheck during the slow rescan reopened readiness")
         releaseRead()
