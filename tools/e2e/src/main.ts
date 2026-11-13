@@ -8,6 +8,7 @@ import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import { parseShard, shardOf } from "./runner/shard.ts"
+import agy from "./scenarios/agy.ts"
 import daemon from "./scenarios/daemon.ts"
 import delivery from "./scenarios/delivery.ts"
 import entrySession from "./scenarios/entry.ts"
@@ -43,6 +44,7 @@ import {
 } from "./world.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
+  agy,
   daemon,
   project,
   plugins,

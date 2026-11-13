@@ -29,14 +29,16 @@ for (const harness of ["pi", "claude", "cursor", "agy"]) {
   }
 }
 
-const cursorPlugin = await Bun.build({
-  entrypoints: [path.join(app, "../plugin-harnesses/src/cursor-plugin.ts")],
-  outdir: path.join(outdir, "cursor"),
-  naming: "plugin.js",
-  target: "bun",
-  external: ["effect", "effect/*", "@vibest/plugin", "@vibest/plugin/*"],
-})
-if (!cursorPlugin.success) {
-  for (const log of cursorPlugin.logs) console.error(log)
-  process.exit(1)
+for (const harness of ["cursor", "agy"]) {
+  const plugin = await Bun.build({
+    entrypoints: [path.join(app, `../plugin-harnesses/src/${harness}-plugin.ts`)],
+    outdir: path.join(outdir, harness),
+    naming: "plugin.js",
+    target: "bun",
+    external: ["effect", "effect/*", "@vibest/plugin", "@vibest/plugin/*"],
+  })
+  if (!plugin.success) {
+    for (const log of plugin.logs) console.error(log)
+    process.exit(1)
+  }
 }

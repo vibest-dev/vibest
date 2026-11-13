@@ -23,7 +23,7 @@ type HcTerminal = {
   labels: Record<string, string>
 }
 
-const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
+export const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
   const dirs = {
     state: path.join(w.root, `${tag}-state`),
     config: path.join(w.root, `${tag}-config`),
@@ -60,7 +60,7 @@ const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
   }
 }
 
-const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
+export const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
 
 const configureRuntime = async (w: World, runtime: string | undefined) => {
   const file = path.join(w.vibestHome, "vibest.json")

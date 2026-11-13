@@ -1,9 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { Harness } from "@vibest/plugin"
 
+import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
 import { pi, piModels } from "../src/pi.ts"
+import { agyLimits } from "../src/subscriptions/agy.ts"
 
 const ADAPTERS = { pi, claude, cursor }
 
@@ -26,6 +28,59 @@ const launchInput: Harness.LaunchInput = {
 
 describe("HarnessAdapter", () => {
   const input = launchInput
+
+  it("agy resumes by conversation id and loads its status line for this session only", () => {
+    const args = agy.launchArgs({ ...input, resume: true, sessionId: "conv-1", pluginDir: "/opt/it's" })
+    assert.deepStrictEqual(args.slice(0, 2), ["--conversation", "conv-1"])
+    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!)
+    assert.deepStrictEqual(settings.statusLine, {
+      type: "command",
+      command: "sh '/opt/it'\\''s/status.sh'",
+      stack_with_default: true,
+    })
+    assert.notInclude(agy.launchArgs(input), "--conversation")
+  })
+
+  it("agy lists models from the JSON the CLI prints after its progress line", () => {
+    const json = JSON.stringify({
+      status: "SUCCESS",
+      command: {
+        name: "models",
+        data: { models: [{ id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)" }] },
+      },
+    })
+    assert.deepStrictEqual(agyModels(["Fetching available models...", json]), [
+      { model: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", default: false },
+    ])
+    assert.isUndefined(agyModels(["Fetching available models...", "Error: Please sign in to view available models."]))
+  })
+
+  it("agy reads its usage windows as used percent with the reset time", () => {
+    const usage = {
+      command: {
+        data: {
+          groups: [
+            {
+              name: "Gemini Models",
+              buckets: [
+                { window: "weekly", remaining_fraction: 0.75, reset_time: "2026-11-18T10:48:56Z" },
+                { window: "5h", remaining_fraction: 0, reset_time: "2026-11-13T11:54:25Z" },
+              ],
+            },
+          ],
+        },
+      },
+    }
+    assert.deepStrictEqual(agyLimits(usage), [
+      {
+        window: "Gemini Models weekly",
+        percent: 25,
+        status: "available",
+        resetTime: Date.parse("2026-11-18T10:48:56Z"),
+      },
+      { window: "Gemini Models 5h", percent: 100, status: "limited", resetTime: Date.parse("2026-11-13T11:54:25Z") },
+    ])
+  })
 
   it("cursor resumes a dash-leading session id as one --resume= argument", () => {
     const dashLeadingArgs = ADAPTERS.cursor.launchArgs({

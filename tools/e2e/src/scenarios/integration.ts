@@ -34,7 +34,7 @@ import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
 
-const listed = async (w: World, id: string, cwd = w.repository) =>
+export const listed = async (w: World, id: string, cwd = w.repository) =>
   (
     await w
       .json<{ sessions: Array<{ id: string; status: string; executionState: string; worktree: string }> }>(["ls"], {
@@ -42,9 +42,10 @@ const listed = async (w: World, id: string, cwd = w.repository) =>
       })
       .then((l) => l.sessions)
   ).find((e) => e.id === id)
-const executionState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.executionState
+export const executionState = async (w: World, id: string, cwd = w.repository) =>
+  (await listed(w, id, cwd))?.executionState
 
-const latest = async (w: World, id: string, cwd = w.repository) => {
+export const latest = async (w: World, id: string, cwd = w.repository) => {
   const reply = (
     await w.json<{
       reply?: { execution: number; status: string; text: string | null; failure: string | null } | null
@@ -59,7 +60,7 @@ const ends = async (w: World, id: string) =>
     return found ? [{ harness: found[1]!, interrupted: found[2] === "interrupted" }] : []
   })
 
-const withSession = async (
+export const withSession = async (
   w: World,
   harness: string,
   flags: ReadonlyArray<string>,

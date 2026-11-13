@@ -57,7 +57,8 @@ const make = Effect.gen(function* () {
         })
         return yield* look.pipe(
           Effect.flatMap((now) => {
-            if (now.ready || settled(now.seen) || step === undefined) return Effect.succeed(now)
+            if (now.ready || step === undefined || (settled(now.seen) && !runtimeLifecycle(adapter)))
+              return Effect.succeed(now)
             return step({
               screen,
               sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),

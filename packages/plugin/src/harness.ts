@@ -59,7 +59,7 @@ export interface HarnessDefinition {
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
   readonly models: ModelLister
   readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
-  readonly subscription?: (home: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
+  readonly subscription?: (home: string, binary: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => unknown
   readonly executionEnd?: (event: HarnessEvent) => { readonly end: Readonly<Record<string, unknown>> } | undefined
   readonly userPrompt?: (

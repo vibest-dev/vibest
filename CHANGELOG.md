@@ -224,6 +224,10 @@ release. Each release lists what broke, who is affected and how to migrate under
 ### Added
 
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
+- **Antigravity (`agy`) is a harness plugin**: add `harnesses/agy/plugin.js` of the install directory to `plugins` in
+  `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an
+  execution when the runtime reports idle, with no reply text) and has no vibest pre-tool guard. For plugin authors,
+  `HarnessDefinition.subscription` is now called with the definition's `binary` as its second argument.
 
 ### Changed
 

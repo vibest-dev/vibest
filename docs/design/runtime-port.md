@@ -159,6 +159,17 @@ idle. Cursor 2026.11.05 does not run a `--plugin-dir` plugin's `stop` hook, and 
 when user or project hooks also have one. It reports no permission/question/auth waits, so vibestd never shows it
 blocked on herdr-core. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
+Antigravity (`agy`) has no hooks vibest can load for one session, only a session-only `--settings` JSON, so vibest launches it
+with a `statusLine` command (`harnesses/agy/status.sh`, `stack_with_default`). agy runs it on every state change with the state as
+JSON on stdin; it prints nothing, writes OSC 7501 to `/dev/tty` (`working` for working and tool use, `blocked:kind=permission` while
+a tool confirmation shows, `blocked:kind=auth` while signing in, `blocked` while reviewing, `idle`, `error`; `initializing` reports
+nothing) and, once, passes the first non-empty `conversation_id` to `vibest integration prompt --harness agy`, the only way vibestd
+learns what to resume with `--conversation`. Classic herdr recognises the `agy` process and detects its state from the screen, so
+runtime-herdr starts `agy` as herdr's `agy` agent; a wrapper binary such as `agyx` goes through the typed shell path and is still
+recognised by its process name. A session-only status line replaces a status line the user configured, in that process only; vibest
+reads no agy settings to merge it. herdr-core maps `error` to `idle`, so an agy error completes the execution like an answer.
+There is no pre-tool guard in agy: it has no launch-scoped hook loader.
+
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,
 and `error`. Successful `done` is intentionally not normalized to `idle`: both are non-working; herdr-app uses
