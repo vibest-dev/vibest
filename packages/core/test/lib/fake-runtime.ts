@@ -1,5 +1,5 @@
 import { Runtime as R } from "@vibest/plugin"
-import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref, Stream } from "effect"
+import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
 
 type Runtime = R.RuntimeDefinition
 type Terminal = R.Terminal
@@ -410,7 +410,7 @@ export class FakeRuntime extends Context.Service<
               return { running: true }
             }),
           ),
-        events: Stream.fromPubSub(events),
+        events: R.eventsFrom(events),
         session: (terminal) =>
           call(
             "session",

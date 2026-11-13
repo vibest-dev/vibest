@@ -2,7 +2,7 @@ import * as VibestPlugin from "@vibest/plugin"
 import { reconnectSchedule } from "@vibest/plugin"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
-import { Cause, Context, Duration, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -55,59 +55,42 @@ const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max:
 export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Scope> = Effect.gen(function* () {
   const bus = yield* Bus
   const env = yield* HostEnv
-  const own = yield* Effect.scope
-  const merging = new Map<string, { readonly runtime: Runtime; readonly fiber: Fiber.Fiber<void> }>()
+  const followers = yield* FiberMap.make<string>()
+  const defined = new Map<string, Runtime>()
   const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
-  const reset = (runtime: Runtime) => bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })
   const follow = (runtime: Runtime) =>
-    Effect.gen(function* () {
-      let resubscribed = false
-      const attempt = Effect.scoped(
-        Effect.gen(function* () {
-          let received = false
-          const run = yield* runtime.events.pipe(
-            Stream.runForEach((event) => {
-              received = true
-              return bus.observe(live(runtime.id, event))
-            }),
-            Effect.forkScoped,
-          )
-          yield* Effect.yieldNow
-          if (resubscribed) yield* reset(runtime)
-          resubscribed = true
-          const ended = yield* Fiber.join(run).pipe(
-            Effect.as(true),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.failCause(cause)
-                : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(Effect.as(false)),
+    runtime.events.pipe(
+      Stream.tap((event) => bus.observe(live(runtime.id, event))),
+      Stream.filter((event) => event.type === "reset"),
+      Stream.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Stream.failCause(cause)
+          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`)).pipe(
+              Stream.drain,
+              Stream.concat(Stream.fail("reconnect")),
             ),
-          )
-          if (!ended && !received) return yield* Effect.fail("no events")
-          return ended
-        }),
-      )
-      while (!(yield* Effect.retry(attempt, RESUBSCRIBE_BACKOFF))) {}
-    }).pipe(Effect.orDie)
+      ),
+      Stream.retry(RESUBSCRIBE_BACKOFF),
+      Stream.runDrain,
+      Effect.orDie,
+    )
   const reconcile = (list: ReadonlyArray<Runtime>) =>
     Effect.gen(function* () {
-      for (const [id, entry] of merging) {
-        const next = list.find((runtime) => runtime.id === id)
-        if (next !== undefined && sameMembers(next, entry.runtime)) continue
-        merging.delete(id)
-        yield* Fiber.interrupt(entry.fiber)
+      for (const [id, runtime] of defined) {
+        const next = list.find((candidate) => candidate.id === id)
+        if (next !== undefined && sameMembers(next, runtime)) continue
+        defined.delete(id)
+        yield* FiberMap.remove(followers, id)
       }
       const fresh: Array<string> = []
       for (const runtime of list) {
-        const kept = merging.get(runtime.id)
-        if (kept !== undefined) {
-          merging.set(runtime.id, { runtime, fiber: kept.fiber })
+        if (defined.has(runtime.id)) {
+          defined.set(runtime.id, runtime)
           continue
         }
         fresh.push(runtime.id)
-        const fiber = yield* follow(runtime).pipe(Effect.forkIn(own))
-        merging.set(runtime.id, { runtime, fiber })
-        yield* bus.observe({ type: "runtime.reset", runtime: runtime.id, machine: "local" })
+        defined.set(runtime.id, runtime)
+        yield* FiberMap.run(followers, runtime.id, follow(runtime))
       }
       env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
       if (fresh.length > 0) yield* PubSub.publish(added, fresh)

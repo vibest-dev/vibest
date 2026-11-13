@@ -119,12 +119,13 @@ describe("pane events", () => {
         () => Effect.succeed({}),
         Stream.fromEffect(Deferred.await(go)).pipe(Stream.as(frame)),
       )
-      const first = yield* runtime.events!.pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)
+      const first = yield* runtime.events!.pipe(Stream.take(2), Stream.runCollect, Effect.forkChild)
       const installPaneSubscription = runtime.state!(TerminalRuntime.terminalOf("s", "w1:p2")).pipe(Effect.ignore)
       yield* installPaneSubscription
       for (let i = 0; i < 10; i++) yield* Effect.yieldNow
       yield* Deferred.succeed(go, undefined)
       assert.deepStrictEqual(yield* Fiber.join(first), [
+        { type: "reset" },
         { type: "state", terminal: TerminalRuntime.terminalOf("s", "w1:p2"), state: "idle" },
       ])
     }).pipe(Effect.provide(Platform.services)),
@@ -181,6 +182,7 @@ describe("herdr event stream", () => {
         Effect.forkScoped,
       )
       yield* Effect.yieldNow
+      assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
       yield* Deferred.succeed(open, undefined)
       assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
       assert.include(JSON.stringify(logs), "socket closed")
