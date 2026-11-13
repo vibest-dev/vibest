@@ -23,6 +23,7 @@
     "vibest/no-payload-sql": "error",
     "vibest/projector-writes": "error",
     "vibest/no-background-loop": "error",
+    "vibest/no-module-let": "error",
     "eslint/no-unused-vars": "error",
     "eslint/no-unused-expressions": [
       "error",

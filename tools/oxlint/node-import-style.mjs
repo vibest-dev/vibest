@@ -2,6 +2,7 @@ import module from "node:module"
 
 import { ledgerAccessRules } from "./ledger-access.mjs"
 import { noComments } from "./no-comments.mjs"
+import { noModuleLet } from "./no-module-let.mjs"
 import { noRestrictedDisable } from "./no-restricted-disable.mjs"
 
 const { isBuiltin } = module
@@ -91,5 +92,6 @@ export default {
     "no-restricted-disable": noRestrictedDisable,
     "no-comments": noComments,
     ...ledgerAccessRules,
+    "no-module-let": noModuleLet,
   },
 }

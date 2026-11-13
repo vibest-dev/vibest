@@ -5,7 +5,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { commandOf, note } from "../../reap.ts"
-import { entryModel, entryRunMessage, entryRunOutput, nextEntryRun } from "./fake-model.ts"
+import { entryModel, entryRunMessage, nextEntryRun } from "./fake-model.ts"
 import {
   herdrConfigSessions,
   pathsNamed,
@@ -16,7 +16,7 @@ import {
 import { alive } from "./world/alive.ts"
 import { claudeShadow, cursorShadow, piShadow, type Profile, userPrivateValues } from "./world/shadow.ts"
 import { endHerdrSocket, stopOwners, stopRecordedDaemon, stopSocketsUnder } from "./world/teardown.ts"
-import { loginEnv, secretName } from "./world/user-env.ts"
+import { secretName } from "./world/user-env.ts"
 
 export const checkout = path.resolve(import.meta.dirname, "../../..")
 
@@ -121,7 +121,9 @@ export class World {
   private constructor(
     readonly root: string,
     readonly profile: Profile,
+    readonly login: Readonly<Record<string, string>>,
   ) {
+    this.redact = redactor(login)
     this.vibestHome = path.join(root, "vibest")
     this.herdrSession = path.basename(root)
     this.hcSocket = path.join(root, "hc.sock")
@@ -135,10 +137,20 @@ export class World {
     this.origin = path.join(root, "shop-origin.git")
   }
 
-  static async create(profile: Profile = "user"): Promise<World> {
+  readonly redact: (text: string) => string
+
+  writeEvidence(file: string, text: string) {
+    return fsPromises.writeFile(file, this.redact(text))
+  }
+
+  copyEvidence(from: string, to: string, words: ReadonlyArray<string> = privateValues) {
+    return copyEvidence(this.login, from, to, words)
+  }
+
+  static async create(login: Readonly<Record<string, string>>, profile: Profile = "user"): Promise<World> {
     const root = await fsPromises.mkdtemp(path.join(worldTmpBase(), "vbe-"))
     await fsPromises.chmod(root, 0o700)
-    const w = new World(root, profile)
+    const w = new World(root, profile, login)
     for (const dir of [w.vibestHome, path.join(root, "tmp")]) await fsPromises.mkdir(dir, { mode: 0o700 })
     await claudeShadow(w.config.claude, profile)
     await fsPromises.mkdir(w.config.pi, { mode: 0o700 })
@@ -155,8 +167,7 @@ export class World {
   }
 
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
-    const login = loginEnv()
-    const env: Record<string, string | undefined> = { ...login }
+    const env: Record<string, string | undefined> = { ...this.login }
     Object.assign(
       env,
       {
@@ -164,7 +175,7 @@ export class World {
         PI_CODING_AGENT_DIR: this.config.pi,
         CLAUDE_CONFIG_DIR: this.config.claude,
         CURSOR_CONFIG_DIR: this.config.cursor,
-        PATH: [path.dirname(binary), login.PATH].join(":"),
+        PATH: [path.dirname(binary), this.login.PATH].join(":"),
         TMPDIR: path.join(this.root, "tmp"),
         HISTFILE: path.join(this.shellDir, ".bash_history"),
         ZDOTDIR: this.shellDir,
@@ -213,7 +224,7 @@ export class World {
     ])
     const result = { code, stdout, stderr }
     this.log.push({
-      argv: argv.map(redact),
+      argv: argv.map(this.redact),
       cwd,
       result: options.unlogged
         ? { code, stdout: `<${stdout.length} bytes not kept>`, stderr: `<${stderr.length} bytes not kept>` }
@@ -320,16 +331,19 @@ export class World {
     ]
     const vibest = (more: ReadonlyArray<string>) =>
       this.run(cwd, [options.bin ?? binary, ...more], options.env === undefined ? {} : { env: options.env })
-    const sent = await vibest(["send", entry!, "--", entryRunMessage(run, argv.map(shWord).join(" "))])
+    const out = path.join(this.root, `entry-run-${run}`)
+    const command = `{ ${argv.map(shWord).join(" ")}; } > ${shWord(out)} 2>&1; echo $? > ${shWord(`${out}.exit.tmp`)} && mv ${shWord(`${out}.exit.tmp`)} ${shWord(`${out}.exit`)}`
+    const sent = await vibest(["send", entry!, "--", entryRunMessage(run, command)])
     expect(sent.code === 0, `vibest send to the entry exited ${sent.code}: ${sent.stderr}${sent.stdout}`)
     await until(
       `the entry session to run vibest ${args.join(" ")}`,
-      () => entryRunOutput(run) !== undefined,
+      () => publishedStatus(`${out}.exit`) !== undefined,
       (options.timeoutMs ?? 60_000) + 60_000,
     )
-    const { code, output } = entryRunOutput(run)!
+    const code = publishedStatus(`${out}.exit`)!
+    const output = fs.readFileSync(out, "utf8").trim()
     const result = { code, stdout: output, stderr: output }
-    this.log.push({ argv: ["(entry)", binary, ...args].map(redact), cwd, result })
+    this.log.push({ argv: ["(entry)", binary, ...args].map(this.redact), cwd, result })
     return result
   }
 
@@ -737,18 +751,23 @@ export const ledgerSnapshot = (home: string) => {
   }
 }
 
+export const exitStatusOf = (content: string) => (/^\d+\s*$/.test(content) ? Number(content) : undefined)
+
+const publishedStatus = (file: string) =>
+  fs.existsSync(file) ? exitStatusOf(fs.readFileSync(file, "utf8")) : undefined
+
 export const until = async (what: string, ok: () => Promise<boolean> | boolean, timeoutMs = 10_000) => {
   for (const deadline = Date.now() + timeoutMs; !(await ok()); await Bun.sleep(100))
     if (Date.now() > deadline) fail(`timed out waiting for ${what}`)
 }
 
-const secrets = () => [
+const secrets = (login: Readonly<Record<string, string>>) => [
   ...(process.env.VIBEST_E2E_ENV ?? "")
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
     .map((pair) => pair.slice(pair.indexOf("=") + 1)),
-  ...Object.entries(loginEnv())
+  ...Object.entries(login)
     .filter(([name, value]) => secretName.test(name) && value.length >= 6)
     .map(([, value]) => value),
 ]
@@ -766,11 +785,15 @@ export const redactWith = (text: string, exact: ReadonlyArray<string>, words: Re
     exact.reduce((t, value) => (value === "" ? t : t.split(value).join("<redacted>")), text),
   )
 
-export const redact = (text: string) => redactWith(text, secrets(), privateValues)
+export const redactor = (login: Readonly<Record<string, string>>) => (text: string) =>
+  redactWith(text, secrets(login), privateValues)
 
-export const writeEvidence = (file: string, text: string) => fsPromises.writeFile(file, redact(text))
-
-export const copyEvidence = async (from: string, to: string, words: ReadonlyArray<string> = privateValues) => {
+export const copyEvidence = async (
+  login: Readonly<Record<string, string>>,
+  from: string,
+  to: string,
+  words: ReadonlyArray<string>,
+) => {
   for (const e of await fsPromises.readdir(from, { recursive: true, withFileTypes: true })) {
     if (!e.isFile()) continue
     const source = path.join(e.parentPath, e.name)
@@ -778,7 +801,7 @@ export const copyEvidence = async (from: string, to: string, words: ReadonlyArra
     await fsPromises.mkdir(path.dirname(target), { recursive: true })
     await fsPromises.writeFile(
       target,
-      redactWith(await fsPromises.readFile(source, "latin1"), secrets(), words),
+      redactWith(await fsPromises.readFile(source, "latin1"), secrets(login), words),
       "latin1",
     )
   }

@@ -52,7 +52,7 @@ test.if(zsh !== null)("commands typed into a world's pane shells stay out of the
   await typeIntoShell({ HOME: home, PATH: "/usr/bin:/bin" })
   expect(await fs.readFile(history, "utf8")).toContain("typed-into-pane")
   await fs.writeFile(history, before)
-  const w = await World.create("first-run")
+  const w = await World.create(capture(home, zsh!), "first-run")
   try {
     const { ZDOTDIR, HISTFILE } = w.env()
     const out = Bun.spawn([zsh!, "-i"], {

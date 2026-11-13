@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { assert, it } from "@effect/vitest"
+import { assert, beforeAll, it } from "@effect/vitest"
 import { connect, probe, protocolHeaders } from "@vibest/client/client"
 import type { PluginInfo } from "@vibest/core/plugins"
 import { Effect } from "effect"
@@ -79,19 +79,15 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
   }
 }
 
-let built = false
-const build = () => {
-  if (built) return
+beforeAll(() => {
   const out = Bun.spawnSync(["bun", "run", "build"], { cwd: pkg, stdout: "pipe", stderr: "pipe" })
   assert.strictEqual(out.exitCode, 0, out.stderr.toString())
-  built = true
-}
+}, 120_000)
 
 it(
   "P11: the compiled binary maps effect, effect/* and @vibest/plugin to its own instances, even for a plugin with its own copy of effect",
   { timeout: 60_000 },
   async () => {
-    build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-p11-"))
     for (const [file, content] of Object.entries(plugins)) {
       await fs.mkdir(path.dirname(path.join(home, "plugins", file)), { recursive: true })
@@ -129,7 +125,6 @@ it(
   "P16/P17: the running binary reloads changed async imports, keeps running the last good one while an import hangs (it gives up after 5s) without setting it up again, recovers",
   { timeout: 300_000 },
   async () => {
-    build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-reload-"))
     const setups = path.join(home, "setups.log")
     const version = path.join(home, "shared", "version.ts")
@@ -193,7 +188,6 @@ it(
   "a plugin's lazy import, imported again once another plugin loads, is the same module evaluated once",
   { timeout: 180_000 },
   async () => {
-    build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-lazy-"))
     const log = path.join(home, "lazy.log")
     await fs.mkdir(path.join(home, "plugins", "lazy"), { recursive: true })

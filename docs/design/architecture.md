@@ -610,9 +610,13 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
   Product identity and runtime are replacements, which is how one core yields several isolated products.
 - Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
   `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
-  left out, and `unbound<E>()(service)` declares the errors a host's replacement may fail with). Each service has a
-  `node` listing its `deps`; what the host supplies (sqlite, the sockets, the platform services, the daemon's
-  identity) is an unbound node. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
+  left out, and `unbound` is infallible). Each service has a `node` listing its `deps`; what the host supplies
+  (the platform services, the daemon's identity) is an unbound node. The SQL client, the socket server and the HTTP
+  server can fail to open, so the host supplies each as an infallible layer token (`SqlClientLayer`,
+  `SocketServerLayer`, `HttpServerLayer`: an unbound node whose value is a `Layer`), and a real provider node
+  (`sqlClient`, `socketServer`, `httpServer`) consumes the token and carries the failure (`DatabaseOpenFailed`,
+  `SchemaMismatch`, `SqlError`, `SocketServerError`, `ServeError`) in its type; a host that omits a token is
+  refused when the graph is compiled. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
   the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
   replacements. The platform (`packages/platform-bun/src/bun.ts`) exports `replacements` for everything it supplies
   (platform services, sqlite, the sockets, the machine transport, the plugin loader, the builtin plugins, the host

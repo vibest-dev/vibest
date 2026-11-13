@@ -107,10 +107,17 @@ const make = Effect.gen(function* () {
             return fresh.map(outboxItem)
           })
           const wake = Stream.fromSubscription(subscription).pipe(
-            Stream.filter((event) => event.type === "outbox.queued" && event.data.peer === peer),
+            Stream.filter(
+              (event) =>
+                event.type === "session.ended" ||
+                ((event.type === "outbox.queued" || event.type === "outbox.acked") && event.data.peer === peer),
+            ),
           )
           return Stream.concat(Stream.make(undefined), wake).pipe(
-            Stream.mapEffect(() => batch),
+            Stream.mapEffect((event) => {
+              if (event?.type === "outbox.acked") for (const id of event.data.ids) sent.delete(id)
+              return batch
+            }),
             Stream.flattenIterable,
           )
         }),

@@ -67,7 +67,7 @@ export const inboxMethods = (store: Store) => {
 
     insertNoticeTo: (recipient: string, message: string) => tx(tellSender(recipient, message)).pipe(Effect.orDie),
 
-    sendToOrigin: (sessionId: string, target: string, message: string) =>
+    sendToOrigin: (sessionId: string, target: string, message: string, request?: string) =>
       tx(
         Effect.gen(function* () {
           const origin = yield* origins(sessionId)
@@ -77,13 +77,16 @@ export const inboxMethods = (store: Store) => {
             sessionId,
             kind: "send",
             content: message,
+            request,
           })
           return written
         }),
       ).pipe(Effect.orDie),
 
-    sendToPeer: (sender: string, peer: string, session: string, message: string) =>
-      tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message })).pipe(Effect.orDie),
+    sendToPeer: (sender: string, peer: string, session: string, message: string, request?: string) =>
+      tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message, request })).pipe(
+        Effect.orDie,
+      ),
 
     queuedBy: (sessionId: string, request: string) =>
       queuedBy(sessionId, request).pipe(
