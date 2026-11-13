@@ -7,7 +7,7 @@ import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { until } from "./fakes.ts"
+import { until, yieldToIo } from "./fakes.ts"
 import { onB, peerSession, repoStack, twoMachines } from "./machines-fakes.ts"
 
 const outboxCount = Effect.flatMap(SqlClient.SqlClient, (sql) =>
@@ -79,6 +79,29 @@ describe("a Send retried with the same request across machines", () => {
       assert.strictEqual(yield* Queue.take(sent), item)
       yield* b.db.ackOutbox(peer, [item])
       yield* queue
+      assert.strictEqual(yield* Queue.take(sent), item)
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("an item whose sender ends before the ack leaves the sent set, so queuing it again sends it again", () =>
+    Effect.gen(function* () {
+      const b = yield* repoStack()
+      const peer = randomId()
+      const a1 = yield* b.as(peer, "p1")
+      const sender = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+      yield* b.db.insertSession({ ...peerSession, id: sender, name: "sender", createdAt: 1, lastActive: 1 }, b.project)
+      const item = randomId()
+      const sent = yield* Queue.unbounded<string>()
+      yield* a1.outbox.pipe(
+        Stream.runForEach((row) => Queue.offer(sent, row.id)),
+        Effect.forkScoped,
+      )
+      yield* b.db.sendToPeer(sender, peer, randomId(), "x", item)
+      assert.strictEqual(yield* Queue.take(sent), item)
+      yield* b.db.archive(sender)
+      yield* until(b.db.outboxOf(peer), (rows) => rows.length === 0)
+      yield* yieldToIo
+      yield* b.db.sendToPeer(sender, peer, randomId(), "x", item)
       assert.strictEqual(yield* Queue.take(sent), item)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

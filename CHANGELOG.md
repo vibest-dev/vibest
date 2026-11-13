@@ -7,6 +7,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **`Send` takes a UUID `request`** (RPC clients): the optional `request` field of `Send` must be a v4 UUID and any
+  other value is refused when the request is decoded. A retried `Send` with the same `request` reaches another
+  machine once. Send a fresh `crypto.randomUUID()` per message and reuse it only when retrying that message.
 - **Starting and stopping the entry session is user-only** (RPC clients, agents): `Launch`, `Project.StartEntry`,
   `Project.EntrySession` and `Project.StopEntry` refuse a session calling them, including the entry session itself.
   Ask the user to run these operations from a terminal that carries no agent session.
