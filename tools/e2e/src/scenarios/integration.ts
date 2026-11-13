@@ -27,7 +27,6 @@ import {
   Skip,
   until,
   type World,
-  writeEvidence,
 } from "../world.ts"
 import { addCursorPlugin } from "../world/plugins.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
@@ -356,7 +355,10 @@ const checks: ReadonlyArray<Check> = [
           const tried = (await Promise.all(files.map((f) => fs.readFile(path.join(transcripts, f), "utf8")))).some(
             (t) => /"tool_use".*herdr pane list/.test(t),
           )
-          await writeEvidence(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
+          await w.writeEvidence(
+            path.join(evidence, "I5-herdr-call.json"),
+            `${JSON.stringify({ tried, transcripts })}\n`,
+          )
           expect(/\bpong\b/.test(message), message)
           expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
           const current = row<{ id: number }>(w, "SELECT process_id AS id FROM session WHERE id = ?", id)?.id

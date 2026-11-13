@@ -71,8 +71,9 @@ describe("plugins: builtins follow the latest config", () => {
         let release!: () => void
         const gate = new Promise<void>((resolve) => (release = resolve))
         const entered = new Set<string>()
+        const platform = Platform.makePluginLoader()
         const loader: PluginLoader["Service"] = {
-          ...Platform.plugins,
+          ...platform,
           prepare: Effect.void,
           load: async (entry, files) => {
             const name = /gate:(\w+)/.exec(await Bun.file(entry).text())?.[1]
@@ -80,7 +81,7 @@ describe("plugins: builtins follow the latest config", () => {
               entered.add(name)
               await gate
             }
-            return Platform.plugins.load(entry, files)
+            return platform.load(entry, files)
           },
         }
         yield* fs.writeFileString(config, `{ "plugins": ["-harness-x"] }`)

@@ -231,19 +231,20 @@ const freshRequire = async (entry: string, files: ReadonlyArray<string>) => {
   for (const file of files) delete nativeRequire.cache[file]
   return nativeRequire(entry)
 }
+const platform = Platform.makePluginLoader()
 const loader: PluginLoader["Service"] = {
-  ...Platform.plugins,
+  ...platform,
   prepare: Effect.void,
   parseJsonc: (text) => {
     vibestJsonReads.count++
     wake()
-    return Platform.plugins.parseJsonc(text)
+    return platform.parseJsonc(text)
   },
   load: freshRequire,
   watch: (directory, changed, failed) => {
     watchGate.listeners.set(directory, changed)
     watchGate.failures.set(directory, failed)
-    const stop = Platform.plugins.watch(
+    const stop = platform.watch(
       directory,
       (name) => {
         if (!watchGate.hold) changed(name)

@@ -148,7 +148,7 @@ const provided: Readonly<Record<string, object>> = {
 
 const providedPackages: ReadonlySet<string> = new Set(Object.keys(provided).map(packageName))
 
-const makePlugins = (): PluginLoader["Service"] => {
+export const makePluginLoader = (): PluginLoader["Service"] => {
   const { keyLocalImports, load } = makeLoads()
   let mapped = false
   return {
@@ -173,8 +173,6 @@ const makePlugins = (): PluginLoader["Service"] => {
     watch,
   }
 }
-
-export const plugins = makePlugins()
 
 const darwinLibc =
   process.platform === "darwin"
@@ -337,7 +335,7 @@ export const replacements: LayerNode.Replacements = [
     }),
   ),
   MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
-  PluginLoader.node.replace(Layer.succeed(PluginLoader, plugins)),
+  PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
   builtinsNode.replace(Layer.succeed(Builtins, pre)),
   HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
   ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
