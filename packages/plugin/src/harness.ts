@@ -1,6 +1,6 @@
+import type { SubscriptionAccount, SubscriptionLimit } from "@vibest/schema/subscription"
 import type { Effect, Types } from "effect"
 
-import type { SubscriptionAccount, SubscriptionLimit } from "./index.ts"
 import type { Transform } from "./registration.ts"
 
 export interface LaunchInput {
