@@ -214,6 +214,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       for (const file of [
         "pi/extension.mjs",
+        "pi/presentation.mjs",
         "claude/.claude-plugin/plugin.json",
         "claude/hooks/register.mjs",
         "cursor/.cursor-plugin/plugin.json",

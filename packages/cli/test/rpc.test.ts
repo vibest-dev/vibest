@@ -514,6 +514,7 @@ describe("vibest.sock", () => {
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Inbox.Take", c["Inbox.Take"](undefined)],
         ["Watch", Stream.runDrain(c.Watch(undefined))],
+        ["Events", Stream.runDrain(c.Events({}))],
         ["Session.Seen", c["Session.Seen"]({ id: "x", finished: 0 })],
         [
           "Project.EntrySession",

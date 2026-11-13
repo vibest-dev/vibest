@@ -7,6 +7,12 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **`vibest ls` git when a worktree is missing** (scripts reading session JSON): a missing worktree used to give
+  `git: null`, and the list did not fail. That row now has a `git` object with `unknown` set (`git cannot read it`
+  when the folder is gone; the error text when inspection throws). Check `unknown` before reading `saved`: `saved` is
+  false, which is not unsaved work. A readable session's `git` has no `unknown`. A thrown inspection no longer fails
+  the whole list; the other rows stay as they were.
+- **`SubscriptionSnapshot` is `Subscription`** (plugin authors): `@vibest/plugin` no longer declares its own subscription types; `SubscriptionAccount` and `SubscriptionLimit` keep their names and `SubscriptionSnapshot` (the `subscriptions` of the agent hook context) is now `Subscription`, all re-exported from `@vibest/schema/subscription`.
 - **Starting and stopping the entry session is user-only** (RPC clients, agents): `Launch`, `Project.StartEntry`,
   `Project.EntrySession` and `Project.StopEntry` refuse a session calling them, including the entry session itself.
   Ask the user to run these operations from a terminal that carries no agent session.

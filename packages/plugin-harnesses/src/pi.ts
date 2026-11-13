@@ -5,7 +5,7 @@ import { findMessage, jsonLines, opt, withConfigured } from "./models.ts"
 import { platform } from "./platform.ts"
 import { piSubscription } from "./subscriptions/pi.ts"
 
-const extension = (pluginDir: string) => `${pluginDir}/extension.mjs`
+const extensions = (pluginDir: string) => ["-e", `${pluginDir}/extension.mjs`, "-e", `${pluginDir}/presentation.mjs`]
 
 const piState = findMessage(
   Schema.Struct({
@@ -72,8 +72,7 @@ export const pi: Harness.HarnessDefinition = {
     ...opt("--session-id", i.sessionId),
     "--append-system-prompt",
     i.systemPromptFile,
-    "-e",
-    extension(i.pluginDir),
+    ...extensions(i.pluginDir),
     ...providerModel(i.provider, i.model),
   ],
   models: {

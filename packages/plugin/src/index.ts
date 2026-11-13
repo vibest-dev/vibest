@@ -1,3 +1,4 @@
+import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
 import { type Effect, Schema, type Scope, type Types } from "effect"
 
 import type { EventDomain } from "./event.ts"
@@ -11,33 +12,11 @@ export * as Runtime from "./runtime.ts"
 export type { EventDomain, Fact, FactOf, FactType } from "./event.ts"
 export type { PromiseContext, PromiseDefinitions, PromiseRegistration } from "./promise.ts"
 export type { Hooks, Registration, Transform } from "./registration.ts"
+export type { Subscription, SubscriptionAccount, SubscriptionLimit } from "@vibest/schema/subscription"
 export { capture, type Captured } from "./capture.ts"
 export { reconnectSchedule } from "./reconnect.ts"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
-
-export interface SubscriptionLimit {
-  readonly window: string
-  readonly percent: number
-  readonly status: "available" | "limited"
-  readonly resetTime: number | null
-}
-
-export interface SubscriptionAccount {
-  readonly kind: "subscription" | "api-key" | "none"
-  readonly plan?: string | undefined
-  readonly provider?: string | undefined
-}
-
-export interface SubscriptionSnapshot {
-  readonly harness: string
-  readonly provider: string
-  readonly machine: "local"
-  readonly account: SubscriptionAccount
-  readonly limits: ReadonlyArray<SubscriptionLimit>
-  readonly updatedAt: number
-  readonly error?: string | undefined
-}
 
 type LimitWindow = {
   readonly status: string
@@ -133,7 +112,7 @@ export interface AgentContext {
   readonly agent: string
   readonly parentSessionId: string | undefined
   readonly harnesses: ReadonlyArray<HarnessOption>
-  readonly subscriptions: ReadonlyArray<SubscriptionSnapshot>
+  readonly subscriptions: ReadonlyArray<Subscription>
   readonly attempts: ReadonlyArray<Attempt>
 }
 

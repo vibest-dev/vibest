@@ -5,10 +5,11 @@ import { Sessions } from "@vibest/core/sessions"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
+import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { entryOfProject, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
+import { entryOfProject, sessionWorktree, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   test(
@@ -110,5 +111,21 @@ describe.concurrent("Sessions", () => {
       assert.notMatch(error.message, /can run: .*\bpi\b/)
     }),
     { unusable: ["pi"] },
+  )
+
+  test(
+    "a git read that fails marks that session unknown and still lists the others",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const broken = yield* spawnWorking(repo)
+      const fine = yield* spawnWorking(repo)
+      yield* (yield* FakeGit).checkout(yield* sessionWorktree(broken.id), { stateError: "worktree unreadable" })
+      const listed = yield* broken.sessions.list()
+      const failed = listed.find((row) => row.id === broken.id)
+      const other = listed.find((row) => row.id === fine.id)
+      assert.strictEqual(failed?.git?.unknown, "Unknown: Git.state: worktree unreadable")
+      assert.strictEqual(other?.git?.saved, true)
+      assert.strictEqual(other?.git?.unknown, undefined)
+    }),
   )
 })
