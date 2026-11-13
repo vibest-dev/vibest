@@ -14,7 +14,7 @@ import {
 } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { type AgentStatus, AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/session"
-import { Context, Effect, Layer, String as Str } from "effect"
+import { Context, Effect, Layer, Queue, Stream, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "./bus.ts"
@@ -33,6 +33,7 @@ import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessId } from "./harness.ts"
+import { followFacts } from "./journal.ts"
 import type { PeerScope } from "./remote.ts"
 import { SessionLive } from "./session/live.ts"
 
@@ -73,6 +74,7 @@ export type SessionFilter = {
 
 const make = Effect.gen(function* () {
   const store = yield* makeStore
+  const bus = yield* Bus
   const {
     sql,
     reads,
@@ -80,6 +82,8 @@ const make = Effect.gen(function* () {
     sessionLive,
     moving,
     emit,
+    afterCommit,
+    afterCommitLive,
     tx,
     notify,
     projectPrefixTaken,
@@ -348,7 +352,7 @@ const make = Effect.gen(function* () {
                   }),
             },
           })
-          if (archives) yield* sessionLive.archiveWhenIdle(row.id)
+          if (archives) yield* afterCommitLive(sessionLive.archiveWhenIdle(row.id))
           const processAt = row.startedAt ?? row.createdAt
           const process = yield* startProcess(
             row.id,
@@ -384,7 +388,7 @@ const make = Effect.gen(function* () {
                 data: { execution, outcome: row.executionState },
               })
           }
-          yield* sessionLive.setStatus(row.id, row.status)
+          yield* afterCommitLive(sessionLive.setStatus(row.id, row.status))
           return true
         }),
       ).pipe(Effect.orDie),
@@ -539,7 +543,7 @@ const make = Effect.gen(function* () {
                 content: start.firstInput,
                 status: "delivered",
               })
-            moving.delete(project)
+            yield* afterCommit(() => void moving.delete(project))
             if (!movingHere || fresh) yield* dropWaiting(project)
             return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project }
           }),
@@ -598,7 +602,7 @@ const make = Effect.gen(function* () {
             yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
             return current.id
           }
-          if (integration !== undefined) yield* sessionLive.setIntegration(id, integration)
+          if (integration !== undefined) yield* afterCommitLive(sessionLive.setIntegration(id, integration))
           yield* emit(ProcessReady, {
             sessionId: id,
             at: patch.ready as number,
@@ -649,6 +653,28 @@ const make = Effect.gen(function* () {
       tx(clearEntryAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     canResumeConversation,
+    facts: (o: {
+      readonly session?: string | undefined
+      readonly after?: number | undefined
+      readonly follow: boolean
+    }) => {
+      const start = o.session === undefined ? ({ log: 0 } as const) : { session: o.session, after: o.after ?? 0 }
+      if (!o.follow) return followFacts(sql, Effect.void, start, false).pipe(Stream.orDie)
+      return Stream.unwrap(
+        Effect.gen(function* () {
+          const wake = yield* Queue.sliding<void>(1)
+          yield* Stream.fromSubscription(yield* bus.subscribe).pipe(
+            Stream.runForEach((event) =>
+              "seq" in event && (o.session === undefined || event.aggregate === o.session)
+                ? Queue.offer(wake, undefined)
+                : Effect.void,
+            ),
+            Effect.forkScoped,
+          )
+          return followFacts(sql, Queue.take(wake), start, true).pipe(Stream.orDie)
+        }),
+      )
+    },
     ...inboxMethods(store),
   }
 })

@@ -296,6 +296,48 @@ describe("Db", () => {
     ),
   )
 
+  it.effect("a rolled back endObserved leaves the live status working", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const sql = yield* SqlClient.SqlClient
+        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const parent = yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
+        yield* db.insertSession(session(id), yield* projectOf("r"), { cwd: "/w", parentSessionId: parent.sessionId })
+        yield* db.startObserved(id, "typed", 1)
+        assert.strictEqual((yield* db.getSession(id))?.status, "working")
+        yield* sql`CREATE TRIGGER no_notice BEFORE INSERT ON inbox BEGIN SELECT RAISE(ABORT, 'no notice'); END`
+        const end = {
+          harness: "pi",
+          at: 2,
+          status: "failed" as const,
+          reply: "",
+          failure: "boom",
+          limited: false,
+          conversation: undefined,
+          needsReady: false,
+        }
+        assert.isTrue(Exit.isFailure(yield* Effect.exit(db.endObserved(id, end))))
+        assert.strictEqual((yield* db.getSession(id))?.status, "working")
+      }),
+    ),
+  )
+
+  it.effect("a rolled back patchLive ready leaves the live integration unchanged", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const sql = yield* SqlClient.SqlClient
+        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        yield* db.insertSession(session(id), yield* projectOf("r"))
+        yield* sql`CREATE TRIGGER no_ready BEFORE UPDATE OF ready_at ON process BEGIN SELECT RAISE(ABORT, 'no ready'); END`
+        const exit = yield* Effect.exit(db.patchLive(id, { ready: 5, integration: { version: "9.9.9", protocol: 1 } }))
+        assert.isTrue(Exit.isFailure(exit))
+        assert.isNull((yield* db.getSession(id))?.process?.integration)
+      }),
+    ),
+  )
+
   it.effect(
     "the task is the first inbox row; the open execution is the message row with no ended_at; status is memory only",
     () =>
