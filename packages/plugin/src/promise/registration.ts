@@ -4,5 +4,4 @@ export interface Registration {
 
 export interface Definitions<Editor> {
   readonly transform: (callback: (editor: Editor) => void) => Promise<Registration>
-  readonly reload: () => Promise<void>
 }

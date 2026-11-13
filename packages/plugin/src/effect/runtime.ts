@@ -62,7 +62,7 @@ export const eventsFrom = (pubsub: PubSub.PubSub<RuntimeEvent>): Stream.Stream<R
     ),
   )
 
-export type CallerValues = Readonly<Record<string, string | undefined>>
+type CallerValues = Readonly<Record<string, string | undefined>>
 
 export interface RuntimeCaller {
   readonly env: ReadonlyArray<string>
@@ -115,7 +115,6 @@ export interface RuntimeDefinition {
 }
 
 export interface RuntimeEditor {
-  list(): ReadonlyArray<RuntimeDefinition>
   get(id: string): RuntimeDefinition | undefined
   add(definition: RuntimeDefinition): void
   update(id: string, update: (definition: Types.Mutable<RuntimeDefinition>) => void): void
@@ -124,5 +123,4 @@ export interface RuntimeEditor {
 
 export interface RuntimeDomain {
   readonly transform: Transform<RuntimeEditor>
-  readonly reload: () => Effect.Effect<void>
 }

@@ -16,7 +16,7 @@ export interface LaunchInput {
   readonly env: Readonly<Record<string, string>>
 }
 
-export interface StartupPane {
+interface StartupPane {
   readonly screen: Effect.Effect<string>
   readonly sendKeys: (keys: ReadonlyArray<string>) => Effect.Effect<void>
 }
@@ -42,7 +42,7 @@ export interface SubscriptionRead {
   readonly error?: string
 }
 
-export type HarnessEvent = Readonly<Record<string, unknown>>
+type HarnessEvent = Readonly<Record<string, unknown>>
 
 export interface HarnessDefinition {
   readonly id: string
@@ -69,7 +69,6 @@ export interface HarnessDefinition {
 }
 
 export interface HarnessEditor {
-  list(): ReadonlyArray<HarnessDefinition>
   get(id: string): HarnessDefinition | undefined
   add(definition: HarnessDefinition): void
   update(id: string, update: (definition: Types.Mutable<HarnessDefinition>) => void): void
@@ -78,5 +77,4 @@ export interface HarnessEditor {
 
 export interface HarnessDomain {
   readonly transform: Transform<HarnessEditor>
-  readonly reload: () => Effect.Effect<void>
 }

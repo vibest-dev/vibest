@@ -7,6 +7,7 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Plugin API members without a caller removed** (plugin authors): `context.runtime.reload` and `context.harness.reload` (`Definitions.reload` of the Promise entry) are gone; the editors of `agent.transform`, `runtime.transform` and `harness.transform` no longer have `list` (use `get`, `add`, `update`, `remove`). `@vibest/plugin/testing` no longer re-exports `RuntimeDefinition` (import it from `@vibest/plugin/effect` as `Runtime.RuntimeDefinition`) and no longer exports `ContractError`, `ContractFailure` and `ContractOptions`. No longer exported from the entries: `AgentContext`, `MachineRuntime`, `MachineRuntimeThere`, `StartupPane`, `HarnessEvent`, `CallerValues`, `CaptureOptions`, `SubscriptionDomain` (Effect) and `Cleanup`, `Definitions` (Promise). They return when a caller needs them.
 - **Plugin entry points split into Promise and Effect** (plugin authors): `@vibest/plugin` is now the Promise API only
   (`Plugin.define({ id, setup })`, a Promise `Context`) and `@vibest/plugin/effect` is the Effect API
   (`Plugin.define({ id, effect })`, `Context`, `Hooks`, `Registration`, `Transform`, `Runtime`, `Harness`, `capture`,

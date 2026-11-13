@@ -231,8 +231,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         options: candidate.options,
         agent: { hook, transform: agents.transform },
         machine: { hook: machine },
-        runtime: { transform: runtimes.transform, reload: runtimes.reload },
-        harness: { transform: harnesses.transform, reload: harnesses.reload },
+        runtime: { transform: runtimes.transform },
+        harness: { transform: harnesses.transform },
         subscription: { report: (input) => subscriptions.report(input) },
         event: { subscribe: factsFor(bus, plugin.id) },
       }

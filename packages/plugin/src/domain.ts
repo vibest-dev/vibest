@@ -51,7 +51,7 @@ export interface SubscriptionReport {
   readonly limits: ReadonlyArray<SubscriptionLimit>
 }
 
-export interface MachineRuntime {
+interface MachineRuntime {
   readonly kind: string
   readonly status: "online" | "offline" | "blocked"
   readonly reason?: string | undefined
@@ -62,7 +62,7 @@ export interface MachineNote {
   readonly fix?: string
 }
 
-export interface MachineRuntimeThere extends MachineRuntime {
+interface MachineRuntimeThere extends MachineRuntime {
   readonly link?: Readonly<Record<string, string>> | undefined
 }
 
@@ -92,7 +92,7 @@ export interface Attempt {
   readonly at: number
 }
 
-export interface AgentContext {
+interface AgentContext {
   readonly project: string
   readonly agent: string
   readonly parentSessionId: string | undefined
@@ -173,7 +173,6 @@ export interface AgentDefinition {
 }
 
 export interface AgentEditor {
-  list(): ReadonlyArray<AgentDefinition>
   get(id: string): AgentDefinition | undefined
   add(definition: AgentDefinition): void
   update(id: string, update: (definition: Types.Mutable<AgentDefinition>) => void): void

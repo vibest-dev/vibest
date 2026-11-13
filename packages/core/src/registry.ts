@@ -201,7 +201,6 @@ export interface Keyed {
 }
 
 export interface ListEditor<D extends Keyed> {
-  list(): ReadonlyArray<D>
   get(id: string): D | undefined
   add(definition: D): void
   update(id: string, update: (definition: { -readonly [K in keyof D]: D[K] }) => void): void
@@ -209,7 +208,6 @@ export interface ListEditor<D extends Keyed> {
 }
 
 export const listEditor = <D extends Keyed>(state: Array<D>): ListEditor<D> => ({
-  list: () => [...state],
   get: (id) => state.find((definition) => definition.id === id),
   add: (definition) => {
     const at = state.findIndex((existing) => existing.id === definition.id)
