@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Effect } from "effect"
 
 import { projectOf } from "./fakes.ts"

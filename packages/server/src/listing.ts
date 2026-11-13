@@ -1,4 +1,3 @@
-import { projectActivity, unseenDone } from "@vibest/core/activity"
 import { type BusEvent } from "@vibest/core/bus"
 import {
   Db,
@@ -9,9 +8,10 @@ import {
   type RuntimeAddress,
   type SessionBrief,
   terminalOf,
-} from "@vibest/core/db"
+} from "@vibest/core/database/db"
+import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
-import { type SessionView, Sessions } from "@vibest/core/sessions"
+import { type SessionView, Sessions } from "@vibest/core/session"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
 

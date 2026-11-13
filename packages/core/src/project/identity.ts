@@ -1,9 +1,9 @@
 import { ProjectMoved } from "@vibest/schema/session"
 import { Effect, FileSystem, Path } from "effect"
 
-import type { Db } from "./db.ts"
-import { Layout } from "./paths.ts"
-import { projectRepositories, projectRoot } from "./project-create.ts"
+import type { Db } from "../database/db.ts"
+import { Layout } from "../paths.ts"
+import { projectRepositories, projectRoot } from "./create.ts"
 
 export const locateProject = Effect.fn("locateProject")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem

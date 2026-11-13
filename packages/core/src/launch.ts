@@ -3,8 +3,8 @@ import { Effect, FileSystem } from "effect"
 
 import { Agents, unknownAgent } from "./agents.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
-import type { AgentsShape } from "./host.ts"
 import { Layout, VibestCommand } from "./paths.ts"
+import type { AgentsShape } from "./plugin/host.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
 import {
   projectText,

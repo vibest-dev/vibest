@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { keyedLock } from "@vibest/core/keyed-lock"
+import { keyedLock } from "@vibest/core/effect/keyed-mutex"
 import { Deferred, Effect, Fiber } from "effect"
 
 describe("keyedLock", () => {

@@ -221,7 +221,7 @@ describe("ledger access rules", () => {
   it("event-reads: only the journal reads the event table and position", () => {
     const source = "export const q = `SELECT * FROM event`\nexport const p = { position: 1 }\n"
     expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
-    expect(oxlintFindings(source, core("journal.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("database/journal.ts"))).toEqual([])
     expect(oxlintFindings(source, core("a.test.ts"))).toEqual([])
   })
 
@@ -239,16 +239,16 @@ describe("ledger access rules", () => {
       "3 vibest(projector-writes)",
       "4 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(source, core("projectors.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("database/projectors.ts"))).toEqual([])
   })
 
   it("projector-writes: db.ts may hold only its one opening write", () => {
     const opening = "export const a = `UPDATE meta SET value = value WHERE key = ''`\n"
-    expect(oxlintFindings(opening, core("db.ts"))).toEqual([])
-    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("db.ts"))).toEqual([
+    expect(oxlintFindings(opening, core("database/db.ts"))).toEqual([])
+    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("database/db.ts"))).toEqual([
       "2 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(`export const a = "DELETE FROM meta"\n`, core("db.ts"))).toEqual([
+    expect(oxlintFindings(`export const a = "DELETE FROM meta"\n`, core("database/db.ts"))).toEqual([
       "1 vibest(projector-writes)",
     ])
   })
@@ -279,9 +279,9 @@ export const i = setInterval
 
   it("no-background-loop: the approved file keeps only its one loop", () => {
     const forever = "export const a = pipe(x, Effect.forever)\n"
-    expect(oxlintFindings(forever, "packages/core/src/plugin-supervisor.ts")).toEqual([])
+    expect(oxlintFindings(forever, "packages/core/src/plugin/supervisor.ts")).toEqual([])
     expect(
-      oxlintFindings(forever + forever.replace("const a", "const b"), "packages/core/src/plugin-supervisor.ts"),
+      oxlintFindings(forever + forever.replace("const a", "const b"), "packages/core/src/plugin/supervisor.ts"),
     ).toEqual(["2 vibest(no-background-loop)"])
   })
 })

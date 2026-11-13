@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Db, terminalOf } from "@vibest/core/db"
+import { Db, terminalOf } from "@vibest/core/database/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import {

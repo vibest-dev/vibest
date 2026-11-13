@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { SessionLive } from "@vibest/core/session/live"
 import { systemPrompt } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"

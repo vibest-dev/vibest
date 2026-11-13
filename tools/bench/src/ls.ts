@@ -3,7 +3,7 @@ import path from "node:path"
 
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Bus } from "@vibest/core/bus"
-import { Db, SQL_NAMES } from "@vibest/core/db"
+import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Layer } from "effect"
 

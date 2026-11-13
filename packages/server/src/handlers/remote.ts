@@ -1,6 +1,6 @@
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/db"
-import type { PeerScope } from "@vibest/core/db-remote"
+import { Db } from "@vibest/core/database/db"
+import type { PeerScope } from "@vibest/core/database/db-remote"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import type { NotInRepository } from "@vibest/core/worktree"

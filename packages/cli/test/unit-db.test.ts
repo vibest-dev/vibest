@@ -3,10 +3,10 @@ import url from "node:url"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
+import { APPLICATION_ID, Db, executionStateOf } from "@vibest/core/database/db"
+import { makeJournal } from "@vibest/core/database/journal"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
-import { APPLICATION_ID, Db, executionStateOf } from "@vibest/core/db"
-import { makeJournal } from "@vibest/core/journal"
-import { PROJECTION_VERSION } from "@vibest/core/projectors"
+import { PROJECTION_VERSION } from "@vibest/core/database/projectors"
 import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -939,7 +939,7 @@ describe("Db", () => {
       const dir = yield* tempDirectory("vibest-schema-race-")
       const file = yield* fileAt(dir, "vibest.db")
       const script = yield* fileAt(dir, "open.ts")
-      const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
+      const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/database/db.ts", import.meta.url))
       const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
       const liveModule = url.fileURLToPath(new URL("../../../packages/core/src/session/live.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../../platform-bun/src/bun.ts", import.meta.url))

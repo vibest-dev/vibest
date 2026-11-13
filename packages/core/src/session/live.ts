@@ -1,7 +1,7 @@
 import type { AgentStatus } from "@vibest/schema/session"
 import { Context, Effect, HashMap, Layer, Option, Ref, SynchronizedRef } from "effect"
 
-import type { Integration } from "../db-rows.ts"
+import type { Integration } from "../database/db-rows.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 
 export interface Tracked {

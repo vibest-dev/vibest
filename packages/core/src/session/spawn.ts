@@ -24,8 +24,9 @@ import {
   runtimeOf,
   terminalOf,
   archived,
-} from "../db.ts"
+} from "../database/db.ts"
 import { Drain } from "../drain.ts"
+import { directoryLock, type keyedLock } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import {
@@ -38,10 +39,9 @@ import {
   preflight,
   unprovided,
 } from "../harness.ts"
-import { directoryLock, type keyedLock } from "../keyed-lock.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, safeRepositoryDirectory } from "../paths.ts"
-import { Plugins, type Routing } from "../plugins.ts"
-import { listProjectRepositories } from "../project-create.ts"
+import { Plugins, type Routing } from "../plugin.ts"
+import { listProjectRepositories } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, Runtimes } from "../runtimes.ts"

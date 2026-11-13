@@ -1,6 +1,6 @@
 import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
-import { Db } from "@vibest/core/db"
-import { locateProject, resolveProject } from "@vibest/core/project-identity"
+import { Db } from "@vibest/core/database/db"
+import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { NotInRepository } from "@vibest/core/worktree"
 import { type ACCESS, Caller, type CallerShape, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"

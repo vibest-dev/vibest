@@ -2,10 +2,10 @@ import { ExecutionAccepted, type InboxKind } from "@vibest/schema/event"
 import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
-import { nextBatch } from "./batch.ts"
+import { nextBatch } from "../batch.ts"
+import { type ObservedEnd } from "../replies.ts"
 import { failureOf, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
-import { type ObservedEnd } from "./replies.ts"
 
 export const inboxMethods = (store: Store) => {
   const {

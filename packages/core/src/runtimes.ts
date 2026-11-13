@@ -6,8 +6,8 @@ import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, 
 
 import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
-import * as Registry from "./registry.ts"
+import type { HostEnv as HostEnvShape, RuntimesShape } from "./plugin/host.ts"
+import * as Registry from "./plugin/registry.ts"
 
 export { NoRuntime }
 

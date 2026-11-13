@@ -4,8 +4,8 @@ import { messageOf } from "@vibest/schema/error"
 import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
-import { LayerNode } from "./effect/layer-node.ts"
-import { Layout } from "./paths.ts"
+import { LayerNode } from "../effect/layer-node.ts"
+import { Layout } from "../paths.ts"
 
 export class PluginLoader extends Context.Service<
   PluginLoader,

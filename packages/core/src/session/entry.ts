@@ -12,15 +12,15 @@ import {
   placedTerminal,
   type RuntimeAddress,
   type SessionRow,
-} from "../db.ts"
+} from "../database/db.ts"
+import { keyedLock } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Harness, harnessOptions, Harnesses, HarnessUnavailable, type HarnessId } from "../harness.ts"
 import { entryIdle } from "../inbox.ts"
-import { keyedLock } from "../keyed-lock.ts"
 import * as Launch from "../launch.ts"
 import { Layout, VibestCommand } from "../paths.ts"
-import { Plugins } from "../plugins.ts"
+import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"

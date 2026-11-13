@@ -1,10 +1,10 @@
 import { Bus } from "@vibest/core/bus"
-import { Db, type OutboxRow } from "@vibest/core/db"
+import { Db, type OutboxRow } from "@vibest/core/database/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
-import { defaultSessionName, Sessions } from "@vibest/core/sessions"
+import { defaultSessionName, Sessions } from "@vibest/core/session"
 import type { PayloadOf } from "@vibest/protocol/rpc"
 import {
   NoCommit,

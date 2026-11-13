@@ -14,7 +14,7 @@ import {
   executionStateOf,
   executionStartedAt,
   archived,
-} from "../db.ts"
+} from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harness.ts"
 import { Inbox } from "../inbox.ts"
