@@ -571,6 +571,38 @@ const ls = Command.make(
   ),
 )
 
+const events = Command.make(
+  "events",
+  {
+    session: Flag.String("session").pipe(
+      Flag.withDescription("Only this session's facts (its id, or a unique prefix of at least 8 characters)"),
+      Flag.optional,
+    ),
+    follow: Flag.Boolean("follow").pipe(
+      Flag.withDescription("Keep running and print facts as they are recorded"),
+      Flag.withDefault(false),
+    ),
+  },
+  (o) =>
+    Effect.gen(function* () {
+      yield* userOnly("events")
+      const c = yield* caller
+      yield* withVibest(c.claim, (client, ping) =>
+        Effect.gen(function* () {
+          if (ping.capabilities?.events !== true)
+            return yield* new LaunchFailed({
+              message: "this vibestd does not serve events; run vibest daemon restart",
+            })
+          yield* Stream.runForEach(client.Events({ session: Option.getOrUndefined(o.session), follow: o.follow }), json)
+        }),
+      )
+    }),
+).pipe(
+  Command.withDescription(
+    "The event log as JSON lines: one session's facts (--session) or all of them; --follow keeps printing new ones",
+  ),
+)
+
 const providerFlag = Flag.String("provider").pipe(
   Flag.withDescription("Only this provider's models; a harness with no provider option refuses it"),
   Flag.optional,
@@ -836,6 +868,7 @@ export const command = (host: Daemon.Host, replacements: Daemon.Replacements, ex
       peek,
       archive,
       ls,
+      events,
       models,
       harness,
       project,
