@@ -150,7 +150,6 @@ const factsFor =
     return Stream.unwrap(Effect.andThen(warned, Effect.map(bus.subscribe, Stream.fromSubscription))).pipe(
       Stream.filter(isFact),
       Stream.filter(wanted),
-      Stream.map((fact) => structuredClone(fact)),
     )
   }
 
