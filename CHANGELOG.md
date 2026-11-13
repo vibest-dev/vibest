@@ -7,6 +7,7 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **`SubscriptionSnapshot` is `Subscription`** (plugin authors): `@vibest/plugin` no longer declares its own subscription types; `SubscriptionAccount` and `SubscriptionLimit` keep their names and `SubscriptionSnapshot` (the `subscriptions` of the agent hook context) is now `Subscription`, all re-exported from `@vibest/schema/subscription`.
 - **Starting and stopping the entry session is user-only** (RPC clients, agents): `Launch`, `Project.StartEntry`,
   `Project.EntrySession` and `Project.StopEntry` refuse a session calling them, including the entry session itself.
   Ask the user to run these operations from a terminal that carries no agent session.
