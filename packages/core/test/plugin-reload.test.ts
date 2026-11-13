@@ -336,12 +336,24 @@ const timers = Effect.gen(function* () {
     isArmed(duration).pipe(Effect.andThen(clock.adjust(Duration.fromInputUnsafe(duration))))
   const clocked = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provideService(effect, Clock.Clock, Object.assign(Object.create(clock) as TestClock.TestClock, { sleep }))
+  const untilOpen = (ready: Effect.Effect<boolean>) =>
+    TestClock.withLive(
+      Effect.gen(function* () {
+        if (!(yield* ready)) return yield* Effect.die("activation did not settle")
+      }),
+    )
   const rescanned = <A, E, R>(f: Effect.Effect<A, E, R>, done: (a: A) => boolean, what: string) =>
     isArmed(RECHECK).pipe(
       Effect.andThen(clock.adjust(RECHECK)),
       Effect.andThen(TestClock.withLive(eventually(clock.adjust(DEBOUNCE).pipe(Effect.andThen(f)), done, what))),
     )
-  return { armed: isArmed, fire, clocked, rescanned }
+  const reloaded = (ready: Effect.Effect<boolean>) =>
+    isArmed(RECHECK).pipe(
+      Effect.andThen(clock.adjust(RECHECK)),
+      Effect.andThen(clock.adjust(DEBOUNCE)),
+      Effect.andThen(untilOpen(ready)),
+    )
+  return { armed: isArmed, fire, clocked, rescanned, untilOpen, reloaded }
 })
 describe("plugins: supervisor", () => {
   const builtinCandidate = (id: string) =>
@@ -363,17 +375,16 @@ describe("plugins: supervisor", () => {
         const config = path.join(dir, "vibest.json")
         const builtins = [builtinCandidate("harness-x"), builtinCandidate("runtime-y"), builtinCandidate("runtime-z")]
         yield* fs.writeFileString(config, `{ "plugins": ["-*", "-runtime.*", "-runtime-*", "-harness-x"] }`)
-        const { clocked, rescanned } = yield* timers
+        const { clocked, untilOpen, reloaded } = yield* timers
         const plugins = yield* clocked(supervise(dir, builtins))
+        yield* untilOpen(plugins.settled)
         assert.deepStrictEqual(yield* startedWith(plugins), ["runtime-y", "runtime-z"])
         yield* fs.writeFileString(config, `{ "plugins": ["-runtime-y", "-harness-x"] }`)
-        yield* rescanned(startedWith(plugins), (ids) => ids.join() === "runtime-z", "runtime-y removed")
+        yield* reloaded(plugins.settled)
+        assert.deepStrictEqual(yield* startedWith(plugins), ["runtime-z"])
         yield* fs.writeFileString(config, `{ "plugins": [] }`)
-        yield* rescanned(
-          startedWith(plugins),
-          (ids) => ids.join() === "harness-x,runtime-y,runtime-z",
-          "the builtins back after un-removing",
-        )
+        yield* reloaded(plugins.settled)
+        assert.deepStrictEqual(yield* startedWith(plugins), ["harness-x", "runtime-y", "runtime-z"])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     20_000,
   )
@@ -389,11 +400,13 @@ describe("plugins: supervisor", () => {
         yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
         yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a1"`))
         watchGate.hold = true
-        const { clocked, rescanned } = yield* timers
+        const { clocked, rescanned, untilOpen, reloaded } = yield* timers
         const service = yield* clocked(supervise(dir))
+        yield* untilOpen(service.settled)
         assert.strictEqual((yield* service.start(event)).model, "a1")
         yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a2"`))
-        yield* rescanned(service.start(event), (s) => s.model === "a2", "the unreported save")
+        yield* reloaded(service.settled)
+        assert.strictEqual((yield* service.start(event)).model, "a2")
         const reads = vibestJsonReads.count
         yield* rescanned(
           Effect.sync(() => vibestJsonReads.count),
