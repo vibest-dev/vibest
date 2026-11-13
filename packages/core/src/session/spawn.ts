@@ -1,6 +1,7 @@
 import { newId } from "@vibest/schema/id"
 import {
   AllocationFailed,
+  describeSpawn,
   LimitReached,
   NoCallingSession,
   NoHarnessChosen,
@@ -40,7 +41,7 @@ import {
 } from "../harness.ts"
 import { directoryLock, type keyedLock } from "../keyed-lock.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, safeRepositoryDirectory } from "../paths.ts"
-import { describeSpawn, Plugins, type Routing } from "../plugins.ts"
+import { Plugins, type Routing } from "../plugins.ts"
 import { listProjectRepositories } from "../project-create.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, Runtimes } from "../runtimes.ts"

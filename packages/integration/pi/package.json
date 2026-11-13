@@ -35,6 +35,7 @@
     "@earendil-works/pi-tui": "1.2.0",
     "@vibest/cli": "workspace:*",
     "@vibest/core": "workspace:*",
+    "@vibest/platform-bun": "workspace:*",
     "@vibest/server": "workspace:*"
   },
   "peerDependencies": {

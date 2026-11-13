@@ -20,7 +20,7 @@ Every machine runs its own vibestd. vibest mirrors herdr-core: each vibestd has 
   file: move it aside and start again"; vibest never rewrites a file it cannot read.
 - It survives restarts, `vibest update` and a handoff. Replacing `vibest.db` alone keeps the identity; deleting
   `identity.json` gives a new one at the next start.
-- The host id is read by the platform layer (`packages/cli/src/platform/bun.ts`): on macOS `IOPlatformUUID` from
+- The host id is read by the platform layer (`packages/platform-bun/src/bun.ts`): on macOS `IOPlatformUUID` from
   `ioreg -rd1 -c IOPlatformExpertDevice` (the value hc stores); on Linux the first line of `/etc/machine-id`, else of
   `/var/lib/dbus/machine-id`. Anything else, a read that fails, is empty or takes more than 2 s: unreadable.
 

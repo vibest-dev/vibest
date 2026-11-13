@@ -1,4 +1,5 @@
 import * as VibestPlugin from "@vibest/plugin"
+import { messageOf } from "@vibest/schema/error"
 import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
@@ -13,7 +14,7 @@ import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
 import type { PluginsShape } from "./host.ts"
-import { type Candidate, keyOf, makeSources, messageOf, PluginLoader } from "./plugin-sources.ts"
+import { type Candidate, keyOf, makeSources, PluginLoader } from "./plugin-sources.ts"
 import { supervise } from "./plugin-supervisor.ts"
 import * as Registry from "./registry.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
@@ -34,17 +35,6 @@ type AgentHook = `agent.${Short}`
 export type MachineHook = keyof VibestPlugin.MachineHooks
 export interface PluginNote extends VibestPlugin.MachineNote {
   readonly plugin?: string
-}
-
-export const describeSpawn = (s: {
-  harness: string
-  provider?: string | undefined
-  model?: string | undefined
-  decidedBy: Readonly<Record<string, string>>
-}) => {
-  const plugins = [...new Set(Object.values(s.decidedBy))]
-  const by = plugins.length === 0 ? "" : ` (chosen by plugin ${plugins.join(", ")})`
-  return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
 }
 
 export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">

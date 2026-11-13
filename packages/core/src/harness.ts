@@ -1,7 +1,7 @@
 import type { HarnessOption } from "@vibest/plugin"
 import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { VibestCommand } from "@vibest/schema/layout"
-import { HarnessUnavailable } from "@vibest/schema/session"
+import { addPluginHint, HarnessUnavailable } from "@vibest/schema/session"
 import { Cache, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -14,9 +14,6 @@ export { type HarnessId, HarnessUnavailable } from "@vibest/schema/session"
 export type { HarnessDefinition }
 
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
-
-export const addPluginHint =
-  "a harness comes from a plugin: add one that provides it to `plugins` in vibest.json in the vibest home"
 
 export const unprovided = (id: string, loaded: ReadonlyArray<HarnessDefinition>) =>
   new HarnessUnavailable({

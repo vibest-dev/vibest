@@ -2,7 +2,7 @@
 
 Installation and update details for the [vibest surfaces](architecture.md#13-surfaces-and-protocol).
 
-From omac `bin/`, `cli-<platform>` packages, `build-flags.ts`: two installs of the same compiled binary,
+From omac `bin/`, `cli-<platform>` packages, the build flags in `packages/cli/scripts/build.ts`: two installs of the same compiled binary,
 built without `bunfig` and `.env` autoloading (otherwise a compiled Bun executable loads `bunfig.toml`, whose
 `preload` runs code, and `.env` from the directory it runs in, and vibest runs in repositories it does not control). install.sh (`curl … | sh`) downloads this platform's archive from the
 latest GitHub Release (a `v*` tag's release: one archive per platform, install.sh, and `version`), unpacks it to

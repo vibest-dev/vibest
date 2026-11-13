@@ -1,11 +1,11 @@
 import * as VibestPlugin from "@vibest/plugin"
+import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
 import { Cause, Context, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type LiveEvent } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
-import { messageOf } from "./plugin-sources.ts"
 import * as Registry from "./registry.ts"
 
 export { NoRuntime }

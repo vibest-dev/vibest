@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { Layout, VibestCommand } from "@vibest/core/paths"
 import { VERSION } from "@vibest/protocol/rpc"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Effect } from "effect"
 import { Command } from "effect/cli"
 

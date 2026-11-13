@@ -65,7 +65,9 @@ export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("
   message: Schema.String,
 }) {}
 
-export const run = (host: Host, replacements: LayerNode.Replacements, options: { readonly handoff?: boolean } = {}) =>
+export type Replacements = LayerNode.Replacements
+
+export const run = (host: Host, replacements: Replacements, options: { readonly handoff?: boolean } = {}) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem

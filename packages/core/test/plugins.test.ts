@@ -17,7 +17,7 @@ import type { Fact } from "@vibest/schema/event"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "../../cli/src/platform/bun.ts"
+import * as Platform from "../../platform-bun/src/bun.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"

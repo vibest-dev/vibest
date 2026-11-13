@@ -8,8 +8,6 @@ import {
   startDaemon,
   stopByHand,
 } from "@vibest/client/client"
-import { askYesNo, interactive, Layout, VibestCommand, shellQuote } from "@vibest/core/paths"
-import { NoSuchSession } from "@vibest/core/sessions"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import {
   DaemonBusy,
@@ -20,9 +18,13 @@ import {
   ProtocolRejected,
   WrongInstance,
 } from "@vibest/protocol/rpc"
+import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
+import { NoSuchSession } from "@vibest/schema/session"
 import { Cause, Console, Duration, Effect, Exit, Option, Path, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, type RpcClientError } from "effect/rpc"
+
+import { askYesNo, interactive } from "./ask.ts"
 
 export const ReplaceOutcome = Schema.Literals(["declined", "busy", "unchanged", "unknown", "other"])
 

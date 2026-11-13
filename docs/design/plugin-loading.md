@@ -68,7 +68,7 @@ at the deadline and leaves the interrupt to a detached fiber (effect 4.0.2 has n
 
 ## Loading on Bun
 
-In `platform/bun.ts` and `platform/plugin-source.ts` (after OpenCode V2's `source.bun.ts`): inside the
+In `packages/platform-bun/src/bun.ts` and `plugin-source.ts` (after OpenCode V2's `source.bun.ts`): inside the
 compiled binary nothing resolves a plugin's `effect` and `@vibest/plugin` imports, and a copy beside the plugin would
 be a second effect instance, so `Bun.plugin` maps them to vibestd's own modules (`effect/X` is `effect.X` for every
 top-level module the root namespace exports). A plugin's graph is its entry and the local files it imports,

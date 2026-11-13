@@ -1,5 +1,5 @@
 import { ID } from "@vibest/schema/id"
-import { type Duration, Effect, FileSystem, Option, Path, Random, Stdio, Stream } from "effect"
+import { Effect, FileSystem, Path, Random } from "effect"
 export { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 
 const LEGACY_SESSION_DIRECTORY = /^[0-9a-f]{8}$/
@@ -35,27 +35,3 @@ export const writeAtomic = Effect.fn("writeAtomic")(function* (
   yield* fs.writeFileString(tmp, content, options?.mode === undefined ? undefined : { mode: options.mode })
   yield* fs.rename(tmp, file)
 })
-
-export const interactive = Effect.gen(function* () {
-  const stdio = yield* Stdio.Stdio
-  return (yield* stdio.stdinIsTerminal) && (yield* stdio.stdoutIsTerminal)
-})
-
-export const askLine = (question: string, timeout: Duration.Input = "2 minutes") =>
-  Effect.gen(function* () {
-    const stdio = yield* Stdio.Stdio
-    yield* Stream.run(Stream.make(question), stdio.stdout()).pipe(Effect.ignore)
-    const answer = yield* Stream.decodeText(stdio.stdin).pipe(
-      Stream.splitLines,
-      Stream.runHead,
-      Effect.timeoutOption(timeout),
-      Effect.orElseSucceed(() => Option.none()),
-    )
-    return Option.flatten(answer)
-  })
-
-export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes", defaultYes = false) =>
-  Effect.map(askLine(question, timeout), (line) => {
-    if (defaultYes && Option.isSome(line) && line.value.trim() === "") return true
-    return /^\s*y(es)?\s*$/i.test(Option.getOrElse(line, () => ""))
-  })
