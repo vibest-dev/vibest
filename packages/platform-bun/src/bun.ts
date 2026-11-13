@@ -32,7 +32,7 @@ import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { SqlClient } from "effect/sql"
 
-import { graph, keyLocalImports, load, packageName, watch } from "./plugin-source.ts"
+import { graph, makeLoads, packageName, watch } from "./plugin-source.ts"
 
 const unrefStdio = Layer.effect(
   Stdio.Stdio,
@@ -134,8 +134,6 @@ export const checkDatabase: Host["checkDatabase"] = (filename) =>
 
 export const runMain = BunRuntime.runMain
 
-let mapped = false
-
 const provided: Readonly<Record<string, object>> = {
   effect,
   "@vibest/plugin": VibestPlugin,
@@ -150,26 +148,30 @@ const provided: Readonly<Record<string, object>> = {
 
 const providedPackages: ReadonlySet<string> = new Set(Object.keys(provided).map(packageName))
 
-export const plugins: PluginLoader["Service"] = {
-  prepare: Effect.sync(() => {
-    if (mapped) return
-    mapped = true
-    Bun.plugin({
-      name: "vibest-plugin-runtime",
-      setup(build) {
-        const object = (exports: object) => () => ({
-          exports: exports as Record<string, unknown>,
-          loader: "object" as const,
-        })
-        for (const [name, value] of Object.entries(provided)) build.module(name, object(value))
-        keyLocalImports(build)
-      },
-    })
-  }),
-  parseJsonc: (text) => Bun.JSONC.parse(text),
-  graph: (entry) => graph(entry, providedPackages),
-  load,
-  watch,
+export const makePluginLoader = (): PluginLoader["Service"] => {
+  const { keyLocalImports, load } = makeLoads()
+  let mapped = false
+  return {
+    prepare: Effect.sync(() => {
+      if (mapped) return
+      mapped = true
+      Bun.plugin({
+        name: "vibest-plugin-runtime",
+        setup(build) {
+          const object = (exports: object) => () => ({
+            exports: exports as Record<string, unknown>,
+            loader: "object" as const,
+          })
+          for (const [name, value] of Object.entries(provided)) build.module(name, object(value))
+          keyLocalImports(build)
+        },
+      })
+    }),
+    parseJsonc: (text) => Bun.JSONC.parse(text),
+    graph: (entry) => graph(entry, providedPackages),
+    load,
+    watch,
+  }
 }
 
 const darwinLibc =
@@ -335,7 +337,7 @@ export const replacements: LayerNode.Replacements = [
     }),
   ),
   MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
-  PluginLoader.node.replace(Layer.succeed(PluginLoader, plugins)),
+  PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
   builtinsNode.replace(Layer.succeed(Builtins, pre)),
   HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
   ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),

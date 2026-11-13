@@ -94,37 +94,40 @@ export const graph = (entry: string, provided: ReadonlySet<string>) => {
 }
 
 const LOAD = /\?vibest-load=\d+$/
-let loads = 0
-const loadOf = new Map<string, number>()
+export const makeLoads = () => {
+  let loads = 0
+  const loadOf = new Map<string, number>()
 
-export const keyLocalImports = (build: Bun.PluginBuilder) =>
-  build.onResolve({ filter: LOCAL }, (args) => {
-    const n = loadOf.get(args.importer)
-    if (n === undefined) return undefined
-    const resolved = resolveLocal(args.path, path.dirname(args.importer))
-    if (!("file" in resolved)) return undefined
-    return {
-      path: resolved.file.split(path.sep).includes("node_modules")
-        ? resolved.file
-        : `${resolved.file}?vibest-load=${n}`,
-    }
-  })
-
-export const load = (entry: string, files: ReadonlyArray<string>): Promise<unknown> => {
-  const loading = new Set(
-    files.flatMap((file) => {
-      try {
-        return [file, fs.realpathSync(file)]
-      } catch {
-        return [file]
+  const keyLocalImports = (build: Bun.PluginBuilder) =>
+    build.onResolve({ filter: LOCAL }, (args) => {
+      const n = loadOf.get(args.importer)
+      if (n === undefined) return undefined
+      const resolved = resolveLocal(args.path, path.dirname(args.importer))
+      if (!("file" in resolved)) return undefined
+      return {
+        path: resolved.file.split(path.sep).includes("node_modules")
+          ? resolved.file
+          : `${resolved.file}?vibest-load=${n}`,
       }
-    }),
-  )
-  for (const key of Object.keys(nativeRequire.cache))
-    if (loading.has(key.replace(LOAD, ""))) delete nativeRequire.cache[key]
-  const n = ++loads
-  for (const file of loading) loadOf.set(file, n)
-  return import(`${entry}?vibest-load=${n}`)
+    })
+
+  const load = (entry: string, files: ReadonlyArray<string>): Promise<unknown> => {
+    const loading = new Set(
+      files.flatMap((file) => {
+        try {
+          return [file, fs.realpathSync(file)]
+        } catch {
+          return [file]
+        }
+      }),
+    )
+    for (const key of Object.keys(nativeRequire.cache))
+      if (loading.has(key.replace(LOAD, ""))) delete nativeRequire.cache[key]
+    const n = ++loads
+    for (const file of loading) loadOf.set(file, n)
+    return import(`${entry}?vibest-load=${n}`)
+  }
+  return { keyLocalImports, load }
 }
 
 export const watch = (directory: string, changed: (name: string) => void, failed: (error: Error) => void) => {
