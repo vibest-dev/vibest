@@ -2,10 +2,10 @@ import { NotReady } from "@vibest/schema/session"
 import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
-import { Db, type SessionRow, harnessIdOf } from "../db.ts"
+import { Db, type SessionRow, harnessIdOf } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harness.ts"
-import type { HarnessDefinition } from "../host.ts"
+import type { HarnessDefinition } from "../plugin/host.ts"
 import {
   agentState,
   type AgentState,

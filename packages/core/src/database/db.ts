@@ -17,8 +17,11 @@ import { type AgentStatus, AmbiguousSession, NoSuchSession, RuntimeAddress } fro
 import { Context, Effect, Layer, Queue, Stream, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { Bus } from "./bus.ts"
-import { apply } from "./database/migration.ts"
+import { Bus } from "../bus.ts"
+import { LayerNode } from "../effect/layer-node.ts"
+import * as PlatformNode from "../effect/platform.ts"
+import type { HarnessId } from "../harness.ts"
+import { SessionLive } from "../session/live.ts"
 import { inboxMethods } from "./db-inbox.ts"
 import { remoteQueries, type PeerScope, type PeerStart } from "./db-remote.ts"
 import {
@@ -30,11 +33,8 @@ import {
   type Integration,
 } from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
-import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
-import type { HarnessId } from "./harness.ts"
 import { followFacts } from "./journal.ts"
-import { SessionLive } from "./session/live.ts"
+import { apply } from "./migration.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
 export { InboxKind, type ProcessEndReason } from "@vibest/schema/event"

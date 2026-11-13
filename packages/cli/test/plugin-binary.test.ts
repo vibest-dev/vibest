@@ -4,7 +4,7 @@ import path from "node:path"
 
 import { assert, beforeAll, it } from "@effect/vitest"
 import { connect, probe, protocolHeaders } from "@vibest/client/client"
-import type { PluginInfo } from "@vibest/core/plugins"
+import type { PluginInfo } from "@vibest/core/plugin"
 import { Effect } from "effect"
 
 import * as Platform from "#platform"

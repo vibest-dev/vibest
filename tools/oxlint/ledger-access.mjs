@@ -27,7 +27,7 @@ const approvedOperations = (file, operations) => {
 
 const eventTable = /\b(FROM|JOIN) event\b/
 const position = /\bposition\b/
-const ledgerFiles = ["/packages/core/src/journal.ts", "/packages/core/src/db-schema.ts"]
+const ledgerFiles = ["/packages/core/src/database/journal.ts", "/packages/core/src/database/db-schema.ts"]
 
 const eventReads = {
   create(context) {
@@ -53,14 +53,14 @@ const noPayloadSql = textRule({
 
 const writeStatement = /INSERT INTO|UPDATE |DELETE FROM/
 const writers = [
-  "/packages/core/src/journal.ts",
-  "/packages/core/src/projectors.ts",
-  "/packages/core/src/db-schema.ts",
+  "/packages/core/src/database/journal.ts",
+  "/packages/core/src/database/projectors.ts",
+  "/packages/core/src/database/db-schema.ts",
   "/packages/core/src/import/",
-  "/packages/core/src/database/",
+  "/packages/core/src/database/migration",
 ]
 const openingWrite = {
-  file: "/packages/core/src/db.ts",
+  file: "/packages/core/src/database/db.ts",
   count: 1,
   accepts: (text) => text.trim() === "UPDATE meta SET value = value WHERE key = ''",
 }
@@ -93,7 +93,7 @@ const projectorWrites = {
 }
 
 const loopFiles = ["/packages/core/src/", "/packages/server/src/"]
-const approvedLoops = [{ file: "/packages/core/src/plugin-supervisor.ts", kind: "Effect.forever", count: 1 }]
+const approvedLoops = [{ file: "/packages/core/src/plugin/supervisor.ts", kind: "Effect.forever", count: 1 }]
 const boundedRepeat = /\b(until|while|times)\b/
 const member = (node, object, property) =>
   node?.type === "MemberExpression" && node.object.name === object && node.property.name === property

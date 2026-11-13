@@ -1,7 +1,7 @@
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
-import { NoSuchSession } from "@vibest/core/sessions"
+import { NoSuchSession } from "@vibest/core/session"
 import {
   CALLER_HEADER,
   CWD_HEADER,

@@ -2,6 +2,7 @@ import { type AgentStatus, InboxRow } from "@vibest/schema/session"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/sql"
 
+import { unwrapped } from "../replies.ts"
 import type { MachineRow, OutboxRow } from "./db-remote.ts"
 import {
   MESSAGE_STATUSES,
@@ -12,7 +13,6 @@ import {
   type SpawnedBefore,
   toInbox,
 } from "./db-rows.ts"
-import { unwrapped } from "./replies.ts"
 
 export const LOCAL_MACHINE = "local"
 

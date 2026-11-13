@@ -12,13 +12,13 @@ import {
   exitedAt,
   executionStateOf,
   archived,
-} from "../db.ts"
+} from "../database/db.ts"
 import { Drain } from "../drain.ts"
+import { directoryLock } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Inbox } from "../inbox.ts"
-import { directoryLock } from "../keyed-lock.ts"
-import { errorMessage } from "../plugins.ts"
+import { errorMessage } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
 import * as Remove from "../remove.ts"

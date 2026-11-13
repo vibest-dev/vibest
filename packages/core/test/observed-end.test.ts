@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { exitedAt, executionStateOf, harnessIdOf } from "@vibest/core/db"
+import { exitedAt, executionStateOf, harnessIdOf } from "@vibest/core/database/db"
 import { Harnesses } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"

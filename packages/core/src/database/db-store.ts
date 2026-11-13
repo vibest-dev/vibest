@@ -18,7 +18,9 @@ import { type AgentStatus, InboxStatus, RuntimeAddress } from "@vibest/schema/se
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
-import { Bus, type BusEvent, type Signal, withChanges } from "./bus.ts"
+import { Bus, type BusEvent, type Signal, withChanges } from "../bus.ts"
+import { noticeEnvelope, sessionEnvelope } from "../replies.ts"
+import { SessionLive } from "../session/live.ts"
 import {
   archived,
   SessionRow,
@@ -30,8 +32,6 @@ import {
 } from "./db-rows.ts"
 import { makeJournal } from "./journal.ts"
 import { decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
-import { noticeEnvelope, sessionEnvelope } from "./replies.ts"
-import { SessionLive } from "./session/live.ts"
 
 type InboxKey = { readonly session: string; readonly id: number }
 

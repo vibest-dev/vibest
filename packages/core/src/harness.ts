@@ -7,9 +7,9 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
-import type { HarnessDefinition, HarnessesShape } from "./host.ts"
 import { listModels, type Model } from "./models.ts"
-import * as Registry from "./registry.ts"
+import type { HarnessDefinition, HarnessesShape } from "./plugin/host.ts"
+import * as Registry from "./plugin/registry.ts"
 export { type HarnessId, HarnessUnavailable } from "@vibest/schema/session"
 export type { HarnessDefinition }
 

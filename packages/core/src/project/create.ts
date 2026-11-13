@@ -1,7 +1,7 @@
 import { ProjectCreateFailed } from "@vibest/schema/project"
 import { Effect, Exit, FileSystem, Option, Path, type PlatformError } from "effect"
 
-import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
+import { safeRepositoryDirectory, sameWorktreeBucket } from "../paths.ts"
 import {
   addWorktree,
   copyIncluded,
@@ -11,7 +11,7 @@ import {
   removeWorktree,
   repositoryDirectoryName,
   type GitState,
-} from "./worktree.ts"
+} from "../worktree.ts"
 
 export interface ProjectFolder {
   readonly name: string

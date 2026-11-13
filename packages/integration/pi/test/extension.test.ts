@@ -21,7 +21,7 @@ import {
   entryPending,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { noticeEnvelope } from "@vibest/core/replies"

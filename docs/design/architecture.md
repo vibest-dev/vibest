@@ -209,7 +209,7 @@ the code sits in:
 | `packages/platform-bun` (`@vibest/platform-bun`)         | The Bun platform of the binary: `bun.ts` (the daemon `Host`, its `replacements`, `services`, `runMain`, `exec`) and `plugin-source.ts`. Private, bundled into the binary; `packages/cli` maps `#platform` to it.                                                                                                                                                                                                      |
 | `packages/integration/claude`, `packages/integration/pi` | omac's `packages/claude`, `packages/pi-omac` (with its coordinator TUI). omac's standalone `extensions/pi-tui` package is removed. `packages/integration/cursor` is new.                                                                                                                                                                                                                                              |
 
-Each workspace package exports `./*` → `./src/*.ts`; imports name the module (`@vibest/core/db`).
+Each workspace package exports `./*` → `./src/*.ts`; imports name the module (`@vibest/core/database/db`).
 
 ## 3. Core domain
 
@@ -354,7 +354,7 @@ below it and subscribing to the events it handles itself:
 | `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                          |
 | `entry.ts` (`EntrySession`)    | starting and resuming the entry session                                                          |
 
-`packages/core/src/sessions.ts` (`Sessions`) is the facade the server and the CLI call: it delegates to these modules and
+`packages/core/src/session.ts` (`Sessions`) is the facade the server and the CLI call: it delegates to these modules and
 itself only reads (`get`, `list`, `peek`, and `view`, which adds a session's directory and git state).
 
 How these modules keep the rules:
@@ -689,7 +689,7 @@ that scope.
 
 **Two capabilities**, as OpenCode V2: `transform(editor)` with a synchronous editor (`add`, plus `update` on the harness editor), and `hook(name, callback)` for live interception. Both return
 a `Registration` (`{ dispose }`) owned by the plugin's scope: unloading the plugin disposes everything it registered,
-and `dispose` may be called earlier (a second call is a no-op). Registries are `packages/core/src/registry.ts`, a port
+and `dispose` may be called earlier (a second call is a no-op). Registries are `packages/core/src/plugin/registry.ts`, a port
 of V2's `State`: transforms apply in registration order on a lazy rebuild, a plugin's setup runs in one `group` (a
 throwing transform disables the whole plugin and removes its earlier registrations; a disabled plugin is not set up
 again until its own revision or options change), and an activation runs in one
@@ -1195,7 +1195,7 @@ that must be the user's own with mode 0700 and no symlink, checked with one `lst
 nothing can be swapped between two checks. Archive removes the session's directory once its processes have exited
 (they may still read the prompt or report an execution end); the system cleans the rest.
 
-`vibest project create` (`core/project-create.ts`) checks everything before it writes anything, and on failure or
+`vibest project create` (`core/project/create.ts`) checks everything before it writes anything, and on failure or
 interruption removes only what it created. Each copy is independent (`--no-hardlinks`, no alternates), on the
 source's branch, with the source's origin, `origin/*` refs and upstream; the local path it was cloned from is not
 kept as a remote, and uncommitted changes are not copied. A directory is a multi-repository project when it is not

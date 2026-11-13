@@ -1,5 +1,5 @@
 import type { HarnessId } from "./harness.ts"
-import type { HarnessDefinition } from "./host.ts"
+import type { HarnessDefinition } from "./plugin/host.ts"
 
 export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
   try {
