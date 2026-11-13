@@ -17,7 +17,7 @@ import { type AgentStatus, InboxStatus, RuntimeAddress } from "@vibest/schema/se
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
-import { Bus, type BusEvent, type Signal } from "./bus.ts"
+import { Bus, type BusEvent, type Signal, withChanges } from "./bus.ts"
 import {
   archived,
   SessionRow,
@@ -92,7 +92,7 @@ const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, termina
 export const makeStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const bus = yield* Bus
-  const journal = yield* makeJournal<Signal>((events: ReadonlyArray<BusEvent>) => bus.published(events))
+  const journal = yield* makeJournal<Signal>((events: ReadonlyArray<BusEvent>) => bus.published(withChanges(events)))
   const { emit, commit: tx, notify } = journal
   const reads = ledgerReads(sql)
   const now = Clock.currentTimeMillis
@@ -332,7 +332,6 @@ export const makeStore = Effect.gen(function* () {
       const [row] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${id}`
       if (row === undefined || row.name === name) return false
       yield* emit(SessionRenamed, { sessionId: id, data: { name } })
-      yield* notify({ type: "session.changed", sessionId: id })
       return true
     })
 
@@ -342,7 +341,6 @@ export const makeStore = Effect.gen(function* () {
       if (row === undefined || row.endedAt !== null) return false
       yield* emit(SessionEnded, { sessionId: id, data: { reason: "archived" } })
       yield* sessionLive.ended(id)
-      yield* notify({ type: "session.changed", sessionId: id })
       return true
     })
 

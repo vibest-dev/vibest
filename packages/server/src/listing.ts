@@ -153,9 +153,7 @@ export const sessionListing = (deps: {
       const projectIds = new Set<string>()
       const sessionIds = new Set<string>()
       for (const event of events) {
-        if ("seq" in event) {
-          if (event.sessionId !== undefined) sessionIds.add(event.sessionId)
-        } else if (event.type === "session.changed") sessionIds.add(event.sessionId)
+        if (event.type === "session.changed") sessionIds.add(event.sessionId)
         else if (event.type === "project.changed") projectIds.add(event.projectId)
         else if (event.type === "terminal.state" || event.type === "terminal.exited") {
           const project = yield* db.entryAt(event.runtime, event.terminal)

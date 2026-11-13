@@ -70,3 +70,25 @@ export const awaitEvent = <A, E, R>(
       return yield* awaitOn(subscription, look, match, deadline, onDeadline)
     }),
   )
+
+export const withChanges = (events: ReadonlyArray<BusEvent>): ReadonlyArray<BusEvent> => {
+  const sessions = new Set<string>()
+  const projects = new Set<string>()
+  for (const event of events) {
+    if (event.type === "session.changed") sessions.add(event.sessionId)
+    else if (event.type === "project.changed") projects.add(event.projectId)
+  }
+  const changes: Array<BusEvent> = []
+  for (const event of events) {
+    if (!("seq" in event)) continue
+    if (event.sessionId !== undefined && !sessions.has(event.sessionId)) {
+      sessions.add(event.sessionId)
+      changes.push({ type: "session.changed", sessionId: event.sessionId })
+    }
+    if (event.projectId !== undefined && !projects.has(event.projectId)) {
+      projects.add(event.projectId)
+      changes.push({ type: "project.changed", projectId: event.projectId })
+    }
+  }
+  return [...events, ...changes]
+}
