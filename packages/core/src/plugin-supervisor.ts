@@ -71,17 +71,16 @@ export const supervise = Effect.fnUntraced(function* (
   builtins: ReadonlyArray<Candidate>,
   sources: Sources,
 ) {
-  const triggers = yield* Queue.sliding<void>(1)
+  const triggers = yield* Queue.sliding<number>(1)
   const builtinTriggers = yield* Queue.sliding<void>(1)
   const changed = new Set<string>()
-  const tokens: Array<Effect.Effect<void>> = [host.holdNow()]
-  const holdFor = () => {
-    tokens.push(host.holdNow())
-  }
+  let observed = 0
+  let release: Effect.Effect<void> | undefined = host.holdNow()
   const notify = (file?: string) => {
     if (file !== undefined) changed.add(file)
-    holdFor()
-    Queue.offerUnsafe(triggers, undefined)
+    observed++
+    if (release === undefined) release = host.holdNow()
+    Queue.offerUnsafe(triggers, observed)
     Queue.offerUnsafe(builtinTriggers, undefined)
   }
   const watcher = yield* makeWatcher(notify)
@@ -118,15 +117,19 @@ export const supervise = Effect.fnUntraced(function* (
     while (yield* watcher.update(resolved.watched)) resolved = yield* resolve(sources, builtins, host.importing)
     yield* publish(resolved.candidates.filter((c) => !isBuiltin(c)))
   }).pipe(logFailure("plugins: reload failed"))
-  yield* Queue.offer(triggers, undefined).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
-  yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
-    Stream.runForEach(() =>
+  yield* Effect.sync(() => {
+    observed++
+    if (release === undefined) release = host.holdNow()
+    Queue.offerUnsafe(triggers, observed)
+  }).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
+  yield* Stream.concat(Stream.succeed(0), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
+    Stream.runForEach((target) =>
       Effect.gen(function* () {
-        const mine = tokens.splice(0, tokens.length)
-        const preparing = host.holdNow()
         yield* reload
-        yield* preparing
-        yield* Effect.forEach(mine, (done) => done, { discard: true })
+        if (observed !== target) return
+        const settled = release
+        release = undefined
+        if (settled) yield* settled
       }),
     ),
     Effect.forkScoped,

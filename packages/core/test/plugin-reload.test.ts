@@ -643,7 +643,7 @@ describe("plugins: supervisor", () => {
         ).__vibestHoldImport = { entered, promise: held, wake }
         yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "scan-a", '"a1"'))
         watchGate.hold = true
-        const { clocked, rescanned } = yield* timers
+        const { clocked, rescanned, armed } = yield* timers
         const service = yield* clocked(supervise(dir))
         assert.strictEqual((yield* service.start(event)).model, "a1")
         yield* fs.writeFileString(
@@ -655,9 +655,12 @@ describe("plugins: supervisor", () => {
           (seen) => seen,
           "b's import",
         )
-        const starting = yield* Effect.forkChild(service.start(event))
-        yield* TestClock.withLive(Effect.sleep("200 millis"))
+        const starting = yield* clocked(Effect.forkChild(service.start(event)))
+        yield* armed(Duration.seconds(10))
         assert.isUndefined(starting.pollUnsafe(), "the start ran while b was still importing")
+        const listed = yield* service.list
+        assert.ok(listed.some((plugin) => plugin.id === "a" && plugin.status === "active"))
+        assert.ok(!listed.some((plugin) => plugin.id === "b"))
         releaseImport()
         const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
         assert.deepStrictEqual(started.trace.map((t) => t.plugin).sort(), ["a", "b"])
