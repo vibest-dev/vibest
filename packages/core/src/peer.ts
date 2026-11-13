@@ -100,8 +100,6 @@ const make = Effect.gen(function* () {
           const sent = new Set<string>()
           const batch = Effect.gen(function* () {
             const rows = yield* db.outboxOf(peer)
-            const present = new Set(rows.map((row) => row.id))
-            for (const id of sent) if (!present.has(id)) sent.delete(id)
             const fresh = rows.filter((row) => !sent.has(row.id))
             for (const row of fresh) sent.add(row.id)
             return fresh.map(outboxItem)
@@ -112,7 +110,10 @@ const make = Effect.gen(function* () {
             ),
           )
           return Stream.concat(Stream.make(undefined), wake).pipe(
-            Stream.mapEffect(() => batch),
+            Stream.mapEffect((event) => {
+              if (event?.type === "outbox.acked") for (const id of event.data.ids) sent.delete(id)
+              return batch
+            }),
             Stream.flattenIterable,
           )
         }),

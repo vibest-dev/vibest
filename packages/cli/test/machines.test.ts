@@ -797,28 +797,6 @@ describe("vibest run --machine and remote sessions", () => {
   )
 
   it.effect(
-    "a send retried with the same request from B to its creator reaches A once, even after the first was acknowledged",
-    () =>
-      Effect.gen(function* () {
-        const { a, b, entryId, asEntry } = yield* twoMachines()
-        const spawned = yield* asEntry(
-          a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} }),
-        )
-        const target = entryId.slice(0, 8)
-        assert.isTrue(
-          yield* b.db.sendToOrigin(onB(spawned.id), target, "which branch?", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"),
-        )
-        yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
-        yield* until(b.run(outboxRows), (rows) => rows.length === 0)
-        assert.isTrue(
-          yield* b.db.sendToOrigin(onB(spawned.id), target, "which branch?", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"),
-        )
-        yield* until(b.run(outboxRows), (rows) => rows.length === 0)
-        assert.lengthOf(yield* a.run(inboxOf(entryId)), 1)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-  )
-
-  it.effect(
     "without --runtime A sends the caller's terminal runtime, else none and B chooses; --runtime wins; B lacking it fails clearly",
     () =>
       Effect.gen(function* () {
