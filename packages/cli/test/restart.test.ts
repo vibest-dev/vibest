@@ -9,7 +9,7 @@ import { Sessions } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Effect, Ref, type Scope } from "effect"
+import { Clock, Effect, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import { daemonPlan } from "../src/update.ts"
@@ -189,11 +189,16 @@ describe("restart in place", () => {
       const interrupted = yield* db.openExecution(entryId)
       assert.isDefined(interrupted)
       yield* herdr.endExecution(sub)
+      yield* Ref.set(herdr.onStarted, (session) =>
+        Clock.currentTimeMillis.pipe(
+          Effect.flatMap((at) =>
+            db.patchLive(session, { ready: at, pid: 600, integration: { version: VERSION, protocol: PROTOCOL } }),
+          ),
+        ),
+      )
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([entryId, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
-      yield* until(processes.signaled, (t) => t.includes(pid))
-      yield* db.noteIntegration(sub, { version: VERSION, protocol: PROTOCOL })
-      yield* untilVirtual(processes.signaled, (t) => t.includes(400))
+      yield* until(herdr.callsTo("run"), (runs) => runs.some((r) => r.argv[0] === "env"))
       assert.includeMembers([...(yield* processes.signaled)], [pid, 400])
       yield* db.patchLive(entryId, { pid: 500, ready: null })
       yield* db.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
