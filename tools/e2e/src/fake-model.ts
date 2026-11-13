@@ -42,27 +42,11 @@ export const toolCall = (id: string, name: string, input: object) =>
   }) + done("tool_calls")
 
 const ENTRY_RUN = /vbe-entry-run:([0-9a-f-]+):([A-Za-z0-9+/=]+)/
-const EXIT = /\nvbe-exit:(\d+)\s*$/
 
 export const entryRunMessage = (run: string, command: string) =>
-  `vbe-entry-run:${run}:${Buffer.from(`${command}; echo vbe-exit:$?`).toString("base64")}`
-
-const entryRunOutputs = new Map<string, string>()
+  `vbe-entry-run:${run}:${Buffer.from(command).toString("base64")}`
 
 export const nextEntryRun = () => crypto.randomUUID()
-
-export const entryRunOutput = (run: string) => {
-  const output = entryRunOutputs.get(`entry-run-${run}`)
-  const exit = output === undefined ? undefined : EXIT.exec(`\n${output}`)
-  return exit ? { code: Number(exit[1]), output: `\n${output}`.slice(1, exit.index) } : undefined
-}
-
-const plain = (content: unknown) =>
-  typeof content === "string"
-    ? content
-    : Array.isArray(content)
-      ? content.map((c: { text?: string }) => c.text ?? "").join("")
-      : ""
 
 const entryCommand = (m: Message | undefined) => {
   const found = m?.role === "user" && !text(m).includes('"tool_result"') ? ENTRY_RUN.exec(text(m)) : null
@@ -73,9 +57,6 @@ export const isEntryRunResult = (m: Message) =>
   (m as { tool_call_id?: unknown }).tool_call_id?.toString().startsWith("entry-run-") === true
 
 export const entryRun = (messages: ReadonlyArray<Message>) => {
-  for (const m of messages)
-    if (m.role === "tool" && isEntryRunResult(m))
-      entryRunOutputs.set(String((m as { tool_call_id?: unknown }).tool_call_id), plain(m.content).trim())
   const run = entryCommand(messages.at(-1))
   return run === undefined ? undefined : toolCall(run.id, "bash", { command: run.command })
 }
@@ -376,8 +357,6 @@ export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<S
         results,
       }
       requests.push(request)
-      for (const r of results)
-        if (r.tool_use_id.startsWith("entry-run-")) entryRunOutputs.set(r.tool_use_id, plain(r.content).trim())
       const sinceAssistant = messages.slice(messages.findLastIndex((m) => m.role === "assistant") + 1)
       const run = request.tools.includes("Bash")
         ? entryCommand({ role: "user", content: sinceAssistant.map(text).join("\n") })

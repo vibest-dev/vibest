@@ -5,7 +5,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { commandOf, note } from "../../reap.ts"
-import { entryModel, entryRunMessage, entryRunOutput, nextEntryRun } from "./fake-model.ts"
+import { entryModel, entryRunMessage, nextEntryRun } from "./fake-model.ts"
 import {
   herdrConfigSessions,
   pathsNamed,
@@ -331,14 +331,17 @@ export class World {
     ]
     const vibest = (more: ReadonlyArray<string>) =>
       this.run(cwd, [options.bin ?? binary, ...more], options.env === undefined ? {} : { env: options.env })
-    const sent = await vibest(["send", entry!, "--", entryRunMessage(run, argv.map(shWord).join(" "))])
+    const out = path.join(this.root, `entry-run-${run}`)
+    const command = `{ ${argv.map(shWord).join(" ")}; } > ${shWord(out)} 2>&1; echo $? > ${shWord(`${out}.exit`)}`
+    const sent = await vibest(["send", entry!, "--", entryRunMessage(run, command)])
     expect(sent.code === 0, `vibest send to the entry exited ${sent.code}: ${sent.stderr}${sent.stdout}`)
     await until(
       `the entry session to run vibest ${args.join(" ")}`,
-      () => entryRunOutput(run) !== undefined,
+      () => fs.existsSync(`${out}.exit`),
       (options.timeoutMs ?? 60_000) + 60_000,
     )
-    const { code, output } = entryRunOutput(run)!
+    const code = Number(fs.readFileSync(`${out}.exit`, "utf8"))
+    const output = fs.readFileSync(out, "utf8").trim()
     const result = { code, stdout: output, stderr: output }
     this.log.push({ argv: ["(entry)", binary, ...args].map(this.redact), cwd, result })
     return result
