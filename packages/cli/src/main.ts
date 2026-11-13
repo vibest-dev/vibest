@@ -69,7 +69,6 @@ Runtime.run(Commands, Handlers, {
   Cli.printFailure,
   Effect.provide(Layout.layer),
   Effect.provide(Logging.layer),
-  Effect.provide(Logging.layer),
   Effect.provideService(VibestCommand, Platform.selfCommand),
   Effect.provideService(Host, { daemon: Platform.daemon, replacements, exec: Platform.exec }),
   Effect.provide(Platform.services),
