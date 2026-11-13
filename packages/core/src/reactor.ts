@@ -27,7 +27,9 @@ export const make = Effect.gen(function* () {
         const subscription = yield* bus.subscribe
         yield* Stream.fromSubscription(subscription).pipe(
           Stream.filter((event): event is EventOf<T> => types.has(event.type)),
-          Stream.runForEach((event) => FiberSet.run(handlers, logFailure(`handle ${event.type}`)(handle(event)))),
+          Stream.runForEach((event) =>
+            FiberSet.run(handlers, logFailure(`handle ${event.type}`)(Effect.suspend(() => handle(event)))),
+          ),
           Effect.forkScoped,
         )
       }),
