@@ -332,15 +332,15 @@ export class World {
     const vibest = (more: ReadonlyArray<string>) =>
       this.run(cwd, [options.bin ?? binary, ...more], options.env === undefined ? {} : { env: options.env })
     const out = path.join(this.root, `entry-run-${run}`)
-    const command = `{ ${argv.map(shWord).join(" ")}; } > ${shWord(out)} 2>&1; echo $? > ${shWord(`${out}.exit`)}`
+    const command = `{ ${argv.map(shWord).join(" ")}; } > ${shWord(out)} 2>&1; echo $? > ${shWord(`${out}.exit.tmp`)} && mv ${shWord(`${out}.exit.tmp`)} ${shWord(`${out}.exit`)}`
     const sent = await vibest(["send", entry!, "--", entryRunMessage(run, command)])
     expect(sent.code === 0, `vibest send to the entry exited ${sent.code}: ${sent.stderr}${sent.stdout}`)
     await until(
       `the entry session to run vibest ${args.join(" ")}`,
-      () => fs.existsSync(`${out}.exit`),
+      () => publishedStatus(`${out}.exit`) !== undefined,
       (options.timeoutMs ?? 60_000) + 60_000,
     )
-    const code = Number(fs.readFileSync(`${out}.exit`, "utf8"))
+    const code = publishedStatus(`${out}.exit`)!
     const output = fs.readFileSync(out, "utf8").trim()
     const result = { code, stdout: output, stderr: output }
     this.log.push({ argv: ["(entry)", binary, ...args].map(this.redact), cwd, result })
@@ -750,6 +750,11 @@ export const ledgerSnapshot = (home: string) => {
     db.close()
   }
 }
+
+export const exitStatusOf = (content: string) => (/^\d+\s*$/.test(content) ? Number(content) : undefined)
+
+const publishedStatus = (file: string) =>
+  fs.existsSync(file) ? exitStatusOf(fs.readFileSync(file, "utf8")) : undefined
 
 export const until = async (what: string, ok: () => Promise<boolean> | boolean, timeoutMs = 10_000) => {
   for (const deadline = Date.now() + timeoutMs; !(await ok()); await Bun.sleep(100))
