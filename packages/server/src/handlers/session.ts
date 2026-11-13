@@ -1,11 +1,11 @@
 import { raisesSeen } from "@vibest/core/activity"
 import { Bus, type BusEvent } from "@vibest/core/bus"
-import { Db, runtimeOf, terminalOf, archived } from "@vibest/core/db"
+import { Db, runtimeOf, terminalOf } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Sessions } from "@vibest/core/sessions"
-import { Caller, type CallerShape, Forbidden, type PayloadOf, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
+import { Caller, Forbidden, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
 import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Queue, Stream } from "effect"
 
@@ -73,70 +73,6 @@ export const make = (
         return id
       })
 
-    const sendWithinProject = (
-      caller: Extract<CallerShape, { readonly _tag: "Session" }>,
-      input: string,
-      p: PayloadOf<"Send">,
-    ) =>
-      Effect.gen(function* () {
-        const toOrigin = yield* db.sendToOrigin(caller.sessionId, input, p.message, p.request)
-        if (toOrigin === false)
-          return yield* new NoSuchSession({
-            id: input,
-            message: `${input} is on another machine that vibestd does not know; nothing was sent`,
-          })
-        if (toOrigin === true) return { id: input }
-        const id = yield* db.resolveSession(input)
-        const target = yield* db.sessionIdentity(id)
-        if (target?.projectId !== caller.projectId)
-          return yield* new Forbidden({
-            method: "Send",
-            message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
-          })
-        const creator = (yield* db.creatorOf(caller.sessionId)) ?? undefined
-        const mine = creator !== undefined && "local" in creator ? creator.local : undefined
-        const allowed = Effect.gen(function* () {
-          if (yield* db.maySend(caller.sessionId, id)) return true
-          return yield* new Forbidden({
-            method: "Send",
-            message: `${id} is not the agent that started you, and you did not start it${mine === undefined ? "" : `; you may send to ${mine}`}`,
-          })
-        })
-        const session = yield* db.getSession(id)
-        const stopped = !session || archived(session)
-        yield* allowed
-        const to = yield* Effect.gen(function* () {
-          if (!(stopped && mine === id)) return { local: id }
-          const heir = yield* db.nearestAlive(caller.sessionId)
-          if (heir === undefined)
-            return yield* new NoSuchSession({
-              id,
-              message: `${id} has ended and no session above it is running; the user reads your last reply with vibest result`,
-            })
-          return heir
-        })
-        if ("peer" in to) {
-          if (!(yield* db.sendToPeer(caller.sessionId, to.peer, to.session, p.message, p.request)))
-            return yield* new NoSuchSession({
-              id,
-              message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,
-            })
-          return { id: to.session }
-        }
-        const dest = to.local
-        if ((yield* db.sessionIdentity(dest))?.entry) {
-          if (!(yield* db.insertSend(dest, p.message, p.request, caller.sessionId)))
-            return yield* new NoSuchSession({
-              id: dest,
-              message: `${dest} is the entry session of this project and is not running`,
-            })
-          return { id: dest }
-        }
-        if (dest === id && stopped) return yield* new NoSuchSession({ id, message: `${id} was archived` })
-        yield* sessions.send(dest, p.message, p.request, caller.sessionId)
-        return { id: dest }
-      })
-
     return {
       Spawn: (input) =>
         Effect.gen(function* () {
@@ -169,7 +105,7 @@ export const make = (
         routed.Send(p, (input) =>
           Effect.gen(function* () {
             const caller = yield* Caller
-            if (caller._tag === "Session") return yield* sendWithinProject(caller, input, p)
+            if (caller._tag === "Session") return yield* sessions.admit(caller, input, p.message, p.request)
             const { c, scope } = yield* reach("Send")
             const target = yield* db.resolveSession(input, scope)
             if (c === undefined && scope !== undefined && !(yield* startedByPeer(scope, target, true)))
@@ -177,16 +113,8 @@ export const make = (
                 method: "Send",
                 message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
               })
-            if ((yield* db.sessionIdentity(target))?.entry) {
-              if (!(yield* db.insertSend(target, p.message, p.request)))
-                return yield* new NoSuchSession({
-                  id: target,
-                  message: `${target} is the entry session of this project and is not running`,
-                })
-              return { id: target }
-            }
-            const id = yield* managed("Send", input)
-            yield* sessions.send(id, p.message, p.request, caller._tag === "Peer" ? caller.session : undefined)
+            const id = (yield* db.sessionIdentity(target))?.entry ? target : yield* managed("Send", input)
+            yield* sessions.deliverTo(id, p.message, p.request, caller._tag === "Peer" ? caller.session : undefined)
             return { id }
           }),
         ),

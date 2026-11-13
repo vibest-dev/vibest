@@ -1,7 +1,9 @@
+import type { Forbidden } from "@vibest/protocol/rpc"
 import { messageOf } from "@vibest/schema/error"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
+  type AmbiguousSession,
   LimitReached,
   NoCallingSession,
   NoHarnessChosen,
@@ -33,6 +35,7 @@ import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
 
 export {
   AllocationFailed,
+  type AmbiguousSession,
   LaunchFailed,
   LimitReached,
   NoCallingSession,
@@ -112,6 +115,18 @@ export class Sessions extends Context.Service<
       request?: string,
       sender?: string,
     ) => Effect.Effect<void, NoSuchSession>
+    readonly deliverTo: (
+      id: string,
+      message: string,
+      request?: string,
+      sender?: string,
+    ) => Effect.Effect<void, NoSuchSession>
+    readonly admit: (
+      sender: { readonly sessionId: string; readonly projectId: string },
+      input: string,
+      message: string,
+      request?: string,
+    ) => Effect.Effect<{ readonly id: string }, NoSuchSession | AmbiguousSession | Forbidden>
     readonly interrupt: (
       id: string,
     ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
@@ -149,7 +164,7 @@ export class Sessions extends Context.Service<
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const git = yield* Git
     const { worktreeOf, republish } = yield* Placement
-    const { send, interrupt, userPrompt, typeTaken } = yield* Delivery
+    const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery
     const reconcile = yield* Reconcile
     const { spawn } = yield* Spawn
     const { remove } = yield* Archive
@@ -244,6 +259,8 @@ export class Sessions extends Context.Service<
     return Sessions.of({
       spawn,
       send,
+      deliverTo,
+      admit,
       interrupt,
       peek,
       remove,
