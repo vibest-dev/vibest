@@ -646,10 +646,10 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
 - Files keep one writer each and are written to a temporary file and renamed (omac write model): system prompt
   files by the daemon (the entry session's by `vibest`); never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
-- Events reach the engine through one in-memory Bus (`core/bus.ts`): the Db publishes a committed transaction's facts
+- Events reach the reactions through one in-memory Bus (`core/bus.ts`): the Db publishes a committed transaction's facts
   in seq order, and observations the schema does not store (signals: `terminal.*`, `runtime.reset`, `session.changed`, `project.changed`) are published only. A waiter subscribes before
   the action whose consequence it waits for (`awaitEvent` before its first look), so an event in between is not lost.
-  The engine (`core/engine.ts`) knows events, not sessions or projects: each handler runs in a fiber of its own, a
+  The Reactor (`core/reactor.ts`, a scoped constructor each reacting service calls: `reactor.on([definitions], handler)` hands the handler the typed event) knows events, not sessions or projects: each handler runs in a fiber of its own, a
   failing one is logged and stops nothing else, and none depends on the order events arrive in. Each re-derives what
   to do from storage under its session's lock, so a late or repeated event finds the work done or redoes it once.
 

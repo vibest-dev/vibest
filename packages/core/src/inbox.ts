@@ -1,13 +1,14 @@
 import type { Taken } from "@vibest/protocol/protocol"
+import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued } from "@vibest/schema/event"
 import { shortId } from "@vibest/schema/id"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
-import { Bus } from "./bus.ts"
+import { Bus, TerminalExited } from "./bus.ts"
 import { Db, type InboxRow, type NewInboxRow, type RuntimeAddress, type SessionRow, harnessIdOf } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
+import * as Reactor from "./reactor.ts"
 import { unwrapped } from "./replies.ts"
 import { agentState, alive, RuntimeError, type Runtime } from "./runtimes.ts"
 
@@ -72,7 +73,7 @@ export class Inbox extends Context.Service<
       const db = yield* Db
       const drain = yield* Drain
       const harnesses = yield* Harnesses
-      const engine = yield* Engine.make
+      const reactor = yield* Reactor.make
 
       const pulls = (harnessId: string) => harnesses.find(harnessId)?.inbox !== undefined
 
@@ -83,24 +84,19 @@ export class Inbox extends Context.Service<
         Effect.sync(() => {
           for (const signal of (id === undefined ? undefined : waiting.get(id)) ?? []) Queue.offerUnsafe(signal, null)
         })
-      yield* engine.on((event) => {
-        switch (event.type) {
-          case "execution.ended":
-            return Effect.sync(() => handedOver.delete(handedKey(event.sessionId, event.data.execution))).pipe(
-              Effect.andThen(wake(event.sessionId)),
-            )
-          case "execution.accepted":
-            return Effect.sync(() => void handedOver.delete(handedKey(event.sessionId, event.data.execution)))
-          case "inbox.queued":
-            return wake(event.sessionId)
-          case "inbox.moved":
-            return event.data.to === "pending" ? wake(event.sessionId) : Effect.void
-          case "terminal.exited":
-            return drain.work("entry session exited", db.clearEntry(event.runtime, event.terminal), true)
-          default:
-            return Effect.void
-        }
-      })
+      yield* reactor.on([ExecutionEnded], (event) =>
+        Effect.sync(() => handedOver.delete(handedKey(event.sessionId, event.data.execution))).pipe(
+          Effect.andThen(wake(event.sessionId)),
+        ),
+      )
+      yield* reactor.on([ExecutionAccepted], (event) =>
+        Effect.sync(() => void handedOver.delete(handedKey(event.sessionId, event.data.execution))),
+      )
+      yield* reactor.on([InboxQueued], (event) => wake(event.sessionId))
+      yield* reactor.on([InboxMoved], (event) => (event.data.to === "pending" ? wake(event.sessionId) : Effect.void))
+      yield* reactor.on([TerminalExited], (event) =>
+        drain.work("entry session exited", db.clearEntry(event.runtime, event.terminal), true),
+      )
 
       const stream = (sessionId: string) =>
         Stream.unwrap(
