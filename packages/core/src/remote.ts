@@ -11,7 +11,6 @@ import { LayerNode } from "./effect/layer-node.ts"
 import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { Machines } from "./machines.ts"
-import { Plugins } from "./plugins.ts"
 import { repositoryIdentity } from "./repository-url.ts"
 import { Runtimes } from "./runtimes.ts"
 
@@ -58,7 +57,6 @@ const make = Effect.gen(function* () {
   const machines = yield* Machines
   const self = yield* VibestdIdentity
   const git = yield* Git
-  const plugins = yield* Plugins
   const runtimes = yield* Runtimes
 
   const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) =>
@@ -193,8 +191,7 @@ const make = Effect.gen(function* () {
             ),
           )
         const identity = yield* repositoryIdentity(remote)
-        const runtime =
-          input.runtime ?? callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv)
+        const runtime = input.runtime ?? callerKind(yield* runtimes.callers, input.callerEnv)
         const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
         const ready =
           viewer?.locate === undefined || runtime === undefined
@@ -237,6 +234,6 @@ export class Remote extends Context.Service<Remote, Effect.Success<typeof make>>
   static readonly node = LayerNode.make({
     service: Remote,
     layer: Remote.layer,
-    deps: [Db.node, Git.node, Machines.node, Plugins.node, Runtimes.node, VibestdIdentity.node],
+    deps: [Db.node, Git.node, Machines.node, Runtimes.node, VibestdIdentity.node],
   })
 }

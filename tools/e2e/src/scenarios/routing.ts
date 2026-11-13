@@ -366,7 +366,10 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
       const started = await w.vibest(["--headless"], { timeoutMs: 60_000 })
       const out = started.stderr + started.stdout
       expect(
-        started.code !== 0 && /PluginsNotActive/.test(out) && !/no harness to inherit/.test(out),
+        started.code !== 0 &&
+          /PluginsNotActive/.test(out) &&
+          !/no harness to inherit/.test(out) &&
+          ["slow-5", "slow-6", "slow-7"].every((name) => out.includes(name)),
         `first start while plugins import: ${started.code} ${out}`,
       )
       const active = async () =>

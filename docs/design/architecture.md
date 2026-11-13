@@ -770,8 +770,9 @@ back to the previous one; neither is retried until it changes; a plugin file fou
 directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
 last mention; an activation latch gates `agent.start.before` and `agent.fail`. They wait up to 10 s
 for the pending generation; if it is still not active the operation fails with `PluginsNotActive`, naming the
-plugins still loading, and does not run on the plugins already active. `vibest plugins` and machine hooks keep
-their current reads. Builtin plugins activate while vibestd's layers are built, before it listens, so a request
+plugins still loading, and does not run on the plugins already active. The hooks for that call are the ones
+active at the gate, so a reload during the reads that follow does not change them. `vibest plugins` reads the plugins
+already active and does not wait. Machine hooks keep their current reads. Builtin plugins activate while vibestd's layers are built, before it listens, so a request
 that routes to a builtin runtime never finds it unregistered. User plugins activate afterwards, in the background,
 and a start during that activation is refused rather than admitted without them. Choosing a place and reading the
 caller's runtime do not wait, so the first start waits once, at this gate. A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`

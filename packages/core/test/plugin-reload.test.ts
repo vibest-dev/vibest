@@ -14,6 +14,7 @@ import {
   PluginsNotActive,
   RECHECK,
 } from "@vibest/core/plugins"
+import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
 import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"
 import { TestClock } from "effect/testing"
@@ -253,7 +254,20 @@ const makeLoader = (): PluginLoader["Service"] => {
       wake()
       return platform.parseJsonc(text)
     },
-    load: freshRequire,
+    load: async (entry, files) => {
+      const marker = /hold-import:(\w+)/.exec(await Bun.file(entry).text())?.[1]
+      const gate = (
+        globalThis as {
+          __vibestHoldImport?: { entered: Set<string>; promise: Promise<void>; wake: () => void }
+        }
+      ).__vibestHoldImport
+      if (marker !== undefined && gate !== undefined) {
+        gate.entered.add(marker)
+        gate.wake()
+        await gate.promise
+      }
+      return freshRequire(entry, files)
+    },
     watch: (directory, changed, failed) => {
       watchGate.listeners.set(directory, changed)
       watchGate.failures.set(directory, failed)
@@ -512,7 +526,7 @@ describe("plugins: supervisor", () => {
             id: "slow",
             effect: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
           })
-          h.ready.closeUnsafe()
+          yield* Effect.sync(h.holdNow)
           const activating = yield* Effect.forkChild(
             h.activate([candidate("slow", "1", slow), candidate("later", "1", logged("later", "later"))]),
           )
@@ -527,5 +541,136 @@ describe("plugins: supervisor", () => {
         }),
       "30 seconds",
     ),
+  )
+
+  const blockedSubscriptions = (entered: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+    Layer.succeed(
+      Subscriptions,
+      Subscriptions.of({
+        list: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as([])),
+        report: () => Effect.void,
+        poll: Effect.void,
+      }),
+    )
+
+  it.effect("a reload while subscriptions are read keeps the hooks captured with readiness", () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* makeHost().pipe(
+        Effect.flatMap((h) =>
+          Effect.gen(function* () {
+            yield* h.activate([candidate("a", "1", logged("a", "a1"))])
+            const starting = yield* Effect.forkChild(h.service.start(event))
+            yield* Deferred.await(entered)
+            yield* h.activate([])
+            yield* Deferred.succeed(release, undefined)
+            assert.deepStrictEqual(
+              (yield* Fiber.join(starting)).trace.map((t) => t.plugin),
+              ["a"],
+            )
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(blockedSubscriptions(entered, release)),
+        Effect.provide(harnessesLayer()),
+        Effect.provide(runtimesLayer),
+        Effect.provide(Agents.layer),
+        Effect.provide(Bus.layer),
+      )
+    }),
+  )
+
+  it.effect("a reload while subscriptions are read keeps the fail hook captured with readiness", () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const failing = Plugin.define({
+        id: "a",
+        effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "pi" })),
+      })
+      yield* makeHost().pipe(
+        Effect.flatMap((h) =>
+          Effect.gen(function* () {
+            yield* h.activate([candidate("a", "1", failing)])
+            const moved = yield* Effect.forkChild(
+              h.service.fail({
+                project: "/r",
+                agent: "general",
+                parentSessionId: undefined,
+                harnesses: event.harnesses,
+                attempts: [],
+                sessionId: "s",
+                reason: "limited",
+                error: "limited",
+                input: "p",
+                harness: "claude",
+                provider: undefined,
+              }),
+            )
+            yield* Deferred.await(entered)
+            yield* h.activate([])
+            yield* Deferred.succeed(release, undefined)
+            assert.strictEqual((yield* Fiber.join(moved)).move?.harness, "pi")
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(blockedSubscriptions(entered, release)),
+        Effect.provide(harnessesLayer()),
+        Effect.provide(runtimesLayer),
+        Effect.provide(Agents.layer),
+        Effect.provide(Bus.layer),
+      )
+    }),
+  )
+
+  it.effect(
+    "a rescan that finds a plugin without a watch notification keeps readiness closed while it imports",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        const entered = new Set<string>()
+        let releaseImport = () => {}
+        const held = new Promise<void>((resolve) => {
+          releaseImport = resolve
+        })
+        ;(
+          globalThis as {
+            __vibestHoldImport?: { entered: Set<string>; promise: Promise<void>; wake: () => void }
+          }
+        ).__vibestHoldImport = { entered, promise: held, wake }
+        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "scan-a", '"a1"'))
+        watchGate.hold = true
+        const { clocked, rescanned } = yield* timers
+        const service = yield* clocked(supervise(dir))
+        assert.strictEqual((yield* service.start(event)).model, "a1")
+        yield* fs.writeFileString(
+          path.join(dir, "plugins", "b.ts"),
+          "// hold-import:b\n" + pluginFile("b", "scan-b", '"b1"'),
+        )
+        yield* rescanned(
+          Effect.sync(() => entered.has("b")),
+          (seen) => seen,
+          "b's import",
+        )
+        const starting = yield* Effect.forkChild(service.start(event))
+        yield* TestClock.withLive(Effect.sleep("200 millis"))
+        assert.isUndefined(starting.pollUnsafe(), "the start ran while b was still importing")
+        releaseImport()
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        assert.deepStrictEqual(started.trace.map((t) => t.plugin).sort(), ["a", "b"])
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            watchGate.hold = false
+            ;(globalThis as { __vibestHoldImport?: unknown }).__vibestHoldImport = undefined
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
+    20_000,
   )
 })
