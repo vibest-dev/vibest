@@ -289,8 +289,8 @@ export const makeSources = Effect.fnUntraced(function* (
       }
       const resolved = located.value
       paths.add(resolved)
-      if (!SOURCE.test(resolved) && !(yield* isDirectory(resolved))) {
-        yield* warn(`vibest.json: plugin path must be a directory or a .ts/.js file: ${resolved}`)
+      if (!(yield* isDirectory(resolved))) {
+        yield* warn(`vibest.json: plugin path must be a directory: ${resolved}`)
         continue
       }
       configured.push({ type: "add", target: resolved, options })

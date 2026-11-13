@@ -7,6 +7,10 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **A `vibest.json` plugin entry must be a folder** (plugin authors, users with single-file entries): an entry that names
+  a file is skipped with a warning, as OpenCode does. Put the file in `~/.vibest/plugins/`, or move it to a folder with
+  an `index.ts` (or a `package.json` with `exports`) and name the folder. The shipped Cursor plugin is now
+  `harnesses/cursor/index.js`; name the folder `harnesses/cursor`.
 - **Starting and stopping the entry session is user-only** (RPC clients, agents): `Launch`, `Project.StartEntry`,
   `Project.EntrySession` and `Project.StopEntry` refuse a session calling them, including the entry session itself.
   Ask the user to run these operations from a terminal that carries no agent session.
@@ -18,8 +22,7 @@ release. Each release lists what broke, who is affected and how to migrate under
   the `Spawn` field `peer` and its refusal text are renamed; `peer` now names only another machine's vibestd.
 - **Cursor is a plugin, claude is the default harness** (users of Cursor, and anyone relying on "no harness to
   inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the file
-  `harnesses/cursor/plugin.js` of the install directory to `plugins` in `~/.vibest/vibest.json` (or put it in
-  `~/.vibest/plugins/`); until then `--harness cursor` fails saying no plugin provides it, and a Cursor session cannot
+  the folder `harnesses/cursor` of the install directory to `plugins` in `~/.vibest/vibest.json`; until then `--harness cursor` fails saying no plugin provides it, and a Cursor session cannot
   resume or restart. The first bare `vibest` in a project with no `--harness` and no plugin choosing now starts Claude when
   Claude is available. To choose differently write `"-harness-default"` in
   `plugins` and pick the harness in a plugin of your own.

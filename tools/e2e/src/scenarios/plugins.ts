@@ -101,14 +101,24 @@ const checks: ReadonlyArray<Check> = [
       await write(configured, plugin("configured"))
       const spaced = path.join(w.root, "with space", "index.ts")
       await write(spaced, plugin("spaced"))
+      const solo = path.join(w.root, "solo.ts")
+      await write(solo, plugin("solo"))
       await write(
         path.join(w.vibestHome, "vibest.json"),
-        JSON.stringify({ plugins: [path.dirname(configured), url.pathToFileURL(path.dirname(spaced)).href] }),
+        JSON.stringify({
+          plugins: [path.dirname(configured), url.pathToFileURL(path.dirname(spaced)).href, solo],
+        }),
       )
       await until("all three plugins active", async () => {
         const all = await list(w)
         return ["home", "configured", "spaced"].every((id) => all.some((p) => p.id === id && p.status === "active"))
       })
+      await until("the single-file entry refused", async () =>
+        (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).includes(
+          `vibest.json: plugin path must be a directory: ${solo}`,
+        ),
+      )
+      expect(!(await list(w)).some((p) => p.id === "solo"), "a single file named in vibest.json was loaded")
     },
   },
   {

@@ -219,7 +219,7 @@ const checks: ReadonlyArray<Check> = [
         "claude/hooks/register.mjs",
         "cursor/.cursor-plugin/plugin.json",
         "cursor/hooks/hooks.json",
-        "cursor/plugin.js",
+        "cursor/index.js",
         ...["pi", "claude", "cursor"].flatMap((h) => [
           `${h}/skills/delegate/SKILL.md`,
           `${h}/skills/pipeline/SKILL.md`,
