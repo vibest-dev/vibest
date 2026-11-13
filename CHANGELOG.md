@@ -8,10 +8,10 @@ release. Each release lists what broke, who is affected and how to migrate under
 ### Breaking changes
 
 - **Agent hooks change the event instead of returning a decision** (plugin authors): `agent.hook("start.before" | "fail", callback)`
-  callbacks return nothing (`Effect<void, …>`, Promise `void`) and assign to the event: `start.before` events have
+  callbacks return nothing (`Effect<void, …>`, Promise `void`) and assign to the event (their own deep copy of it): `start.before` events have
   mutable `prompt`, `harness`, `provider`, `model`, `machine` and `runtime`; `fail` events have a mutable `move`.
-  `AgentRoute` and `AgentResults` are gone. Each callback works on its own copy and the host copies the changed fields
-  back only when it succeeded within its 5 s deadline, so a timeout or failure changes nothing. Migrate
+  `AgentRoute` and `AgentResults` are gone. Each callback works on its own deep copy and the host copies the changed fields
+  back (deep-copied again) only when it succeeded within its 5 s deadline, so a timeout or failure changes nothing. Migrate
   `Effect.succeed({ harness: "pi" })` to `Effect.sync(() => { event.harness = "pi" })` and a returned move to
   `event.move = { harness, … }`. Machine hooks still return notes.
 - **A start while plugins are still loading is refused** (users; RPC clients of `Spawn`, `Launch`,
@@ -178,17 +178,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   move is two executions instead of one. A reply that arrives after vibestd gave an execution up as `lost` is an
   execution of its own. An execution stopped in its terminal (Esc) is `interrupted`, with no failure and no notice,
   like `vibest interrupt`.
-- **Plugin hooks return their decisions** (plugin authors): hooks no longer change the event they are given. Each
-  callback gets a read-only event (frozen: an assignment throws, and the plugin is reported as crashed, so a run it
-  routes fails with `plugin <id> crashed: …`) and returns what it decides, which core applies in plugin order, a
-  later plugin overriding an earlier one as before. `agent.start.before` returns an `AgentRoute` (any of `prompt`,
-  `harness`, `provider`, `model`, `machine`, `runtime`; `undefined` unsets `harness`, `provider`, `model` or
-  `runtime` and leaves `prompt` and `machine` as they are), `agent.fail` returns an
-  `AgentMove`, and `machine.connect`/`machine.remove` return their notes. `AgentFail` has no `move` and
-  `MachineEvent` has no `notes`; `@vibest/plugin/testing` `machineHooks().fire` takes an event without `notes`. The
-  trace's `changes` list the fields each callback returned. Migrate: `e.harness = "pi"` becomes
-  `return { harness: "pi" }` (for example `Effect.succeed({ harness: "pi" })`), `e.move = m` becomes `return m`, and
-  `e.notes.push(n)` becomes `return [n]`.
+- **Machine hooks return their notes** (plugin authors): `machine.connect`/`machine.remove` callbacks return their
+  notes instead of pushing to `event.notes`; `MachineEvent` has no `notes`, and `@vibest/plugin/testing`
+  `machineHooks().fire` takes an event without `notes`. Migrate `e.notes.push(n)` to `return [n]`.
 - **Promise plugins** (plugin authors): a plugin may be `Plugin.define({ id, setup })` from `@vibest/plugin` instead of `{ id, effect }` from `@vibest/plugin/effect`:
   `setup` gets a context of Promises (hook callbacks return a value or a Promise and refuse by throwing
   `AgentRefused`, `event.subscribe` is an `AsyncIterable`) and may return a cleanup that runs when the plugin unloads.

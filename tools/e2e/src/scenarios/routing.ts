@@ -144,7 +144,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before picks the harness: with it the run starts Pi, ls names the plugin as the harness's decider, and its answer arrives",
+      "a routing plugin's agent.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")

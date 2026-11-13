@@ -127,15 +127,7 @@ const routed = (before: VibestPlugin.AgentStartBefore, after: VibestPlugin.Agent
       (after[field] !== undefined || !REQUIRED.includes(field)),
   )
 
-const draftOf = <T extends object>(event: T): T =>
-  Object.fromEntries(
-    Object.entries(event).map(([field, value]) => [
-      field,
-      value !== null && typeof value === "object"
-        ? Object.freeze(Array.isArray(value) ? [...value] : { ...value })
-        : value,
-    ]),
-  ) as T
+const draftOf = <T extends object>(event: T): T => structuredClone(event)
 
 const readOnly = <T extends object>(event: T): T => Object.freeze(draftOf(event))
 
@@ -489,8 +481,9 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         const decidedBy: Record<string, string> = {}
         const route = (draft: VibestPlugin.AgentStartBefore, plugin: string) => {
           const fields = routed(event, draft)
-          const changes = fields.map((field) => decide(field, event[field], draft[field], plugin, decidedBy))
-          Object.assign(event, Object.fromEntries(fields.map((field) => [field, draft[field]])))
+          const values = Object.fromEntries(fields.map((field) => [field, structuredClone(draft[field])]))
+          const changes = fields.map((field) => decide(field, event[field], values[field], plugin, decidedBy))
+          Object.assign(event, values)
           return changes
         }
         const stopped = yield* runHook("agent.start.before", hooks, event, route, trace)
@@ -515,9 +508,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list, move: undefined }
         const decidedBy: Record<string, string> = {}
         const moveTo = (draft: VibestPlugin.AgentFail, plugin: string) => {
-          if (draft.move === undefined || JSON.stringify(draft.move) === JSON.stringify(event.move)) return []
-          const change = decide("move", event.move, draft.move, plugin, decidedBy)
-          event.move = draft.move
+          if (JSON.stringify(draft.move) === JSON.stringify(event.move)) return []
+          const move = structuredClone(draft.move)
+          const change = decide("move", event.move, move, plugin, decidedBy)
+          event.move = move
           return [change]
         }
         const stopped = yield* runHook("agent.fail", hooks, event, moveTo, trace)
