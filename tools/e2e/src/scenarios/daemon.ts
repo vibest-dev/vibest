@@ -1,6 +1,8 @@
+import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
+import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
 import { alive, binary, expect, expectReplied, factsOf, until, type World } from "../world.ts"
@@ -27,6 +29,40 @@ const raw = (w: World, request: object) =>
     socket.on("error", reject)
     setTimeout(() => (socket.destroy(), reject(new Error("no reply in 5 s"))), 5_000)
   })
+
+const hungTeardownPlugin = `import { Plugin } from "@vibest/plugin"
+import { Effect } from "effect"
+export default Plugin.define({ id: "hung-teardown", effect: () => Effect.addFinalizer(() => Effect.never) })
+`
+
+const startWithHungPlugin = async (w: World) => {
+  const file = path.join(w.vibestHome, "plugins", "hung-teardown.ts")
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(file, hungTeardownPlugin)
+  await w.daemon()
+  await until("the hung-teardown plugin active", async () =>
+    (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
+      (p) => p.id === "hung-teardown" && p.status === "active",
+    ),
+  )
+  return (await running(w)).pid!
+}
+
+const logOf = (w: World) => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
+
+const exitsAtDeadline = async (w: World, pid: number, stop: () => Promise<unknown>) => {
+  const logged = (await logOf(w)).length
+  const t0 = Date.now()
+  await stop()
+  await until("vibestd exited", () => !alive(pid), 20_000)
+  const took = Date.now() - t0
+  expect(took >= 9_000 && took <= 14_000, `vibestd exited ${took} ms after the stop; the deadline is 10 s plus a flush`)
+  const said = (await logOf(w)).slice(logged)
+  expect(
+    /shutdown deadline exceeded[\s\S]*vibest\/Plugins/.test(said),
+    `the log does not name the layer still releasing: ${said.slice(-1500)}`,
+  )
+}
 
 type Printed = { aggregate: string; seq: number; at: number; type: string; data: unknown }
 
@@ -76,6 +112,47 @@ const checks: ReadonlyArray<Check> = [
           return d.status === "running" && d.pid !== before
         })
         expect(!alive(before), `old vibestd ${before} still alive`)
+      }
+    },
+  },
+  {
+    id: "D11",
+    title:
+      "D11 vibestd whose plugin teardown never ends exits at the shutdown deadline after SIGTERM and after a stop request, logging the layer still releasing; daemon restart onto a new vibestd still goes through",
+    run: async (w) => {
+      {
+        const pid = await startWithHungPlugin(w)
+        await exitsAtDeadline(w, pid, async () => process.kill(pid, "SIGTERM"))
+      }
+      {
+        const pid = await startWithHungPlugin(w)
+        const info = JSON.parse(await fs.readFile(path.join(w.vibestHome, "vibestd.pid"), "utf8")) as {
+          instance: string
+        }
+        await exitsAtDeadline(w, pid, async () => {
+          const reply = await raw(w, {
+            jsonrpc: "2.0",
+            id: "1",
+            method: "Daemon.Stop",
+            params: { instance: info.instance },
+            headers: [
+              ["vibest-protocol", String(PROTOCOL)],
+              ["vibest-caller", "cli"],
+              ["vibest-repository", w.repository],
+            ],
+          })
+          expect(!("error" in reply), `Daemon.Stop was refused: ${JSON.stringify(reply)}`)
+        })
+      }
+      {
+        const before = await startWithHungPlugin(w)
+        const r = await w.tty(["daemon", "restart"], "y\n", { timeoutMs: 120_000 })
+        expect(r.code === 0, `daemon restart exited ${r.code}: ${r.stdout}${r.stderr}`)
+        await until("a new vibestd answers", async () => {
+          const d = await running(w)
+          return d.status === "running" && d.pid !== before
+        })
+        await until("the old vibestd gone", () => !alive(before), 20_000)
       }
     },
   },

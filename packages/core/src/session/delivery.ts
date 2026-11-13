@@ -1,6 +1,19 @@
 import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Predicate, Ref } from "effect"
+import {
+  Cause,
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schema,
+} from "effect"
 
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
@@ -17,6 +30,10 @@ import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+
+export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused", {
+  message: Schema.String,
+}) {}
 
 export const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
   Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
@@ -161,6 +178,77 @@ const make = Effect.gen(function* () {
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
 
+  const toEntry = (id: string, message: string, request?: string, sender?: string) =>
+    Effect.gen(function* () {
+      if (!(yield* db.insertSend(id, message, request, sender)))
+        return yield* new NoSuchSession({
+          id,
+          message: `${id} is the entry session of this project and is not running`,
+        })
+    })
+
+  const deliverTo = Effect.fn("Delivery.deliverTo")(function* (
+    id: string,
+    message: string,
+    request?: string,
+    sender?: string,
+  ) {
+    if (!(yield* db.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender)
+    return yield* toEntry(id, message, request)
+  })
+
+  const admit = Effect.fn("Delivery.admit")(function* (
+    sender: { readonly sessionId: string; readonly projectId: string },
+    input: string,
+    message: string,
+    request?: string,
+  ) {
+    const toOrigin = yield* db.sendToOrigin(sender.sessionId, input, message, request)
+    if (toOrigin === false)
+      return yield* new NoSuchSession({
+        id: input,
+        message: `${input} is on another machine that vibestd does not know; nothing was sent`,
+      })
+    if (toOrigin === true) return { id: input }
+    const id = yield* db.resolveSession(input)
+    const target = yield* db.sessionIdentity(id)
+    if (target?.projectId !== sender.projectId)
+      return yield* new SendRefused({
+        message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
+      })
+    const creator = (yield* db.creatorOf(sender.sessionId)) ?? undefined
+    const mine = creator !== undefined && "local" in creator ? creator.local : undefined
+    if (!(yield* db.maySend(sender.sessionId, id)))
+      return yield* new SendRefused({
+        message: `${id} is not the agent that started you, and you did not start it${mine === undefined ? "" : `; you may send to ${mine}`}`,
+      })
+    const session = yield* db.getSession(id)
+    const stopped = !session || archived(session)
+    if (!(stopped && mine === id)) {
+      if (stopped && !target.entry) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+      if (target.entry) yield* toEntry(id, message, request, sender.sessionId)
+      else yield* send(id, message, request, sender.sessionId)
+      return { id }
+    }
+    const heir = yield* db.nearestAlive(sender.sessionId)
+    if (heir === undefined)
+      return yield* new NoSuchSession({
+        id,
+        message: `${id} has ended and no session above it is running; the user reads your last reply with vibest result`,
+      })
+    if ("peer" in heir) {
+      if (!(yield* db.sendToPeer(sender.sessionId, heir.peer, heir.session, message, request)))
+        return yield* new NoSuchSession({
+          id,
+          message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,
+        })
+      return { id: heir.session }
+    }
+    if ((yield* db.sessionIdentity(heir.local))?.entry) yield* toEntry(heir.local, message, request, sender.sessionId)
+    else yield* send(heir.local, message, request, sender.sessionId)
+    return { id: heir.local }
+  })
+
   const queued = (id: string, inboxId: number | undefined) =>
     Effect.gen(function* () {
       const row = (yield* db.pendingInbox(id)).find((r) => r.id === inboxId)
@@ -257,7 +345,7 @@ const make = Effect.gen(function* () {
       `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
-  return { deliverQueued, send, interrupt, userPrompt, typeTaken }
+  return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }
 })
 
 export class Delivery extends Context.Service<Delivery, Effect.Success<typeof make>>()("vibest/Delivery") {
