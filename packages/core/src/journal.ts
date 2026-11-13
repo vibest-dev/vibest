@@ -9,7 +9,7 @@ import {
   UnknownFact,
 } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
-import { Clock, Context, Effect, Schema } from "effect"
+import { Clock, Context, Effect, Schema, Stream } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
 import { LOG_SCHEMA, ledgerOf, MIGRATION_TABLE } from "./db-schema.ts"
@@ -47,6 +47,37 @@ type Logged = Row & { readonly position: number }
 const readLog = (sql: SqlClient.SqlClient, after: number) =>
   sql<Logged>`SELECT position, aggregate, seq, at, type, data
     FROM event WHERE position > ${after} ORDER BY position LIMIT ${REPLAY_PAGE}`
+
+export type Cursor = { readonly session: string; readonly after: number } | { readonly log: number }
+
+const readPage = (sql: SqlClient.SqlClient, cursor: Cursor) =>
+  "session" in cursor
+    ? sql<Row>`SELECT aggregate, seq, at, type, data
+        FROM event WHERE aggregate = ${cursor.session} AND seq > ${cursor.after} ORDER BY seq LIMIT ${REPLAY_PAGE}`
+    : readLog(sql, cursor.log)
+
+const advance = (cursor: Cursor, page: ReadonlyArray<Row>): Cursor => {
+  const last = page[page.length - 1]! as Logged
+  return "session" in cursor ? { session: cursor.session, after: last.seq } : { log: last.position }
+}
+
+export const followFacts = (
+  sql: SqlClient.SqlClient,
+  wake: Effect.Effect<void>,
+  start: Cursor,
+  follow: boolean,
+): Stream.Stream<Row, SqlError.SqlError> =>
+  Stream.unfold(start, (cursor) =>
+    readPage(sql, cursor).pipe(
+      Effect.flatMap((page) =>
+        page.length > 0
+          ? Effect.succeed([page, advance(cursor, page)] as const)
+          : follow
+            ? wake.pipe(Effect.andThen(Effect.succeed([[], cursor] as const)))
+            : Effect.undefined,
+      ),
+    ),
+  ).pipe(Stream.flattenIterable)
 
 const replayFrom = (sql: SqlClient.SqlClient, after: number): Effect.Effect<void, SqlError.SqlError | UnknownFact> =>
   readLog(sql, after).pipe(
