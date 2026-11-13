@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { commands } from "@vibest/builtins"
+import * as Logging from "@vibest/client/logging"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Effect } from "effect"
 
@@ -67,6 +68,8 @@ Runtime.run(Commands, Handlers, {
 }).pipe(
   Cli.printFailure,
   Effect.provide(Layout.layer),
+  Effect.provide(Logging.layer),
+  Effect.provide(Logging.layer),
   Effect.provideService(VibestCommand, Platform.selfCommand),
   Effect.provideService(Host, { daemon: Platform.daemon, replacements, exec: Platform.exec }),
   Effect.provide(Platform.services),

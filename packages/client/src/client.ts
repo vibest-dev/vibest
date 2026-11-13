@@ -111,7 +111,7 @@ const fromEnv = Effect.gen(function* () {
     cwd: (yield* Path.Path).resolve("."),
   }
 }).pipe(
-  Effect.tapCause((cause) => Effect.logDebug(`session claim headers fell back to the request: ${Cause.pretty(cause)}`)),
+  Effect.tapCause((cause) => Effect.logDebug("session claim headers fell back to the request", cause)),
   Effect.orElseSucceed(() => ({})),
 )
 

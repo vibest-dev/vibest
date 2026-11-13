@@ -14,7 +14,6 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { checkReplay } from "@vibest/core/journal"
-import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/core/processes"
@@ -24,6 +23,7 @@ import * as VibestPlugin from "@vibest/plugin"
 import { messageOf } from "@vibest/schema/error"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
+import { MachineTransport } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
@@ -340,7 +340,13 @@ export const replacements: LayerNode.Replacements = [
   ),
   MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
   PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
-  builtinsNode.replace(Layer.succeed(Builtins, pre)),
+  builtinsNode.replace(
+    LayerNode.make({
+      name: "vibest/Builtins",
+      layer: Layer.effect(Builtins, pre),
+      deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
+    }),
+  ),
   HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
   ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
   Server.socketServerLayer.replace(
