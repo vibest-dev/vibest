@@ -1,26 +1,21 @@
 import { Plugin } from "@vibest/plugin"
 import type { Harness } from "@vibest/plugin"
-import { Effect, FileSystem, Path } from "effect"
+import { Effect } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-type SubscriptionResult = Effect.Success<ReturnType<NonNullable<Harness.HarnessDefinition["subscription"]>>>
-type Services = FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+import type { Spawner } from "./subscriptions/index.ts"
 
 export const harnessPlugin = (
   definition: Harness.HarnessDefinition,
-  subscription?: (home: string) => Effect.Effect<SubscriptionResult, never, Services>,
+  subscription?: (spawner: Spawner) => NonNullable<Harness.HarnessDefinition["subscription"]>,
 ) =>
-  Effect.map(Effect.context<Services>(), (services) =>
+  Effect.map(Effect.service(ChildProcessSpawner.ChildProcessSpawner), (spawner) =>
     Plugin.define({
       id: `harness-${definition.id}`,
       effect: (ctx) =>
         ctx.harness
           .transform((editor) =>
-            editor.add(
-              subscription
-                ? { ...definition, subscription: (home) => subscription(home).pipe(Effect.provideContext(services)) }
-                : definition,
-            ),
+            editor.add(subscription ? { ...definition, subscription: subscription(spawner) } : definition),
           )
           .pipe(Effect.asVoid),
     }),

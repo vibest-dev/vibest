@@ -3,6 +3,7 @@ import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import type { Harness } from "@vibest/plugin"
 import { Effect, FileSystem, Layer, Path } from "effect"
+import { ChildProcessSpawner } from "effect/process"
 
 import { noProvider, opt } from "./models.ts"
 import { cursorSubscription } from "./subscriptions/cursor.ts"
@@ -59,9 +60,10 @@ export const cursor: Harness.HarnessDefinition = {
   ],
   models: { args: () => ["models"], answer: cursorModels },
   subscription: (home) =>
-    Effect.flatMap(cursorEnvironment(home), (problem) => cursorSubscription(home, problem)).pipe(
-      Effect.provide(cursorPlatform),
-    ),
+    Effect.gen(function* () {
+      const spawner = yield* Effect.service(ChildProcessSpawner.ChildProcessSpawner)
+      return yield* cursorSubscription(spawner)(home, yield* cursorEnvironment(home))
+    }).pipe(Effect.provide(cursorPlatform)),
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),

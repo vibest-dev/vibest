@@ -1,5 +1,8 @@
 import { capture } from "@vibest/plugin"
 import { Effect } from "effect"
+import { ChildProcessSpawner } from "effect/process"
+
+export type Spawner = ChildProcessSpawner.ChildProcessSpawner["Service"]
 
 export const record = (u: unknown): Record<string, unknown> | undefined =>
   typeof u === "object" && u !== null && !Array.isArray(u) ? (u as Record<string, unknown>) : undefined
@@ -15,7 +18,7 @@ export const parseJson = (text: string | undefined): unknown => {
   }
 }
 
-export const runCli = (command: string, args: ReadonlyArray<string>, cwd: string) =>
+export const runCli = (spawner: Spawner, command: string, args: ReadonlyArray<string>, cwd: string) =>
   capture(command, args, {
     stdin: "ignore",
     cwd,
@@ -23,6 +26,7 @@ export const runCli = (command: string, args: ReadonlyArray<string>, cwd: string
     extendEnv: true,
     timeout: CLI_TIMEOUT,
   }).pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     Effect.map((run) => (run === undefined ? undefined : run.stdout)),
     Effect.orElseSucceed(() => undefined),
   )
