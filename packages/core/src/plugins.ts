@@ -164,13 +164,16 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const ready = yield* Latch.make(true)
     let slots: ReadonlyArray<Slot> = []
 
-    const close = (scope: Scope.Closeable, id: string) =>
+    const close = (scope: Scope.Closeable, id: string, level: "error" | "warning" = "error") =>
       timeoutWithoutWaiting(Scope.close(scope, Exit.void), root, timeout).pipe(
         Effect.flatMap((exit) =>
           Option.isNone(exit)
             ? Effect.logWarning(`plugin ${id}: teardown timed out; left to finish on its own`)
             : Exit.isFailure(exit.value)
-              ? Effect.logWarning(`plugin ${id}: teardown failed: ${errorMessage(exit.value.cause)}`)
+              ? (level === "error" ? Effect.logError : Effect.logWarning)("failed to clean up plugin", {
+                  "plugin.id": id,
+                  cause: exit.value.cause,
+                })
               : Effect.void,
         ),
       )
@@ -179,7 +182,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     yield* Stream.fromQueue(broken).pipe(
       Stream.runForEach(({ running, refresh }) =>
         Effect.logWarning(`plugin ${running.candidate.plugin.id} disabled: ${running.broken}`).pipe(
-          Effect.andThen(close(running.scope, running.candidate.plugin.id)),
+          Effect.andThen(close(running.scope, running.candidate.plugin.id, "warning")),
           Effect.andThen(refresh),
           logFailure("plugins: disabling a plugin failed"),
         ),

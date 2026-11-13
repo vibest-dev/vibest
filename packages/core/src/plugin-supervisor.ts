@@ -85,7 +85,7 @@ export const supervise = Effect.fnUntraced(function* (
         activated = revisions
       }),
     )
-  yield* publish()
+  yield* publish().pipe(logFailure("plugins: first activation failed"))
   yield* Stream.fromQueue(builtinTriggers).pipe(
     Stream.runForEach(() => publish().pipe(logFailure("plugins: builtin update failed"))),
     Effect.forkScoped,

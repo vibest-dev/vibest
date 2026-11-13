@@ -72,7 +72,7 @@ export default Plugin.define({
 const checks: ReadonlyArray<Check> = [
   {
     id: "G2",
-    title: "a plugin whose teardown fails is logged by id and cause, and its edited revision still runs",
+    title: "a plugin whose teardown fails is logged as an error with its id, and its edited revision still runs",
     run: async (w) => {
       const file = path.join(w.vibestHome, "plugins", "unclean.ts")
       await write(file, failingTeardown("unclean"))
@@ -85,7 +85,7 @@ const checks: ReadonlyArray<Check> = [
       )
       const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
       expect(
-        /plugin unclean: teardown failed: .*e2e teardown boom/.test(log),
+        /ERROR[^\n]*failed to clean up plugin \{\s+"plugin\.id": "unclean"/.test(log),
         `the failed teardown was not logged: ${log.slice(-2000)}`,
       )
       await fs.rm(file)
@@ -289,7 +289,7 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
   {
     id: "G10",
     title:
-      "a plugin folder loads the existing package.json exports entry (./server, else .), never an unexported index.ts, recovers once its missing dependency is installed, and refuses an entry outside the folder",
+      "a plugin folder loads the existing package.json exports entry (./server, else .), never an unexported index.ts, recovers once its missing dependency is installed, drops an entry outside the folder without listing it, and loads an entry named ..entry.ts",
     run: async (w) => {
       const folder = path.join(w.vibestHome, "plugins", "packaged")
       await write(
@@ -326,12 +326,21 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
         path.join(escaping, "package.json"),
         JSON.stringify({ name: "e2e-escaping", type: "module", exports: path.relative(escaping, outside) }),
       )
-      await until("the escaping entry reported", async () =>
-        (await list(w)).some(
-          (p) => p.status === "failed" && p.source.endsWith("escaping") && (p.error ?? "").includes("outside"),
-        ),
+      const dotted = path.join(w.vibestHome, "plugins", "dotted")
+      await write(
+        path.join(dotted, "package.json"),
+        JSON.stringify({ name: "e2e-dotted", type: "module", exports: "./..entry.ts" }),
       )
-      expect(!(await list(w)).some((p) => p.id === "escaped"), "an entry outside the plugin folder was loaded")
+      await write(path.join(dotted, "..entry.ts"), plugin("dotted"))
+      await until("the dotted entry active", async () =>
+        (await list(w)).some((p) => p.id === "dotted" && p.status === "active"),
+      )
+      const all = await list(w)
+      expect(
+        !all.some((p) => p.id === "escaped" || p.source.includes("escaping")),
+        `an entry outside the plugin folder was listed: ${JSON.stringify(all)}`,
+      )
+      await fs.rm(dotted, { recursive: true })
       await fs.rm(escaping, { recursive: true })
     },
   },

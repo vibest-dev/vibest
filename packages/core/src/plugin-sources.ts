@@ -22,6 +22,10 @@ export class PluginLoader extends Context.Service<
   static readonly node = LayerNode.unbound(PluginLoader)
 }
 
+export class InvalidPluginPath extends Schema.TaggedError<InvalidPluginPath>()("InvalidPluginPath", {
+  target: Schema.String,
+}) {}
+
 export interface Candidate {
   readonly source: string
   readonly revision: string
@@ -86,6 +90,8 @@ export type Operation =
   | { readonly type: "remove"; readonly target: string }
 
 const SOURCE = /\.[cm]?[jt]s$/
+const contains = (relative: string) =>
+  relative === "" || (!relative.startsWith("/") && relative !== ".." && !relative.startsWith("../"))
 const isLocal = (target: string) =>
   target.startsWith("/") || target.startsWith("./") || target.startsWith("../") || target.startsWith("file://")
 
@@ -122,6 +128,11 @@ export const makeSources = Effect.fnUntraced(function* (
       Effect.map((i) => i.type === "Directory"),
       Effect.orElseSucceed(() => false),
     )
+  const isFile = (target: string) =>
+    fs.stat(target).pipe(
+      Effect.map((i) => i.type === "File"),
+      Effect.orElseSucceed(() => false),
+    )
   const revisionOf = (graph: Graph) =>
     Effect.forEach(
       [...graph.files.map((f) => [f, false] as const), ...graph.unresolved.map((d) => [d, true] as const)],
@@ -153,8 +164,7 @@ export const makeSources = Effect.fnUntraced(function* (
     const root = yield* canonical(target)
     for (const file of candidates) {
       if (!(yield* fs.exists(file))) continue
-      const real = yield* canonical(file)
-      return path.relative(root, real).startsWith("..") ? ({ outside: file } as const) : file
+      return contains(path.relative(root, yield* canonical(file))) ? file : null
     }
     return undefined
   })
@@ -211,7 +221,7 @@ export const makeSources = Effect.fnUntraced(function* (
       if (!isLocal(target)) return failed("npm plugins are not supported yet")
       const file = yield* entry(target, paths).pipe(Effect.orElseSucceed(() => undefined))
       if (file !== target) listings.add(target)
-      if (typeof file === "object") return failed(`entry ${file.outside} is outside the plugin folder ${target}`)
+      if (file === null) return undefined
       if (file === undefined) {
         yield* warn(`plugin ${target} has no package.json exports, server.* or index.* entry; skipped`)
         return undefined
@@ -278,18 +288,14 @@ export const makeSources = Effect.fnUntraced(function* (
         configured.push({ type: "add", target, options })
         continue
       }
-      const located = yield* (
-        target.startsWith("file://")
-          ? Effect.try(() => new URL(target)).pipe(Effect.flatMap(path.fromFileUrl))
-          : Effect.succeed(path.resolve(layout.home, target))
-      ).pipe(Effect.option)
-      if (Option.isNone(located)) {
-        yield* warn(`vibest.json: plugin path is not a valid file URL: ${target}`)
-        continue
-      }
-      const resolved = located.value
+      const resolved = target.startsWith("file://")
+        ? yield* Effect.try(() => new URL(target)).pipe(
+            Effect.flatMap(path.fromFileUrl),
+            Effect.mapError(() => new InvalidPluginPath({ target })),
+          )
+        : path.resolve(layout.home, target)
       paths.add(resolved)
-      if (!(yield* isDirectory(resolved))) {
+      if (yield* isFile(resolved)) {
         yield* warn(`vibest.json: plugin path must be a directory: ${resolved}`)
         continue
       }

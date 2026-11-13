@@ -448,6 +448,13 @@ describe("plugins: loading", () => {
         assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
         assert.strictEqual((yield* first.start(event)).model, "from-y")
 
+        yield* config(["./x", "file://["])
+        const invalid = yield* loaded(dir)
+        assert.deepStrictEqual(
+          (yield* invalid.list).map((p) => p.id),
+          [],
+        )
+
         yield* config(["-*", "./y", "./x"])
         const second = yield* loaded(dir)
         assert.deepStrictEqual(

@@ -21,9 +21,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 - **`vibest run --peer` is `--share`** (agents and scripts that start a session in another session's worktree): the flag,
   the `Spawn` field `peer` and its refusal text are renamed; `peer` now names only another machine's vibestd.
 - **Cursor is a plugin, claude is the default harness** (users of Cursor, and anyone relying on "no harness to
-  inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the file
-  the folder `harnesses/cursor` of the install directory to `plugins` in `~/.vibest/vibest.json`; until then `--harness cursor` fails saying no plugin provides it, and a Cursor session cannot
-  resume or restart. The first bare `vibest` in a project with no `--harness` and no plugin choosing now starts Claude when
+  inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the
+  folder `harnesses/cursor` of the install directory to `plugins` in `~/.vibest/vibest.json`; until then `--harness
+  cursor` fails saying no plugin provides it, and a Cursor session cannot resume or restart. The first bare `vibest` in a project with no `--harness` and no plugin choosing now starts Claude when
   Claude is available. To choose differently write `"-harness-default"` in
   `plugins` and pick the harness in a plugin of your own.
 - **`-<id>` removes builtin plugins** (plugin authors): an entry such as `"-runtime-choice"` now removes the builtin with

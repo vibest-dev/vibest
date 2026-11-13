@@ -13,7 +13,7 @@ must be a directory.
 
 Editing a plugin file reloads it without a daemon restart: `vibest plugins` shows the new version, and vibestd is the
 same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way. A plugin whose teardown fails
-is logged by id and cause, and its edited revision still runs.
+is logged as an error with its plugin id, and its edited revision still runs.
 
 ## G3. A plugin that fails to load
 
@@ -62,7 +62,7 @@ A plugin folder whose `package.json` maps `exports` loads the file the map names
 file that does not exist, and never a file the map does not export. While a package it imports is not
 installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
 active without editing the plugin or restarting vibestd. An `exports` entry that resolves outside the plugin folder is
-not loaded; the plugin is listed as failed saying the entry is outside the folder.
+not loaded, and the plugin is not listed.
 
 ## G11. A plugin disabled by a failing transform
 
