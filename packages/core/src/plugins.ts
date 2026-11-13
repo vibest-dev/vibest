@@ -170,7 +170,9 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         Effect.flatMap((exit) =>
           Option.isNone(exit)
             ? Effect.logWarning(`plugin ${id}: teardown timed out; left to finish on its own`)
-            : Effect.void,
+            : Exit.isFailure(exit.value)
+              ? Effect.logWarning(`plugin ${id}: teardown failed: ${errorMessage(exit.value.cause)}`)
+              : Effect.void,
         ),
       )
 

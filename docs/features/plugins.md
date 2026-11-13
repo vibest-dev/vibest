@@ -10,7 +10,8 @@ is and when it counts as working.
 ## G2. Reloading an edited plugin
 
 Editing a plugin file reloads it without a daemon restart: `vibest plugins` shows the new version, and vibestd is the
-same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way.
+same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way. A plugin whose teardown fails
+is logged by id and cause, and its edited revision still runs.
 
 ## G3. A plugin that fails to load
 

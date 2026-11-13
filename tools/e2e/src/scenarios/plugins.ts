@@ -60,7 +60,36 @@ const write = async (file: string, text: string) => {
   await fs.rename(`${file}.tmp`, file)
 }
 
+const failingTeardown = (id: string) => `import { Plugin } from "@vibest/plugin"
+import { Effect } from "effect"
+export default Plugin.define({
+  id: ${JSON.stringify(id)},
+  effect: () => Effect.addFinalizer(() => Effect.die(new Error("e2e teardown boom"))),
+})
+`
+
 const checks: ReadonlyArray<Check> = [
+  {
+    id: "G2",
+    title: "a plugin whose teardown fails is logged by id and cause, and its edited revision still runs",
+    run: async (w) => {
+      const file = path.join(w.vibestHome, "plugins", "unclean.ts")
+      await write(file, failingTeardown("unclean"))
+      await until("the first revision active", async () =>
+        (await list(w)).some((p) => p.id === "unclean" && p.status === "active"),
+      )
+      await write(file, plugin("unclean-v2"))
+      await until("the edited revision active", async () =>
+        (await list(w)).some((p) => p.id === "unclean-v2" && p.status === "active"),
+      )
+      const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
+      expect(
+        /plugin unclean: teardown failed: .*e2e teardown boom/.test(log),
+        `the failed teardown was not logged: ${log.slice(-2000)}`,
+      )
+      await fs.rm(file)
+    },
+  },
   {
     id: "G1",
     title: "plugins lists one from VIBEST_HOME/plugins and one from vibest.json",
