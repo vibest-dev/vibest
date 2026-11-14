@@ -1,11 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { keyedLock } from "@vibest/core/effect/keyed-mutex"
+import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
 import { Deferred, Effect, Fiber } from "effect"
 
 describe("keyedLock", () => {
   it.effect("one holder per key; the entry goes once released with nobody waiting", () =>
     Effect.gen(function* () {
-      const locks = keyedLock<number>()
+      const locks = KeyedMutex.keyedLock<number>()
       const order: Array<string> = []
       const gate = yield* Deferred.make<void>()
       const first = yield* Effect.forkChild(
@@ -32,7 +32,7 @@ describe("keyedLock", () => {
 
   it.effect("a waiter interrupted while it waits and a failed holder leave no entry", () =>
     Effect.gen(function* () {
-      const locks = keyedLock<string>()
+      const locks = KeyedMutex.keyedLock<string>()
       const holding = yield* Deferred.make<void>()
       const gate = yield* Deferred.make<void>()
       const holder = yield* Effect.forkChild(
@@ -52,7 +52,7 @@ describe("keyedLock", () => {
 
   it.effect("a holder interrupted after it took the lock releases it", () =>
     Effect.gen(function* () {
-      const locks = keyedLock<string>()
+      const locks = KeyedMutex.keyedLock<string>()
       const holding = yield* Deferred.make<void>()
       const holder = yield* Effect.forkChild(
         locks.withLock("a")(Deferred.succeed(holding, undefined).pipe(Effect.andThen(Effect.never))),

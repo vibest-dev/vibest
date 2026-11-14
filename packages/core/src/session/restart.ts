@@ -19,7 +19,7 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { Harness, Harnesses } from "../harness.ts"
 import { entryCommand, restartArgv } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"

@@ -2,7 +2,7 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Cause, Clock, Duration, Effect, Exit, Option, type Scope } from "effect"
 
-import { timeoutWithoutWaiting } from "../effect/bounded.ts"
+import { Bounded } from "../effect/bounded.ts"
 
 export interface Events {
   readonly "agent.start.before": VibestPlugin.AgentStartBefore
@@ -87,7 +87,7 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
   timeout: Duration.Input,
 ) {
   const started = yield* Clock.currentTimeMillis
-  const exit = yield* timeoutWithoutWaiting(
+  const exit = yield* Bounded.timeoutWithoutWaiting(
     Effect.suspend(() => entry.callback(event)),
     scope,
     timeout,

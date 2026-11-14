@@ -22,9 +22,9 @@ import type { PeerStart } from "../database/db-remote.ts"
 import { type NewSession, type SessionRow, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
-import { directoryLock, type keyedLock } from "../effect/keyed-mutex.ts"
+import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
 import { harnessCatalog, harnessOptions, Harness, Harnesses, preflight, unprovided } from "../harness.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
@@ -85,7 +85,7 @@ const sessionSpawn = (deps: {
   readonly crypto: Crypto.Crypto
   readonly git: Git["Service"]
   readonly scope: Scope.Scope
-  readonly locks: ReturnType<typeof keyedLock<string>>
+  readonly locks: ReturnType<typeof KeyedMutex.keyedLock<string>>
   readonly options: { readonly maxSessions: number | undefined }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
@@ -337,7 +337,7 @@ const sessionSpawn = (deps: {
     const admitted =
       input.share === undefined
         ? yield* admit(undefined)
-        : yield* locks.withLock(directoryLock((yield* db.sessionDirectory(input.share)) ?? ""))(
+        : yield* locks.withLock(KeyedMutex.directoryLock((yield* db.sessionDirectory(input.share)) ?? ""))(
             Effect.gen(function* () {
               const shared = yield* shareOf(input, input.share!, runtimeKind, decision.machine.id)
               yield* shareAdmitPause.wait

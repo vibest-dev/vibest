@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import * as PlatformNode from "@vibest/core/effect/platform"
+import { PlatformNode } from "@vibest/core/effect/platform"
 import { Context, Effect, Layer } from "effect"
 
 class Probe extends Context.Service<Probe, true>()("test/Probe") {}

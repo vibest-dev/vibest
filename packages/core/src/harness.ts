@@ -6,7 +6,7 @@ import { Cache, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Opti
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
+import { PlatformNode } from "./effect/platform.ts"
 import { listModels, type Model } from "./models.ts"
 import type { HarnessDefinition, HarnessesShape } from "./plugin/host.ts"
 import * as Registry from "./plugin/registry.ts"

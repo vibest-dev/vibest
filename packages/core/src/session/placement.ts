@@ -30,7 +30,7 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
 import { encodeCommand, Harness, Harnesses } from "../harness.ts"
 import { Inbox } from "../inbox.ts"

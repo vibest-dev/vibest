@@ -4,7 +4,7 @@ import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, S
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
+import { PlatformNode } from "./effect/platform.ts"
 
 export class GitError extends Schema.TaggedError<GitError>()("GitError", {
   args: Schema.Array(Schema.String),

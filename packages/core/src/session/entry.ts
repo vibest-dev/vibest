@@ -15,9 +15,9 @@ import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
 import { AddressJson, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { keyedLock } from "../effect/keyed-mutex.ts"
+import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { Harness, harnessOptions, Harnesses } from "../harness.ts"
 import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
@@ -66,7 +66,7 @@ const make = Effect.gen(function* () {
   const vibestCommand = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const projectLocked = keyedLock<string>()
+  const projectLocked = KeyedMutex.keyedLock<string>()
 
   const withHarness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(

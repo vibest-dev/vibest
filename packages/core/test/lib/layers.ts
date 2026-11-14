@@ -1,6 +1,6 @@
 import { equalToReplay } from "@vibest/core/database/journal"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import * as PlatformNode from "@vibest/core/effect/platform"
+import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
 import { Processes } from "@vibest/core/processes"
 import { Effect, Layer } from "effect"

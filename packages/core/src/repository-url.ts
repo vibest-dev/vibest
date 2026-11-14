@@ -3,7 +3,7 @@ import { Context, Duration, Effect, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
+import { PlatformNode } from "./effect/platform.ts"
 
 export type ParsedRemote = { readonly host: string; readonly path: string; readonly ssh: boolean }
 

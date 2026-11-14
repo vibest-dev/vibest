@@ -3,7 +3,7 @@ import { Layout } from "@vibest/schema/layout"
 import { Context, Duration, Effect, FileSystem, Layer, Option, Schema } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
+import { PlatformNode } from "./effect/platform.ts"
 
 export const HOST_ID_TIMEOUT = Duration.seconds(2)
 export const MACHINE_ID_FILES = ["/etc/machine-id", "/var/lib/dbus/machine-id"] as const

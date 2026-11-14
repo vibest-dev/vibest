@@ -25,7 +25,7 @@ import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { SessionLive } from "../session/live.ts"
 import { inboxMethods } from "./db-inbox.ts"
 import { remoteQueries, type PeerScope, type PeerStart } from "./db-remote.ts"

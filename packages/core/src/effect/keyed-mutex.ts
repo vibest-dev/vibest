@@ -1,5 +1,7 @@
 import { Effect, Semaphore } from "effect"
 
+export * as KeyedMutex from "./keyed-mutex.ts"
+
 export const directoryLock = (directory: string) => `directory:${directory}`
 
 export const keyedLock = <K>() => {

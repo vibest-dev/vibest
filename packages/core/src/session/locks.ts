@@ -1,12 +1,12 @@
 import { Context, Effect, Layer } from "effect"
 
 import { Drain } from "../drain.ts"
-import { keyedLock } from "../effect/keyed-mutex.ts"
+import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 
 const make = Effect.gen(function* () {
   const drain = yield* Drain
-  const locks = keyedLock<string>()
+  const locks = KeyedMutex.keyedLock<string>()
   return {
     ...locks,
     locked:
