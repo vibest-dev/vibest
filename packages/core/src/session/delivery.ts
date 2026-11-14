@@ -284,10 +284,12 @@ const make = Effect.gen(function* () {
     })
 
   const deliverWoken = (id: string, wake: Wake) =>
-    locked(id)(due(id, wake).pipe(Effect.flatMap((ready) => (ready ? deliver(id) : Effect.void)))).pipe(
-      Effect.catchCause(undeliverable(id, wake.rows)),
-      Reactor.logFailure(`deliver ${id}`),
-    )
+    locked(id)(
+      due(id, wake).pipe(
+        Effect.flatMap((ready) => (ready ? deliver(id) : Effect.void)),
+        Effect.catchCause(undeliverable(id, wake.rows)),
+      ),
+    ).pipe(Reactor.logFailure(`deliver ${id}`))
 
   const wakes = yield* RunCoordinator.make<string, Wake>({
     drain: deliverWoken,
