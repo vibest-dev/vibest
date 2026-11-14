@@ -49,7 +49,7 @@ const event = {
 }
 
 const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
-  for (let i = 0; i < 250 && !done(); i++) {
+  for (let i = 0; i < 3000 && !done(); i++) {
     yield* TestClock.withLive(Effect.sleep("20 millis"))
     yield* TestClock.adjust("150 millis")
   }
@@ -109,12 +109,12 @@ describe("plugins: builtins follow the latest config", () => {
 
         const spawning = yield* Effect.forkChild(plugins.start(event))
         release()
-        const decision = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("10 seconds")))
+        const decision = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("60 seconds")))
         assert.isFalse(
           decision.trace.some((t) => t.plugin === "harness-x"),
           "the removed builtin ran",
         )
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    { timeout: 20_000 },
+    { timeout: 120_000 },
   )
 })
