@@ -55,6 +55,12 @@ const isHandoff = (file, node, source) =>
   node.specifiers[0].type === "ImportSpecifier" &&
   node.specifiers[0].imported.name === handoff.name
 
+const specifierOf = (source) => {
+  if (typeof source?.value === "string") return source.value
+  if (source?.type === "TemplateLiteral" && source.expressions.length === 0) return source.quasis[0].value.cooked
+  return undefined
+}
+
 export const packageImports = {
   create(context) {
     const file = context.filename.replaceAll("\\", "/")
@@ -65,8 +71,8 @@ export const packageImports = {
     const list = allowed[name]
     if (list === undefined) return {}
     const check = (node) => {
-      const source = node.source?.value
-      if (typeof source !== "string") return
+      const source = specifierOf(node.source)
+      if (source === undefined) return
       if (source.startsWith(".")) {
         if (path.posix.resolve(path.posix.dirname(file), source).startsWith(`${root}/`)) return
         context.report({ node, message: `A relative import stays inside ${name}: import another package by its name.` })

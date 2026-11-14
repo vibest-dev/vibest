@@ -331,6 +331,7 @@ export { f } from "@vibest/server/server"
       `import * as Server from "@vibest/server/server"\nexport const v = Server\n`,
       `import { HANDOFF_ENV, layer } from "@vibest/server/server"\nexport const v = [HANDOFF_ENV, layer]\n`,
       `export const v = import("@vibest/server/server")\n`,
+      `export const v = import(\`@vibest/server/server\`)\n`,
       `import { x } from "@vibest/server/server/x"\nexport const v = x\n`,
     ])
       expect(oxlintFindings(other, handler)).toEqual(["1 vibest(package-imports)"])
