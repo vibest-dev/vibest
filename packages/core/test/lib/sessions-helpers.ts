@@ -153,7 +153,7 @@ export const chooseNext = Plugin.define({
   effect: (ctx) =>
     ctx.agent.hook("fail", (event) =>
       Effect.sync(() => {
-        if (event.reason !== "limited") return undefined
+        if (event.reason !== "limited") return
         const pair = (harness: string, provider: string) => `${harness}\0${provider}`
         const excludedPairs = new Set<string>()
         const excludedHarnesses = new Set(event.attempts.filter((a) => a.outcome !== "limited").map((a) => a.harness))
@@ -194,8 +194,7 @@ export const chooseNext = Plugin.define({
         }
         const picked = known.length > 0 ? known.reduce((a, b) => (a.score <= b.score ? a : b)) : undefined
         const fallback = unknown[0]
-        const chosen = picked ?? (fallback === undefined ? undefined : { harness: fallback, provider: undefined })
-        return chosen
+        event.move = picked ?? (fallback === undefined ? undefined : { harness: fallback, provider: undefined })
       }),
     ),
 })

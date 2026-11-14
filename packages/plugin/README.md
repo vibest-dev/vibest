@@ -28,9 +28,9 @@ import { Plugin } from "@vibest/plugin"
 export default Plugin.define({
   id: "my-plugin",
   setup: async (context) => {
-    await context.agent.hook("start.before", async (event) =>
-      event.prompt.startsWith("ask:") ? { harness: "pi" } : undefined,
-    )
+    await context.agent.hook("start.before", async (event) => {
+      if (event.prompt.startsWith("ask:")) event.harness = "pi"
+    })
     return () => console.log("unloaded")
   },
 })
@@ -45,14 +45,13 @@ lists every plugin, builtins first, with its status and counters.
 | Member                | What it does                                                                                                                                                      |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `options`             | the plugin's options                                                                                                                                              |
-| `agent.hook`          | intercept `start.before` (return `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (return a move) |
+| `agent.hook`          | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (assign `move`) |
 | `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                |
 | `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
 | `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                              |
 | `event.subscribe`     | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                            |
 
-**Hooks** run in plugin order; each callback gets a read-only event, returns what it decides, and has 5 seconds.
-Assigning to the event throws, and counts as the plugin crashing. **Transforms** take a synchronous
+**Hooks** run in plugin order; each callback gets the event, changes it by assigning to its fields, and has 5 seconds. A callback that times out or fails changes nothing. **Transforms** take a synchronous
 editor (`add`; the harness editor also has `update`) and apply in registration order, so a later plugin sees and may
 change what earlier ones, builtins included, defined. Load effectful data before registering a transform. A transform that throws fails the whole plugin and removes what it registered.
 
