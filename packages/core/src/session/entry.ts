@@ -22,7 +22,7 @@ import { Harness, harnessOptions } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
-import { Plugins, pluginsNode } from "../plugin.ts"
+import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
@@ -58,7 +58,7 @@ const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const runtimes = yield* Runtimes.Service
   const restarting = (yield* SessionLive).restarting
-  const plugins = yield* Plugins
+  const plugins = yield* Plugins.Service
   const agents = yield* Agents.Service
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
@@ -431,7 +431,7 @@ export class EntrySession extends Context.Service<EntrySession, Effect.Success<t
       Db.node,
       Harness.node,
       Harnesses.node,
-      pluginsNode,
+      Plugins.node,
       Processes.node,
       Runtimes.node,
       SessionLive.node,

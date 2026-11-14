@@ -7,7 +7,7 @@ import { Bus } from "../bus.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Runtimes } from "../runtimes.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
-import * as Hooks from "./hooks.ts"
+import { Hooks } from "./hooks.ts"
 
 type Short = keyof VibestPlugin.AgentHooks
 type AgentHook = `agent.${Short}`

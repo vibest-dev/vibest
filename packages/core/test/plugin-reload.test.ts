@@ -11,9 +11,8 @@ import {
   Plugins,
   PluginsNotActive,
   RECHECK,
-  pluginsLayer,
 } from "@vibest/core/plugin"
-import * as Hooks from "@vibest/core/plugin/hooks"
+import { Hooks } from "@vibest/core/plugin/hooks"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
@@ -80,7 +79,7 @@ const host = <A, E>(
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
     Effect.provide(memoryBus),
-    Effect.provide(Hooks.Service.layer),
+    Effect.provide(Hooks.layer),
   )
 
 describe("plugins: activation", () => {
@@ -334,7 +333,7 @@ const packageHome = Effect.gen(function* () {
 })
 
 const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
-  pluginsLayer.pipe(
+  Plugins.layer.pipe(
     Layer.provide(Layer.sync(PluginLoader, makeLoader)),
     Layer.provide(Layer.succeed(Builtins, builtins)),
     Layer.provide(subscriptionsLayer),
@@ -343,9 +342,9 @@ const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
     Layer.provide(memoryBus),
-    Layer.provide(Hooks.Service.layer),
+    Layer.provide(Hooks.layer),
     Layer.build,
-    Effect.map(Context.get(Plugins)),
+    Effect.map(Context.get(Plugins.Service)),
   )
 
 const eventually = <A, E, R>(f: Effect.Effect<A, E, R>, done: (a: A) => boolean, what: string) =>
@@ -388,7 +387,7 @@ describe("plugins: supervisor", () => {
       id,
       Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.void) }),
     )
-  const startedWith = (plugins: Plugins["Service"]) =>
+  const startedWith = (plugins: Plugins.Interface) =>
     plugins.start(event).pipe(Effect.map((s) => s.trace.map((t) => t.plugin)))
 
   it.effect(
@@ -715,7 +714,7 @@ describe("plugins: supervisor", () => {
         ),
         Effect.scoped,
         Effect.provide(blockedSubscriptions(entered, release)),
-        Effect.provide(Hooks.Service.layer),
+        Effect.provide(Hooks.layer),
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
@@ -759,7 +758,7 @@ describe("plugins: supervisor", () => {
         ),
         Effect.scoped,
         Effect.provide(blockedSubscriptions(entered, release)),
-        Effect.provide(Hooks.Service.layer),
+        Effect.provide(Hooks.layer),
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),

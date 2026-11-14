@@ -27,7 +27,7 @@ import { Git } from "../git.ts"
 import { harnessCatalog, harnessOptions, Harness, preflight } from "../harness.ts"
 import { Harnesses, unprovided } from "../harnesses.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
-import { Plugins, pluginsNode, type Routing } from "../plugin.ts"
+import { Plugins, type Routing } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
@@ -75,7 +75,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
     const harness = yield* Harness.Service
     const harnesses = yield* Harnesses.Service
     const agents = yield* Agents.Service
-    const plugins = yield* Plugins
+    const plugins = yield* Plugins.Service
     const drain = yield* Drain.Service
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -410,7 +410,7 @@ export class Spawn extends Context.Service<Spawn, Effect.Success<ReturnType<type
     Archive.node,
     Move.node,
     Placement.node,
-    pluginsNode,
+    Plugins.node,
     Runtimes.node,
     SessionLocks.node,
     PlatformNode.crypto,

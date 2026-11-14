@@ -4,7 +4,7 @@ import type { MachineRow } from "@vibest/core/database/remote"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
-import { errorMessage, type MachineHook, type PluginNote, Plugins, pluginsNode } from "@vibest/core/plugin"
+import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
 import { Runtimes } from "@vibest/core/runtimes"
 import { reconnectSchedule, type Runtime } from "@vibest/plugin/effect"
 import { peerHeaders } from "@vibest/protocol/protocol"
@@ -168,7 +168,7 @@ const make = Effect.gen(function* () {
   const self = yield* Identity.Service
   const transport = yield* MachineTransport
   const scope = yield* Effect.scope
-  const plugins = yield* Plugins
+  const plugins = yield* Plugins.Service
   const runtimes = yield* Runtimes.Service
   const entries = new Map<string, Entry>()
   const fibers = new Map<string, Fiber.Fiber<void>>()
@@ -601,5 +601,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Db.node, machineTransportNode, pluginsNode, Runtimes.node, Identity.node],
+  deps: [Db.node, machineTransportNode, Plugins.node, Runtimes.node, Identity.node],
 })

@@ -19,9 +19,9 @@ export class PluginLoader extends Context.Service<
     readonly load: (entry: string, files: ReadonlyArray<string>) => Promise<unknown>
     readonly watch: (directory: string, changed: (name: string) => void, failed: (error: Error) => void) => () => void
   }
->()("vibest/PluginLoader") {
-  static readonly node = LayerNode.unbound(PluginLoader)
-}
+>()("vibest/PluginLoader") {}
+
+export const pluginLoaderNode = LayerNode.unbound(PluginLoader)
 
 export class InvalidPluginPath extends Schema.TaggedError<InvalidPluginPath>()("InvalidPluginPath", {
   target: Schema.String,

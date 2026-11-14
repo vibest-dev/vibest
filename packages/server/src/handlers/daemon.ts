@@ -32,7 +32,7 @@ export const make = ({ cliOnly }: Checks) =>
   Effect.gen(function* () {
     const db = yield* Db.Service
     const runtimes = yield* Runtimes.Service
-    const plugins = yield* Plugins
+    const plugins = yield* Plugins.Service
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
     const updateStatus = yield* UpdateCheck.Service

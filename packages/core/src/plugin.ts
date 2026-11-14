@@ -13,23 +13,24 @@ import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { Harnesses } from "./harnesses.ts"
-import * as Hooks from "./plugin/hooks.ts"
-import { errorMessage } from "./plugin/hooks.ts"
+import { errorMessage, Hooks } from "./plugin/hooks.ts"
 import * as PluginHost from "./plugin/host.ts"
 import * as Registry from "./plugin/registry.ts"
 import {
   type FailInput,
-  Plugins,
+  Service,
   type StartInput,
   type MachineHook,
   type PluginNote,
   type SpawnDecision,
 } from "./plugin/service.ts"
-import { type AnyPlugin, type Candidate, keyOf, makeSources, PluginLoader } from "./plugin/sources.ts"
+import { type AnyPlugin, type Candidate, keyOf, makeSources, PluginLoader, pluginLoaderNode } from "./plugin/sources.ts"
 import { supervise } from "./plugin/supervisor.ts"
 import { logFailure } from "./reactor.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
+
+export * as Plugins from "./plugin.ts"
 export {
   AgentRefused,
   Change,
@@ -40,11 +41,11 @@ export {
   TraceEntry,
 } from "@vibest/schema/plugin"
 
-export { type Candidate, pluginEntries, PluginLoader } from "./plugin/sources.ts"
+export { type Candidate, pluginEntries, PluginLoader, pluginLoaderNode } from "./plugin/sources.ts"
 export { DEBOUNCE, RECHECK } from "./plugin/supervisor.ts"
 export { errorMessage }
 export type { FailInput, Interface, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugin/service.ts"
-export { Plugins } from "./plugin/service.ts"
+export { Service } from "./plugin/service.ts"
 
 export const DEFAULT_TIMEOUT = Duration.seconds(5)
 export const MACHINE_TIMEOUT = Duration.seconds(30)
@@ -446,7 +447,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 
     const list = Effect.sync(() => slots.map(info))
     const importing = (sources: ReadonlyArray<string>) => Effect.sync(() => void (loading = sources))
-    return { service: Plugins.of({ start, fail, list, settled, machine }), activate, holdNow, importing }
+    return { service: Service.of({ start, fail, list, settled, machine }), activate, holdNow, importing }
   })
 
 export const makePlugins = (
@@ -456,11 +457,11 @@ export const makePlugins = (
   makeHost(options).pipe(
     Effect.tap((host) => host.activate(candidates)),
     Effect.map((host) => host.service),
-    Effect.provide(Hooks.Service.layer),
+    Effect.provide(Hooks.layer),
   )
 
-export const pluginsLayer = Layer.effect(
-  Plugins,
+export const layer = Layer.effect(
+  Service,
   Effect.gen(function* () {
     yield* (yield* PluginLoader).prepare
     const host = yield* makeHost()
@@ -471,16 +472,16 @@ export const pluginsLayer = Layer.effect(
   }),
 )
 
-export const pluginsNode = LayerNode.make({
-  service: Plugins,
-  layer: pluginsLayer,
+export const node = LayerNode.make({
+  service: Service,
+  layer,
   deps: [
     builtinsNode,
     Agents.node,
     Bus.node,
     Harnesses.node,
-    Hooks.Service.node,
-    PluginLoader.node,
+    Hooks.node,
+    pluginLoaderNode,
     Runtimes.node,
     Subscriptions.node,
     PlatformNode.crypto,

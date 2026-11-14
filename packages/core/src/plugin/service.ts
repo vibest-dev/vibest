@@ -39,4 +39,4 @@ export interface Interface {
   ) => Effect.Effect<{ readonly plugins: ReadonlyArray<string>; readonly notes: ReadonlyArray<PluginNote> }>
 }
 
-export class Plugins extends Context.Service<Plugins, Interface>()("vibest/Plugins") {}
+export class Service extends Context.Service<Service, Interface>()("vibest/Plugins") {}

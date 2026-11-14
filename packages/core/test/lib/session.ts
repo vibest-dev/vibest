@@ -10,9 +10,9 @@ import { Harness } from "@vibest/core/harness"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { type Candidate, makeHost, Plugins, pluginsNode } from "@vibest/core/plugin"
+import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/domains"
-import * as Hooks from "@vibest/core/plugin/hooks"
+import { Hooks } from "@vibest/core/plugin/hooks"
 import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
@@ -140,7 +140,7 @@ export const pluginsHost = (
           const release = host.holdNow()
           yield* host.activate(loaded).pipe(Effect.andThen(release), Effect.forkScoped)
         } else yield* host.activate(loaded)
-        return Context.make(Plugins, host.service).pipe(
+        return Context.make(Plugins.Service, host.service).pipe(
           Context.add(PluginHost, {
             load: (added) => host.activate([...loaded, ...added.map(candidateOf)]),
           }),
@@ -153,7 +153,7 @@ export const pluginsHost = (
       Bus.node,
       Db.node,
       Harnesses.node,
-      Hooks.Service.node,
+      Hooks.node,
       Runtimes.node,
       SessionLive.node,
       Subscriptions.node,
@@ -271,7 +271,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harness.node.replace(harnessLayer()),
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
-      pluginsNode.replace(plugins),
+      Plugins.node.replace(plugins),
       Spawn.node.replace(defaultSpawn),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),
@@ -383,7 +383,7 @@ export const restartSessions = Effect.gen(function* () {
     Harness.node.replace(Layer.succeed(Harness.Service, yield* Harness.Service)),
     Harnesses.node.replace(Layer.succeed(Harnesses.Service, yield* Harnesses.Service)),
     Inbox.node.replace(Layer.succeed(Inbox.Service, yield* Inbox.Service)),
-    pluginsNode.replace(Layer.succeed(Plugins, yield* Plugins)),
+    Plugins.node.replace(Layer.succeed(Plugins.Service, yield* Plugins.Service)),
     Processes.node.replace(Layer.succeed(Processes.Service, yield* Processes.Service)),
     Runtimes.node.replace(Layer.succeed(Runtimes.Service, yield* Runtimes.Service)),
     Subscriptions.node.replace(Layer.succeed(Subscriptions, yield* Subscriptions)),
