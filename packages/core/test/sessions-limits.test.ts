@@ -1,4 +1,5 @@
 import { assert, describe } from "@effect/vitest"
+import { Db } from "@vibest/core/database/db"
 import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
 import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -10,12 +11,13 @@ import { TestClock } from "effect/testing"
 
 import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { EXECUTIONS, writeEnd, systemPromptFile } from "./lib/observe.ts"
+import { EXECUTIONS, until, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
   harnessOf,
   spawnWorking,
   sessionWorktree,
+  spawnInput,
   test,
   sqlNotices,
   limited,
@@ -25,6 +27,25 @@ import {
 } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Session", () => {
+  test(
+    "a usage limit when the first terminal opens moves the session; when the move dies the new worktree is removed",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const fs = yield* FileSystem.FileSystem
+      const opening = yield* herdr.hold("open")
+      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
+      yield* opening.reached
+      const worktree = yield* sessionWorktree(id)
+      assert.isTrue(yield* fs.exists(worktree))
+      yield* opening.release("rate_limit: usage limit reached")
+      yield* until(db.getSession(id), (row) => row !== undefined && exitedAt(row) !== null)
+      assert.isFalse(yield* fs.exists(worktree))
+      assert.include((yield* db.latestInbox(id, "notice"))!.message, "move died")
+    }),
+    { db: (db) => ({ ...db, limitSource: () => Effect.die(new Error("move died")) }) },
+  )
+
   test(
     "a usage-limit failure of a running session reports the limit and starts nothing else",
     Effect.gen(function* () {
