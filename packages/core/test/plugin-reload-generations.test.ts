@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Builtins, type Candidate, PluginLoader, Plugins, pluginsLayer } from "@vibest/core/plugin"
+import * as Hooks from "@vibest/core/plugin/hooks"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
@@ -85,7 +86,7 @@ describe("plugins: builtins follow the latest config", () => {
           },
         }
         yield* fs.writeFileString(config, `{ "plugins": ["-harness-x"] }`)
-        const plugins = yield* Plugins.layer.pipe(
+        const plugins = yield* pluginsLayer.pipe(
           Layer.provide(Layer.succeed(PluginLoader, loader)),
           Layer.provide(Layer.succeed(Builtins, [builtin])),
           Layer.provide(subscriptionsLayer),
@@ -94,6 +95,7 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(runtimesLayer),
           Layer.provide(Agents.layer),
           Layer.provide(memoryBus),
+          Layer.provide(Hooks.Service.layer),
           Layer.build,
           Effect.map(Context.get(Plugins)),
         )

@@ -4,7 +4,7 @@ import { HarnessUnavailable } from "@vibest/schema/session"
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import type { HarnessDefinition } from "./plugin/host.ts"
+import type { HarnessDefinition } from "./plugin/domains.ts"
 
 export const Model = Schema.Struct({
   harness: Schema.String,

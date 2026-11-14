@@ -6,7 +6,7 @@ import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harness.ts"
-import type { HarnessDefinition } from "../plugin/host.ts"
+import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
   type AgentState,

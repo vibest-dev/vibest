@@ -58,8 +58,14 @@ fires a plugin's machine hooks in its own tests.
 
 ## Running hooks
 
-`plugin/hooks.ts` registers and runs both `agent.*` and `machine.*` hooks: each plugin keeps its registrations, and
-`Hooks.run` bounds one call and counts it in the plugin's stats. Every hook runs in the host's scope, not its plugin's,
+`plugin/hooks.ts` is the host's one hook registry (the `Hooks.Service` node): it registers and runs both `agent.*` and
+`machine.*` hooks. Every registration is keyed by the activation that made it and removed with that activation's scope;
+dispatch takes the registrations of the active activations in plugin load order, and in registration order within one
+activation, so a late registration or a retired revision whose teardown overran its deadline never changes the order
+or runs beside its replacement. `Hooks.run` bounds one call and counts it in the
+plugin's stats, and `Hooks.dispatch` runs the `agent.*` hooks one after another on a copy of the event and commits each
+copy. `plugin/host.ts` builds the context one plugin's setup receives; `plugin/service.ts` holds the `Plugins` interface and tag.
+Every hook runs in the host's scope, not its plugin's,
 so a reload or a disabled plugin never cuts short a call in flight: it finishes on the plugin snapshot it started with
 and is only interrupted by its own timeout or by vibestd shutting down. Setups, teardowns and hook calls are bounded by
 `timeoutWithoutWaiting` (`effect/bounded.ts`), not `Effect.timeout`: `Effect.timeout` interrupts the late effect and waits for

@@ -1,6 +1,6 @@
 import type { HarnessId } from "@vibest/schema/session"
 
-import type { HarnessDefinition } from "./plugin/host.ts"
+import type { HarnessDefinition } from "./plugin/domains.ts"
 
 export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
   try {

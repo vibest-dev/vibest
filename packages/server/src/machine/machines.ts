@@ -4,7 +4,7 @@ import type { MachineRow } from "@vibest/core/database/db-remote"
 import { keyedLock } from "@vibest/core/effect/keyed-mutex"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { VibestdIdentity } from "@vibest/core/identity"
-import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
+import { errorMessage, type MachineHook, type PluginNote, Plugins, pluginsNode } from "@vibest/core/plugin"
 import { Runtimes } from "@vibest/core/runtimes"
 import { reconnectSchedule, type Runtime } from "@vibest/plugin/effect"
 import { peerHeaders } from "@vibest/protocol/protocol"
@@ -590,6 +590,6 @@ export class Machines extends Context.Service<Machines, Effect.Success<typeof ma
   static readonly node = LayerNode.make({
     service: Machines,
     layer: Machines.layer,
-    deps: [Db.node, MachineTransport.node, Plugins.node, Runtimes.node, VibestdIdentity.node],
+    deps: [Db.node, MachineTransport.node, pluginsNode, Runtimes.node, VibestdIdentity.node],
   })
 }
