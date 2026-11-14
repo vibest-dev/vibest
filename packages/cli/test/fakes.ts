@@ -75,9 +75,9 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const projectId = yield* db.projectOfSession(sessionId)
+    const projectId = yield* db.session.projectOfSession(sessionId)
     if (projectId === undefined) return null
-    const entry = yield* db.entryOf(projectId)
+    const entry = yield* db.session.entryOf(projectId)
     return entry?.id === sessionId ? (entry.process?.conversation ?? null) : null
   })
 

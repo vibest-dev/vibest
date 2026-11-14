@@ -105,7 +105,7 @@ describe("identity.json", () => {
         ["daemon", "--foreground"],
       )
       assert.strictEqual(run.code, 1)
-      assert.include(run.stderr, "is not a vibest identity file")
+      assert.include(yield* fs.readFileString(layout.log), "is not a vibest identity file")
       assert.isFalse(yield* fs.exists(layout.database))
       assert.strictEqual(yield* fs.readFileString(layout.identity), "garbage")
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),

@@ -2,15 +2,17 @@ import { dlopen, FFIType } from "bun:ffi"
 import fs from "node:fs"
 import fsPromises from "node:fs/promises"
 import os from "node:os"
+import path from "node:path"
 
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { pre } from "@vibest/builtins"
+import { ArchiveOnIdle } from "@vibest/builtins/archive-on-idle"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
 import { checkReplay } from "@vibest/core/bus"
-import { SQL_NAMES } from "@vibest/core/database/db"
+import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
 import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -19,6 +21,8 @@ import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugin"
 import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
 import { Runtimes } from "@vibest/core/runtimes"
+import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
+import { SessionLive } from "@vibest/core/session/live"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
@@ -37,6 +41,7 @@ import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { SqlClient } from "effect/sql"
 
+import { trimLog } from "./log-file.ts"
 import { graph, makeLoads, packageName, watch } from "./plugin-source.ts"
 
 const unrefStdio = Layer.effect(
@@ -236,9 +241,31 @@ const processes: Processes.ProcessPlatform["Service"] = {
 }
 
 const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
+  dup2: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 })
 const LOCK_EX_NB = 2 | 4
+
+export const captureDaemonLog = (file: string) =>
+  Effect.sync(() => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const fd = fs.openSync(file, "a")
+    try {
+      if (libc.symbols.dup2(fd, 1) === -1 || libc.symbols.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
+    } finally {
+      fs.closeSync(fd)
+    }
+  })
+
+export const trimDaemonLog: Host["trimLog"] = (file) =>
+  Effect.sync(() => {
+    try {
+      trimLog(file)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      fs.writeSync(2, `log trim failed: ${message}\n`)
+    }
+  })
 
 const lockFailed = (file: string) => (e: unknown) => new LockFailed({ file, message: messageOf(e) })
 
@@ -352,8 +379,15 @@ export const replacements: LayerNode.Replacements = [
   builtinsNode.replace(
     LayerNode.make({
       name: "vibest/Builtins",
-      layer: Layer.effect(Builtins, pre),
-      deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
+      layer: Layer.effect(Builtins, pre).pipe(Layer.provide(Layer.effect(ArchiveOnIdle, archiveOnIdle))),
+      deps: [
+        PlatformNode.fileSystem,
+        PlatformNode.path,
+        PlatformNode.childProcessSpawner,
+        Archive.node,
+        Db.node,
+        SessionLive.node,
+      ],
     }),
   ),
   Runtimes.hostEnvNode.replace(Layer.succeed(Runtimes.HostEnv, { drop: dropEnv })),
@@ -413,7 +447,13 @@ const onSignals: Host["onSignals"] = (onSignal) =>
     (off) => Effect.sync(off),
   ).pipe(Effect.asVoid)
 
-export const daemon: Host = { lock, checkDatabase, onSignals, exit: (code) => Effect.sync(() => process.exit(code)) }
+export const daemon: Host = {
+  lock,
+  checkDatabase,
+  trimLog: trimDaemonLog,
+  onSignals,
+  exit: (code) => Effect.sync(() => process.exit(code)),
+}
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")

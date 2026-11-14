@@ -47,11 +47,14 @@ const workingSession = Effect.gen(function* () {
     runtime: "herdr",
     harness: "pi",
   })
-  yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
+  yield* until(
+    db.session.getSession(id),
+    (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
+  )
   yield* sessions.check(id)
   const pane = (yield* herdr.agent(id))!.terminal
-  const row = (yield* db.getSession(id))!
-  const worktree = yield* db.sessionDirectory(row.id)
+  const row = (yield* db.session.getSession(id))!
+  const worktree = yield* db.session.sessionDirectory(row.id)
   if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
   return { id, repo, pane, sessions, db, herdr, worktree, rules: yield* systemPromptFile(id) }
 })
@@ -102,7 +105,7 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* closedButReplyLost
       yield* held.release("unreachable")
       assert.strictEqual((yield* Fiber.join(removing))._tag, "RuntimeUnreachable")
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.isNull(exitedAt(row))
       assert.deepStrictEqual(yield* processEnds(id), [])
       assert.isTrue(archived(row))
@@ -113,7 +116,7 @@ describe.concurrent("vibest rm: process proof", () => {
         pane: "closed",
         worktree: "removed",
       })
-      assert.isNotNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
     }),
   )
 
@@ -129,7 +132,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.deepInclude(yield* Fiber.join(removing), { processes: "unknown", pane: "kept", worktree: "kept" })
       assert.isTrue(HashMap.has(yield* a.herdr.panes, a.pane))
       assert.deepStrictEqual(yield* processEnds(a.id), [])
-      assert.isNull(exitedAt((yield* a.db.getSession(a.id))!))
+      assert.isNull(exitedAt((yield* a.db.session.getSession(a.id))!))
       assert.deepInclude(yield* a.sessions.remove(a.id), { pane: "closed", worktree: "removed" })
 
       const b = yield* idleSession
@@ -137,7 +140,7 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* closeByHand
       const gone = yield* b.sessions.remove(b.id)
       assert.deepInclude(gone, { processes: "exited", pane: "closed", worktree: "removed" })
-      assert.isNotNull(exitedAt((yield* b.db.getSession(b.id))!))
+      assert.isNotNull(exitedAt((yield* b.db.session.getSession(b.id))!))
       assert.isFalse(yield* fs.exists(b.worktree))
       assert.isFalse(yield* fs.exists(b.rules))
     }),
@@ -160,7 +163,7 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* a.herdr.runtime.close({ id: a.pane })
       yield* worktreeDeletedOutsideVibest(a)
       yield* a.sessions.check(a.id)
-      yield* until(a.db.getSession(a.id), (row) => (row ? exitedAt(row) : undefined) !== null)
+      yield* until(a.db.session.getSession(a.id), (row) => (row ? exitedAt(row) : undefined) !== null)
       yield* settled
       assert.deepInclude(
         yield* a.sessions.remove(a.id),
@@ -189,7 +192,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, { processes: "alive", pane: "closed", worktree: "kept" })
       assert.include(out.reasons.join("\n"), "process 4242 has its working directory in it")
-      assert.isNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
       assert.isTrue(yield* fs.exists(worktree))
       assert.isTrue(yield* fs.exists(rules))
       assert.strictEqual(
@@ -197,12 +200,12 @@ describe.concurrent("vibest rm: process proof", () => {
         `${id} was archived; run a new session`,
       )
       yield* sessions.check(id)
-      assert.isNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
 
       yield* fake.setCwdUsers([])
       assert.deepInclude(yield* sessions.remove(id), { processes: "exited", worktree: "removed", reasons: [] })
-      assert.isNotNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
       assert.isFalse(yield* fs.exists(rules))
     }),
   )
@@ -243,7 +246,7 @@ describe.concurrent("vibest rm: process proof", () => {
     Effect.gen(function* () {
       const leaving = yield* idleSession
       const fake = yield* FakeProcesses
-      const root = (yield* leaving.db.getSession(leaving.id))!.process!.pid!
+      const root = (yield* leaving.db.session.getSession(leaving.id))!.process!.pid!
       const child = root + 1
       yield* fake.setTree(root, [root, child])
       yield* fake.set(root, "alive")
@@ -262,7 +265,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.strictEqual(yield* fake.cwdListings, 1)
 
       const staying = yield* idleSession
-      const stuck = (yield* staying.db.getSession(staying.id))!.process!.pid!
+      const stuck = (yield* staying.db.session.getSession(staying.id))!.process!.pid!
       yield* fake.setTree(stuck, [stuck])
       yield* fake.set(stuck, "alive")
       yield* fake.setCwdUsers([stuck])
@@ -318,7 +321,7 @@ describe.concurrent("vibest rm: process proof", () => {
         1,
         "one key press, the interrupt; the spawn's prompt text is a send without keys",
       )
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(row.status, "unknown")
       assert.strictEqual(executionStateOf(row), "interrupted")
       assert.isNotNull(exitedAt(row))
@@ -337,7 +340,7 @@ describe.concurrent("vibest rm: process proof", () => {
         `${id} did not stop within 10s of the interrupt key; its terminal closed anyway`,
       )
       assert.isFalse(HashMap.has(yield* herdr.panes, pane))
-      assert.isNotNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
     }),
     { interruptIgnored: true },
   )

@@ -4,7 +4,7 @@ import { Effect, FileSystem } from "effect"
 export const projectOf = (directory: string) =>
   Effect.gen(function* () {
     const db = yield* Db
-    return (yield* db.projectAt(directory))?.id ?? (yield* db.createProject(directory, []))
+    return (yield* db.project.projectAt(directory))?.id ?? (yield* db.project.createProject(directory, []))
   })
 
 export const tempDirectory = (prefix: string) =>
@@ -14,6 +14,6 @@ export const tempDirectory = (prefix: string) =>
   }).pipe(Effect.orDie)
 
 export const entryPending = (db: Db["Service"], projectId: string) =>
-  Effect.flatMap(db.entryOf(projectId), (entry) =>
-    entry === undefined ? Effect.succeed([]) : db.pendingInbox(entry.id),
+  Effect.flatMap(db.session.entryOf(projectId), (entry) =>
+    entry === undefined ? Effect.succeed([]) : db.inbox.pendingInbox(entry.id),
   )

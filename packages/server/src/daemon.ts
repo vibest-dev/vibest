@@ -45,6 +45,7 @@ export interface Host extends ShutdownHost {
   readonly checkDatabase: (
     filename: string,
   ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
+  readonly trimLog: (file: string) => Effect.Effect<void>
 }
 
 const HANDOFF_TIMEOUT = Duration.seconds(30)
@@ -114,6 +115,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       return yield* new DaemonSocketInUse({
         message: `something on ${layout.socket} ${inUse}; it was left running. ${stopByHand(layout.socket, undefined)}`,
       })
+    yield* host.trimLog(layout.log)
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
     const facts = yield* Identity.HostFacts.pipe(
