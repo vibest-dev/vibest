@@ -19,6 +19,8 @@ import {
 } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 
+export * as Executions from "./executions.ts"
+
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const STOP_WAIT = Duration.seconds(10)
@@ -35,11 +37,11 @@ const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 
 const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const harnesses = yield* Harnesses.Service
   const bus = yield* Bus.Service
-  const { track } = yield* SessionLive
+  const { track } = yield* SessionLive.Service
 
   const awaitReady = Effect.fn("Executions.awaitReady")(
     (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
@@ -242,14 +244,14 @@ const make = Effect.gen(function* () {
   return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish }
 })
 
-export class Executions extends Context.Service<Executions, Effect.Success<typeof make>>()("vibest/Executions") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Executions, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Executions") {}
 
-  static readonly node = LayerNode.make({
-    service: Executions,
-    layer: Executions.layer,
-    deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
+})

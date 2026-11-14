@@ -26,17 +26,19 @@ import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
-const make = Effect.gen(function* () {
+export * as Archive from "./archive.ts"
+
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const fs = yield* FileSystem.FileSystem
   const runtimes = yield* Runtimes.Service
   const inbox = yield* Inbox.Service
   const drain = yield* Drain.Service
   const removal = yield* Remove.make
-  const locks = yield* SessionLocks
-  const sessionLive = yield* SessionLive
-  const { notice, recount } = yield* Placement
-  const { interruptAgent, settleAfterInterrupt } = yield* Executions
+  const locks = yield* SessionLocks.Service
+  const sessionLive = yield* SessionLive.Service
+  const { notice, recount } = yield* Placement.Service
+  const { interruptAgent, settleAfterInterrupt } = yield* Executions.Service
   const archives = yield* FiberSet.make()
   const { locked } = locks
   const logged = Reactor.logFailure
@@ -232,36 +234,36 @@ const make = Effect.gen(function* () {
   return { undoCutOffStart, abandonLaunch, remove, finishArchive, archiveSoon }
 })
 
-export class Archive extends Context.Service<Archive, Effect.Success<typeof make>>()("vibest/Archive") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Archive, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Archive") {}
 
-  static readonly node = LayerNode.make({
-    service: Archive,
-    layer: Archive.layer,
-    deps: [
-      Db.node,
-      Drain.node,
-      Executions.node,
-      Inbox.node,
-      Placement.node,
-      Processes.node,
-      Runtimes.node,
-      SessionLive.node,
-      SessionLocks.node,
-      Git.node,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Db.node,
+    Drain.node,
+    Executions.node,
+    Inbox.node,
+    Placement.node,
+    Processes.node,
+    Runtimes.node,
+    SessionLive.node,
+    SessionLocks.node,
+    Git.node,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})
 
 export const archiveOnIdle = Effect.gen(function* () {
-  const archive = yield* Archive
+  const archive = yield* Service
   const db = yield* Db.Service
-  const live = yield* SessionLive
+  const live = yield* SessionLive.Service
   return {
     optedIn: live.archivesOnIdle,
     consider: archive.archiveSoon,

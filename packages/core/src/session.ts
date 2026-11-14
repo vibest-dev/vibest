@@ -150,18 +150,18 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Sessi
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
-  const sessionLive = yield* SessionLive
-  const locks = yield* SessionLocks
+  const sessionLive = yield* SessionLive.Service
+  const locks = yield* SessionLocks.Service
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const git = yield* Git.Service
-  const { worktreeOf, republish } = yield* Placement
-  const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery
-  const reconcile = yield* Reconcile
-  const { spawn } = yield* Spawn
-  const { remove } = yield* Archive
-  const { outdated, restart, restartLater } = yield* Restart
+  const { worktreeOf, republish } = yield* Placement.Service
+  const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery.Service
+  const reconcile = yield* Reconcile.Service
+  const { spawn } = yield* Spawn.Service
+  const { remove } = yield* Archive.Service
+  const { outdated, restart, restartLater } = yield* Restart.Service
 
   const getRow = (id: string) =>
     db.session

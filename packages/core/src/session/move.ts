@@ -17,6 +17,8 @@ import { Subscriptions } from "../subscriptions/service.ts"
 import { Executions } from "./executions.ts"
 import { Placement } from "./placement.ts"
 
+export * as Move from "./move.ts"
+
 export interface LimitMove {
   readonly rerun: (
     h: Runtime,
@@ -46,15 +48,15 @@ const limitFailure = (
   return text === "" ? `${named}: ${error}` : text
 }
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const plugins = yield* Plugins.Service
-  const subscriptions = yield* Subscriptions
+  const subscriptions = yield* Subscriptions.Service
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
   const processes = yield* Processes.Service
-  const { prompt, finish } = yield* Executions
-  const { openTerminal, show, locate, launchArgv, systemPromptOf } = yield* Placement
+  const { prompt, finish } = yield* Executions.Service
+  const { openTerminal, show, locate, launchArgv, systemPromptOf } = yield* Placement.Service
 
   const exited = (id: string, reason: ProcessEndReason) =>
     Effect.andThen(db.session.setStatus(id, "unknown"), db.session.endProcess(id, reason))
@@ -316,23 +318,23 @@ const make = Effect.gen(function* () {
   return { rerun }
 })
 
-export class Move extends Context.Service<Move, Effect.Success<typeof make>>()("vibest/Move") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Move, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Move") {}
 
-  static readonly node = LayerNode.make({
-    service: Move,
-    layer: Move.layer,
-    deps: [
-      Db.node,
-      Executions.node,
-      Harness.node,
-      Harnesses.node,
-      Placement.node,
-      Plugins.node,
-      Processes.node,
-      Subscriptions.node,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Db.node,
+    Executions.node,
+    Harness.node,
+    Harnesses.node,
+    Placement.node,
+    Plugins.node,
+    Processes.node,
+    Subscriptions.node,
+  ],
+})

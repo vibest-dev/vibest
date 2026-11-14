@@ -34,6 +34,8 @@ import { SessionLocks } from "./locks.ts"
 import { Placement, runtimeEnv } from "./placement.ts"
 import { Reconcile } from "./reconcile.ts"
 
+export * as Restart from "./restart.ts"
+
 export interface Outdated {
   readonly id: string
   readonly agent: string
@@ -81,7 +83,7 @@ type LiveNow = Effect.Effect<
   | undefined
 >
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harness = yield* Harness.Service
@@ -91,15 +93,15 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const processes = yield* Processes.Service
-  const { restarting } = yield* SessionLive
+  const { restarting } = yield* SessionLive.Service
   const bus = yield* Bus.Service
   const scope = yield* Effect.scope
-  const { locked } = yield* SessionLocks
+  const { locked } = yield* SessionLocks.Service
   const version = (yield* App.Service).version
-  const { awaitReady, prompt } = yield* Executions
+  const { awaitReady, prompt } = yield* Executions.Service
   const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
-  const { launchArgv } = yield* Placement
-  const reconcile = yield* Reconcile
+  const { launchArgv } = yield* Placement.Service
+  const reconcile = yield* Reconcile.Service
   const vibestCommand = yield* VibestCommand
 
   const entryArgv = (entry: SessionRow) =>
@@ -389,14 +391,15 @@ const make = Effect.gen(function* () {
       }),
     )
 
-  const restart = (ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
+  const restart = Effect.fn("Restart.restart")((ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
     Effect.gen(function* () {
       const outcomes = yield* Effect.forEach(new Set(ids), (id) => restartOwned(id, working.includes(id)), {
         concurrency: RESTART_CONCURRENCY,
       })
       for (const o of outcomes) yield* o.ok ? Effect.logInfo(o.message) : Effect.logWarning(o.message)
       return outcomes
-    })
+    }),
+  )
 
   const runningTheCommand = (entry: SessionRow, command: number) => {
     const pid = pidOf(entry)
@@ -405,7 +408,7 @@ const make = Effect.gen(function* () {
       : processes.tree(pid).pipe(Effect.map((tree) => tree?.includes(command) === true))
   }
 
-  const restartLater = (ids: ReadonlyArray<string>, after: number | undefined) =>
+  const restartLater = Effect.fn("Restart.restartLater")((ids: ReadonlyArray<string>, after: number | undefined) =>
     Effect.gen(function* () {
       const working: Array<string> = []
       for (const entry of yield* db.session.entrySessions) {
@@ -426,36 +429,37 @@ const make = Effect.gen(function* () {
                 Effect.timeoutOption(AFTER_WAIT),
               )
       yield* waited.pipe(Effect.andThen(restart(ids, working)), Effect.forkIn(scope))
-    }).pipe(Effect.asVoid)
+    }).pipe(Effect.asVoid),
+  )
 
   return { outdated, restart, restartLater }
 })
 
-export class Restart extends Context.Service<Restart, Effect.Success<typeof make>>()("vibest/Restart") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Restart, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Restart") {}
 
-  static readonly node = LayerNode.make({
-    service: Restart,
-    layer: Restart.layer,
-    deps: [
-      App.node,
-      Agents.node,
-      Bus.node,
-      Db.node,
-      Executions.node,
-      Harness.node,
-      Harnesses.node,
-      Placement.node,
-      Processes.node,
-      Reconcile.node,
-      Runtimes.node,
-      SessionLive.node,
-      SessionLocks.node,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    App.node,
+    Agents.node,
+    Bus.node,
+    Db.node,
+    Executions.node,
+    Harness.node,
+    Harnesses.node,
+    Placement.node,
+    Processes.node,
+    Reconcile.node,
+    Runtimes.node,
+    SessionLive.node,
+    SessionLocks.node,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

@@ -46,7 +46,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const { publish, afterCommit, transaction: tx } = yield* Bus.Service
-    const sessionLive = yield* SessionLive
+    const sessionLive = yield* SessionLive.Service
     const now = Clock.currentTimeMillis
     const {
       reads,

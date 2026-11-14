@@ -18,14 +18,14 @@ describe.concurrent("Session", () => {
       const herdr = yield* FakeRuntime
       const { id, sessions, db, entryId } = yield* spawnWorking(yield* makeRepository)
       yield* settleEntry(sessions, entryId)
-      const entryStatuses = (yield* (yield* SessionLive).size).statuses - 1
+      const entryStatuses = (yield* (yield* SessionLive.Service).size).statuses - 1
       assert.deepInclude(yield* sessions.inMemory, { tracked: 2, locks: 0 })
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses + 1)
+      assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses + 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses)
       yield* until(sessions.inMemory, atMostEntryTracked)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
@@ -42,7 +42,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* sessions.inMemory).tracked, 2)
       assert.deepInclude(yield* db.session.getSession(id), { status: "idle" })
       yield* sessions.remove(id)
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses)
       yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
     }),
     { hooked: ["pi"] },

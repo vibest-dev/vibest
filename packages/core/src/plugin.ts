@@ -189,7 +189,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       Effect.forkIn(root),
     )
 
-    const subscriptions = yield* Subscriptions
+    const subscriptions = yield* Subscriptions.Service
     const runtimes = yield* Runtimes.Service
     const hooks = yield* Hooks.Service
     const contextFor = yield* PluginHost.make

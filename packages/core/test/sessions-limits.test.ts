@@ -149,7 +149,7 @@ describe.concurrent("Session", () => {
       const herdr = yield* FakeRuntime
       const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* (yield* Subscriptions).report({
+      yield* (yield* Subscriptions.Service).report({
         harness: "pi",
         limits: [{ window: "5h", percent: 100, status: "limited", resetTime }],
       })
@@ -260,7 +260,7 @@ describe.concurrent("Session", () => {
       const aborted = yield* spawnWorking(repo)
       const missing = yield* spawnWorking(repo)
       const lost = yield* spawnWorking(repo)
-      yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
+      yield* (yield* Subscriptions.Service).report({ harness: "pi", limits: [limited] })
       const fail = (
         id: string,
         sessions: typeof aborted.sessions,

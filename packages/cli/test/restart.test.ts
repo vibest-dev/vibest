@@ -93,7 +93,7 @@ describe("restart in place", () => {
       yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* ran.reached
       assert.deepStrictEqual(yield* processes.signaled, [pid])
-      assert.isTrue(yield* (yield* SessionLive).restarting.has(id))
+      assert.isTrue(yield* (yield* SessionLive.Service).restarting.has(id))
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false, status: "idle" }))
       yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.check(id)
@@ -114,7 +114,7 @@ describe("restart in place", () => {
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
       assert.strictEqual((yield* herdr.callsTo("open")).length, opened, "no new terminal")
       const row = (yield* db.session.getSession(id))!
-      assert.isFalse(yield* (yield* SessionLive).restarting.has(id))
+      assert.isFalse(yield* (yield* SessionLive.Service).restarting.has(id))
       assert.notStrictEqual(row.process?.pid, pid)
       assert.strictEqual(executionStateOf(row), "open")
       assert.include(

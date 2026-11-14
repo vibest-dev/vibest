@@ -30,22 +30,24 @@ import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
 
+export * as Reconcile from "./reconcile.ts"
+
 export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const inbox = yield* Inbox.Service
   const processes = yield* Processes.Service
-  const sessionLive = yield* SessionLive
+  const sessionLive = yield* SessionLive.Service
   const { restarting, track } = sessionLive
-  const locks = yield* SessionLocks
-  const { deliverQueued } = yield* Delivery
-  const exits = yield* Exits
-  const { finishArchive } = yield* Archive
-  const { notice, republish } = yield* Placement
+  const locks = yield* SessionLocks.Service
+  const { deliverQueued } = yield* Delivery.Service
+  const exits = yield* Exits.Service
+  const { finishArchive } = yield* Archive.Service
+  const { notice, republish } = yield* Placement.Service
   const scope = yield* Effect.scope
   const reactor = yield* Reactor.make
   const { locked } = locks
@@ -155,7 +157,9 @@ const make = Effect.gen(function* () {
 
   const checkSession = (id: string): Effect.Effect<unknown, unknown> => locked(id)(check(id))
 
-  const checkLocked = (id: string): Effect.Effect<void> => logged(`check ${id}`)(checkSession(id))
+  const checkLocked = Effect.fn("Reconcile.check")((id: string): Effect.Effect<void> =>
+    logged(`check ${id}`)(checkSession(id)),
+  )
 
   const wakes = yield* RunCoordinator.make<string, void>({ drain: checkLocked, merge: () => undefined })
 
@@ -218,27 +222,27 @@ const make = Effect.gen(function* () {
   return { check: checkLocked, reconciles: Effect.sync(() => reconciles) }
 })
 
-export class Reconcile extends Context.Service<Reconcile, Effect.Success<typeof make>>()("vibest/Reconcile") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Reconcile, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Reconcile") {}
 
-  static readonly node = LayerNode.make({
-    service: Reconcile,
-    layer: Reconcile.layer,
-    deps: [
-      Archive.node,
-      Bus.node,
-      Db.node,
-      Delivery.node,
-      Exits.node,
-      Harnesses.node,
-      Inbox.node,
-      Placement.node,
-      Processes.node,
-      Runtimes.node,
-      SessionLive.node,
-      SessionLocks.node,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Archive.node,
+    Bus.node,
+    Db.node,
+    Delivery.node,
+    Exits.node,
+    Harnesses.node,
+    Inbox.node,
+    Placement.node,
+    Processes.node,
+    Runtimes.node,
+    SessionLive.node,
+    SessionLocks.node,
+  ],
+})

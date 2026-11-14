@@ -9,18 +9,20 @@ import { Archive } from "./archive.ts"
 import { Move } from "./move.ts"
 import { Placement } from "./placement.ts"
 
+export * as Exits from "./exits.ts"
+
 export interface LimitedExecution {
   readonly execution: number
   readonly process: number | null
   readonly failure: string
 }
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const inbox = yield* Inbox.Service
-  const move = yield* Move
-  const { undoCutOffStart } = yield* Archive
-  const { notice, handTask, recount } = yield* Placement
+  const move = yield* Move.Service
+  const { undoCutOffStart } = yield* Archive.Service
+  const { notice, handTask, recount } = yield* Placement.Service
 
   const limitOf = Effect.fn("Exits.limitOf")(function* (session: SessionRow) {
     if (executionStateOf(session) !== "failed" || (yield* db.session.creatorOf(session.id)) === undefined)
@@ -111,14 +113,14 @@ const make = Effect.gen(function* () {
   return { limitOf, afterLimit, recordExit, settle }
 })
 
-export class Exits extends Context.Service<Exits, Effect.Success<typeof make>>()("vibest/Exits") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Exits, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Exits") {}
 
-  static readonly node = LayerNode.make({
-    service: Exits,
-    layer: Exits.layer,
-    deps: [Archive.node, Db.node, Inbox.node, Move.node, Placement.node],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Archive.node, Db.node, Inbox.node, Move.node, Placement.node],
+})

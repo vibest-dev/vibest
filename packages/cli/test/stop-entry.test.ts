@@ -203,7 +203,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
     "while a restart is between its harnesses: a start elsewhere is refused even with no agent seen, and the move is unsupported",
     Effect.gen(function* () {
       const s = yield* workingPiEntry
-      yield* (yield* SessionLive).restarting.mark(s.started.sessionId)
+      yield* (yield* SessionLive.Service).restarting.mark(s.started.sessionId)
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))

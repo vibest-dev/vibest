@@ -686,8 +686,8 @@ describe("plugins: supervisor", () => {
 
   const blockedSubscriptions = (entered: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
     Layer.succeed(
-      Subscriptions,
-      Subscriptions.of({
+      Subscriptions.Service,
+      Subscriptions.Service.of({
         list: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as([])),
         report: () => Effect.void,
         poll: Effect.void,

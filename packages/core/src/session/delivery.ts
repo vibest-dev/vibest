@@ -41,6 +41,8 @@ import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
 
+export * as Delivery from "./delivery.ts"
+
 export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused", {
   message: Schema.String,
 }) {}
@@ -48,17 +50,17 @@ export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused"
 export const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
   Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const inbox = yield* Inbox.Service
   const fs = yield* FileSystem.FileSystem
-  const sessionLive = yield* SessionLive
-  const locks = yield* SessionLocks
-  const { prompt, interruptAgent } = yield* Executions
-  const exits = yield* Exits
-  const { worktreeOf, handTask, resume } = yield* Placement
+  const sessionLive = yield* SessionLive.Service
+  const locks = yield* SessionLocks.Service
+  const { prompt, interruptAgent } = yield* Executions.Service
+  const exits = yield* Exits.Service
+  const { worktreeOf, handTask, resume } = yield* Placement.Service
   const reactor = yield* Reactor.make
   const { locked } = locks
   const { undelivered } = inbox
@@ -374,26 +376,26 @@ const make = Effect.gen(function* () {
   return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }
 })
 
-export class Delivery extends Context.Service<Delivery, Effect.Success<typeof make>>()("vibest/Delivery") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Delivery, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Delivery") {}
 
-  static readonly node = LayerNode.make({
-    service: Delivery,
-    layer: Delivery.layer,
-    deps: [
-      Bus.node,
-      Db.node,
-      Executions.node,
-      Exits.node,
-      Harnesses.node,
-      Inbox.node,
-      Placement.node,
-      Runtimes.node,
-      SessionLive.node,
-      SessionLocks.node,
-      PlatformNode.fileSystem,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Bus.node,
+    Db.node,
+    Executions.node,
+    Exits.node,
+    Harnesses.node,
+    Inbox.node,
+    Placement.node,
+    Runtimes.node,
+    SessionLive.node,
+    SessionLocks.node,
+    PlatformNode.fileSystem,
+  ],
+})

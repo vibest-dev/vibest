@@ -129,7 +129,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
       const w = yield* archiveSession(yield* makeRepository)
-      assert.isTrue(yield* (yield* SessionLive).archivesOnIdle(w.id))
+      assert.isTrue(yield* (yield* SessionLive.Service).archivesOnIdle(w.id))
       yield* askEntry(w)
       yield* finishExecution(w, "status: completed\nsummary: found it")
       yield* entryTakes(w)

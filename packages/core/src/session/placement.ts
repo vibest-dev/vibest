@@ -36,6 +36,8 @@ import { projectText, removeSystemPrompt, systemPrompt, writeSystemPrompt } from
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
 
+export * as Placement from "./placement.ts"
+
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
 
@@ -52,7 +54,7 @@ export type LaunchOutcome =
   | { readonly _tag: "Limited"; readonly input: string; readonly error: string }
   | { readonly _tag: "Failed" }
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harness = yield* Harness.Service
@@ -65,7 +67,7 @@ const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const git = yield* Git.Service
   const vibest = yield* VibestCommand
-  const { prompt } = yield* Executions
+  const { prompt } = yield* Executions.Service
 
   const provided = <A, E>(
     effect: Effect.Effect<
@@ -443,28 +445,28 @@ const make = Effect.gen(function* () {
   }
 })
 
-export class Placement extends Context.Service<Placement, Effect.Success<typeof make>>()("vibest/Placement") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Placement, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Placement") {}
 
-  static readonly node = LayerNode.make({
-    service: Placement,
-    layer: Placement.layer,
-    deps: [
-      Agents.node,
-      Db.node,
-      Executions.node,
-      Git.node,
-      Harness.node,
-      Harnesses.node,
-      Inbox.node,
-      Runtimes.node,
-      PlatformNode.childProcessSpawner,
-      PlatformNode.crypto,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Agents.node,
+    Db.node,
+    Executions.node,
+    Git.node,
+    Harness.node,
+    Harnesses.node,
+    Inbox.node,
+    Runtimes.node,
+    PlatformNode.childProcessSpawner,
+    PlatformNode.crypto,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

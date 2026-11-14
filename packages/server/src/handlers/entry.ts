@@ -6,7 +6,7 @@ import type { Checks, Handlers } from "./caller.ts"
 
 export const make = ({ scope, machineFromCaller, cliOnly, resolveAt }: Checks) =>
   Effect.gen(function* () {
-    const entrySession = yield* EntrySession
+    const entrySession = yield* EntrySession.Service
     return {
       Launch: ({ argv, agent, focus, runtime, callerEnv, runtimeSession }) =>
         Effect.gen(function* () {

@@ -39,7 +39,7 @@ export interface Input {
 
 export const make = Effect.gen(function* () {
   const hooks = yield* Hooks.Service
-  const subscriptions = yield* Subscriptions
+  const subscriptions = yield* Subscriptions.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const agents = yield* Agents.Service

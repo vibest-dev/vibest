@@ -33,7 +33,7 @@ export const make = ({ cliOnly }: Checks) =>
     const db = yield* Db.Service
     const runtimes = yield* Runtimes.Service
     const plugins = yield* Plugins.Service
-    const subscriptions = yield* Subscriptions
+    const subscriptions = yield* Subscriptions.Service
     const identity = yield* Identity
     const updateStatus = yield* UpdateCheck.Service
     const { version } = yield* App.Service

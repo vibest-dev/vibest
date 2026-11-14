@@ -90,7 +90,7 @@ const runtimes = LayerNode.make({
 })
 
 const subscriptions = LayerNode.make({
-  service: Subscriptions,
+  service: Subscriptions.Service,
   layer: Subscriptions.testLayer,
   deps: [Harness.node, Harnesses.node],
 })
@@ -386,7 +386,7 @@ export const restartSessions = Effect.gen(function* () {
     Plugins.node.replace(Layer.succeed(Plugins.Service, yield* Plugins.Service)),
     Processes.node.replace(Layer.succeed(Processes.Service, yield* Processes.Service)),
     Runtimes.node.replace(Layer.succeed(Runtimes.Service, yield* Runtimes.Service)),
-    Subscriptions.node.replace(Layer.succeed(Subscriptions, yield* Subscriptions)),
+    Subscriptions.node.replace(Layer.succeed(Subscriptions.Service, yield* Subscriptions.Service)),
     PlatformNode.childProcessSpawner.replace(
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, yield* ChildProcessSpawner.ChildProcessSpawner),
     ),
