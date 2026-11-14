@@ -10,7 +10,7 @@ import {
 } from "@vibest/core/database/db-rows"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
-import { type SessionView, Sessions } from "@vibest/core/session"
+import { type SessionView, Session } from "@vibest/core/session"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import type { RuntimeAddress } from "@vibest/schema/session"
 import { Effect } from "effect"
@@ -47,8 +47,8 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
 
 export const sessionListing = (deps: {
   readonly db: Db["Service"]
-  readonly sessions: Sessions["Service"]
-  readonly runtimes: Runtimes["Service"]
+  readonly sessions: Session.Interface
+  readonly runtimes: Runtimes.Interface
 }) => {
   const { db, sessions, runtimes } = deps
   const listedRows = (rows: ReadonlyArray<SessionView>) =>

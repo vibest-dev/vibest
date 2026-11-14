@@ -4,7 +4,7 @@ import { Db } from "@vibest/core/database/db"
 import type { PeerScope } from "@vibest/core/database/db-remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
 import { peerHeaders } from "@vibest/protocol/protocol"
@@ -54,9 +54,9 @@ type Away = { readonly machine: ListedMachine; readonly sessions: ReadonlyArray<
 const make = Effect.gen(function* () {
   const db = yield* Db
   const machines = yield* Machines
-  const self = yield* VibestdIdentity
-  const git = yield* Git
-  const runtimes = yield* Runtimes
+  const self = yield* Identity.Service
+  const git = yield* Git.Service
+  const runtimes = yield* Runtimes.Service
 
   const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) =>
     Effect.gen(function* () {
@@ -233,6 +233,6 @@ export class Remote extends Context.Service<Remote, Effect.Success<typeof make>>
   static readonly node = LayerNode.make({
     service: Remote,
     layer: Remote.layer,
-    deps: [Db.node, Git.node, Machines.node, Runtimes.node, VibestdIdentity.node],
+    deps: [Db.node, Git.node, Machines.node, Runtimes.node, Identity.node],
   })
 }

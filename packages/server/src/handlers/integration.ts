@@ -1,6 +1,7 @@
 import { Db } from "@vibest/core/database/db"
 import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
-import { harnessCatalog, Harnesses, unprovided } from "@vibest/core/harness"
+import { harnessCatalog } from "@vibest/core/harness"
+import { Harnesses, unprovided } from "@vibest/core/harnesses"
 import { type HookCaller, Integration } from "@vibest/core/integration"
 import { forProvider } from "@vibest/core/models"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"
@@ -14,8 +15,8 @@ import type { Handlers } from "./caller.ts"
 
 export const make = Effect.gen(function* () {
   const db = yield* Db
-  const harnesses = yield* Harnesses
-  const integration = yield* Integration
+  const harnesses = yield* Harnesses.Service
+  const integration = yield* Integration.Service
   const remote = yield* Remote
 
   const hook = (

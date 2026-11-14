@@ -6,15 +6,16 @@ import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
-import { Harness, Harnesses } from "@vibest/core/harness"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Harness } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
+import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/host"
 import { Processes } from "@vibest/core/processes"
-import { SshHosts } from "@vibest/core/repository-url"
-import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
-import { Sessions } from "@vibest/core/session"
+import { RepositoryUrl } from "@vibest/core/repository-url"
+import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
+import { Session } from "@vibest/core/session"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
@@ -39,7 +40,7 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
-import { Identity, Shutdown } from "../../../server/src/handlers/daemon.ts"
+import { Identity as HandlerIdentity, Shutdown } from "../../../server/src/handlers/daemon.ts"
 import { MachineTransport } from "../../../server/src/machine/machines.ts"
 import { services } from "../../../server/src/services.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
@@ -75,12 +76,12 @@ const runtimesFrom = (definitions: ReadonlyArray<RuntimeDefinition>) =>
   )
 
 const runtimes = LayerNode.make({
-  service: Runtimes,
+  service: Runtimes.Service,
   layer: Layer.effect(
-    Runtimes,
+    Runtimes.Service,
     Effect.flatMap(FakeRuntime, (fake) => runtimesFrom([fake.runtime])),
   ),
-  deps: [runtimeNode, Bus.node, HostEnv.node],
+  deps: [runtimeNode, Bus.node, Runtimes.hostEnvNode],
 })
 
 const subscriptions = LayerNode.make({
@@ -150,23 +151,23 @@ const readyOnStart = LayerNode.make({
 
 const noTransport: MachineTransport["Service"] = () => Effect.fail(new Error("no machine transport in this test"))
 
-const defaultSsh = Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed(alias) })
+const defaultSsh = Layer.succeed(RepositoryUrl.Service, { hostName: (alias) => Effect.succeed(alias) })
 
 const defaultTransport = Layer.succeed(MachineTransport, noTransport)
 
 const defaultSpawn = Spawn.configured({ maxSessions: undefined })
 
-const sessionsDecorated = (decorate: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]) =>
-  Sessions.node.replace(
+const sessionsDecorated = (decorate: (sessions: Session.Interface, db: Db["Service"]) => Session.Interface) =>
+  Session.node.replace(
     LayerNode.make({
-      service: Sessions,
+      service: Session.Service,
       layer: Layer.effect(
-        Sessions,
+        Session.Service,
         Effect.gen(function* () {
-          return decorate(yield* Sessions.make, yield* Db)
+          return decorate(yield* Session.make, yield* Db)
         }),
       ),
-      deps: Sessions.deps,
+      deps: Session.deps,
     }),
   )
 
@@ -190,9 +191,9 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       platform,
       home,
       PlatformNode.sqlClient,
-      HostEnv.node,
-      VibestdIdentity.node,
+      Runtimes.hostEnvNode,
       Identity.node,
+      HandlerIdentity.node,
       Shutdown.node,
       fakeProcesses,
       Processes.node,
@@ -207,7 +208,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
     ]),
     [
       PlatformNode.layout.replace(home),
-      App.node.replace(Layer.succeed(App, { version: "test" })),
+      App.node.replace(Layer.succeed(App.Service, { version: "test" })),
       UpdateCheck.node.replace(Layer.succeed(UpdateCheck, Effect.succeed(NOT_CHECKED))),
       Runtimes.node.replace(runtimes),
       Harness.node.replace(harnessLayer()),
@@ -215,18 +216,18 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Subscriptions.node.replace(subscriptions),
       Plugins.node.replace(plugins),
       Spawn.node.replace(defaultSpawn),
-      SshHosts.node.replace(defaultSsh),
+      RepositoryUrl.node.replace(defaultSsh),
       MachineTransport.node.replace(defaultTransport),
-      HostEnv.node.replace(noHostEnv),
-      VibestdIdentity.node.replace(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),
-      Identity.node.replace(Layer.succeed(Identity, {})),
+      Runtimes.hostEnvNode.replace(noHostEnv),
+      Identity.node.replace(Layer.sync(Identity.Service, () => ({ id: randomId(), name: "test-host" }))),
+      HandlerIdentity.node.replace(Layer.succeed(HandlerIdentity, {})),
       Shutdown.node.replace(Layer.effect(Shutdown, Deferred.make<void>())),
       ...replacements,
     ],
   )
 
 export const sshHosts = (hosts: Readonly<Record<string, string>> | undefined) =>
-  Layer.succeed(SshHosts, { hostName: (alias: string) => Effect.succeed(hosts?.[alias] ?? alias) })
+  Layer.succeed(RepositoryUrl.Service, { hostName: (alias: string) => Effect.succeed(hosts?.[alias] ?? alias) })
 
 export const transportLayer = (transport: MachineTransport["Service"] | undefined) =>
   Layer.succeed(MachineTransport, transport ?? noTransport)
@@ -247,7 +248,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
   readonly sshHosts?: Readonly<Record<string, string>>
   readonly transport?: MachineTransport["Service"]
-  readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
+  readonly sessions?: (sessions: Session.Interface, db: Db["Service"]) => Session.Interface
   readonly identity?: DaemonIdentity
   readonly version?: string
 }
@@ -292,12 +293,16 @@ export const sessionFrom = (options: TestOptions = {}) =>
       Harness.node.replace(harnessLayer(harnessStandIn(options))),
       Harnesses.node.replace(harnessesLayer(options.harnesses)),
       Spawn.node.replace(Spawn.configured({ maxSessions: options.maxSessions })),
-      ...(options.version === undefined ? [] : [App.node.replace(Layer.succeed(App, { version: options.version }))]),
+      ...(options.version === undefined
+        ? []
+        : [App.node.replace(Layer.succeed(App.Service, { version: options.version }))]),
       ...(options.sessions === undefined ? [] : [sessionsDecorated(options.sessions)]),
       ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
-      SshHosts.node.replace(sshHosts(options.sshHosts)),
+      RepositoryUrl.node.replace(sshHosts(options.sshHosts)),
       MachineTransport.node.replace(transportLayer(options.transport)),
-      ...(options.identity === undefined ? [] : [Identity.node.replace(Layer.succeed(Identity, options.identity))]),
+      ...(options.identity === undefined
+        ? []
+        : [HandlerIdentity.node.replace(Layer.succeed(HandlerIdentity, options.identity))]),
     ],
     pluginsHost(options.plugins ?? [], {
       ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),
@@ -311,17 +316,17 @@ export { sessionFrom as testLayer }
 
 export const restartSessions = Effect.gen(function* () {
   const held = [
-    Agents.node.replace(Layer.succeed(Agents, yield* Agents)),
+    Agents.node.replace(Layer.succeed(Agents.Service, yield* Agents.Service)),
     Bus.node.replace(Layer.succeed(Bus, yield* Bus)),
     Db.node.replace(Layer.succeed(Db, yield* Db)),
-    Drain.node.replace(Layer.succeed(Drain, yield* Drain)),
-    Git.node.replace(Layer.succeed(Git, yield* Git)),
-    Harness.node.replace(Layer.succeed(Harness, yield* Harness)),
-    Harnesses.node.replace(Layer.succeed(Harnesses, yield* Harnesses)),
-    Inbox.node.replace(Layer.succeed(Inbox, yield* Inbox)),
+    Drain.node.replace(Layer.succeed(Drain.Service, yield* Drain.Service)),
+    Git.node.replace(Layer.succeed(Git.Service, yield* Git.Service)),
+    Harness.node.replace(Layer.succeed(Harness.Service, yield* Harness.Service)),
+    Harnesses.node.replace(Layer.succeed(Harnesses.Service, yield* Harnesses.Service)),
+    Inbox.node.replace(Layer.succeed(Inbox.Service, yield* Inbox.Service)),
     Plugins.node.replace(Layer.succeed(Plugins, yield* Plugins)),
-    Processes.node.replace(Layer.succeed(Processes, yield* Processes)),
-    Runtimes.node.replace(Layer.succeed(Runtimes, yield* Runtimes)),
+    Processes.node.replace(Layer.succeed(Processes.Service, yield* Processes.Service)),
+    Runtimes.node.replace(Layer.succeed(Runtimes.Service, yield* Runtimes.Service)),
     Subscriptions.node.replace(Layer.succeed(Subscriptions, yield* Subscriptions)),
     PlatformNode.childProcessSpawner.replace(
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, yield* ChildProcessSpawner.ChildProcessSpawner),
@@ -329,12 +334,12 @@ export const restartSessions = Effect.gen(function* () {
     PlatformNode.crypto.replace(Layer.succeed(Crypto.Crypto, yield* Crypto.Crypto)),
     PlatformNode.fileSystem.replace(Layer.succeed(FileSystem.FileSystem, yield* FileSystem.FileSystem)),
     PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
-    App.node.replace(Layer.succeed(App, yield* App)),
+    App.node.replace(Layer.succeed(App.Service, yield* App.Service)),
     PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
     Spawn.node.replace(defaultSpawn),
   ]
   const fresh = yield* Layer.build(
-    Layer.fresh(LayerNode.compile(LayerNode.group([Sessions.node]), { replacements: held })),
+    Layer.fresh(LayerNode.compile(LayerNode.group([Session.node]), { replacements: held })),
   )
-  return Context.get(fresh, Sessions)
+  return Context.get(fresh, Session.Service)
 })

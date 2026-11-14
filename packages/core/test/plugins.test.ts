@@ -4,7 +4,7 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf } from "@vibest/core/database/db-rows"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugin"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin } from "@vibest/plugin"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin/effect"
@@ -58,7 +58,7 @@ describe("plugins: spawn hook", () => {
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
-      const s = yield* (yield* Sessions).spawn(
+      const s = yield* (yield* Session.Service).spawn(
         yield* spawnInput(yield* mainCheckout(nested), { prompt: "research: how does the cache work?" }),
       )
       assert.strictEqual(s.harness, "claude")
@@ -93,7 +93,9 @@ describe("plugins: spawn hook", () => {
     "P3: a hook stuck in an uninterruptible sleep times out and refuses the start",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const spawning = yield* Effect.forkChild((yield* Sessions).spawn(yield* spawnInput(repo, { harness: "pi" })))
+      const spawning = yield* Effect.forkChild(
+        (yield* Session.Service).spawn(yield* spawnInput(repo, { harness: "pi" })),
+      )
       yield* until(
         Effect.sync(() => stuckHookEntered.value),
         (x) => x,
@@ -121,7 +123,7 @@ describe("plugins: spawn hook", () => {
     "a plugin can rewrite the prompt the session receives",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const s = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      const s = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepStrictEqual(s.trace.at(-1)!.changes, [
         { field: "prompt", from: "do it", to: "do it\n\nRun the tests first." },
       ])
@@ -135,7 +137,7 @@ describe("plugins: spawn hook", () => {
     "a JS plugin that returns undefined for the prompt or the machine changes neither; its other fields apply",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const s = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      const s = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepStrictEqual(s.trace.at(-1)!.changes, [{ field: "model", to: "m" }])
       yield* until(herdr.callsTo("send"), (c) => c.length > 0)
       assert.include((yield* herdr.callsTo("send"))[0]!.text, "do it")
@@ -154,12 +156,12 @@ describe("plugins: spawn hook", () => {
     "P8/P14: an unknown harness written by a plugin is refused, naming it; one that unsets the harness leaves NoHarnessChosen",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const error = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(repo)))
+      const error = yield* Effect.flip((yield* Session.Service).spawn(yield* spawnInput(repo)))
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, "vim")
       assert.include(error.message, "editor")
       assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-      const unset = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(repo, { prompt: "unset" })))
+      const unset = yield* Effect.flip((yield* Session.Service).spawn(yield* spawnInput(repo, { prompt: "unset" })))
       assert.strictEqual(unset._tag, "NoHarnessChosen")
       assert.include(unset.message, "no harness to inherit")
     }),
@@ -177,7 +179,7 @@ describe("plugins: spawn hook", () => {
       assert.include(byId("broken")[0]!.error, "setup boom")
       assert.deepInclude(byId("ok")[0], { id: "ok", status: "active", calls: 0 })
       assert.deepInclude(byId("ok")[1], { id: "ok", status: "failed", error: "Duplicate plugin ID: ok" })
-      yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepInclude(
         (yield* plugins.list).find((q) => q.id === "ok")!,
         { calls: 1, changed: 1, crashed: 0 },
@@ -208,7 +210,7 @@ describe("plugins: spawn hook", () => {
   test(
     "old and unknown hook names fail the plugin's setup instead of running at startup",
     Effect.gen(function* () {
-      const s = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      const s = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepStrictEqual(
         s.trace.map((t) => [t.plugin, t.outcome]),
         [
@@ -511,7 +513,7 @@ describe("plugins: event.subscribe", () => {
     "a consumer that holds up its facts does not hold up the commits, and gets every fact in order once it goes on",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       yield* yieldToIo
       yield* sessions.spawn(yield* spawnInput(repo, { harness: "pi" }))
       const second = yield* sessions.spawn(yield* spawnInput(repo, { harness: "pi" }))

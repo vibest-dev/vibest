@@ -52,7 +52,7 @@ const bareGuard = (agent: string, tool: string, input: Record<string, unknown>) 
   guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, input, "/")
 const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAMS)
 const namedRuntimes = (ids: ReadonlyArray<string>) =>
-  Layer.succeed(Runtimes, {
+  Layer.succeed(Runtimes.Service, {
     all: Effect.succeed(ids.map((id) => ({ id }) as Runtime)),
   } as unknown as RuntimesShape)
 
@@ -607,7 +607,7 @@ layer(
 
   it.effect("a definition without a guard meets the floor only; a guard that throws is a refusal", () =>
     Effect.gen(function* () {
-      const agents = yield* Agents
+      const agents = yield* Agents.Service
       yield* agents.transform((editor) => {
         editor.add({ id: "plain", description: "no guard", system: "" })
         editor.add({

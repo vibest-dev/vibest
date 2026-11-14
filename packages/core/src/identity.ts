@@ -5,6 +5,8 @@ import { Context, Duration, Effect, FileSystem, Layer, Option, Schema } from "ef
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 
+export * as Identity from "./identity.ts"
+
 export const HOST_ID_TIMEOUT = Duration.seconds(2)
 export const MACHINE_ID_FILES = ["/etc/machine-id", "/var/lib/dbus/machine-id"] as const
 
@@ -23,28 +25,31 @@ export class HostFacts extends Context.Service<
     readonly id: Effect.Effect<string | undefined>
     readonly pid: number
   }
->()("vibest/HostFacts") {
-  static readonly node = LayerNode.unbound(HostFacts)
+>()("vibest/HostFacts") {}
+
+export const hostFactsNode = LayerNode.unbound(HostFacts)
+
+export interface Interface {
+  readonly id: string
+  readonly name: string
 }
 
-export class VibestdIdentity extends Context.Service<VibestdIdentity, { readonly id: string; readonly name: string }>()(
-  "vibest/VibestdIdentity",
-) {
-  static readonly layer = Layer.effect(
-    VibestdIdentity,
-    Effect.gen(function* () {
-      const loaded = yield* loadIdentity((yield* Layout).identity, yield* HostFacts)
-      if (loaded.warning !== undefined) yield* Effect.logWarning(loaded.warning)
-      return { id: loaded.identity.id, name: loaded.identity.name }
-    }),
-  )
+export class Service extends Context.Service<Service, Interface>()("vibest/VibestdIdentity") {}
 
-  static readonly node = LayerNode.make({
-    service: VibestdIdentity,
-    layer: VibestdIdentity.layer,
-    deps: [HostFacts.node, PlatformNode.fileSystem, PlatformNode.layout],
-  })
-}
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const loaded = yield* loadIdentity((yield* Layout).identity, yield* HostFacts)
+    if (loaded.warning !== undefined) yield* Effect.logWarning(loaded.warning)
+    return { id: loaded.identity.id, name: loaded.identity.name }
+  }),
+)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [hostFactsNode, PlatformNode.fileSystem, PlatformNode.layout],
+})
 
 export class IdentityUnreadable extends Schema.TaggedError<IdentityUnreadable>()("IdentityUnreadable", {
   file: Schema.String,

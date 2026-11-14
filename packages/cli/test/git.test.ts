@@ -131,7 +131,7 @@ describe("git, the live layer: worktree add and remove", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const git = yield* Git
+      const git = yield* Git.Service
       const repo = yield* makeRepository
       assert.strictEqual(yield* mainCheckout(repo), repo)
       yield* fs.makeDirectory(path.join(repo, "sub"))
@@ -539,7 +539,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
   it.effect("git errors carry stderr", () =>
     Effect.gen(function* () {
       const dir = yield* tempDirectory("vibest-nogit-")
-      const error = yield* Effect.flip(Git.use((git) => git.topLevel(dir)))
+      const error = yield* Effect.flip(Git.Service.use((git) => git.topLevel(dir)))
       assert.include(error.message, "not a git repository")
     }),
   )

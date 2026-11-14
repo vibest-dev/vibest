@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { exitedAt, executionStateOf, harnessIdOf } from "@vibest/core/database/db-rows"
-import { Harnesses } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
 import { Clock, Effect, Fiber } from "effect"
@@ -13,7 +13,7 @@ import { idleSession, spawnWorking, sqlNotices, test } from "./lib/sessions-help
 
 const observedEnd = (harness: string, payload: object) =>
   Effect.gen(function* () {
-    const adapter = yield* (yield* Harnesses).get(harness)
+    const adapter = yield* (yield* Harnesses.Service).get(harness)
     return executionEndFrom(adapter, payload as Record<string, unknown>, yield* Clock.currentTimeMillis)
   })
 
@@ -58,7 +58,7 @@ describe("observed execution end", () => {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
       yield* sessions.send(id, "queued")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
-      yield* (yield* Integration).executionEnd(
+      yield* (yield* Integration.Service).executionEnd(
         { id, entry: false, harness: "claude" },
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
       )
@@ -81,7 +81,7 @@ describe("observed execution end", () => {
       const held = yield* herdr.hold("state", id)
       const checking = yield* Effect.forkChild(sessions.check(id))
       yield* held.reached
-      yield* (yield* Integration).executionEnd(
+      yield* (yield* Integration.Service).executionEnd(
         { id, entry: false, harness: "pi" },
         JSON.stringify({ type: "agent_settled", text: "done while locked" }),
       )

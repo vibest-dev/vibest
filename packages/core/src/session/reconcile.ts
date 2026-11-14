@@ -16,7 +16,7 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import { Harnesses } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
@@ -34,10 +34,10 @@ export const HOOK_GRACE = Duration.seconds(10)
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const runtimes = yield* Runtimes
-  const harnesses = yield* Harnesses
-  const inbox = yield* Inbox
-  const processes = yield* Processes
+  const runtimes = yield* Runtimes.Service
+  const harnesses = yield* Harnesses.Service
+  const inbox = yield* Inbox.Service
+  const processes = yield* Processes.Service
   const sessionLive = yield* SessionLive
   const { restarting, track } = sessionLive
   const locks = yield* SessionLocks

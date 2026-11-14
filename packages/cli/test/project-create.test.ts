@@ -10,7 +10,7 @@ import {
   projectRepositories,
   projectRoot,
 } from "@vibest/core/project/create"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { liveDaemon } from "@vibest/runtime-herdr/commands"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -211,7 +211,7 @@ const served = Server.layer.pipe(
   Layer.provideMerge(testLayer()),
 )
 
-const sessionTest = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
+const sessionTest = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(served)), 30_000)
 
 describe("multi-repository isolated workspace", () => {
@@ -278,7 +278,7 @@ describe("multi-repository isolated workspace", () => {
       const db = yield* Db
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
       const root = path.join(parent, "combo")
       yield* fs.makeDirectory(root)
@@ -391,7 +391,7 @@ describe("multi-repository isolated workspace", () => {
       const path = yield* Path.Path
       const db = yield* Db
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
       const root = path.join(parent, "combo")
       yield* fs.makeDirectory(root)

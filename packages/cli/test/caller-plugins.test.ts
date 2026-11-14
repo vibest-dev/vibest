@@ -3,7 +3,7 @@ import { Bus } from "@vibest/core/bus"
 import { callerTarget, entryPlace, specHits, type CallerHit } from "@vibest/core/caller"
 import { Builtins, builtinsNode } from "@vibest/core/plugin"
 import type { Caller, RuntimeDefinition } from "@vibest/core/plugin/host"
-import { HostEnv, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
+import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { run as runDaemon } from "@vibest/server/daemon"
@@ -94,7 +94,7 @@ describe("the runtime registry", () => {
         const bus = yield* Bus
         const seen = yield* bus.subscribe
         const runtimes = yield* makeRuntimes.pipe(
-          Effect.provideService(HostEnv, { drop: (names) => void dropped.push(...names) }),
+          Effect.provideService(Runtimes.HostEnv, { drop: (names) => void dropped.push(...names) }),
         )
         const queue = yield* Queue.unbounded<RuntimeEvent>()
         yield* runtimes.transform((editor) => editor.add(definition("hc", ["HC_ID"])))

@@ -20,7 +20,7 @@ export const served = (options?: TestOptions) =>
 
 export const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>,
+  program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>,
   options?: TestOptions,
   timeout?: number,
 ) => it.effect(name, () => program.pipe(Effect.provide(served(options))), timeout)

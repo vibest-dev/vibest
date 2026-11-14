@@ -3,7 +3,7 @@ import net from "node:net"
 import { readPing } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
-import { ProcessPlatform, Processes } from "@vibest/core/processes"
+import { Processes } from "@vibest/core/processes"
 import { agentsLayer } from "@vibest/core/test/lib/agents"
 import { entryPending, projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
 import { FakeProcesses } from "@vibest/core/test/lib/fake-processes"
@@ -127,8 +127,8 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     return { stdout, stderr, code }
   }).pipe(Effect.scoped, Effect.orDie)
 
-export const processesOn = (platform: ProcessPlatform["Service"]) =>
-  Processes.layer.pipe(Layer.provide(Layer.succeed(ProcessPlatform, platform)))
+export const processesOn = (platform: Processes.ProcessPlatform["Service"]) =>
+  Processes.layer.pipe(Layer.provide(Layer.succeed(Processes.ProcessPlatform, platform)))
 
 export {
   makeRepository,
@@ -263,7 +263,7 @@ export const wire = Effect.gen(function* () {
 })
 
 export const hostReplacements = [
-  App.node.replace(Layer.succeed(App, { version: VERSION })),
+  App.node.replace(Layer.succeed(App.Service, { version: VERSION })),
   UpdateCheck.node.replace(Layer.succeed(UpdateCheck, Effect.succeed(NOT_CHECKED))),
 ]
 

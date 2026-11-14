@@ -34,7 +34,7 @@ export const stopAgent = (
   },
 ) =>
   Effect.gen(function* () {
-    const processes = yield* Processes
+    const processes = yield* Processes.Service
     const pid = input.pid
     const unsupported = (reason: string) => ({ result: "unsupported" as const, reason })
     if (pid === undefined || !validPid(pid))
@@ -85,10 +85,10 @@ export interface ReleaseInput {
 export const make = Effect.gen(function* () {
   const db = yield* Db
   const layout = yield* Layout
-  const processes = yield* Processes
+  const processes = yield* Processes.Service
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const git = yield* Git
+  const git = yield* Git.Service
 
   const release = (input: ReleaseInput) =>
     Effect.gen(function* () {
@@ -181,7 +181,7 @@ export const make = Effect.gen(function* () {
       const linked = (repoRoot: string, path: string) =>
         Effect.gen(function* () {
           const at = yield* fs.realPath(path).pipe(Effect.orElseSucceed(() => path))
-          return (yield* Git.use((git) => git.linkedWorktrees(repoRoot))).includes(at)
+          return (yield* Git.Service.use((git) => git.linkedWorktrees(repoRoot))).includes(at)
         })
       const keepWorktree = Effect.gen(function* () {
         if (input.keepWorktree) return "worktree kept as asked (--keep-worktree)"
@@ -264,7 +264,7 @@ export const make = Effect.gen(function* () {
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
-      Effect.provideService(Git, git),
+      Effect.provideService(Git.Service, git),
     )
 
   return { release }

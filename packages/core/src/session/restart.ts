@@ -20,7 +20,8 @@ import {
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
-import { Harness, Harnesses } from "../harness.ts"
+import { Harness } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { entryCommand, restartArgv } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition, HarnessesShape } from "../plugin/host.ts"
@@ -109,9 +110,9 @@ const sessionRestart = (deps: {
   readonly version: string
   readonly db: Db["Service"]
   readonly bus: Bus["Service"]
-  readonly runtimes: Runtimes["Service"]
+  readonly runtimes: Runtimes.Interface
   readonly harnesses: Pick<HarnessesShape, "get" | "find">
-  readonly processes: Processes["Service"]
+  readonly processes: Processes.Interface
   readonly restarting: SessionLive["Service"]["restarting"]
   readonly scope: Scope.Scope
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
@@ -416,14 +417,14 @@ const sessionRestart = (deps: {
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const runtimes = yield* Runtimes
-  const harness = yield* Harness
-  const harnesses = yield* Harnesses
-  const agents = yield* Agents
+  const runtimes = yield* Runtimes.Service
+  const harness = yield* Harness.Service
+  const harnesses = yield* Harnesses.Service
+  const agents = yield* Agents.Service
   const layout = yield* Layout
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const processes = yield* Processes
+  const processes = yield* Processes.Service
   const { restarting } = yield* SessionLive
   const bus = yield* Bus
   const scope = yield* Effect.scope
@@ -454,9 +455,9 @@ const make = Effect.gen(function* () {
       })
       return restartArgv(command)
     }).pipe(
-      Effect.provideService(Agents, agents),
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
+      Effect.provideService(Agents.Service, agents),
+      Effect.provideService(Harness.Service, harness),
+      Effect.provideService(Harnesses.Service, harnesses),
       Effect.provideService(Layout, layout),
       Effect.provideService(VibestCommand, vibestCommand),
       Effect.provideService(FileSystem.FileSystem, fs),
@@ -464,7 +465,7 @@ const make = Effect.gen(function* () {
     )
 
   return sessionRestart({
-    version: (yield* App).version,
+    version: (yield* App.Service).version,
     db,
     bus,
     runtimes,

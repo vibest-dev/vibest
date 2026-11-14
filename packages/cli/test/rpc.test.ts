@@ -6,7 +6,7 @@ import { Db } from "@vibest/core/database/db"
 import { executionStateOf } from "@vibest/core/database/db-rows"
 import { projectRoot } from "@vibest/core/project/create"
 import { unwrapped } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { PRESENT_TIMEOUT } from "@vibest/core/session/entry"
 import { Plugin } from "@vibest/plugin/effect"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
@@ -167,7 +167,7 @@ describe("vibest.sock", () => {
       const db = yield* Db
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const c = asCli(raw, yield* makeRepository)
       const spawner = yield* asEntry(raw, yield* makeRepository)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "cursor", prompt: "work" })
@@ -199,7 +199,7 @@ describe("vibest.sock", () => {
     "List cuts a task past 500 characters; Get keeps it, and latest is the newest message",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const db = yield* Db
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)

@@ -1,7 +1,7 @@
 import { Db } from "@vibest/core/database/db"
-import { Harnesses } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { executionEndFrom } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
 import { Clock, Duration, Effect, Path, Predicate, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -40,7 +40,7 @@ export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predic
 }
 
 export const settled = Effect.gen(function* () {
-  const sessions = yield* Sessions
+  const sessions = yield* Session.Service
   yield* yieldToIo
   yield* until(sessions.inMemory, (m) => m.locks === 0)
 })
@@ -51,14 +51,14 @@ export const untilVirtual = <A, E, R>(
   step: Duration.Input = "100 millis",
 ) => poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust(step))), 1000, "untilVirtual")
 
-export const settleEntry = (sessions: Sessions["Service"], entryId: string) => sessions.check(entryId)
+export const settleEntry = (sessions: Session.Interface, entryId: string) => sessions.check(entryId)
 
 export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks: number }) =>
   m.tracked <= 1 && m.locks === 0
 
 export const writeEnd = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
-    const adapter = yield* (yield* Harnesses).get(harness)
+    const adapter = yield* (yield* Harnesses.Service).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
     yield* (yield* Db).endObserved(id, executionEndFrom(adapter, payload as Record<string, unknown>, at))
   })

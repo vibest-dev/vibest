@@ -29,14 +29,14 @@ export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>
 export const make = ({ cliOnly }: Checks) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const runtimes = yield* Runtimes
+    const runtimes = yield* Runtimes.Service
     const plugins = yield* Plugins
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
     const updateStatus = yield* UpdateCheck
-    const { version } = yield* App
+    const { version } = yield* App.Service
     const shutdown = yield* Shutdown
-    const drain = yield* Drain
+    const drain = yield* Drain.Service
     const bus = yield* Bus
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.deliveringInbox, shutdown })

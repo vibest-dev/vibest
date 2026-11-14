@@ -1,10 +1,10 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
-import { Harnesses } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { Clock, Effect, Exit, Fiber, Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -81,7 +81,7 @@ describe.concurrent("Sessions", () => {
 
   const typedBeforeTheTask = Effect.gen(function* () {
     const herdr = yield* FakeRuntime
-    const sessions = yield* Sessions
+    const sessions = yield* Session.Service
     const db = yield* Db
     const repo = yield* makeRepository
     const held = yield* herdr.hold("state")
@@ -111,7 +111,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const held = yield* herdr.hold("state")
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
@@ -196,7 +196,7 @@ describe.concurrent("Sessions", () => {
     "a reply after a late start report while confirm gives up is delivered, and the batch stays delivered",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const db = yield* Db
       const repo = yield* makeRepository
       yield* db.startEntry(
@@ -412,7 +412,7 @@ describe.concurrent("Sessions", () => {
   test(
     "Cursor: a hook from an earlier process does not record its conversation id",
     Effect.gen(function* () {
-      const integration = yield* Integration
+      const integration = yield* Integration.Service
       const { id, db } = yield* spawnWorking(yield* makeRepository, "cursor")
       const current = (yield* db.currentProcessId(id))!
       const event = JSON.stringify({ hook_event_name: "beforeSubmitPrompt", conversation_id: "c-old", prompt: "x" })
@@ -427,7 +427,7 @@ describe.concurrent("Sessions", () => {
     "Cursor on a runtime with no status for it: the task waits for its ready report and, typed, shows it working without a resend; its execution end shows it idle, and an interrupt goes by its open execution",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const db = yield* Db
       const repo = yield* makeRepository
       yield* Ref.set(herdr.onStarted, (session) =>
@@ -444,7 +444,7 @@ describe.concurrent("Sessions", () => {
       yield* TestClock.adjust("40 seconds")
       yield* settled
       assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
-      const integration = yield* Integration
+      const integration = yield* Integration.Service
       const who = { id, entry: false, harness: CURSOR.id }
       yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
@@ -472,7 +472,7 @@ describe.concurrent("Sessions", () => {
     "a send to a session whose harness no plugin provides any more fails with HarnessUnavailable in its notice",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const harnesses = yield* Harnesses
+      const harnesses = yield* Harnesses.Service
       const loaded = yield* Scope.make()
       yield* harnesses.transform((editor) => editor.add({ ...PI, id: "leaving-pi" })).pipe(Scope.provide(loaded))
       const { id, sessions } = yield* spawnWorking(yield* makeRepository, "leaving-pi")

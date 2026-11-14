@@ -5,14 +5,14 @@ import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/d
 import type { ReplayDiffers } from "@vibest/core/database/journal"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { HostFacts } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
-import { Identity, Shutdown } from "./handlers/daemon.ts"
+import { Identity as HandlerIdentity, Shutdown } from "./handlers/daemon.ts"
 import * as ShutdownDeadline from "./shutdown-deadline.ts"
 import type { ShutdownHost } from "./shutdown-deadline.ts"
 
@@ -116,8 +116,10 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       })
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
-    const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
-    const app = yield* App.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
+    const facts = yield* Identity.HostFacts.pipe(
+      Effect.provide(LayerNode.compile(Identity.hostFactsNode, { replacements })),
+    )
+    const app = yield* App.Service.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
     const identity = {
       pid: facts.pid,
       instance: yield* newId(),
@@ -133,7 +135,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),
-          Identity.node.replace(Layer.succeed(Identity, identity)),
+          HandlerIdentity.node.replace(Layer.succeed(HandlerIdentity, identity)),
           Shutdown.node.replace(Layer.succeed(Shutdown, shutdown)),
         ],
       }),

@@ -15,7 +15,7 @@ const gitDirectory = (p: string) =>
     return p
   })
 
-export const mainCheckout = (dir: string) => Git.use((git) => git.mainCheckout(dir))
+export const mainCheckout = (dir: string) => Git.Service.use((git) => git.mainCheckout(dir))
 
 const remoteRepositoryName = (url: string) => {
   const bare = url
@@ -28,7 +28,7 @@ const remoteRepositoryName = (url: string) => {
 
 export const repositoryDirectoryName = Effect.fn("repositoryDirectoryName")(function* (dir: string) {
   const main = yield* mainCheckout(dir)
-  const remote = yield* Git.use((git) => git.originUrl(main))
+  const remote = yield* Git.Service.use((git) => git.originUrl(main))
   return remote ? remoteRepositoryName(remote) : (yield* Path.Path).basename(main)
 })
 
@@ -40,9 +40,9 @@ export const allocationParentBlocked = Effect.fn("allocationParentBlocked")(func
 })
 
 export const addWorktree = (root: string, path: string, commit?: string) =>
-  Git.use((git) => git.addWorktree(root, path, commit))
+  Git.Service.use((git) => git.addWorktree(root, path, commit))
 
-export const removeWorktree = (root: string, path: string) => Git.use((git) => git.removeWorktree(root, path))
+export const removeWorktree = (root: string, path: string) => Git.Service.use((git) => git.removeWorktree(root, path))
 
 export class CopyFailed extends Schema.TaggedError<CopyFailed>()("CopyFailed", {
   source: Schema.String,
@@ -92,7 +92,7 @@ export const copyIncluded = Effect.fn("copyIncluded")(function* (root: string, w
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const open: string[] = []
-  const git = yield* Git
+  const git = yield* Git.Service
   for (const f of yield* git.includedFiles(root)) {
     const dst = path.join(worktree, f)
     const taken = yield* Effect.gen(function* () {
@@ -117,4 +117,4 @@ export const copyIncluded = Effect.fn("copyIncluded")(function* (root: string, w
   return copied
 })
 
-export const gitState = (worktree: string) => Git.use((git) => git.state(worktree))
+export const gitState = (worktree: string) => Git.Service.use((git) => git.state(worktree))

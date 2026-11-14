@@ -1,8 +1,8 @@
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 
 import * as Http from "./http.ts"
 import * as Server from "./server.ts"
 import { services } from "./services.ts"
 
-export const daemon = LayerNode.group([VibestdIdentity.node, services, Server.node, Http.node])
+export const daemon = LayerNode.group([Identity.node, services, Server.node, Http.node])

@@ -5,7 +5,7 @@ import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 
 const make = Effect.gen(function* () {
-  const drain = yield* Drain
+  const drain = yield* Drain.Service
   const locks = KeyedMutex.keyedLock<string>()
   return {
     ...locks,
@@ -21,5 +21,9 @@ export class SessionLocks extends Context.Service<SessionLocks, Effect.Success<t
 
   static readonly layer = Layer.effect(SessionLocks, make)
 
-  static readonly node = LayerNode.make({ service: SessionLocks, layer: SessionLocks.layer, deps: [Drain.node] })
+  static readonly node = LayerNode.make({
+    service: SessionLocks,
+    layer: SessionLocks.layer,
+    deps: [Drain.node],
+  })
 }

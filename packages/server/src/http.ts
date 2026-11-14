@@ -2,7 +2,7 @@ import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import { Harnesses } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
@@ -45,11 +45,11 @@ const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Sch
 
 export const make = Effect.gen(function* () {
   const db = yield* Db
-  const inbox = yield* Inbox
-  const integration = yield* Integration
-  const drain = yield* Drain
-  const harnesses = yield* Harnesses
-  const { version } = yield* App
+  const inbox = yield* Inbox.Service
+  const integration = yield* Integration.Service
+  const drain = yield* Drain.Service
+  const harnesses = yield* Harnesses.Service
+  const { version } = yield* App.Service
   const caller = (headers: Headers.Headers) =>
     Effect.gen(function* () {
       const read = reader(headers)

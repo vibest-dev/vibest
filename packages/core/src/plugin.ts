@@ -18,7 +18,7 @@ import { Bus, type BusEvent } from "./bus.ts"
 import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
-import { Harnesses } from "./harness.ts"
+import { Harnesses } from "./harnesses.ts"
 import * as Hooks from "./plugin/hooks.ts"
 import { errorMessage } from "./plugin/hooks.ts"
 import type { PluginsShape } from "./plugin/host.ts"
@@ -222,9 +222,9 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     )
 
     const subscriptions = yield* Subscriptions
-    const runtimes = yield* Runtimes
-    const harnesses = yield* Harnesses
-    const agents = yield* Agents
+    const runtimes = yield* Runtimes.Service
+    const harnesses = yield* Harnesses.Service
+    const agents = yield* Agents.Service
     const bus = yield* Bus
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin

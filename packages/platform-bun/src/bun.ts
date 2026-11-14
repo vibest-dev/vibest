@@ -14,10 +14,10 @@ import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/
 import { checkReplay } from "@vibest/core/database/journal"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
+import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugin"
-import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/core/processes"
-import { HostEnv } from "@vibest/core/runtimes"
+import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
+import { Runtimes } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
@@ -227,7 +227,12 @@ const terminate = (pid: number) => {
   process.kill(pid, "SIGTERM")
 }
 
-const processes: ProcessPlatform["Service"] = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
+const processes: Processes.ProcessPlatform["Service"] = {
+  liveness,
+  terminate,
+  pid: process.pid,
+  uid: process.getuid?.(),
+}
 
 const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
@@ -350,8 +355,8 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
     }),
   ),
-  HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
-  ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
+  Runtimes.hostEnvNode.replace(Layer.succeed(Runtimes.HostEnv, { drop: dropEnv })),
+  Processes.processPlatformNode.replace(Layer.succeed(Processes.ProcessPlatform, processes)),
   Server.socketServerLayer.replace(
     LayerNode.make({
       name: "vibest/SocketServer",
@@ -372,10 +377,12 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.layout],
     }),
   ),
-  HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
+  Identity.hostFactsNode.replace(
+    Layer.succeed(Identity.HostFacts, { name: os.hostname(), id: hostId, pid: process.pid }),
+  ),
 ]
 
-export const app = (info: App["Service"]) => App.node.replace(Layer.succeed(App, info))
+export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))
 
 export const updateCheck = (
   construct: Effect.Effect<UpdateCheck["Service"], never, Scope.Scope | HttpClient.HttpClient>,

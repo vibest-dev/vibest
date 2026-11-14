@@ -32,9 +32,9 @@ import { Placement } from "./placement.ts"
 const make = Effect.gen(function* () {
   const db = yield* Db
   const fs = yield* FileSystem.FileSystem
-  const runtimes = yield* Runtimes
-  const inbox = yield* Inbox
-  const drain = yield* Drain
+  const runtimes = yield* Runtimes.Service
+  const inbox = yield* Inbox.Service
+  const drain = yield* Drain.Service
   const removal = yield* Remove.make
   const locks = yield* SessionLocks
   const sessionLive = yield* SessionLive

@@ -8,7 +8,7 @@ export const DRAIN_TIMEOUT = Duration.seconds(5)
 type Blocker = { readonly id: string; readonly reason: string }
 
 export interface StopDeps {
-  readonly drain: Drain["Service"]
+  readonly drain: Drain.Interface
   readonly bus: Bus["Service"]
   readonly deliveringInbox: Effect.Effect<
     ReadonlyArray<{ readonly id: number; readonly kind: string; readonly sessionId: string }>

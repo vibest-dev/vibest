@@ -2,6 +2,12 @@ import { Context } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
 
-export class App extends Context.Service<App, { readonly version: string }>()("vibest/App") {
-  static readonly node = LayerNode.unbound(App)
+export * as App from "./app.ts"
+
+export interface Interface {
+  readonly version: string
 }
+
+export class Service extends Context.Service<Service, Interface>()("vibest/App") {}
+
+export const node = LayerNode.unbound(Service)

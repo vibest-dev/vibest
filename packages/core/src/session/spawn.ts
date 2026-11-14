@@ -26,7 +26,8 @@ import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
-import { harnessCatalog, harnessOptions, Harness, Harnesses, preflight, unprovided } from "../harness.ts"
+import { harnessCatalog, harnessOptions, Harness, preflight } from "../harness.ts"
+import { Harnesses, unprovided } from "../harnesses.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
 import { Plugins, type Routing } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
@@ -73,17 +74,17 @@ export interface Spawned extends Routing {
 
 const sessionSpawn = (deps: {
   readonly db: Db["Service"]
-  readonly runtimes: Runtimes["Service"]
-  readonly harness: Harness["Service"]
-  readonly harnesses: Harnesses["Service"]
-  readonly agents: Agents["Service"]
+  readonly runtimes: Runtimes.Interface
+  readonly harness: Harness.Interface
+  readonly harnesses: Harnesses.Interface
+  readonly agents: Agents.Interface
   readonly plugins: Plugins["Service"]
-  readonly drain: Drain["Service"]
+  readonly drain: Drain.Interface
   readonly layout: Layout["Service"]
   readonly fs: FileSystem.FileSystem
   readonly path: Path.Path
   readonly crypto: Crypto.Crypto
-  readonly git: Git["Service"]
+  readonly git: Git.Interface
   readonly scope: Scope.Scope
   readonly locks: ReturnType<typeof KeyedMutex.keyedLock<string>>
   readonly options: { readonly maxSessions: number | undefined }
@@ -113,11 +114,11 @@ const sessionSpawn = (deps: {
     onOwnLimit,
     options,
   } = deps
-  const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git>) =>
+  const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
     effect.pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
-      Effect.provideService(Git, git),
+      Effect.provideService(Git.Service, git),
     )
   const machinesListing = machines(
     runtimes,
@@ -189,8 +190,8 @@ const sessionSpawn = (deps: {
       provider: input.provider ?? from?.process?.provider ?? undefined,
       model: input.model ?? from?.process?.model ?? undefined,
       harnesses: yield* harnessOptions.pipe(
-        Effect.provideService(Harness, harness),
-        Effect.provideService(Harnesses, harnesses),
+        Effect.provideService(Harness.Service, harness),
+        Effect.provideService(Harnesses.Service, harnesses),
       ),
       attempts: [],
       machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
@@ -200,8 +201,8 @@ const sessionSpawn = (deps: {
     })
     const { provider, model } = decision
     const runnableHere = harnessCatalog.pipe(
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
+      Effect.provideService(Harness.Service, harness),
+      Effect.provideService(Harnesses.Service, harnesses),
       Effect.map((choices) => choices.filter((choice) => choice.problem === null).map((choice) => choice.harness)),
     )
     if (decision.harness === undefined) return yield* new NoHarnessChosen({ runnable: yield* runnableHere })
@@ -228,8 +229,8 @@ const sessionSpawn = (deps: {
     const harnessId = decision.harness
     if (harnesses.find(harnessId) === undefined) return yield* routed(unprovided(harnessId, harnesses.all))
     yield* preflight(harnessId, provider ?? null, model ?? null, input.env).pipe(
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
+      Effect.provideService(Harness.Service, harness),
+      Effect.provideService(Harnesses.Service, harnesses),
       Effect.catchTag("HarnessUnavailable", routed),
     )
     const adapter = yield* harnesses.get(harnessId)
@@ -392,17 +393,17 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
     const { worktreeOf, launch } = yield* Placement
     return sessionSpawn({
       db: yield* Db,
-      runtimes: yield* Runtimes,
-      harness: yield* Harness,
-      harnesses: yield* Harnesses,
-      agents: yield* Agents,
+      runtimes: yield* Runtimes.Service,
+      harness: yield* Harness.Service,
+      harnesses: yield* Harnesses.Service,
+      agents: yield* Agents.Service,
       plugins: yield* Plugins,
-      drain: yield* Drain,
+      drain: yield* Drain.Service,
       layout: yield* Layout,
       fs: yield* FileSystem.FileSystem,
       path: yield* Path.Path,
       crypto: yield* Crypto.Crypto,
-      git: yield* Git,
+      git: yield* Git.Service,
       scope: yield* Effect.scope,
       locks: yield* SessionLocks,
       options,

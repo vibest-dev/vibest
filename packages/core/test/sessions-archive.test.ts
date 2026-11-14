@@ -2,7 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { exitedAt, archived, executionStateOf } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { Deferred, Effect, Fiber, FileSystem } from "effect"
 import { SqlClient } from "effect/sql"
@@ -66,7 +66,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   ) =>
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const db = yield* Db
       const entry = yield* db.startEntry(
         yield* projectOf(repo),
@@ -90,7 +90,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     w.db.insertSend(w.entryId, "a question", undefined, w.id)
 
   const finishExecution = (
-    w: { readonly id: string; readonly sessions: Sessions["Service"]; readonly herdr: FakeRuntime["Service"] },
+    w: { readonly id: string; readonly sessions: Session.Interface; readonly herdr: FakeRuntime["Service"] },
     text: string,
     error?: string,
   ) =>
@@ -102,7 +102,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
 
   const entryTakes = (w: { readonly entryId: string }) =>
     Effect.gen(function* () {
-      const inbox = yield* Inbox
+      const inbox = yield* Inbox.Service
       return yield* until(inbox.take(w.entryId, undefined), (taken) => taken !== undefined)
     })
 

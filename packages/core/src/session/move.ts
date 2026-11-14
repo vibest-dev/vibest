@@ -8,7 +8,8 @@ import { Cause, Clock, Context, Effect, Exit, Layer } from "effect"
 import { type SessionRow, harnessIdOf, pidOf, runtimeOf, startOf, terminalOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import { Harness, harnessOptions, Harnesses, preflight } from "../harness.ts"
+import { Harness, harnessOptions, preflight } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { errorMessage, Plugins, PluginsNotActive } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { RuntimeError, type Runtime, type Terminal } from "../runtimes.ts"
@@ -49,9 +50,9 @@ const make = Effect.gen(function* () {
   const db = yield* Db
   const plugins = yield* Plugins
   const subscriptions = yield* Subscriptions
-  const harness = yield* Harness
-  const harnesses = yield* Harnesses
-  const processes = yield* Processes
+  const harness = yield* Harness.Service
+  const harnesses = yield* Harnesses.Service
+  const processes = yield* Processes.Service
   const { prompt, finish } = yield* Executions
   const { openTerminal, show, locate, launchArgv, systemPromptOf } = yield* Placement
 
@@ -145,8 +146,8 @@ const make = Effect.gen(function* () {
         return false
       })
     const options = yield* harnessOptions.pipe(
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
+      Effect.provideService(Harness.Service, harness),
+      Effect.provideService(Harnesses.Service, harnesses),
     )
     const thisExecution = [
       ...(yield* db.limitedSince(session.id, source.since)).map((l) => ({
@@ -229,8 +230,8 @@ const make = Effect.gen(function* () {
       }
       if (ruledOut(next, rows)) return yield* giveUp(yield* left())
       const checked = yield* preflight(next.harness, next.provider ?? null, next.model ?? null).pipe(
-        Effect.provideService(Harness, harness),
-        Effect.provideService(Harnesses, harnesses),
+        Effect.provideService(Harness.Service, harness),
+        Effect.provideService(Harnesses.Service, harnesses),
         Effect.exit,
       )
       if (Exit.isFailure(checked)) {

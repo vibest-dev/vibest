@@ -21,7 +21,7 @@ export class FakeProcesses extends Context.Service<
     }>
     readonly setCwdDelay: (delay: Duration.Input) => Effect.Effect<void>
     readonly cwdListings: Effect.Effect<number>
-    readonly processes: Processes["Service"]
+    readonly processes: Processes.Interface
   }
 >()("test/FakeProcesses") {
   static readonly layer = Layer.effect(
@@ -64,7 +64,7 @@ export class FakeProcesses extends Context.Service<
         holdSignal: () => holdNext(signalGate),
         holdCwd: () => holdNext(cwdGate),
         setCwdDelay: (d) => Ref.set(cwdDelay, d),
-        processes: Processes.of({
+        processes: Processes.Service.of({
           liveness: (pid) =>
             Ref.update(probed, (p) => [...p, pid]).pipe(
               Effect.andThen(Ref.get(states)),

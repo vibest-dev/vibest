@@ -31,7 +31,7 @@ const served = Server.layer.pipe(
   Layer.provideMerge(testLayer()),
 )
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
+const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(served)))
 
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))

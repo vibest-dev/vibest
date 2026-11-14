@@ -4,7 +4,8 @@ import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscr
 import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
 
 import { LayerNode } from "../effect/layer-node.ts"
-import { Harness, Harnesses } from "../harness.ts"
+import { Harness } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition, SubscriptionsShape } from "../plugin/host.ts"
 import { logFailure } from "../reactor.ts"
 
@@ -48,8 +49,8 @@ const wrote = (
 
 export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsShape>()("vibest/Subscriptions") {
   static readonly make = Effect.gen(function* () {
-    const harnesses = yield* Harnesses
-    const harness = yield* Harness
+    const harnesses = yield* Harnesses.Service
+    const harness = yield* Harness.Service
     const rows = yield* Ref.make(new Map<string, Row>())
     const modify = (harness: HarnessId, provider: string, f: (prev: Row | undefined, now: number) => Row) =>
       Effect.gen(function* () {
@@ -123,7 +124,7 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
     Subscriptions,
     Effect.gen(function* () {
       const service = yield* Subscriptions.make
-      const harnesses = yield* Harnesses
+      const harnesses = yield* Harnesses.Service
       const scope = yield* Effect.scope
       const lock = yield* Semaphore.make(1)
       let polledAt = Number.NEGATIVE_INFINITY

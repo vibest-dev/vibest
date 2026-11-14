@@ -3,14 +3,15 @@ import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
-import { Harness, Harnesses } from "@vibest/core/harness"
+import { Harness } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
-import { SshHosts } from "@vibest/core/repository-url"
+import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { Archive } from "@vibest/core/session/archive"
 import { Delivery } from "@vibest/core/session/delivery"
 import { EntrySession } from "@vibest/core/session/entry"
@@ -41,7 +42,7 @@ export const services = LayerNode.group([
   Inbox.node,
   Subscriptions.node,
   Plugins.node,
-  SshHosts.node,
+  RepositoryUrl.node,
   Git.node,
   SessionLocks.node,
   Executions.node,
@@ -53,7 +54,7 @@ export const services = LayerNode.group([
   Exits.node,
   Reconcile.node,
   Restart.node,
-  Sessions.node,
+  Session.node,
   Integration.node,
   Peers.node,
   EntrySession.node,

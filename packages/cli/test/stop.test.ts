@@ -5,7 +5,7 @@ import { executionStateOf } from "@vibest/core/database/db-rows"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
 import { Project } from "@vibest/core/project"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { Shutdown } from "@vibest/server/handlers/daemon"
@@ -42,7 +42,7 @@ const serve = (options: TestOptions = {}) =>
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>,
+  program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>,
   options?: TestOptions,
 ) => it.effect(name, () => program.pipe(Effect.provide(serve(options))))
 
@@ -63,10 +63,10 @@ const stopFromCli = (repo: string) =>
   })
 
 const shutdownDone = Effect.flatMap(Shutdown, Deferred.isDone)
-const draining = Effect.flatMap(Drain, (d) => until(d.phase, (p) => p === "draining"))
+const draining = Effect.flatMap(Drain.Service, (d) => until(d.phase, (p) => p === "draining"))
 const stopOnceIdle = (repo: string) =>
   Effect.gen(function* () {
-    yield* until((yield* Drain).pending, (p) => p.length === 0)
+    yield* until((yield* Drain.Service).pending, (p) => p.length === 0)
     return yield* joinAdvancingClock(yield* Effect.forkScoped(stopFromCli(repo)))
   })
 const joinAdvancingClock = <A, E>(stopping: Fiber.Fiber<A, E>) =>
@@ -182,7 +182,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       )
       const refused = yield* joinAdvancingClock(stopping)
       assert.include(JSON.stringify(refused), `spawn ${id}`)
-      assert.strictEqual(yield* (yield* Drain).phase, "open")
+      assert.strictEqual(yield* (yield* Drain.Service).phase, "open")
       assert.isFalse(yield* shutdownDone)
       yield* held.release()
       yield* until(db.getSession(id), (s) => (s ? executionStateOf(s) : undefined) === "open")
@@ -244,8 +244,8 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const { db, herdr, worker } = yield* idleMainWithWorker(repo, "pi")
-      const sessions = yield* Sessions
-      const drain = yield* Drain
+      const sessions = yield* Session.Service
+      const drain = yield* Drain.Service
       yield* herdr.endExecution(worker)
       yield* writeEnd(worker, "pi", { text: "status: completed" })
       yield* sessions.check(worker)
@@ -266,7 +266,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
         agent: "general",
@@ -296,8 +296,8 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const { sessionId } = yield* idleMainWithWorker(repo, "claude")
-      const inbox = yield* Inbox
-      const drain = yield* Drain
+      const inbox = yield* Inbox.Service
+      const drain = yield* Drain.Service
       yield* (yield* Db).insertNoticeTo(sessionId, "wait")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
@@ -314,7 +314,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "a client that stops waiting for its Stop cancels it: the drain ends and changes are admitted again, its operation untouched",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const drain = yield* Drain
+      const drain = yield* Drain.Service
       const leave = drain.track("still running")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining

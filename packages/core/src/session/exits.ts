@@ -17,7 +17,7 @@ export interface LimitedExecution {
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const inbox = yield* Inbox
+  const inbox = yield* Inbox.Service
   const move = yield* Move
   const { undoCutOffStart } = yield* Archive
   const { notice, handTask, recount } = yield* Placement

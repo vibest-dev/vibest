@@ -3,9 +3,9 @@ import { Db } from "@vibest/core/database/db"
 import type { OutboxRow } from "@vibest/core/database/db-remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
-import { defaultSessionName, Sessions } from "@vibest/core/session"
+import { defaultSessionName, Session } from "@vibest/core/session"
 import type { PayloadOf } from "@vibest/protocol/rpc"
 import {
   NoCommit,
@@ -29,9 +29,9 @@ const outboxItem = (row: OutboxRow): OutboxItem => {
 const make = Effect.gen(function* () {
   const db = yield* Db
   const bus = yield* Bus
-  const sessions = yield* Sessions
-  const self = yield* VibestdIdentity
-  const git = yield* Git
+  const sessions = yield* Session.Service
+  const self = yield* Identity.Service
+  const git = yield* Git.Service
 
   return {
     spawn: (peer: string, project: string, reportTo: string, input: PayloadOf<"Peer.Spawn">) =>
@@ -133,6 +133,6 @@ export class Peers extends Context.Service<Peers, Effect.Success<typeof make>>()
   static readonly node = LayerNode.make({
     service: Peers,
     layer: Peers.layer,
-    deps: [Bus.node, Db.node, Git.node, Sessions.node, VibestdIdentity.node],
+    deps: [Bus.node, Db.node, Git.node, Session.node, Identity.node],
   })
 }

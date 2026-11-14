@@ -3,7 +3,7 @@ import { Db } from "@vibest/core/database/db"
 import type { MachineRow } from "@vibest/core/database/db-remote"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
 import { Runtimes } from "@vibest/core/runtimes"
 import { reconnectSchedule, type Runtime } from "@vibest/plugin/effect"
@@ -163,11 +163,11 @@ type Entry = {
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const self = yield* VibestdIdentity
+  const self = yield* Identity.Service
   const transport = yield* MachineTransport
   const scope = yield* Effect.scope
   const plugins = yield* Plugins
-  const runtimes = yield* Runtimes
+  const runtimes = yield* Runtimes.Service
   const entries = new Map<string, Entry>()
   const fibers = new Map<string, Fiber.Fiber<void>>()
   const there = new Map<string, { readonly runtimes: ReadonlyArray<RuntimeThere>; readonly at: number }>()
@@ -590,6 +590,6 @@ export class Machines extends Context.Service<Machines, Effect.Success<typeof ma
   static readonly node = LayerNode.make({
     service: Machines,
     layer: Machines.layer,
-    deps: [Db.node, MachineTransport.node, Plugins.node, Runtimes.node, VibestdIdentity.node],
+    deps: [Db.node, MachineTransport.node, Plugins.node, Runtimes.node, Identity.node],
   })
 }

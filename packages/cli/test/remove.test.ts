@@ -2,7 +2,7 @@ import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { archived, executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
 import { cwdHolders, livenessOf, parseProcessTable, Processes, runFor, sessionTree } from "@vibest/core/processes"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -32,7 +32,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   it.effect(name, () => program.pipe(Effect.provide(testLayer(options))))
 
 const workingSession = Effect.gen(function* () {
-  const sessions = yield* Sessions
+  const sessions = yield* Session.Service
   const db = yield* Db
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
@@ -65,7 +65,7 @@ const idleSession = Effect.gen(function* () {
   return w
 })
 
-const removeAdvancingClock = (sessions: Sessions["Service"], id: string) =>
+const removeAdvancingClock = (sessions: Session.Interface, id: string) =>
   Effect.gen(function* () {
     const fiber = yield* Effect.forkChild(sessions.remove(id))
     yield* untilVirtual(
@@ -75,7 +75,7 @@ const removeAdvancingClock = (sessions: Sessions["Service"], id: string) =>
     return yield* Fiber.join(fiber)
   })
 
-const removeTimingCwd = (sessions: Sessions["Service"], id: string) =>
+const removeTimingCwd = (sessions: Session.Interface, id: string) =>
   Effect.gen(function* () {
     const held = yield* (yield* FakeProcesses).holdCwd()
     const fiber = yield* Effect.forkChild(sessions.remove(id))
@@ -493,7 +493,7 @@ describe.concurrent("Processes", () => {
           const sleepPid = Number((yield* shell.stdout.pipe(Stream.decodeText, Stream.take(1), Stream.mkString)).trim())
           const shellPid = Number(shell.pid)
           const processes = yield* Effect.gen(function* () {
-            return yield* Processes
+            return yield* Processes.Service
           }).pipe(
             Effect.provide(
               processesOn({
@@ -527,7 +527,7 @@ describe.concurrent("Processes", () => {
           uid: undefined,
         }
         const p = yield* Effect.gen(function* () {
-          return yield* Processes
+          return yield* Processes.Service
         }).pipe(Effect.provide(processesOn(platform)))
         for (const pid of [0, -1, 1.5, Number.NaN]) assert.strictEqual(yield* p.liveness(pid), "unknown")
         assert.strictEqual(yield* p.liveness(7), "alive")
@@ -548,7 +548,7 @@ describe.concurrent("Processes", () => {
           yield* Effect.addFinalizer(() => child.kill().pipe(Effect.ignore))
           const pid = Number(child.pid)
           const processes = yield* Effect.gen(function* () {
-            return yield* Processes
+            return yield* Processes.Service
           }).pipe(
             Effect.provide(
               processesOn({

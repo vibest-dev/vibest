@@ -45,7 +45,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       assert.strictEqual(yield* db.currentProcessId(id), reporter)
       yield* until(db.getSession(id), (row) => row !== undefined && exitedAt(row) === null && terminalOf(row).id !== "")
-      assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
+      assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
     { hooked: ["pi"] },
   )

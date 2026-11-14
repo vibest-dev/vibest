@@ -9,6 +9,8 @@ import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./plugin/host.ts"
 import * as Registry from "./plugin/registry.ts"
 
+export * as Runtimes from "./runtimes.ts"
+
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
 export type Terminal = RuntimeAddress
@@ -32,9 +34,9 @@ const live = (runtime: string, event: RuntimeEvent): Signal => {
   }
 }
 
-export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {
-  static readonly node = LayerNode.unbound(HostEnv)
-}
+export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {}
+
+export const hostEnvNode = LayerNode.unbound(HostEnv)
 
 const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
   new NoRuntime({
@@ -97,12 +99,13 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
     transform: registry.transform,
     all,
     find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
-    route: (id) =>
+    route: Effect.fn("Runtimes.route")((id) =>
       Effect.suspend(() => {
         const loaded = registry.get()
         const found = loaded.find((runtime) => runtime.id === id)
         return found === undefined ? Effect.fail(notLoaded(id, loaded)) : Effect.succeed(found)
       }),
+    ),
     statuses: Effect.suspend(() =>
       Effect.forEach(
         registry.get(),
@@ -110,7 +113,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
         { concurrency: "unbounded" },
       ),
     ),
-    online: (runtime) =>
+    online: Effect.fn("Runtimes.online")((runtime) =>
       runtime.status().pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
@@ -131,6 +134,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
               ),
         ),
       ),
+    ),
     added: Stream.fromPubSub(added),
     callers: Effect.sync(() =>
       registry.get().flatMap((runtime) =>
@@ -148,11 +152,13 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   }
 })
 
-export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest/Runtimes") {
-  static readonly layer = Layer.effect(Runtimes, make)
+export type Interface = RuntimesShape
 
-  static readonly node = LayerNode.make({ service: Runtimes, layer: Runtimes.layer, deps: [Bus.node, HostEnv.node] })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Runtimes") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [Bus.node, hostEnvNode] })
 
 export type AgentSeen = AgentState | "absent"
 

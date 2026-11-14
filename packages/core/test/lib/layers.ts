@@ -16,9 +16,9 @@ export const platform = LayerNode.make({ name: "test/Platform", layer: services,
 export const fakeProcesses = LayerNode.make({ service: FakeProcesses, layer: FakeProcesses.layer, deps: [] })
 
 export const processes = LayerNode.make({
-  service: Processes,
+  service: Processes.Service,
   layer: Layer.effect(
-    Processes,
+    Processes.Service,
     Effect.map(FakeProcesses, (fake) => fake.processes),
   ),
   deps: [fakeProcesses],

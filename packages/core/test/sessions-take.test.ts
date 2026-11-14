@@ -1,7 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { Inbox } from "@vibest/core/inbox"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -19,7 +19,7 @@ const test: typeof plainTest = (name, program, options, touches) =>
 
 const entryAsked = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
-  const sessions = yield* Sessions
+  const sessions = yield* Session.Service
   const db = yield* Db
   const repo = yield* makeRepository
   const entry = yield* db.startEntry(
@@ -36,7 +36,7 @@ const entryAsked = Effect.gen(function* () {
   const { id } = yield* sessions.spawn(yield* spawnInput(repo))
   yield* until(db.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
   yield* db.insertSend(entry.sessionId, "a question", undefined, id)
-  return { db, sessions, inbox: yield* Inbox, entryId: entry.sessionId, sender: id }
+  return { db, sessions, inbox: yield* Inbox.Service, entryId: entry.sessionId, sender: id }
 })
 
 const inboxStatuses = (sender: string) =>

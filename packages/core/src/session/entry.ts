@@ -18,7 +18,8 @@ import { Db } from "../database/db.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
-import { Harness, harnessOptions, Harnesses } from "../harness.ts"
+import { Harness, harnessOptions } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
 import { Plugins } from "../plugin.ts"
@@ -55,13 +56,13 @@ const firstStart = new LaunchFailed({
 const make = Effect.gen(function* () {
   const db = yield* Db
   const bus = yield* Bus
-  const runtimes = yield* Runtimes
+  const runtimes = yield* Runtimes.Service
   const restarting = (yield* SessionLive).restarting
   const plugins = yield* Plugins
-  const agents = yield* Agents
-  const harness = yield* Harness
-  const harnesses = yield* Harnesses
-  const processes = yield* Processes
+  const agents = yield* Agents.Service
+  const harness = yield* Harness.Service
+  const harnesses = yield* Harnesses.Service
+  const processes = yield* Processes.Service
   const layout = yield* Layout
   const vibestCommand = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
@@ -70,8 +71,8 @@ const make = Effect.gen(function* () {
 
   const withHarness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
+      Effect.provideService(Harness.Service, harness),
+      Effect.provideService(Harnesses.Service, harnesses),
       Effect.provideService(Layout, layout),
       Effect.provideService(VibestCommand, vibestCommand),
       Effect.provideService(FileSystem.FileSystem, fs),
@@ -404,7 +405,7 @@ const make = Effect.gen(function* () {
           detach: db.detachEntry(projectId, runtime, place.address),
           reattach: db.reattachEntry(projectId, runtime, place.address),
           wait: HARNESS_EXIT_WAIT,
-        }).pipe(Effect.provideService(Bus, bus), Effect.provideService(Processes, processes))
+        }).pipe(Effect.provideService(Bus, bus), Effect.provideService(Processes.Service, processes))
       }),
     )
   })

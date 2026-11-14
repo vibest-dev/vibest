@@ -7,7 +7,7 @@ import { Deferred, Effect, Fiber, Layer } from "effect"
 const drainLayer = Drain.layer.pipe(Layer.provideMerge(Bus.layer))
 
 const stopper = Effect.gen(function* () {
-  const drain = yield* Drain
+  const drain = yield* Drain.Service
   const bus = yield* Bus
   const shutdown = yield* Deferred.make<void>()
   return { drain, shutdown, stop: stopOnce({ drain, bus, deliveringInbox: Effect.succeed([]), shutdown }) }

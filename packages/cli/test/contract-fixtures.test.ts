@@ -81,7 +81,7 @@ const check = (name: string, lines: ReadonlyArray<Line>, paths: Record<string, s
     )
   })
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
+const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(served)))
 
 describe("contract", () => {

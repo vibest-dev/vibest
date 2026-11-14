@@ -19,7 +19,7 @@ export type Agent = Extract<CallerShape, { _tag: "Cli" | "Session" }>
 
 export const make = Effect.gen(function* () {
   const db = yield* Db
-  const runtimes = yield* Runtimes
+  const runtimes = yield* Runtimes.Service
 
   const agent = (method: MethodOf<"agent" | "owner">) =>
     Effect.gen(function* () {
