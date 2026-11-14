@@ -3,7 +3,7 @@ import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, harnessIdOf, runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { Deferred, Effect, FileSystem, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -62,7 +62,7 @@ describe.concurrent("after a vibestd stop", () => {
       const spawned = yield* Deferred.make<string>()
       return yield* heldAtOpen(
         undefined,
-        Effect.flatMap(Sessions, (sessions) =>
+        Effect.flatMap(Session.Service, (sessions) =>
           spawnInput(repo).pipe(
             Effect.flatMap(sessions.spawn),
             Effect.flatMap(({ id }) => Deferred.succeed(spawned, id)),
@@ -159,7 +159,7 @@ describe.concurrent("after a vibestd stop", () => {
         { agent: "coordinator" },
       )
       const opening = yield* herdr.hold("open")
-      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
+      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(repo))
       yield* opening.reached
       const looking = yield* herdr.hold("state", id)
       yield* opening.release()
@@ -214,7 +214,7 @@ describe.concurrent("after a vibestd stop", () => {
         { agent: "coordinator" },
       )
       const sending = yield* herdr.hold("send")
-      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
+      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(repo))
       yield* sending.reached
       yield* Effect.gen(function* () {
         assert.isUndefined(yield* db.untakenTask(id))
@@ -255,7 +255,7 @@ describe.concurrent("after a vibestd stop", () => {
           ...(row.process?.routing ? { routing: row.process.routing } : {}),
         })
         const successor = yield* db.currentProcessId(id)
-        yield* (yield* Integration).ready(id, undefined)
+        yield* (yield* Integration.Service).ready(id, undefined)
         const handed = Effect.map(herdr.callsTo("send"), (calls) =>
           calls.filter((call) => call.text?.includes("do it") === true),
         )

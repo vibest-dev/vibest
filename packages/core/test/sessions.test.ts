@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
@@ -11,7 +11,7 @@ import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual,
 import { makeRepository } from "./lib/session.ts"
 import { entryOfProject, sessionWorktree, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "a session's in-memory flags, lock and live status go once it ends; resumed, its next execution ends as any execution does; archived, they go again with no check of its own",
     Effect.gen(function* () {
@@ -87,7 +87,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const { parentSessionId: _, ...input } = yield* spawnInput(repo)
       const error = yield* Effect.flip(
-        (yield* Sessions).spawn({
+        (yield* Session.Service).spawn({
           ...input,
           harness: undefined,
           origin: { peer: "a".repeat(32), project: "p", reportTo: "origin-session" },
@@ -104,7 +104,9 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const parent = yield* entryOfProject(repo)
-      const error = yield* Effect.flip((yield* Sessions).spawn({ ...(yield* spawnInput(repo)), harness: undefined }))
+      const error = yield* Effect.flip(
+        (yield* Session.Service).spawn({ ...(yield* spawnInput(repo)), harness: undefined }),
+      )
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, `(inherited from ${parent})`)
       assert.match(error.message, /this machine can run: .*claude/)

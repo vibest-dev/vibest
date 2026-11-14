@@ -52,7 +52,7 @@ export const processOf = (read: Read) => {
 }
 
 export const admit = <A, E, R, A2, E2>(
-  drain: Drain["Service"],
+  drain: Drain.Interface,
   label: string,
   settlement: boolean,
   effect: Effect.Effect<A, E, R>,
@@ -67,7 +67,7 @@ export const admit = <A, E, R, A2, E2>(
 export const AdmissionLive = Layer.effect(
   Admission,
   Effect.gen(function* () {
-    const drain = yield* Drain
+    const drain = yield* Drain.Service
     return Admission.of((effect, { rpc }) =>
       admit(drain, rpc._tag, SETTLEMENTS.has(rpc._tag), effect, Effect.fail(new DaemonStopping({ method: rpc._tag }))),
     )
@@ -202,7 +202,7 @@ export const ProtocolGateLive = Layer.effect(
   ProtocolGate,
   Effect.gen(function* () {
     const db = yield* Db
-    const { version } = yield* App
+    const { version } = yield* App.Service
     return ProtocolGate.of((effect, { headers, rpc }) =>
       Effect.gen(function* () {
         const rejected = yield* checkProtocol(db, reader(headers), version)

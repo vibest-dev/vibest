@@ -22,9 +22,10 @@ import { type NewSession, harnessIdOf, runtimeOf, terminalOf, archived } from ".
 import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
-import { harnessCatalog, harnessOptions, Harness, Harnesses, preflight, unprovided } from "../harness.ts"
+import { harnessCatalog, harnessOptions, Harness, preflight } from "../harness.ts"
+import { Harnesses, unprovided } from "../harnesses.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
 import { Plugins, pluginsNode, type Routing } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
@@ -69,27 +70,27 @@ export interface Spawned extends Routing {
 const make = (options: { readonly maxSessions: number | undefined }) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const runtimes = yield* Runtimes
-    const harness = yield* Harness
-    const harnesses = yield* Harnesses
-    const agents = yield* Agents
+    const runtimes = yield* Runtimes.Service
+    const harness = yield* Harness.Service
+    const harnesses = yield* Harnesses.Service
+    const agents = yield* Agents.Service
     const plugins = yield* Plugins
-    const drain = yield* Drain
+    const drain = yield* Drain.Service
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const crypto = yield* Crypto.Crypto
-    const git = yield* Git
+    const git = yield* Git.Service
     const scope = yield* Effect.scope
     const locks = yield* SessionLocks
     const { worktreeOf, launch } = yield* Placement
     const onOwnLimit = (yield* Move).rerun
     const logged = Reactor.logFailure
-    const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git>) =>
+    const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
       effect.pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
-        Effect.provideService(Git, git),
+        Effect.provideService(Git.Service, git),
       )
     const machinesListing = machines(
       runtimes,
@@ -137,7 +138,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
         return worktree
       })
 
-    const spawn = Effect.fn("Sessions.spawn")(function* (input: SpawnInput) {
+    const spawn = Effect.fn("Session.spawn")(function* (input: SpawnInput) {
       if (input.parentSessionId === undefined && input.origin?.reportTo === undefined)
         return yield* new NoCallingSession()
       const root = input.root
@@ -161,8 +162,8 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
         provider: input.provider ?? from?.process?.provider ?? undefined,
         model: input.model ?? from?.process?.model ?? undefined,
         harnesses: yield* harnessOptions.pipe(
-          Effect.provideService(Harness, harness),
-          Effect.provideService(Harnesses, harnesses),
+          Effect.provideService(Harness.Service, harness),
+          Effect.provideService(Harnesses.Service, harnesses),
         ),
         attempts: [],
         machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
@@ -172,8 +173,8 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
       })
       const { provider, model } = decision
       const runnableHere = harnessCatalog.pipe(
-        Effect.provideService(Harness, harness),
-        Effect.provideService(Harnesses, harnesses),
+        Effect.provideService(Harness.Service, harness),
+        Effect.provideService(Harnesses.Service, harnesses),
         Effect.map((choices) => choices.filter((choice) => choice.problem === null).map((choice) => choice.harness)),
       )
       if (decision.harness === undefined) return yield* new NoHarnessChosen({ runnable: yield* runnableHere })
@@ -200,8 +201,8 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
       const harnessId = decision.harness
       if (harnesses.find(harnessId) === undefined) return yield* routed(unprovided(harnessId, harnesses.all))
       yield* preflight(harnessId, provider ?? null, model ?? null, input.env).pipe(
-        Effect.provideService(Harness, harness),
-        Effect.provideService(Harnesses, harnesses),
+        Effect.provideService(Harness.Service, harness),
+        Effect.provideService(Harnesses.Service, harnesses),
         Effect.catchTag("HarnessUnavailable", routed),
       )
       const adapter = yield* harnesses.get(harnessId)

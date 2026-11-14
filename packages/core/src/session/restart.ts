@@ -19,8 +19,9 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
-import { Harness, Harnesses } from "../harness.ts"
+import { PlatformNode } from "../effect/platform.ts"
+import { Harness } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { entryCommand, restartArgv } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
@@ -82,19 +83,19 @@ type LiveNow = Effect.Effect<
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const runtimes = yield* Runtimes
-  const harness = yield* Harness
-  const harnesses = yield* Harnesses
-  const agents = yield* Agents
+  const runtimes = yield* Runtimes.Service
+  const harness = yield* Harness.Service
+  const harnesses = yield* Harnesses.Service
+  const agents = yield* Agents.Service
   const layout = yield* Layout
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const processes = yield* Processes
+  const processes = yield* Processes.Service
   const { restarting } = yield* SessionLive
   const bus = yield* Bus
   const scope = yield* Effect.scope
   const { locked } = yield* SessionLocks
-  const version = (yield* App).version
+  const version = (yield* App.Service).version
   const { awaitReady, prompt } = yield* Executions
   const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
   const { launchArgv } = yield* Placement
@@ -122,9 +123,9 @@ const make = Effect.gen(function* () {
       })
       return restartArgv(command)
     }).pipe(
-      Effect.provideService(Agents, agents),
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
+      Effect.provideService(Agents.Service, agents),
+      Effect.provideService(Harness.Service, harness),
+      Effect.provideService(Harnesses.Service, harnesses),
       Effect.provideService(Layout, layout),
       Effect.provideService(VibestCommand, vibestCommand),
       Effect.provideService(FileSystem.FileSystem, fs),

@@ -40,7 +40,7 @@ const served = (options: TestOptions) =>
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, TestServices | FakeProcesses | Project | Scope.Scope>,
+  program: Effect.Effect<void, E, TestServices | FakeProcesses | Project.Service | Scope.Scope>,
   options: TestOptions = {},
 ) => it.effect(name, () => program.pipe(Effect.provide(served(options))), 20_000)
 
@@ -136,7 +136,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
         yield* refuseRealKills
         const asked: Array<number> = []
         const processes = yield* Effect.gen(function* () {
-          return yield* Processes
+          return yield* Processes.Service
         }).pipe(
           Effect.provide(
             processesOn({

@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { pidOf } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { PROTOCOL } from "@vibest/schema/version"
@@ -46,7 +46,7 @@ const project = Effect.gen(function* () {
     { agent: "coordinator" },
   )
   yield* herdr.seedAgent("test/coord")
-  const sessions = yield* Sessions
+  const sessions = yield* Session.Service
   const { id: worker } = yield* sessions.spawn({
     agent: "general",
     machine: { id: "local" },
@@ -66,7 +66,18 @@ const project = Effect.gen(function* () {
       headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), harness: "claude", ...who })),
       body,
     })
-  return { db, herdr, entryId: entry.sessionId, worker, projectId, repo, key, sessions, call, inbox: yield* Inbox }
+  return {
+    db,
+    herdr,
+    entryId: entry.sessionId,
+    worker,
+    projectId,
+    repo,
+    key,
+    sessions,
+    call,
+    inbox: yield* Inbox.Service,
+  }
 })
 
 describe("vibestd's HTTP API", () => {

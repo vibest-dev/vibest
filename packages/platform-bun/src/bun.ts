@@ -14,11 +14,11 @@ import { SQL_NAMES } from "@vibest/core/database/db"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
 import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import * as PlatformNode from "@vibest/core/effect/platform"
-import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
+import { PlatformNode } from "@vibest/core/effect/platform"
+import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugin"
-import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/core/processes"
-import { HostEnv } from "@vibest/core/runtimes"
+import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
+import { Runtimes } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
@@ -26,7 +26,7 @@ import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
-import { MachineTransport } from "@vibest/server/machine/machines"
+import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
@@ -65,7 +65,7 @@ const platform = Layer.mergeAll(
   FetchHttpClient.layer,
   unrefStdio,
   HerdrBun.layerSocketConnector,
-  Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
   user,
 )
 
@@ -228,7 +228,12 @@ const terminate = (pid: number) => {
   process.kill(pid, "SIGTERM")
 }
 
-const processes: ProcessPlatform["Service"] = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
+const processes: Processes.ProcessPlatform["Service"] = {
+  liveness,
+  terminate,
+  pid: process.pid,
+  uid: process.getuid?.(),
+}
 
 const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
@@ -291,7 +296,7 @@ const hostId = readHostId(
 
 const theExitSaysWhyTheLineEnded = () => undefined
 
-const transport: MachineTransport["Service"] = (argv) =>
+const transport: Machines.MachineTransport["Service"] = (argv) =>
   Effect.acquireRelease(
     Effect.try({
       try: () => Bun.spawn([...argv], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env } }),
@@ -342,7 +347,7 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.layout],
     }),
   ),
-  MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
+  Machines.machineTransportNode.replace(Layer.succeed(Machines.MachineTransport, transport)),
   PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
   builtinsNode.replace(
     LayerNode.make({
@@ -351,8 +356,8 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
     }),
   ),
-  HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
-  ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
+  Runtimes.hostEnvNode.replace(Layer.succeed(Runtimes.HostEnv, { drop: dropEnv })),
+  Processes.processPlatformNode.replace(Layer.succeed(Processes.ProcessPlatform, processes)),
   Server.socketServerLayer.replace(
     LayerNode.make({
       name: "vibest/SocketServer",
@@ -373,18 +378,20 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.layout],
     }),
   ),
-  HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
+  Identity.hostFactsNode.replace(
+    Layer.succeed(Identity.HostFacts, { name: os.hostname(), id: hostId, pid: process.pid }),
+  ),
 ]
 
-export const app = (info: App["Service"]) => App.node.replace(Layer.succeed(App, info))
+export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))
 
 export const updateCheck = (
-  construct: Effect.Effect<UpdateCheck["Service"], never, Scope.Scope | HttpClient.HttpClient>,
+  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient>,
 ) =>
   UpdateCheck.node.replace(
     LayerNode.make({
-      service: UpdateCheck,
-      layer: Layer.effect(UpdateCheck, construct),
+      service: UpdateCheck.Service,
+      layer: Layer.effect(UpdateCheck.Service, construct),
       deps: [PlatformNode.httpClient],
     }),
   )

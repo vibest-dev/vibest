@@ -268,7 +268,7 @@ Effect 4 services (`Context.Service`) and Layers:
 Constraints:
 
 - `src/` depends solely on `effect` abstract services (6.3); runtime implementations provided only at entrypoints.
-- Services other than `Sessions` and `Inbox` never touch SQLite.
+- Services other than `Session` and `Inbox` never touch SQLite.
 - One `Semaphore(1)` per session: spawn / send / stop / event handling serialize per session; parallel across sessions.
 - All background fibers attach to daemon's Scope; interruption on cancellation guarantees no dangling tasks.
 - Calls to herdr use **agent names exclusively**, without caching pane ids (unaffected when users move panes).
@@ -636,7 +636,7 @@ herdr relies on hooks installed in each harness to acquire session ids and state
 
 ### 11.2 Coordinator delivery
 
-Delivery goes to the project's coordinator row. No address, or the pane is gone: the row is `dropped` and never delivered, including after the next `omac launch`. `idle`: claim (`pending` → `sending`, guarded on that address) then prompt, or leave `pending` for a Pi subscriber which claims the same way. `busy` / `unknown`: wait. A claim that does not finish sets `sending` → `failed`. Each row that goes `sending` → `delivered` is handed to Sessions once (8.6b).
+Delivery goes to the project's coordinator row. No address, or the pane is gone: the row is `dropped` and never delivered, including after the next `omac launch`. `idle`: claim (`pending` → `sending`, guarded on that address) then prompt, or leave `pending` for a Pi subscriber which claims the same way. `busy` / `unknown`: wait. A claim that does not finish sets `sending` → `failed`. Each row that goes `sending` → `delivered` is handed to `Session` once (8.6b).
 
 ### 11.4 Session as Receiver
 

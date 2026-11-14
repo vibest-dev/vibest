@@ -4,15 +4,15 @@ import { App } from "@vibest/core/app"
 import type { ReplayDiffers } from "@vibest/core/bus"
 import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db-schema"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import * as PlatformNode from "@vibest/core/effect/platform"
-import { HostFacts } from "@vibest/core/identity"
+import { PlatformNode } from "@vibest/core/effect/platform"
+import { Identity } from "@vibest/core/identity"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
-import { Identity, Shutdown } from "./handlers/daemon.ts"
+import { DaemonHandlers } from "./handlers/daemon.ts"
 import * as ShutdownDeadline from "./shutdown-deadline.ts"
 import type { ShutdownHost } from "./shutdown-deadline.ts"
 
@@ -84,7 +84,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
             message: `cannot take vibestd's start lock ${layout.daemonInfo}: ${e.message}. Nothing was changed; check that file.`,
           }),
       ),
-      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector> => {
+      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector.Service> => {
         if (writer) return Effect.succeed({ held: true, write: writer })
         if (options.handoff) return Effect.succeed(undefined)
         return probe(layout.socket).pipe(Effect.map((up) => (up ? { held: false } : undefined)))
@@ -116,8 +116,10 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       })
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
-    const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
-    const app = yield* App.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
+    const facts = yield* Identity.HostFacts.pipe(
+      Effect.provide(LayerNode.compile(Identity.hostFactsNode, { replacements })),
+    )
+    const app = yield* App.Service.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
     const identity = {
       pid: facts.pid,
       instance: yield* newId(),
@@ -133,8 +135,8 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),
-          Identity.node.replace(Layer.succeed(Identity, identity)),
-          Shutdown.node.replace(Layer.succeed(Shutdown, shutdown)),
+          DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, identity)),
+          DaemonHandlers.shutdownNode.replace(Layer.succeed(DaemonHandlers.Shutdown, shutdown)),
         ],
       }),
     )

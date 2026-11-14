@@ -22,7 +22,7 @@ export const services = Layer.mergeAll(
   BunServices.layer,
   FetchHttpClient.layer,
   user,
-  Layer.succeed(SocketConnector, (endpoint: string) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(SocketConnector.Service, (endpoint: string) => BunSocket.makeNet({ path: endpoint })),
 )
 
 export const memorySqlite = SqliteClient.layer({ filename: ":memory:", disableWAL: true, ...SQL_NAMES })

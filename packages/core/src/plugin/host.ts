@@ -4,7 +4,7 @@ import { Effect, Stream } from "effect"
 
 import { Agents } from "../agents.ts"
 import { Bus } from "../bus.ts"
-import { Harnesses } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { Runtimes } from "../runtimes.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
 import * as Hooks from "./hooks.ts"
@@ -40,9 +40,9 @@ export interface Input {
 export const make = Effect.gen(function* () {
   const hooks = yield* Hooks.Service
   const subscriptions = yield* Subscriptions
-  const runtimes = yield* Runtimes
-  const harnesses = yield* Harnesses
-  const agents = yield* Agents
+  const runtimes = yield* Runtimes.Service
+  const harnesses = yield* Harnesses.Service
+  const agents = yield* Agents.Service
   const bus = yield* Bus
   return ({ plugin, activation, options, stats }: Input): VibestPlugin.Context => {
     const register = <N extends Hooks.Name>(

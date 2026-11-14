@@ -5,7 +5,7 @@ import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import { Harnesses } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
@@ -37,7 +37,7 @@ const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const harnesses = yield* Harnesses
+  const harnesses = yield* Harnesses.Service
   const bus = yield* Bus
   const { track } = yield* SessionLive
 

@@ -12,8 +12,8 @@ import type { Checks, Handlers } from "./caller.ts"
 export const make = ({ scope, cliOnly, atProject, resolveAt }: Checks) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const project = yield* Project
-    const runtimes = yield* Runtimes
+    const project = yield* Project.Service
+    const runtimes = yield* Runtimes.Service
     return {
       "Project.Open": ({ move }) =>
         Effect.gen(function* () {

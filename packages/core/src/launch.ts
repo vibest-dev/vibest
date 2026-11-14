@@ -3,7 +3,8 @@ import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema
 import { Effect, FileSystem } from "effect"
 
 import { Agents, unknownAgent } from "./agents.ts"
-import { encodeCommand, Harness, Harnesses } from "./harness.ts"
+import { encodeCommand, Harness } from "./harness.ts"
+import { Harnesses } from "./harnesses.ts"
 import type { AgentsShape } from "./plugin/domains.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
 import {
@@ -19,7 +20,7 @@ export const definitionIn = (agents: AgentsShape, id: string) => {
   return found === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.succeed(found)
 }
 
-export const definitionOf = (id: string) => Effect.flatMap(Agents, (agents) => definitionIn(agents, id))
+export const definitionOf = (id: string) => Effect.flatMap(Agents.Service, (agents) => definitionIn(agents, id))
 
 const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.catch((e) => (e instanceof SystemPromptDirUnsafe ? Effect.fail(e) : Effect.die(e))))
@@ -42,8 +43,8 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   >
 }) {
   const definition = yield* definitionOf(input.agent)
-  const adapter = yield* (yield* Harnesses).get(input.harness)
-  const harness = yield* Harness
+  const adapter = yield* (yield* Harnesses.Service).get(input.harness)
+  const harness = yield* Harness.Service
   const layout = yield* Layout
   const vibest = yield* VibestCommand
   const unavailable = (message: string) => new HarnessUnavailable({ harness: input.harness, message })

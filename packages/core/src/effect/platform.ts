@@ -7,6 +7,8 @@ import { SqlClient, type SqlError } from "effect/sql"
 import type { DatabaseOpenFailed, SchemaMismatch } from "../database/db-schema.ts"
 import { LayerNode } from "./layer-node.ts"
 
+export * as PlatformNode from "./platform.ts"
+
 export const fileSystem = LayerNode.unbound(FileSystem.FileSystem)
 export const path = LayerNode.unbound(Path.Path)
 export const crypto = LayerNode.unbound(Crypto.Crypto)

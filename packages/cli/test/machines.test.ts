@@ -6,7 +6,7 @@ import { cliHeaders, connect } from "@vibest/client/client"
 import { connectPipe, stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 import { unwrapped } from "@vibest/core/replies"
 import { PEER_BY_USER, peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
@@ -42,13 +42,13 @@ type Stack = Context.Context<Layer.Success<ReturnType<typeof served>>>
 
 const stack = (net: Net) =>
   Effect.gen(function* () {
-    const dial = yield* SocketConnector
+    const dial = yield* SocketConnector.Service
     const context: Stack = yield* Layer.build(served({ transport: net.transport(dial) }))
     const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
     const layout = yield* run(Layout)
     const raw = yield* connect(layout.socket)
     const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
-    return { context, run, layout, raw, cli, id: (yield* run(VibestdIdentity)).id }
+    return { context, run, layout, raw, cli, id: (yield* run(Identity.Service)).id }
   })
 
 const failureTag = <A, E>(exit: Exit.Exit<A, E>) =>
@@ -74,7 +74,7 @@ describe("the peer caller", () => {
   it.effect("Peer.Hello over a stdin and stdout pipe records the peer; only Hello is allowed before it", () =>
     Effect.gen(function* () {
       const layout = yield* Layout
-      const self = yield* VibestdIdentity
+      const self = yield* Identity.Service
       const client = yield* connectPipe(yield* overNodeSocket(layout.socket))
       const peer = randomId()
       const as = <A, E, R>(effect: Effect.Effect<A, E, R>) => RpcClient.withHeaders(effect, peerHeaders(peer))
@@ -100,7 +100,7 @@ describe("the peer caller", () => {
   it.effect("a Hello from this vibestd's own id records no peer", () =>
     Effect.gen(function* () {
       const layout = yield* Layout
-      const self = yield* VibestdIdentity
+      const self = yield* Identity.Service
       const client = yield* connect(layout.socket)
       const hello = yield* RpcClient.withHeaders(
         client["Peer.Hello"]({ id: self.id, name: "me", callsMe: "loop" }),
@@ -828,7 +828,7 @@ describe("vibest run --machine and remote sessions", () => {
         )
         assert.strictEqual(failed._tag, "NoRuntime")
         assert.include(failed.message, 'the runtime "term" is not loaded; loaded: herdr')
-        assert.include(failed.message, (yield* c.run(VibestdIdentity)).name)
+        assert.include(failed.message, (yield* c.run(Identity.Service)).name)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

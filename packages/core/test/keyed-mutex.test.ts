@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import * as KeyedMutex from "@vibest/core/effect/keyed-mutex"
+import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
 import { Deferred, Effect, Fiber, Scheduler } from "effect"
 
 import { interruptOnceReady } from "./lib/interrupt-at.ts"

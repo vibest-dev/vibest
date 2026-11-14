@@ -2,7 +2,7 @@ import { it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/db-rows"
 import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { isLimited, Plugin, stillLimited } from "@vibest/plugin/effect"
 import type { HarnessId } from "@vibest/schema/session"
 import { Effect, type Scope } from "effect"
@@ -68,7 +68,7 @@ export const claudeEnd = (reason: string) =>
 
 export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {
-    const sessions = yield* Sessions
+    const sessions = yield* Session.Service
     const db = yield* Db
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),

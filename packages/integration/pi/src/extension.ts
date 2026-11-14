@@ -275,7 +275,7 @@ export const services = Layer.mergeAll(
   Layout.layer,
   NodeChildProcessSpawner.layer.pipe(Layer.provide(NodeFileSystem.layer)),
   NodeFileSystem.layer,
-  Layer.succeed(SocketConnector, (endpoint) => NodeSocket.makeNet({ path: endpoint })),
+  Layer.succeed(SocketConnector.Service, (endpoint) => NodeSocket.makeNet({ path: endpoint })),
   vibestCommand,
 ).pipe(Layer.provideMerge(NodePath.layer))
 

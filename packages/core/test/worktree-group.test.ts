@@ -4,7 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { type NewSession, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
 import { sameWorktreeBucket } from "@vibest/core/paths"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
 import { Layout } from "@vibest/schema/layout"
 import type { HarnessId } from "@vibest/schema/session"
@@ -82,7 +82,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const path = yield* Path.Path
       const layout = yield* Layout
       const db = yield* Db
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const repository = yield* repositoryDirectoryName(repo)
       const taken = layout.allocationWorktree(repository, "ab01")
@@ -105,7 +105,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const path = yield* Path.Path
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const name = path.basename(repo)
       const parent = path.join(layout.worktrees, name)
@@ -130,7 +130,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const held = yield* herdr.hold("open")
-      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
+      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(repo))
       yield* held.reached
       const wt = yield* directoryOf(id)
       assert.isTrue(yield* fs.exists(wt))
@@ -149,7 +149,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const path = yield* Path.Path
       const layout = yield* Layout
       const db = yield* Db
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const key = yield* projectOf(repo)
       const outside = "e5f6a7b8-e5f6-4e5f-8e5f-e5f6a7b8e5f6"
@@ -173,7 +173,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     "a held creation reserves its leaf, so the next draw does not alias it, even under a name differing only in case on a case-folding file system",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const db = yield* Db
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
@@ -213,7 +213,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
       const db = yield* Db
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const layout = yield* Layout
       const repo = yield* makeRepository
       yield* (yield* FakeGit).update(repo, { origin: "git@github.com:Org/MyRepo.git" })
@@ -239,7 +239,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const exit = yield* Effect.exit(sessions.spawn(yield* spawnInput(repo)))
       assert.isTrue(Exit.isFailure(exit))
@@ -257,7 +257,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const path = yield* Path.Path
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const parent = path.join(layout.worktrees, yield* repositoryDirectoryName(repo))
       const reserved = () => fs.existsSync(parent) && fs.readdirSync(parent).length > 0
@@ -298,7 +298,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const spawning = yield* Effect.forkChild(sessions.spawn(yield* spawnInput(repo)))
       yield* held.inserted

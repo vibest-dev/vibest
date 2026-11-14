@@ -7,7 +7,7 @@ import { type HttpClient } from "effect/http"
 import { type Host } from "../host.ts"
 import type { Spec } from "./spec.ts"
 
-export type Environment = Command.Environment | Host | Layout | SocketConnector | HttpClient.HttpClient
+export type Environment = Command.Environment | Host | Layout | SocketConnector.Service | HttpClient.HttpClient
 
 export type Input<Value> =
   Value extends Spec.Node<infer _Name, infer Command, infer _Commands>

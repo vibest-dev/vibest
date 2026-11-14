@@ -43,7 +43,7 @@ export class FakeGit extends Context.Service<
     readonly repository: (main: string, facts?: RepositoryFacts) => Effect.Effect<void>
     readonly update: (main: string, facts: RepositoryFacts) => Effect.Effect<void>
     readonly checkout: (path: string, facts: CheckoutFacts) => Effect.Effect<void>
-    readonly git: Git["Service"]
+    readonly git: Git.Interface
   }
 >()("test/FakeGit") {
   static readonly layer = Layer.effect(
@@ -89,7 +89,7 @@ export class FakeGit extends Context.Service<
           { discard: true },
         )
 
-      const git = Git.of({
+      const git = Git.Service.of({
         mainCheckout: (dir) =>
           Effect.gen(function* () {
             const found = yield* locate(dir)
@@ -197,7 +197,7 @@ export class FakeGit extends Context.Service<
   )
 
   static readonly git = Layer.effect(
-    Git,
+    Git.Service,
     Effect.gen(function* () {
       return (yield* FakeGit).git
     }),

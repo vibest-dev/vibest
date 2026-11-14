@@ -3,7 +3,7 @@ import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, pidOf } from "@vibest/core/database/db-rows"
 import { line } from "@vibest/core/inbox"
 import { noticeEnvelope } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
 import { CONTINUE, continueText } from "@vibest/core/session/restart"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -54,7 +54,7 @@ describe("vibest update's plan for vibestd", () => {
 
 const busyPiSubagent = Effect.gen(function* () {
   const db = yield* Db
-  const sessions = yield* Sessions
+  const sessions = yield* Session.Service
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
   yield* db.startEntry(
@@ -191,7 +191,7 @@ describe("restart in place", () => {
     "a Cursor entry session (no integration reports its pid or its readiness): never listed as outdated, and a restart asked for anyway signals and runs nothing",
     Effect.gen(function* () {
       const { herdr, id } = yield* workingEntry("cursor")
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const processes = yield* FakeProcesses
       assert.deepStrictEqual(yield* sessions.outdated, [])
       const [outcome] = yield* sessions.restart([id])
@@ -273,7 +273,7 @@ describe("restart in place", () => {
     "an entry session the runtime calls idle still continues when the update command is running in its process tree",
     Effect.gen(function* () {
       const db = yield* Db
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
@@ -332,7 +332,7 @@ describe("restart in place", () => {
   )
 
   test(
-    "the old harness's report after the new process.start is not its answer, even for a fresh Sessions",
+    "the old harness's report after the new process.start is not its answer, even for a fresh Session service",
     Effect.gen(function* () {
       const { db, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime

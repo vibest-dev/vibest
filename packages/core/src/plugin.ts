@@ -6,10 +6,10 @@ import { Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Sc
 
 import { Agents } from "./agents.ts"
 import { Bus } from "./bus.ts"
-import { timeoutWithoutWaiting } from "./effect/bounded.ts"
+import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
-import { Harnesses } from "./harness.ts"
+import { PlatformNode } from "./effect/platform.ts"
+import { Harnesses } from "./harnesses.ts"
 import * as Hooks from "./plugin/hooks.ts"
 import { errorMessage } from "./plugin/hooks.ts"
 import * as PluginHost from "./plugin/host.ts"
@@ -149,7 +149,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     }
 
     const close = (scope: Scope.Closeable, id: string, level: "error" | "warning" = "error") =>
-      timeoutWithoutWaiting(Scope.close(scope, Exit.void), root, timeout).pipe(
+      Bounded.timeoutWithoutWaiting(Scope.close(scope, Exit.void), root, timeout).pipe(
         Effect.flatMap((exit) =>
           Option.isNone(exit)
             ? Effect.logWarning(`plugin ${id}: teardown timed out; left to finish on its own`)
@@ -176,7 +176,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     )
 
     const subscriptions = yield* Subscriptions
-    const runtimes = yield* Runtimes
+    const runtimes = yield* Runtimes.Service
     const hooks = yield* Hooks.Service
     const contextFor = yield* PluginHost.make
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
@@ -187,7 +187,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         running.broken = `${failure.state}.transform threw: ${messageOf(failure.cause)}`
         Queue.offerUnsafe(broken, { running, refresh })
       }
-      const exit = yield* timeoutWithoutWaiting(
+      const exit = yield* Bounded.timeoutWithoutWaiting(
         Effect.suspend(() =>
           effectOf(plugin)(contextFor({ plugin: plugin.id, activation: running, options: candidate.options, stats })),
         ).pipe(Scope.provide(scope), Registry.group(report)),

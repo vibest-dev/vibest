@@ -1,11 +1,13 @@
 import { Effect, Semaphore } from "effect"
 
-export interface KeyedMutex<in Key> {
+export * as KeyedMutex from "./keyed-mutex.ts"
+
+export interface Interface<in Key> {
   readonly size: Effect.Effect<number>
   readonly withLock: (key: Key) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
-export const makeUnsafe = <Key>(): KeyedMutex<Key> => {
+export const makeUnsafe = <Key>(): Interface<Key> => {
   const locks = new Map<Key, { readonly semaphore: Semaphore.Semaphore; users: number }>()
 
   const withLock =
@@ -31,4 +33,4 @@ export const makeUnsafe = <Key>(): KeyedMutex<Key> => {
   return { size: Effect.sync(() => locks.size), withLock }
 }
 
-export const make = <Key>(): Effect.Effect<KeyedMutex<Key>> => Effect.sync(makeUnsafe<Key>)
+export const make = <Key>(): Effect.Effect<Interface<Key>> => Effect.sync(makeUnsafe<Key>)

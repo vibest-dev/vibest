@@ -37,7 +37,7 @@ const inspect = (directory: string, given: string, base: string | undefined) =>
     const absolute = resolveAgainst(path, base, given)
     const info = yield* fs.stat(absolute).pipe(Effect.mapError(() => refuse("not found")))
     if (info.type !== "Directory") return yield* refuse("not a directory")
-    const git = yield* Git
+    const git = yield* Git.Service
     const top = yield* git.topLevel(absolute).pipe(Effect.mapError(() => refuse("not a git repository")))
     const source = yield* fs.realPath(top).pipe(Effect.mapError((e) => refuse(e.message)))
     const inside = path.relative(source, directory)
@@ -54,7 +54,7 @@ const inspect = (directory: string, given: string, base: string | undefined) =>
   })
 
 const copy = (folder: ProjectFolder) =>
-  Git.use((git) =>
+  Git.Service.use((git) =>
     git.copyRepository({ source: folder.source, dest: folder.path, branch: folder.branch, origin: folder.origin }),
   ).pipe(
     Effect.mapError(
@@ -127,7 +127,7 @@ export interface ProjectRepository {
 const ownGitCheckout = (dir: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
-    const top = yield* Git.use((git) => git.topLevel(dir)).pipe(Effect.option)
+    const top = yield* Git.Service.use((git) => git.topLevel(dir)).pipe(Effect.option)
     if (Option.isNone(top)) return false
     return (yield* fs.realPath(top.value)) === (yield* fs.realPath(dir))
   })
@@ -144,7 +144,7 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
     )
   const info = yield* goneIsUndefined(fs.stat(directory))
   if (info === undefined || info.type !== "Directory") return undefined
-  const git = yield* Git
+  const git = yield* Git.Service
   if (yield* git.insideWorkTree(directory)) return undefined
   const names = yield* goneIsUndefined(fs.readDirectory(directory))
   if (names === undefined) return undefined
@@ -165,7 +165,7 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
   return found.length > 0 ? found : undefined
 })
 
-const isMainCheckout = (dir: string) => Git.use((git) => git.isMainCheckout(dir))
+const isMainCheckout = (dir: string) => Git.Service.use((git) => git.isMainCheckout(dir))
 
 export const projectRoot = Effect.fn("projectRoot")(function* (directory: string) {
   const children = yield* listProjectRepositories(directory)
@@ -215,7 +215,7 @@ export const projectRepositories = Effect.fn("projectRepositories")(function* (r
   for (const checkout of checkouts) {
     const path = yield* fs.realPath(checkout)
     if (places.some((place) => place.path === path)) continue
-    places.push({ path, remote: yield* Git.use((git) => git.originUrl(path)) })
+    places.push({ path, remote: yield* Git.Service.use((git) => git.originUrl(path)) })
   }
   return places
 })

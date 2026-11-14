@@ -15,7 +15,7 @@ import {
 import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
 import { Inbox } from "../inbox.ts"
 import { errorMessage } from "../plugin.ts"
@@ -31,9 +31,9 @@ import { Placement } from "./placement.ts"
 const make = Effect.gen(function* () {
   const db = yield* Db
   const fs = yield* FileSystem.FileSystem
-  const runtimes = yield* Runtimes
-  const inbox = yield* Inbox
-  const drain = yield* Drain
+  const runtimes = yield* Runtimes.Service
+  const inbox = yield* Inbox.Service
+  const drain = yield* Drain.Service
   const removal = yield* Remove.make
   const locks = yield* SessionLocks
   const sessionLive = yield* SessionLive

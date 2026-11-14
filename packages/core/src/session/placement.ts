@@ -30,9 +30,10 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
-import { encodeCommand, Harness, Harnesses } from "../harness.ts"
+import { encodeCommand, Harness } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { definitionIn } from "../launch.ts"
 import {
@@ -62,27 +63,31 @@ export type LaunchOptions = {
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const runtimes = yield* Runtimes
-  const harness = yield* Harness
-  const harnesses = yield* Harnesses
-  const agents = yield* Agents
-  const inbox = yield* Inbox
+  const runtimes = yield* Runtimes.Service
+  const harness = yield* Harness.Service
+  const harnesses = yield* Harnesses.Service
+  const agents = yield* Agents.Service
+  const inbox = yield* Inbox.Service
   const layout = yield* Layout
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const git = yield* Git
+  const git = yield* Git.Service
   const vibest = yield* VibestCommand
   const { prompt } = yield* Executions
 
   const provided = <A, E>(
-    effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Git>,
+    effect: Effect.Effect<
+      A,
+      E,
+      FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Git.Service
+    >,
   ) =>
     effect.pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.provideService(Git, git),
+      Effect.provideService(Git.Service, git),
     )
 
   const notice = Effect.fn("Placement.notice")((session: SessionRow, message: string) =>

@@ -6,7 +6,7 @@ import { processOf, reader } from "../gates.ts"
 import type { Handlers } from "./caller.ts"
 
 export const make = Effect.gen(function* () {
-  const inbox = yield* Inbox
+  const inbox = yield* Inbox.Service
   const pullingSession = (method: "Inbox.Subscribe" | "Inbox.Take") =>
     Effect.gen(function* () {
       const c = yield* Caller

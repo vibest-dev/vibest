@@ -5,13 +5,15 @@ import { Agents } from "./agents.ts"
 import { runtimeOf, terminalOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
+import { PlatformNode } from "./effect/platform.ts"
 import * as Guard from "./guard.ts"
-import { Harnesses } from "./harness.ts"
+import { Harnesses } from "./harnesses.ts"
 import type { HarnessDefinition } from "./plugin/domains.ts"
 import { jsonObject, promptOf, executionEndOf } from "./replies.ts"
 import { alive, Runtimes } from "./runtimes.ts"
-import { Sessions } from "./session.ts"
+import { Session } from "./session.ts"
+
+export * as Integration from "./integration.ts"
 
 export type HookCaller = {
   readonly id: string
@@ -22,10 +24,10 @@ export type HookCaller = {
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const sessions = yield* Sessions
-  const harnesses = yield* Harnesses
-  const agents = yield* Agents
-  const runtimes = yield* Runtimes
+  const sessions = yield* Session.Service
+  const harnesses = yield* Harnesses.Service
+  const agents = yield* Agents.Service
+  const runtimes = yield* Runtimes.Service
   const layout = yield* Layout
   const vibest = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
@@ -88,43 +90,45 @@ const make = Effect.gen(function* () {
     })
   })
 
-  const guard = (sessionId: string, raw: string) =>
-    Effect.gen(function* () {
+  const guard = Effect.fn("Integration.guard")(
+    function* (sessionId: string, raw: string) {
       const row = yield* db.sessionIdentity(sessionId)
       if (row === undefined) return `no session ${sessionId}; the tool call is refused.`
       return yield* Guard.check({ id: row.id, agent: row.agent, projectDir: layout.project(row.projectId) }, raw)
-    }).pipe(
-      Effect.provideService(Agents, agents),
-      Effect.provideService(Harnesses, harnesses),
-      Effect.provideService(Layout, layout),
-      Effect.provideService(Runtimes, runtimes),
-      Effect.provideService(VibestCommand, vibest),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-      Effect.withSpan("Integration.guard"),
-    )
+    },
+    Effect.provideService(Agents.Service, agents),
+    Effect.provideService(Harnesses.Service, harnesses),
+    Effect.provideService(Layout, layout),
+    Effect.provideService(Runtimes.Service, runtimes),
+    Effect.provideService(VibestCommand, vibest),
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+  )
 
-  const conversation = (id: string, conversation: string, process: number | undefined) =>
-    db.noteConversation(id, conversation, process)
+  const conversation = Effect.fn("Integration.conversation")(
+    (id: string, conversation: string, process: number | undefined) => db.noteConversation(id, conversation, process),
+  )
 
   return { executionEnd, prompt, ready, conversation, guard }
 })
 
-export class Integration extends Context.Service<Integration, Effect.Success<typeof make>>()("vibest/Integration") {
-  static readonly layer = Layer.effect(Integration, make)
+export type Interface = Effect.Success<typeof make>
 
-  static readonly node = LayerNode.make({
-    service: Integration,
-    layer: Integration.layer,
-    deps: [
-      Agents.node,
-      Db.node,
-      Harnesses.node,
-      Runtimes.node,
-      Sessions.node,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
-  })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Integration") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Agents.node,
+    Db.node,
+    Harnesses.node,
+    Runtimes.node,
+    Session.node,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

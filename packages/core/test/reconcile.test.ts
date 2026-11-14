@@ -1,7 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { exitedAt } from "@vibest/core/database/db-rows"
-import { Sessions, START_TIMEOUT } from "@vibest/core/session"
+import { Session, START_TIMEOUT } from "@vibest/core/session"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -16,7 +16,7 @@ const TEST_HERDR = "herdr"
 const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) =>
   testEffect(sessionFrom({ hooked: ["pi"] }))(name, () => program)
 
-const startupSettled = (sessions: Sessions["Service"]) => until(sessions.inMemory, (memory) => memory.reconciles >= 1)
+const startupSettled = (sessions: Session.Interface) => until(sessions.inMemory, (memory) => memory.reconciles >= 1)
 
 describe("reconcile: a terminal whose agent has not started", () => {
   test(
@@ -28,7 +28,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
       const projectId = yield* projectOf(repo)
       const id = "cccccccc-cccc-4ccc-8ccc-000000000001"
       yield* herdr.addPane("w8:pending", "w8", repo)
-      yield* startupSettled(yield* Sessions)
+      yield* startupSettled(yield* Session.Service)
       yield* db.insertSession(
         {
           id,

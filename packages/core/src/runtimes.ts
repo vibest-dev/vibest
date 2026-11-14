@@ -9,6 +9,8 @@ import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 
+export * as Runtimes from "./runtimes.ts"
+
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
 export type Terminal = RuntimeAddress
@@ -32,9 +34,9 @@ const live = (runtime: string, event: RuntimeEvent): Signal => {
   }
 }
 
-export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {
-  static readonly node = LayerNode.unbound(HostEnv)
-}
+export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {}
+
+export const hostEnvNode = LayerNode.unbound(HostEnv)
 
 const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
   new NoRuntime({
@@ -97,12 +99,13 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
     transform: registry.transform,
     all,
     find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
-    route: (id) =>
+    route: Effect.fn("Runtimes.route")((id) =>
       Effect.suspend(() => {
         const loaded = registry.get()
         const found = loaded.find((runtime) => runtime.id === id)
         return found === undefined ? Effect.fail(notLoaded(id, loaded)) : Effect.succeed(found)
       }),
+    ),
     statuses: Effect.suspend(() =>
       Effect.forEach(
         registry.get(),
@@ -110,7 +113,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
         { concurrency: "unbounded" },
       ),
     ),
-    online: (runtime) =>
+    online: Effect.fn("Runtimes.online")((runtime) =>
       runtime.status().pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
@@ -131,6 +134,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
               ),
         ),
       ),
+    ),
     added: Stream.fromPubSub(added),
     callers: Effect.sync(() =>
       registry.get().flatMap((runtime) =>
@@ -148,48 +152,54 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   }
 })
 
-export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest/Runtimes") {
-  static readonly layer = Layer.effect(Runtimes, make)
+export type Interface = RuntimesShape
 
-  static readonly node = LayerNode.make({ service: Runtimes, layer: Runtimes.layer, deps: [Bus.node, HostEnv.node] })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Runtimes") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [Bus.node, hostEnvNode] })
 
 export type AgentSeen = AgentState | "absent"
 
 export const stateOf = (seen: AgentSeen): AgentState | undefined => (seen === "absent" ? undefined : seen)
 
-export const agentState = (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
-  h.state === undefined
-    ? Effect.succeed("unknown")
-    : h
-        .state(terminal)
-        .pipe(
-          Effect.catchTag("RuntimeError", (error) =>
-            error.code === "not_found"
-              ? Effect.succeed("absent" as AgentSeen)
-              : error.code === "unreachable"
-                ? Effect.fail(error)
-                : Effect.succeed("unknown" as AgentSeen),
+export const agentState = Effect.fn("Runtimes.agentState")(
+  (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
+    h.state === undefined
+      ? Effect.succeed("unknown")
+      : h
+          .state(terminal)
+          .pipe(
+            Effect.catchTag("RuntimeError", (error) =>
+              error.code === "not_found"
+                ? Effect.succeed("absent" as AgentSeen)
+                : error.code === "unreachable"
+                  ? Effect.fail(error)
+                  : Effect.succeed("unknown" as AgentSeen),
+            ),
           ),
-        )
+)
 
-export const alive = (h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
+export const alive = Effect.fn("Runtimes.alive")((h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
   h.process(terminal).pipe(
     Effect.map((p) => p.running),
     Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.code !== "not_found")),
-  )
+  ),
+)
 
 export const peekHint = (id: string) => `to see its terminal, run: vibest peek ${id}`
 
-export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30) =>
+export const paneTail = Effect.fn("Runtimes.paneTail")((h: Runtime, terminal: Terminal | undefined, lines = 30) =>
   terminal
     ? h.read(terminal, lines).pipe(
         Effect.map((text) => text.trim()),
         Effect.orElseSucceed(() => ""),
       )
-    : Effect.succeed("")
+    : Effect.succeed(""),
+)
 
-export const runtimesHere = (runtimes: RuntimesShape) =>
+export const runtimesHere = Effect.fn("Runtimes.runtimesHere")((runtimes: RuntimesShape) =>
   Effect.flatMap(runtimes.statuses, (rows) =>
     Effect.forEach(
       rows,
@@ -205,22 +215,22 @@ export const runtimesHere = (runtimes: RuntimesShape) =>
         ),
       { concurrency: "unbounded" },
     ),
-  )
+  ),
+)
 
-export const machinesListing = (
-  runtimes: RuntimesShape,
-  harnesses: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
-  runtimes.statuses.pipe(
-    Effect.map((rows) => [
-      {
-        machine: "local",
-        runtimes: rows.map(({ runtime, status }) => ({
-          kind: runtime.id,
-          status: status.status,
-          ...("reason" in status ? { reason: status.reason } : {}),
-        })),
-        harnesses,
-      },
-    ]),
-  )
+export const machinesListing = Effect.fn("Runtimes.machinesListing")(
+  (runtimes: RuntimesShape, harnesses: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
+    runtimes.statuses.pipe(
+      Effect.map((rows) => [
+        {
+          machine: "local",
+          runtimes: rows.map(({ runtime, status }) => ({
+            kind: runtime.id,
+            status: status.status,
+            ...("reason" in status ? { reason: status.reason } : {}),
+          })),
+          harnesses,
+        },
+      ]),
+    ),
+)

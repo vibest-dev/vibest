@@ -1,7 +1,7 @@
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
 import type { PeerScope } from "@vibest/core/database/db-remote"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerShape, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
@@ -10,7 +10,7 @@ import { Effect, Stream } from "effect"
 
 import type { Listing } from "../listing.ts"
 import { Machines } from "../machine/machines.ts"
-import { Peers } from "../machine/peer.ts"
+import { Peer } from "../machine/peer.ts"
 import { address, type At, type ListScope, Remote } from "../machine/remote.ts"
 import type { Checks } from "./caller.ts"
 
@@ -43,12 +43,12 @@ export const remoteHandlers = (
 ) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const self = yield* VibestdIdentity
-    const { version } = yield* App
-    const machines = yield* Machines
-    const peers = yield* Peers
-    const remote = yield* Remote
-    const runtimes = yield* Runtimes
+    const self = yield* Identity.Service
+    const { version } = yield* App.Service
+    const machines = yield* Machines.Service
+    const peers = yield* Peer.Service
+    const remote = yield* Remote.Service
+    const runtimes = yield* Runtimes.Service
     const { cliOnly } = deps
 
     const reach = (method: Routed | "List") =>

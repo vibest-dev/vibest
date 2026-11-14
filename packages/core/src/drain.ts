@@ -3,6 +3,8 @@ import { Context, Deferred, Effect, Layer } from "effect"
 import { Bus } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 
+export * as Drain from "./drain.ts"
+
 const make = Effect.gen(function* () {
   const bus = yield* Bus
   let phase: "open" | "draining" | "accepted" = "open"
@@ -21,7 +23,7 @@ const make = Effect.gen(function* () {
     )
   return {
     track,
-    work: <A, E, R>(label: string, body: Effect.Effect<A, E, R>, settlement = false) =>
+    work: Effect.fn("Drain.work")(<A, E, R>(label: string, body: Effect.Effect<A, E, R>, settlement = false) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.acquireUseRelease(
           restore(enter(label, settlement)),
@@ -29,8 +31,10 @@ const make = Effect.gen(function* () {
           (leave) => leave,
         ),
       ),
-    admit: (label: string, settlement = false) =>
+    ),
+    admit: Effect.fn("Drain.admit")((label: string, settlement = false) =>
       Effect.sync(() => (phase === "open" || (settlement && phase === "draining") ? track(label) : undefined)),
+    ),
     begin: Effect.sync(() => {
       if (phase !== "open") return false
       phase = "draining"
@@ -54,8 +58,10 @@ const make = Effect.gen(function* () {
   }
 })
 
-export class Drain extends Context.Service<Drain, Effect.Success<typeof make>>()("vibest/Drain") {
-  static readonly layer = Layer.effect(Drain, make)
+export type Interface = Effect.Success<typeof make>
 
-  static readonly node = LayerNode.make({ service: Drain, layer: Drain.layer, deps: [Bus.node] })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Drain") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [Bus.node] })

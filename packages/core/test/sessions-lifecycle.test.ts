@@ -20,7 +20,7 @@ import {
   sqlNotices,
 } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "a resume whose start fails closes the pane it placed; the next resume on the same harness starts a process whose terminal report is accepted",
     Effect.gen(function* () {
@@ -45,7 +45,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       assert.strictEqual(yield* db.currentProcessId(id), reporter)
       yield* until(db.getSession(id), (row) => row !== undefined && exitedAt(row) === null && terminalOf(row).id !== "")
-      assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
+      assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
     { hooked: ["pi"] },
   )

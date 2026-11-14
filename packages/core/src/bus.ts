@@ -23,7 +23,7 @@ import {
   setMeta,
 } from "./database/db-schema.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
+import { PlatformNode } from "./effect/platform.ts"
 
 export type Signal =
   | {

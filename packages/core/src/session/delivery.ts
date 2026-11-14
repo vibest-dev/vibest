@@ -28,8 +28,8 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
-import { Harnesses } from "../harness.ts"
+import { PlatformNode } from "../effect/platform.ts"
+import { Harnesses } from "../harnesses.ts"
 import { Inbox, text as inboxText } from "../inbox.ts"
 import { errorMessage } from "../plugin.ts"
 import * as Reactor from "../reactor.ts"
@@ -49,9 +49,9 @@ export const unreachable = (session: SessionRow) => (e: { readonly message: stri
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const runtimes = yield* Runtimes
-  const harnesses = yield* Harnesses
-  const inbox = yield* Inbox
+  const runtimes = yield* Runtimes.Service
+  const harnesses = yield* Harnesses.Service
+  const inbox = yield* Inbox.Service
   const fs = yield* FileSystem.FileSystem
   const sessionLive = yield* SessionLive
   const locks = yield* SessionLocks

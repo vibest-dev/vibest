@@ -1,13 +1,13 @@
 import { cliHeaders, connect } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
-import { VibestdIdentity } from "@vibest/core/identity"
+import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
-import type { SpawnInput, Sessions } from "@vibest/core/session"
+import type { SpawnInput, Session } from "@vibest/core/session"
 import { peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
-import type { MachineTransport } from "@vibest/server/machine/machines"
+import type { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { Clock, Deferred, Effect, Layer } from "effect"
 import { RpcClient } from "effect/rpc"
@@ -59,7 +59,7 @@ export class Net {
     return Effect.forEach(this.routes.get(host)?.pipes ?? [], (p) => p.cut, { discard: true })
   }
 
-  transport(dial: SocketConnector["Service"]): MachineTransport["Service"] {
+  transport(dial: SocketConnector.Interface): Machines.MachineTransport["Service"] {
     const { argv: seen, routes } = this
     return (argv) =>
       Effect.gen(function* () {
@@ -120,7 +120,7 @@ export const peerSession = {
 
 export const fakeSpawns =
   (spawns: Array<SpawnInput>, terminal: (input: SpawnInput, id: string) => string = () => "") =>
-  (sessions: Sessions["Service"], db: Db["Service"]) => ({
+  (sessions: Session.Interface, db: Db["Service"]) => ({
     ...sessions,
     spawn: (input: SpawnInput) =>
       Effect.gen(function* () {
@@ -167,7 +167,7 @@ export const REPOSITORY = { origin: REMOTE, head: COMMIT, commits: [COMMIT] }
 export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE) =>
   Effect.gen(function* () {
     const spawns: Array<SpawnInput> = []
-    const transport = net === undefined ? {} : { transport: net.transport(yield* SocketConnector) }
+    const transport = net === undefined ? {} : { transport: net.transport(yield* SocketConnector.Service) }
     const context = yield* Layer.build(
       served({ ...transport, ...options, sessions: options.sessions ?? fakeSpawns(spawns) }),
     )
@@ -193,7 +193,7 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
       })
     const spawn = (call: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>, request = randomId()) =>
       call(raw["Peer.Spawn"]({ agent: "general", repository: REMOTE, commit: COMMIT, prompt: "do it", request }))
-    return { run, db, raw, cli, as, spawn, spawns, directory, project, layout, id: (yield* run(VibestdIdentity)).id }
+    return { run, db, raw, cli, as, spawn, spawns, directory, project, layout, id: (yield* run(Identity.Service)).id }
   })
 
 export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>

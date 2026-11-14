@@ -9,7 +9,7 @@ import * as Platform from "./platform/bun.ts"
 const scope: ProjectScope = { id: "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b" }
 
 const withProjectInTempHome = <A, E>(
-  program: Effect.Effect<A, E, Project | Layout | FileSystem.FileSystem | Path.Path>,
+  program: Effect.Effect<A, E, Project.Service | Layout | FileSystem.FileSystem | Path.Path>,
 ) =>
   Effect.gen(function* () {
     const home = yield* tempDirectory("vibest-project-")
@@ -21,7 +21,7 @@ describe("Project", () => {
   it.effect("info names the folder and its subfolders; search reads their text files and skips a .sh", () =>
     withProjectInTempHome(
       Effect.gen(function* () {
-        const project = yield* Project
+        const project = yield* Project.Service
         const layout = yield* Layout
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path

@@ -94,7 +94,7 @@ notifies nobody.
 `remote_url` equals `repository` or has the same repository identity as `identity` (a multi-repository project is
 refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
-and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
+and fetch it there"), and runs `Session.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
 `origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
@@ -120,7 +120,7 @@ The same repository is often cloned with different URLs on two machines (`git@gi
 port, a leading `~/` or `/`, a trailing `/` and a trailing `.git`: `github.com/o/r` for all of `git@github.com:o/r.git`,
 `ssh://git@github.com:22/o/r`, `https://github.com/o/r.git` and `https://GitHub.com/o/r`. The host of an ssh form
 (scp-like `host:path`, `ssh://`, `git+ssh://`) may be an alias from the ssh config; it is resolved to its real
-`HostName` with `ssh -G <alias>` (the `SshHosts` service: a successful lookup is cached per alias; a failure, a non-zero exit or the 5 s limit gives
+`HostName` with `ssh -G <alias>` (the `RepositoryUrl` service: a successful lookup is cached per alias; a failure, a non-zero exit or the 5 s limit gives
 the alias itself and is asked again next time)
 on the machine that reads it: A resolves its own remote, B the remotes of its own checkouts. An https host is never
 looked up, nor a bracketed IPv6 host or a one-letter host (a Windows path such as `C:/src/r`): those have no identity. A local path or `file://` URL has no identity and matches only the same string. A sends both the raw URL

@@ -3,7 +3,7 @@ import { messageOf } from "@vibest/schema/error"
 import type { Change, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, type Scope } from "effect"
 
-import { timeoutWithoutWaiting } from "../effect/bounded.ts"
+import { Bounded } from "../effect/bounded.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 
 export interface Events {
@@ -103,7 +103,7 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
   timeout: Duration.Input,
 ) {
   const started = yield* Clock.currentTimeMillis
-  const exit = yield* timeoutWithoutWaiting(
+  const exit = yield* Bounded.timeoutWithoutWaiting(
     Effect.suspend(() => entry.callback(event)),
     scope,
     timeout,

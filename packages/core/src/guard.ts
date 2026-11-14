@@ -3,7 +3,7 @@ import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 
 import { Agents } from "./agents.ts"
-import { Harnesses } from "./harness.ts"
+import { Harnesses } from "./harnesses.ts"
 import { Runtimes } from "./runtimes.ts"
 
 export interface ToolCall {
@@ -206,7 +206,7 @@ const RUNTIME_CONTROL = new Set(["agent", "pane", "tab", "workspace", "worktree"
 const USER_MACHINE_COMMANDS = new Set(["connect", "machine"])
 const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsWith("-")) ?? ""
 
-const loadedRuntimePrograms = Effect.flatMap(Runtimes, (runtimes) =>
+const loadedRuntimePrograms = Effect.flatMap(Runtimes.Service, (runtimes) =>
   Effect.map(runtimes.all, (all) => new Set(all.map((runtime) => runtime.id))),
 )
 
@@ -426,7 +426,7 @@ export const check = (
     const projectFolder = yield* physicalOption(session.projectDir)
     const refused = yield* floor(call, projectFolder)
     if (refused) return refused
-    const definition = (yield* Agents).find(session.agent)
+    const definition = (yield* Agents.Service).find(session.agent)
     if (definition === undefined)
       return `The agent definition ${session.agent} of session ${session.id} is not registered (its plugin is unloaded or failed to load); tool calls are refused.`
     const guard = definition.guard
@@ -440,7 +440,7 @@ export const check = (
       session: {
         id: session.id,
         projectFolder: projectFolder ?? "",
-        harnessBinaries: new Set((yield* Harnesses).all.map((harness) => harness.binary)),
+        harnessBinaries: new Set((yield* Harnesses.Service).all.map((harness) => harness.binary)),
         runtimePrograms: yield* loadedRuntimePrograms,
       },
     }

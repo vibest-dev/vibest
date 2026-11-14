@@ -3,7 +3,10 @@ import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/sche
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import * as PlatformNode from "./effect/platform.ts"
+import { PlatformNode } from "./effect/platform.ts"
+
+export * as Project from "./project.ts"
+
 export { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 
 const SEARCH_HITS = 50
@@ -15,63 +18,59 @@ export interface ProjectScope {
   readonly id: string
 }
 
-export class Project extends Context.Service<
-  Project,
-  {
-    readonly info: (scope: ProjectScope) => Effect.Effect<typeof ProjectInfoResult.Type>
-    readonly search: (
-      scope: ProjectScope,
-      input: typeof ProjectSearchInput.Type,
-    ) => Effect.Effect<ReadonlyArray<string>>
-  }
->()("vibest/Project") {
-  static readonly layer = Layer.effect(
-    Project,
-    Effect.gen(function* () {
-      const layout = yield* Layout
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-
-      const dir = (scope: ProjectScope, kind: ProjectKind) => path.join(layout.project(scope.id), kind)
-
-      const info = (scope: ProjectScope) =>
-        Effect.succeed({
-          directory: layout.project(scope.id),
-          preferences: path.join(layout.project(scope.id), "preferences.md"),
-          docs: dir(scope, "docs"),
-          memories: dir(scope, "memories"),
-          artifacts: dir(scope, "artifacts"),
-        })
-
-      const search = (scope: ProjectScope, input: typeof ProjectSearchInput.Type) =>
-        Effect.gen(function* () {
-          const q = input.query.toLowerCase()
-          const hits: string[] = []
-          for (const kind of input.kind ? [input.kind] : KINDS) {
-            const names = yield* fs
-              .readDirectory(dir(scope, kind), { recursive: true })
-              .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
-            for (const name of names.filter((n) => EXTENSIONS.some((e) => n.endsWith(e))).sort()) {
-              const content = yield* fs
-                .readFileString(path.join(dir(scope, kind), name))
-                .pipe(Effect.orElseSucceed(() => ""))
-              const rel = name.split(path.sep).join("/")
-              content.split("\n").forEach((l, i) => {
-                if (hits.length < SEARCH_HITS && l.toLowerCase().includes(q))
-                  hits.push(`${kind}/${rel}:${i + 1}: ${l.trim().slice(0, 200)}`)
-              })
-            }
-          }
-          return hits
-        })
-
-      return Project.of({ info, search })
-    }),
-  )
-
-  static readonly node = LayerNode.make({
-    service: Project,
-    layer: Project.layer,
-    deps: [PlatformNode.fileSystem, PlatformNode.layout, PlatformNode.path],
-  })
+export interface Interface {
+  readonly info: (scope: ProjectScope) => Effect.Effect<typeof ProjectInfoResult.Type>
+  readonly search: (scope: ProjectScope, input: typeof ProjectSearchInput.Type) => Effect.Effect<ReadonlyArray<string>>
 }
+
+export class Service extends Context.Service<Service, Interface>()("vibest/Project") {}
+
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const layout = yield* Layout
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+
+    const dir = (scope: ProjectScope, kind: ProjectKind) => path.join(layout.project(scope.id), kind)
+
+    const info = Effect.fn("Project.info")((scope: ProjectScope) =>
+      Effect.succeed({
+        directory: layout.project(scope.id),
+        preferences: path.join(layout.project(scope.id), "preferences.md"),
+        docs: dir(scope, "docs"),
+        memories: dir(scope, "memories"),
+        artifacts: dir(scope, "artifacts"),
+      }),
+    )
+
+    const search = Effect.fn("Project.search")(function* (scope: ProjectScope, input: typeof ProjectSearchInput.Type) {
+      const q = input.query.toLowerCase()
+      const hits: string[] = []
+      for (const kind of input.kind ? [input.kind] : KINDS) {
+        const names = yield* fs
+          .readDirectory(dir(scope, kind), { recursive: true })
+          .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+        for (const name of names.filter((n) => EXTENSIONS.some((e) => n.endsWith(e))).sort()) {
+          const content = yield* fs
+            .readFileString(path.join(dir(scope, kind), name))
+            .pipe(Effect.orElseSucceed(() => ""))
+          const rel = name.split(path.sep).join("/")
+          content.split("\n").forEach((l, i) => {
+            if (hits.length < SEARCH_HITS && l.toLowerCase().includes(q))
+              hits.push(`${kind}/${rel}:${i + 1}: ${l.trim().slice(0, 200)}`)
+          })
+        }
+      }
+      return hits
+    })
+
+    return Service.of({ info, search })
+  }),
+)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [PlatformNode.fileSystem, PlatformNode.layout, PlatformNode.path],
+})

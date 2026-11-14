@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
-import { Sessions } from "@vibest/core/session"
+import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
@@ -24,7 +24,7 @@ import {
   entryOfProject,
 } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "a usage-limit failure of a running session reports the limit and starts nothing else",
     Effect.gen(function* () {
@@ -331,7 +331,7 @@ describe.concurrent("Sessions", () => {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
+      yield* (yield* Session.Service).check(id)
       assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "pi")
       assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
       assert.deepStrictEqual(
@@ -358,7 +358,7 @@ describe.concurrent("Sessions", () => {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
+      yield* (yield* Session.Service).check(id)
       const row = (yield* db.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "pi")
       assert.strictEqual(executionStateOf(row), "failed")
@@ -398,7 +398,7 @@ describe.concurrent("Sessions", () => {
       const pane = (yield* herdr.agent(id))!.terminal
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
+      yield* (yield* Session.Service).check(id)
       const row = (yield* db.getSession(id))!
       assert.strictEqual(executionStateOf(row), "failed")
       assert.isNull(exitedAt(row))
@@ -435,7 +435,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       const held = yield* herdr.hold("send", id)
-      const checking = yield* Effect.forkChild((yield* Sessions).check(id))
+      const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
       yield* held.reached
       yield* held.release("failed")
       yield* Fiber.join(checking)
@@ -477,7 +477,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       const closing = yield* herdr.hold("close")
-      const checking = yield* Effect.forkChild((yield* Sessions).check(id))
+      const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
       yield* closing.reached
       const prompting = yield* herdr.hold("send", id)
       yield* closing.release()

@@ -1,7 +1,7 @@
 import { equalToReplay } from "@vibest/core/bus"
 import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import * as PlatformNode from "@vibest/core/effect/platform"
+import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
 import { Processes } from "@vibest/core/processes"
 import { Effect, Layer } from "effect"
@@ -17,9 +17,9 @@ export const platform = LayerNode.make({ name: "test/Platform", layer: services,
 export const fakeProcesses = LayerNode.make({ service: FakeProcesses, layer: FakeProcesses.layer, deps: [] })
 
 export const processes = LayerNode.make({
-  service: Processes,
+  service: Processes.Service,
   layer: Layer.effect(
-    Processes,
+    Processes.Service,
     Effect.map(FakeProcesses, (fake) => fake.processes),
   ),
   deps: [fakeProcesses],

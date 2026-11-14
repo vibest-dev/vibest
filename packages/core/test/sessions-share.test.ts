@@ -11,7 +11,7 @@ import { until } from "./lib/observe.ts"
 import { makeRepository, type TestOptions } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   const sharersOfDirectory = (ownerId: string) =>
     Effect.gen(function* () {
       const db = yield* Db
@@ -221,7 +221,7 @@ describe.concurrent("Sessions", () => {
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
       yield* until(owner.db.getSession(id), (w) => w !== undefined && exitedAt(w) === null && terminalOf(w).id !== "")
       assert.strictEqual(yield* owner.db.currentProcessId(id), reporter)
-      assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
+      assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
   )
 })
