@@ -42,7 +42,7 @@ type Stack = Context.Context<Layer.Success<ReturnType<typeof served>>>
 
 const stack = (net: Net) =>
   Effect.gen(function* () {
-    const dial = yield* SocketConnector
+    const dial = yield* SocketConnector.Service
     const context: Stack = yield* Layer.build(served({ transport: net.transport(dial) }))
     const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
     const layout = yield* run(Layout)

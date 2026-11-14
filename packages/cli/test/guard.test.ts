@@ -690,7 +690,7 @@ describe("wizard entry", () => {
             touched.socket = true
             return Effect.die("socket")
           }),
-          Effect.provideService(VibestSocketConnector, () => {
+          Effect.provideService(VibestSocketConnector.Service, () => {
             touched.socket = true
             return Effect.die("socket")
           }),
@@ -765,7 +765,7 @@ describe("vibest --session inside herdr", () => {
             touched.socket = true
             return Effect.die("herdr socket")
           }),
-          Effect.provideService(VibestSocketConnector, () => {
+          Effect.provideService(VibestSocketConnector.Service, () => {
             touched.socket = true
             return Effect.die("socket")
           }),
@@ -816,7 +816,7 @@ describe("vibest --session inside herdr", () => {
           herdr.push("connect")
           return Effect.die("herdr")
         }),
-        Effect.provideService(VibestSocketConnector, () => Effect.die("socket")),
+        Effect.provideService(VibestSocketConnector.Service, () => Effect.die("socket")),
         Effect.provide(Platform.services),
         Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
         Effect.provide(Path.layer),

@@ -59,7 +59,7 @@ export class Net {
     return Effect.forEach(this.routes.get(host)?.pipes ?? [], (p) => p.cut, { discard: true })
   }
 
-  transport(dial: SocketConnector["Service"]): Machines.MachineTransport["Service"] {
+  transport(dial: SocketConnector.Interface): Machines.MachineTransport["Service"] {
     const { argv: seen, routes } = this
     return (argv) =>
       Effect.gen(function* () {
@@ -167,7 +167,7 @@ export const REPOSITORY = { origin: REMOTE, head: COMMIT, commits: [COMMIT] }
 export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE) =>
   Effect.gen(function* () {
     const spawns: Array<SpawnInput> = []
-    const transport = net === undefined ? {} : { transport: net.transport(yield* SocketConnector) }
+    const transport = net === undefined ? {} : { transport: net.transport(yield* SocketConnector.Service) }
     const context = yield* Layer.build(
       served({ ...transport, ...options, sessions: options.sessions ?? fakeSpawns(spawns) }),
     )

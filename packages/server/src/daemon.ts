@@ -84,7 +84,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
             message: `cannot take vibestd's start lock ${layout.daemonInfo}: ${e.message}. Nothing was changed; check that file.`,
           }),
       ),
-      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector> => {
+      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector.Service> => {
         if (writer) return Effect.succeed({ held: true, write: writer })
         if (options.handoff) return Effect.succeed(undefined)
         return probe(layout.socket).pipe(Effect.map((up) => (up ? { held: false } : undefined)))

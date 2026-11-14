@@ -64,7 +64,7 @@ const platform = Layer.mergeAll(
   FetchHttpClient.layer,
   unrefStdio,
   HerdrBun.layerSocketConnector,
-  Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
   user,
 )
 

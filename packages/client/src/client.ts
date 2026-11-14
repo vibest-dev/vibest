@@ -30,7 +30,7 @@ import * as Socket from "effect/socket/Socket"
 
 import { SocketConnector } from "./socket-connector.ts"
 
-export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
+export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector.Service
 
 export const SHUTDOWN_DEADLINE = Duration.seconds(10)
 export const SHUTDOWN_FLUSH = Duration.millis(1_500)
@@ -143,7 +143,7 @@ export const connect = (socket: string) =>
   clientOver(
     Layer.effect(
       Socket.Socket,
-      Effect.flatMap(SocketConnector, (dial) => dial(socket)),
+      Effect.flatMap(SocketConnector.Service, (dial) => dial(socket)),
     ),
     { pingInterval: "1 minute", pingTimeout: "1 day" },
   )
@@ -201,7 +201,7 @@ export const awaitDaemon = (socket: string) =>
   )
 
 export const accepts = (socket: string) =>
-  Effect.flatMap(SocketConnector, (dial) => dial(socket)).pipe(
+  Effect.flatMap(SocketConnector.Service, (dial) => dial(socket)).pipe(
     Effect.flatMap((s) => s.reader),
     Effect.as(true),
     Effect.scoped,
