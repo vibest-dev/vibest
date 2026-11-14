@@ -72,7 +72,8 @@ const marker = (dir: string) =>
     yield* fs.writeFileString(path.join(dir, "keep"), "keep\n")
   })
 
-const directoryOf = (id: string) => Effect.flatMap(Db, (db) => db.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
+const directoryOf = (id: string) =>
+  Effect.flatMap(Db, (db) => db.session.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
 
 describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a name is reserved by creating its directory, so whatever already sits at a path takes that name", () => {
   test(
@@ -91,7 +92,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       yield* fs.symlink("nowhere", link)
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       assert.strictEqual(yield* directoryOf(id), layout.allocationWorktree(repository, "ab03"))
-      yield* until(db.getSession(id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
+      yield* until(db.session.getSession(id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
       assert.strictEqual(yield* fs.readFileString(path.join(taken, "keep")), "keep\n")
       assert.strictEqual(yield* fs.readLink(link), "nowhere")
     }),
@@ -136,7 +137,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       assert.isTrue(yield* fs.exists(wt))
       yield* fs.writeFileString(path.join(path.dirname(wt), "sibling"), "group\n")
       yield* held.release("failed")
-      yield* until(db.getSession(id), (w) => !!w && exitedAt(w) !== null)
+      yield* until(db.session.getSession(id), (w) => !!w && exitedAt(w) !== null)
       assert.isFalse(yield* fs.exists(wt))
       assert.strictEqual(yield* fs.readFileString(path.join(path.dirname(wt), "sibling")), "group\n")
     }),
@@ -156,8 +157,8 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const none = "a7b8c9d0-a7b8-4a7b-8a7b-a7b8c9d0a7b8"
       const elsewhere = path.join(layout.home, "x", outside)
       yield* marker(elsewhere)
-      yield* db.insertSession(storedRow(outside), key, { cwd: elsewhere })
-      yield* db.insertSession(storedRow(none), key)
+      yield* db.session.insertSession(storedRow(outside), key, { cwd: elsewhere })
+      yield* db.session.insertSession(storedRow(none), key)
       const left = (yield* sessions.remove(outside))!
       assert.strictEqual(left.worktree, "kept")
       assert.include(left.reasons.join("\n"), "left alone")
@@ -191,14 +192,14 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       )
       const second = yield* sessions.spawn(yield* spawnInput(other))
       yield* until(
-        db.getSession(second.id),
+        db.session.getSession(second.id),
         (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
       )
       const expected = sameWorktreeBucket("MyRepo", "myrepo") ? "abce" : "abcd"
       assert.strictEqual(yield* directoryOf(second.id), layout.allocationWorktree("myrepo", expected))
       yield* held.release()
       yield* until(
-        db.getSession(first.id),
+        db.session.getSession(first.id),
         (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
       )
       assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
@@ -220,14 +221,14 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       yield* marker(layout.allocationWorktree("MyRepo", "abcd"))
       const file = layout.allocationWorktree("MyRepo", "abce")
       yield* fs.writeFileString(file, "keep\n")
-      const before = (yield* db.listSessions({ stopped: true })).map((row) => row.id)
+      const before = (yield* db.session.listSessions({ stopped: true })).map((row) => row.id)
       const failed = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo)))
       assert.strictEqual(failed._tag, "AllocationFailed")
       assert.include(failed.message, "no unused 4-hex")
       assert.lengthOf(yield* herdr.callsTo("open"), 0)
       assert.strictEqual(yield* fs.readFileString(file), "keep\n")
       assert.deepStrictEqual(
-        (yield* db.listSessions({ stopped: true })).map((row) => row.id),
+        (yield* db.session.listSessions({ stopped: true })).map((row) => row.id),
         before,
       )
     }),
@@ -246,7 +247,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const parent = path.join(layout.worktrees, yield* repositoryDirectoryName(repo))
       assert.deepStrictEqual(yield* fs.readDirectory(parent), [])
     }),
-    () => ({ db: (db) => ({ ...db, insertSession: () => Effect.die("insert failed") }) }),
+    () => ({ db: (db) => ({ ...db, session: { ...db.session, insertSession: () => Effect.die("insert failed") } }) }),
   )
 
   test(
@@ -269,7 +270,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const exit = yield* Fiber.await(spawning)
       assert.isTrue(Exit.hasInterrupts(exit))
       assert.deepStrictEqual(yield* files.readDirectory(parent), [])
-      assert.lengthOf(yield* db.listSessions({ stopped: true }), 0)
+      assert.lengthOf(yield* db.session.listSessions({ stopped: true }), 0)
       assert.lengthOf(yield* herdr.callsTo("open"), 0)
     }),
   )
@@ -281,10 +282,13 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       options: (): TestOptions => ({
         db: (db) => ({
           ...db,
-          insertSession: (...args) =>
-            db
-              .insertSession(...args)
-              .pipe(Effect.tap(() => Deferred.succeed(inserted, undefined).pipe(Effect.andThen(Deferred.await(go))))),
+          session: {
+            ...db.session,
+            insertSession: (...args) =>
+              db.session
+                .insertSession(...args)
+                .pipe(Effect.tap(() => Deferred.succeed(inserted, undefined).pipe(Effect.andThen(Deferred.await(go))))),
+          },
         }),
       }),
       inserted: Deferred.await(inserted),
@@ -306,8 +310,8 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       yield* Effect.yieldNow
       yield* held.go
       yield* Fiber.join(interrupting)
-      const [row] = yield* until(db.listSessions({ stopped: true }), (rows) => rows.length === 1)
-      yield* until(db.getSession(row!.id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
+      const [row] = yield* until(db.session.listSessions({ stopped: true }), (rows) => rows.length === 1)
+      yield* until(db.session.getSession(row!.id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
     }),
     held.options,

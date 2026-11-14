@@ -95,7 +95,7 @@ export const make = Effect.gen(function* () {
       const { h, session } = input
       const id = session.id
       const reasons = [...input.reasons]
-      const directory = yield* db.sessionDirectory(id)
+      const directory = yield* db.session.sessionDirectory(id)
       if (!directory) {
         reasons.push(`${id} records no directory; nothing was deleted`)
         return {
@@ -170,7 +170,7 @@ export const make = Effect.gen(function* () {
           : yield* confirmExited
       const processState: ProcessState = confirmed.state
       if (processState === "exited" && exitedAt(session) === null) {
-        yield* db.endProcess(id, "archived")
+        yield* db.session.endProcess(id, "archived")
       }
       let shared = false
       const g = exists ? yield* gitState(worktree) : undefined
@@ -189,7 +189,7 @@ export const make = Effect.gen(function* () {
           return `${worktree} is not under ${layout.worktrees}; left alone`
         const sharing = (live: ReadonlyArray<string>) =>
           live.length > 0 ? `worktree kept: session ${live.join(", ")} still works in it` : undefined
-        const liveSharers = db.liveSharers(id)
+        const liveSharers = db.session.liveSharers(id)
         const early = sharing(yield* liveSharers)
         if (early) {
           shared = true
