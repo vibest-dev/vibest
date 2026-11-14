@@ -1,7 +1,6 @@
 import type {
   AgentEditor,
   AgentHooks,
-  AgentResults,
   MachineHookOptions,
   MachineHooks,
   MachineNote,
@@ -20,7 +19,7 @@ export interface Context {
   readonly agent: {
     readonly hook: <Name extends keyof AgentHooks>(
       name: Name,
-      callback: (event: AgentHooks[Name]) => Awaitable<AgentResults[Name] | void>,
+      callback: (event: AgentHooks[Name]) => Awaitable<void>,
     ) => Promise<Registration>
     readonly transform: (callback: (editor: AgentEditor) => void) => Promise<Registration>
   }

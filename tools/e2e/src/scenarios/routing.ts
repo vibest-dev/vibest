@@ -128,7 +128,9 @@ import { Plugin } from "@vibest/plugin"
 export default Plugin.define({
   id: "promised",
   setup: async (ctx) => {
-    await ctx.agent.hook("start.before", async (e) => (e.prompt.includes("done-promised") ? { harness: "pi" } : undefined))
+    await ctx.agent.hook("start.before", async (e) => {
+      if (e.prompt.includes("done-promised")) e.provider = "second"
+    })
     void (async () => {
       for await (const fact of ctx.event.subscribe({ types: ["execution.ended"] }))
         fs.appendFileSync(${JSON.stringify(facts)}, \`\${fact.type} \${fact.sessionId}\\n\`)
@@ -142,7 +144,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before picks the harness: with it the run starts Pi, ls names the plugin as the harness's decider, and its answer arrives",
+      "a routing plugin's agent.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")
@@ -152,11 +154,14 @@ const checks: ReadonlyArray<Check> = [
         await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.succeed(e.prompt.includes("done-routed") ? { harness: "pi" } : undefined))`,
+          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.provider = "second" }))`,
         )
         const id = await runId(w, ["--", ask("routed")])
         const e = await entry(w, id)
-        expect(e?.harness === "pi" && e.routing?.decidedBy.harness === "router", `routed session: ${JSON.stringify(e)}`)
+        expect(
+          e?.harness === "pi" && e.routing?.decidedBy.provider === "router",
+          `routed session: ${JSON.stringify(e)}`,
+        )
         await resultOf(w, id, "routed")
       } finally {
         model.stop()
@@ -307,7 +312,7 @@ const checks: ReadonlyArray<Check> = [
         const router = await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", () => Effect.succeed({ harness: "pi" }))`,
+          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
         )
         const pi = await startedIn("dflt-pi", { PI_CODING_AGENT_DIR: dir })
         expect(pi.harness === "pi", `a plugin picking Pi: ${JSON.stringify(pi)}`)
@@ -483,7 +488,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
         const id = await runId(w, ["--", ask("promised")])
         const e = await entry(w, id)
         expect(
-          e?.harness === "pi" && e.routing?.decidedBy.harness === "promised",
+          e?.harness === "pi" && e.routing?.decidedBy.provider === "promised",
           `routed session: ${JSON.stringify(e)}`,
         )
         await resultOf(w, id, "promised")
@@ -539,7 +544,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
         await install("gate-b", sleep)
         await install(
           "gate-router",
-          `${sleep}.pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.succeed(e.prompt.includes("done-gated") ? { harness: "pi" } : undefined))))`,
+          `${sleep}.pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-gated")) e.provider = "second" }))))`,
         )
         await until(
           "the first setup",
@@ -579,7 +584,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
         const id = await runId(w, ["--", ask("gated")])
         const started = await entry(w, id)
         expect(
-          started?.harness === "pi" && started.routing?.decidedBy.harness === "gate-router",
+          started?.harness === "pi" && started.routing?.decidedBy.provider === "gate-router",
           `routed once active: ${JSON.stringify(started)}`,
         )
         await resultOf(w, id, "gated")

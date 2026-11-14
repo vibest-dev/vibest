@@ -24,8 +24,7 @@ error, and the other plugins, those after it included, stay active.
 
 A plugin hook that refuses a run blocks `vibest run` with its reason before any pane or worktree exists: the command
 fails and prints the reason. A hook that throws instead of returning an Effect blocks the run the same way, printing
-`plugin <id> crashed: <error>`, and counts as a crash of that plugin; so does a hook written in the old style that
-assigns to the event it is given instead of returning its decision.
+`plugin <id> crashed: <error>`, and counts as a crash of that plugin.
 
 ## G5. A routing plugin picks the harness
 
