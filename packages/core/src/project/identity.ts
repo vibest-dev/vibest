@@ -5,7 +5,7 @@ import { Effect, FileSystem, Path } from "effect"
 import type { Db } from "../database/db.ts"
 import { projectRepositories, projectRoot } from "./create.ts"
 
-export const locateProject = Effect.fn("locateProject")(function* (directory: string) {
+export const locateProject = Effect.fn("Project.locateProject")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem
   const root = yield* fs.realPath((yield* projectRoot(directory)).root)
   return { root, repositories: yield* projectRepositories(root) }
@@ -18,7 +18,7 @@ export interface Moved {
   readonly manual: ReadonlyArray<string>
 }
 
-const repairWorktrees = Effect.fn("repairWorktrees")(function* (repositories: ReadonlyArray<string>) {
+const repairWorktrees = Effect.fn("Project.repairWorktrees")(function* (repositories: ReadonlyArray<string>) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const worktrees = (yield* Layout).worktrees
@@ -48,7 +48,7 @@ const repairWorktrees = Effect.fn("repairWorktrees")(function* (repositories: Re
   return { repaired, manual }
 })
 
-export const resolveProject = Effect.fn("resolveProject")(function* (
+export const resolveProject = Effect.fn("Project.resolveProject")(function* (
   db: Db.Interface,
   located: Located,
   move?: boolean,
