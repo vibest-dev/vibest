@@ -3,7 +3,7 @@
 Status: vibestd keeps an append-only log of facts (the `event` table) and a read model projected from it, in one SQLite
 file, `vibest.db`. The facts are the catalog in `packages/schema/src/event.ts`; `packages/core/src/bus.ts` appends
 them and the projectors of `packages/core/src/project/projector.ts`, `session/projector.ts` and `remote/projector.ts`, each registered with `bus.project`, turn each into its read-model rows; a replay reaching a fact type with no registered projector fails. The `Db` service
-(`packages/core/src/database/db.ts` and its `db-*.ts` modules) answers its callers from the read model and changes nothing but by
+(`packages/core/src/database/db.ts` and its domain modules) answers its callers from the read model and changes nothing but by
 appending facts.
 
 - `event`: the log. Each row is one fact of one aggregate: `aggregate` (the id of what it is about), `seq` (its number
@@ -275,7 +275,10 @@ type or key changes or removes rows, in the same pull request.
 
 ## The Db service
 
-- All SQL is in `packages/core/src/database/db.ts` and its `db-*.ts` modules, over one SQLite connection. The session row
+- All SQL is in `packages/core/src/database/`, over one SQLite connection. `Db` is the one transaction owner; its interface
+  groups its methods by domain (`db.project`, `db.session`, `db.inbox`, `db.remote`), each built by its module
+  (`project.ts`, `session.ts`, `inbox.ts`, `remote.ts`) from the in-transaction statements of `session-statements.ts`,
+  `inbox.ts` and `remote.ts`. The session row
   callers read (`SessionRow`) is built from the read model plus the memory listed below (`database/ledger-read.ts` holds the
   reads the import's referee shares). It carries `endedAt`, `parentId`, `entry`, the current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
   session with neither never ran an execution. `attempts` lists the harness and provider of each of its processes that
