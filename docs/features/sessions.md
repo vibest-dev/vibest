@@ -33,7 +33,9 @@ worktree go and the branch keeps them. `--keep-worktree` keeps a clean worktree 
 ## S7. Archive on idle
 
 `vibest run --archive-on-idle` archives the session the first time it is idle after a completed execution with nothing it sent
-or was sent still waiting, and sends no notice for a clean archive. `--archive-on-completion` is a usage error.
+or was sent still waiting, and sends no notice for a clean archive. The builtin plugin `archive-on-idle` does that;
+`"-archive-on-idle"` in `vibest.json` removes it, and a session started with the flag then stays until `vibest archive`.
+`--archive-on-completion` is a usage error.
 
 ## S9. A limit on sessions
 

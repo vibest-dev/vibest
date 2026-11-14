@@ -5,7 +5,7 @@ import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
-import { Clock, Effect, Exit, Fiber, Ref, Scope } from "effect"
+import { Clock, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -13,7 +13,7 @@ import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { CURSOR, PI } from "./lib/harnesses.ts"
-import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd } from "./lib/observe.ts"
+import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
@@ -246,6 +246,7 @@ describe.concurrent("Session", () => {
         (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "completed",
       )
       assert.strictEqual(executionStateOf(done), "completed")
+      yield* settled
       assert.deepStrictEqual(
         yield* sql<{
           status: string
@@ -492,6 +493,57 @@ describe.concurrent("Session", () => {
     }),
     { hooked: ["leaving-pi"] },
   )
+
+  {
+    const failing = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    test(
+      "a failed delivery marks its rows failed under the session lock: a check meanwhile does not deliver them as well",
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        const sql = yield* SqlClient.SqlClient
+        const harnesses = yield* Harnesses.Service
+        const loaded = yield* Scope.make()
+        yield* harnesses.transform((editor) => editor.add({ ...PI, id: "leaving-pi" })).pipe(Scope.provide(loaded))
+        const { id, sessions } = yield* spawnWorking(yield* makeRepository, "leaving-pi")
+        yield* writeEnd(id, "leaving-pi", { text: "status: completed" })
+        yield* herdr.endExecution(id)
+        yield* sessions.check(id)
+        yield* Scope.close(loaded, Exit.void)
+        yield* sessions.send(id, "hello")
+        yield* Deferred.await(failing)
+        yield* harnesses
+          .transform((editor) => editor.add({ ...PI, id: "leaving-pi" }))
+          .pipe(Scope.provide(yield* Scope.make()))
+        const checking = yield* Effect.forkChild(sessions.check(id))
+        for (let i = 0; i < 30; i++) yield* yieldToIo
+        yield* Deferred.succeed(go, undefined)
+        yield* Fiber.join(checking)
+        yield* settled
+        const [row] = yield* sql<{
+          status: string
+        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'hello'`.pipe(Effect.orDie)
+        const sent = (yield* herdr.callsTo("send")).filter((call) => call.text?.includes("hello")).length
+        assert.deepStrictEqual({ status: row?.status, sent }, { status: "failed", sent: 0 })
+      }),
+      {
+        hooked: ["leaving-pi"],
+        db: (db) => ({
+          ...db,
+          inbox: {
+            ...db.inbox,
+            setInboxStatus: (sessionId, ids, status, from, into) =>
+              status === "failed" && from === undefined
+                ? Deferred.succeed(failing, undefined).pipe(
+                    Effect.andThen(Deferred.await(go)),
+                    Effect.andThen(db.inbox.setInboxStatus(sessionId, ids, status, from, into)),
+                  )
+                : db.inbox.setInboxStatus(sessionId, ids, status, from, into),
+          },
+        }),
+      },
+    )
+  }
 
   test(
     "a session that cannot be resumed: each accepted message fails on its own, with its own notice",

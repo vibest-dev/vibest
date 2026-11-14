@@ -231,6 +231,7 @@ describe("plugins: spawn hook", () => {
           ["typo", "failed"],
           ["proto", "failed"],
           ["current", "active"],
+          ["archive-on-idle", "active"],
         ],
       )
       const supported = "agent.start.before, agent.fail"

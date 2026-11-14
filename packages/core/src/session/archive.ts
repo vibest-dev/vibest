@@ -1,8 +1,6 @@
-import { ExecutionEnded, InboxMoved, SessionEnded } from "@vibest/schema/event"
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
-import { Bus } from "../bus.ts"
 import {
   type SessionRow,
   sessionEnded,
@@ -39,7 +37,6 @@ const make = Effect.gen(function* () {
   const sessionLive = yield* SessionLive
   const { notice, recount } = yield* Placement
   const { interruptAgent, settleAfterInterrupt } = yield* Executions
-  const reactor = yield* Reactor.make
   const archives = yield* FiberSet.make()
   const { locked } = locks
   const logged = Reactor.logFailure
@@ -223,33 +220,16 @@ const make = Effect.gen(function* () {
     ).pipe(logged(`archive ${id}`)),
   )
 
-  const archiveSoon = (ids: ReadonlyArray<string>) =>
+  const archiveSoon = Effect.fn("Archive.archiveSoon")((ids: ReadonlyArray<string>) =>
     Effect.forEach(
       ids,
       (id) =>
         FiberSet.run(archives, drain.work(`archive ${id}`, archiveIfIdle(id).pipe(logged(`archive ${id}`)), true)),
       { discard: true },
-    )
-
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void,
-  )
-  yield* reactor.on([InboxMoved], (event) =>
-    event.data.to === "pending" || event.data.to === "delivering"
-      ? Effect.void
-      : db.inbox.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon)),
-  )
-  yield* reactor.on([SessionEnded], (event) =>
-    db.session
-      .creatorOf(event.sessionId!)
-      .pipe(
-        Effect.flatMap((creator) =>
-          creator !== undefined && "local" in creator ? archiveSoon([creator.local]) : Effect.void,
-        ),
-      ),
+    ),
   )
 
-  return { undoCutOffStart, abandonLaunch, remove, finishArchive }
+  return { undoCutOffStart, abandonLaunch, remove, finishArchive, archiveSoon }
 })
 
 export class Archive extends Context.Service<Archive, Effect.Success<typeof make>>()("vibest/Archive") {
@@ -261,7 +241,6 @@ export class Archive extends Context.Service<Archive, Effect.Success<typeof make
     service: Archive,
     layer: Archive.layer,
     deps: [
-      Bus.node,
       Db.node,
       Drain.node,
       Executions.node,
@@ -278,3 +257,18 @@ export class Archive extends Context.Service<Archive, Effect.Success<typeof make
     ],
   })
 }
+
+export const archiveOnIdle = Effect.gen(function* () {
+  const archive = yield* Archive
+  const db = yield* Db
+  const live = yield* SessionLive
+  return {
+    optedIn: live.archivesOnIdle,
+    consider: archive.archiveSoon,
+    parties: (sessionId: string, inbox: number) => db.inbox.inboxParties(sessionId, inbox),
+    localCreator: (sessionId: string) =>
+      db.session
+        .creatorOf(sessionId)
+        .pipe(Effect.map((creator) => (creator !== undefined && "local" in creator ? creator.local : undefined))),
+  }
+})
