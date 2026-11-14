@@ -15,6 +15,8 @@ import { Context, Effect, Layer } from "effect"
 
 import { Machines } from "./machines.ts"
 
+export * as Remote from "./remote.ts"
+
 type Address =
   | { readonly _tag: "Local"; readonly id: string }
   | { readonly _tag: "Remote"; readonly machine: string; readonly id: string }
@@ -53,7 +55,7 @@ type Away = { readonly machine: ListedMachine; readonly sessions: ReadonlyArray<
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const machines = yield* Machines
+  const machines = yield* Machines.Service
   const self = yield* Identity.Service
   const git = yield* Git.Service
   const runtimes = yield* Runtimes.Service
@@ -96,143 +98,151 @@ const make = Effect.gen(function* () {
     f: (client: PipeClient, headers: Record<string, string>) => Effect.Effect<A, E>,
   ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, peerHeaders(self.id, project, by))))
 
-  const relay = <A, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
-    call(at.machine, project, by, (client, headers) => f(client, at, { headers }))
+  const relay = Effect.fn("Remote.relay")(<A, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
+    call(at.machine, project, by, (client, headers) => f(client, at, { headers })),
+  )
 
   return {
     relay,
 
-    forward: <A extends { readonly id: string } | null, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
-      Effect.map(relay(at, project, by, f), (row): A =>
-        row === null ? row : { ...row, id: addressed(at.machine, row.id) },
-      ),
+    forward: Effect.fn("Remote.forward")(
+      <A extends { readonly id: string } | null, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
+        Effect.map(relay(at, project, by, f), (row): A =>
+          row === null ? row : { ...row, id: addressed(at.machine, row.id) },
+        ),
+    ),
 
-    harnesses: (machine: string, provider: string | undefined) =>
+    harnesses: Effect.fn("Remote.harnesses")((machine: string, provider: string | undefined) =>
       Effect.flatMap(machines.link(machine), (link) =>
         link.call(
           link.client["Harnesses.List"](provider === undefined ? {} : { provider }, { headers: peerHeaders(self.id) }),
         ),
       ),
+    ),
 
-    list: (scope: ListScope, by: string, stopped: boolean | undefined) =>
-      Effect.gen(function* () {
-        if (scope._tag === "Peer") return { sessions: [], machines: [] }
-        const each = yield* Effect.forEach(
-          yield* machines.states,
-          ({ info, link }): Effect.Effect<Away> =>
-            link === undefined || scope._tag !== "Project"
-              ? Effect.succeed({ machine: info, sessions: [] })
-              : link
-                  .call(
-                    link.client.List(stopped === undefined ? {} : { stopped }, {
-                      headers: peerHeaders(self.id, scope.id, by),
-                    }),
-                  )
-                  .pipe(
-                    Effect.matchEffect({
-                      onSuccess: (rows) =>
-                        Effect.map(view(info.name, rows.sessions), (sessions) => ({ machine: info, sessions })),
-                      onFailure: (e) =>
-                        Effect.succeed({
-                          machine: { ...info, state: "unreachable" as const, reason: e.message },
-                          sessions: [],
-                        }),
-                    }),
-                  ),
-          { concurrency: "unbounded" },
-        )
-        return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
-      }),
+    list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
+      if (scope._tag === "Peer") return { sessions: [], machines: [] }
+      const each = yield* Effect.forEach(
+        yield* machines.states,
+        ({ info, link }): Effect.Effect<Away> =>
+          link === undefined || scope._tag !== "Project"
+            ? Effect.succeed({ machine: info, sessions: [] })
+            : link
+                .call(
+                  link.client.List(stopped === undefined ? {} : { stopped }, {
+                    headers: peerHeaders(self.id, scope.id, by),
+                  }),
+                )
+                .pipe(
+                  Effect.matchEffect({
+                    onSuccess: (rows) =>
+                      Effect.map(view(info.name, rows.sessions), (sessions) => ({ machine: info, sessions })),
+                    onFailure: (e) =>
+                      Effect.succeed({
+                        machine: { ...info, state: "unreachable" as const, reason: e.message },
+                        sessions: [],
+                      }),
+                  }),
+                ),
+        { concurrency: "unbounded" },
+      )
+      return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
+    }),
 
-    get: (at: At, project: string, by: string, p: PayloadOf<"Get">) =>
+    get: Effect.fn("Remote.get")((at: At, project: string, by: string, p: PayloadOf<"Get">) =>
       relay(at, project, by, (c, { id }, o) => c.Get({ ...p, id }, o)).pipe(
         Effect.flatMap((row) => Effect.map(view(at.machine, [row]), (rows) => rows[0]!)),
       ),
+    ),
 
-    peek: (at: At, project: string, by: string, p: PayloadOf<"Peek">) =>
-      Effect.gen(function* () {
-        const { text } = yield* relay(at, project, by, (c, { id }, o) => c.Peek({ ...p, id }, o))
-        const row = yield* relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
-          Effect.flatMap((row) => view(at.machine, [row])),
-          Effect.map((rows) => rows[0]),
-          Effect.orElseSucceed(() => undefined),
-        )
-        return {
-          text,
-          ...(row === undefined || row.address.id === "" ? {} : { terminal: row.address.id }),
-          ...(row?.view === undefined ? {} : { view: row.view }),
-        }
-      }),
+    peek: Effect.fn("Remote.peek")(function* (at: At, project: string, by: string, p: PayloadOf<"Peek">) {
+      const { text } = yield* relay(at, project, by, (c, { id }, o) => c.Peek({ ...p, id }, o))
+      const row = yield* relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
+        Effect.flatMap((row) => view(at.machine, [row])),
+        Effect.map((rows) => rows[0]),
+        Effect.orElseSucceed(() => undefined),
+      )
+      return {
+        text,
+        ...(row === undefined || row.address.id === "" ? {} : { terminal: row.address.id }),
+        ...(row?.view === undefined ? {} : { view: row.view }),
+      }
+    }),
 
-    spawn: (machine: string, input: PayloadOf<"Spawn">, from: { readonly project: string; readonly session: string }) =>
-      Effect.gen(function* () {
-        const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
-          ([, flag]) => flag,
-        )
-        if (refused.length > 0)
-          return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })
-        const repositories = yield* db.projectRemote(from.project)
-        const repository = repositories[0]
-        if (repositories.length !== 1 || repository === undefined)
-          return yield* new MachineFailed({
-            message: "only a project of one repository runs agents on another machine",
-          })
-        const remote = repository.remote
-        if (remote === null)
-          return yield* new MachineFailed({
-            message: `${repository.path} has no remote; another machine finds its checkout by the remote URL`,
-          })
-        const commit = yield* git
-          .head(repository.path)
-          .pipe(
-            Effect.mapError(
-              (e) => new MachineFailed({ message: `cannot read HEAD of ${repository.path}: ${e.message}` }),
-            ),
-          )
-        const identity = yield* repositoryIdentity(remote)
-        const runtime = input.runtime ?? callerKind(yield* runtimes.callers, input.callerEnv)
-        const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
-        const ready =
-          viewer?.locate === undefined || runtime === undefined
-            ? undefined
-            : yield* machines.ensure(machine, runtime, new Map(), true)
-        const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
-          client["Peer.Spawn"](
-            {
-              repository: remote,
-              ...(identity === undefined ? {} : { identity }),
-              commit,
-              agent: input.agent,
-              prompt: input.prompt,
-              ...(input.harness === undefined ? {} : { harness: input.harness }),
-              ...(input.provider === undefined ? {} : { provider: input.provider }),
-              ...(input.model === undefined ? {} : { model: input.model }),
-              ...(input.name === undefined ? {} : { title: input.name }),
-              ...(runtime === undefined ? {} : { runtime }),
-              request: input.request ?? randomId(),
-            },
-            { headers },
+    spawn: Effect.fn("Remote.spawn")(function* (
+      machine: string,
+      input: PayloadOf<"Spawn">,
+      from: { readonly project: string; readonly session: string },
+    ) {
+      const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
+        ([, flag]) => flag,
+      )
+      if (refused.length > 0)
+        return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })
+      const repositories = yield* db.projectRemote(from.project)
+      const repository = repositories[0]
+      if (repositories.length !== 1 || repository === undefined)
+        return yield* new MachineFailed({
+          message: "only a project of one repository runs agents on another machine",
+        })
+      const remote = repository.remote
+      if (remote === null)
+        return yield* new MachineFailed({
+          message: `${repository.path} has no remote; another machine finds its checkout by the remote URL`,
+        })
+      const commit = yield* git
+        .head(repository.path)
+        .pipe(
+          Effect.mapError(
+            (e) => new MachineFailed({ message: `cannot read HEAD of ${repository.path}: ${e.message}` }),
           ),
         )
-        return {
-          id: addressed(machine, spawned.session),
-          harness: spawned.harness,
-          ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
-          ...(spawned.model === undefined ? {} : { model: spawned.model }),
-          decidedBy: spawned.decidedBy,
-          trace: spawned.trace,
-          ...(ready?.note === undefined ? {} : { notes: [{ message: ready.note }] }),
-        }
-      }),
+      const identity = yield* repositoryIdentity(remote)
+      const runtime = input.runtime ?? callerKind(yield* runtimes.callers, input.callerEnv)
+      const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
+      const ready =
+        viewer?.locate === undefined || runtime === undefined
+          ? undefined
+          : yield* machines.ensure(machine, runtime, new Map(), true)
+      const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
+        client["Peer.Spawn"](
+          {
+            repository: remote,
+            ...(identity === undefined ? {} : { identity }),
+            commit,
+            agent: input.agent,
+            prompt: input.prompt,
+            ...(input.harness === undefined ? {} : { harness: input.harness }),
+            ...(input.provider === undefined ? {} : { provider: input.provider }),
+            ...(input.model === undefined ? {} : { model: input.model }),
+            ...(input.name === undefined ? {} : { title: input.name }),
+            ...(runtime === undefined ? {} : { runtime }),
+            request: input.request ?? randomId(),
+          },
+          { headers },
+        ),
+      )
+      return {
+        id: addressed(machine, spawned.session),
+        harness: spawned.harness,
+        ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
+        ...(spawned.model === undefined ? {} : { model: spawned.model }),
+        decidedBy: spawned.decidedBy,
+        trace: spawned.trace,
+        ...(ready?.note === undefined ? {} : { notes: [{ message: ready.note }] }),
+      }
+    }),
   }
 })
 
-export class Remote extends Context.Service<Remote, Effect.Success<typeof make>>()("vibest/Remote") {
-  static readonly layer = Layer.effect(Remote, make)
+export type Interface = Effect.Success<typeof make>
 
-  static readonly node = LayerNode.make({
-    service: Remote,
-    layer: Remote.layer,
-    deps: [Db.node, Git.node, Machines.node, Runtimes.node, Identity.node],
-  })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Remote") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [Db.node, Git.node, Machines.node, Runtimes.node, Identity.node],
+})

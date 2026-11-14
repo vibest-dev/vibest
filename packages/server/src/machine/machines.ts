@@ -41,6 +41,8 @@ import {
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
 
+export * as Machines from "./machines.ts"
+
 type PipeExit = { readonly code: number | undefined; readonly stderr: string }
 
 interface Pipe {
@@ -51,9 +53,9 @@ interface Pipe {
 export class MachineTransport extends Context.Service<
   MachineTransport,
   (argv: ReadonlyArray<string>) => Effect.Effect<Pipe, Error, Scope.Scope>
->()("vibest/MachineTransport") {
-  static readonly node = LayerNode.unbound(MachineTransport)
-}
+>()("vibest/MachineTransport") {}
+
+export const machineTransportNode = LayerNode.unbound(MachineTransport)
 
 const ADD_TIMEOUT = Duration.seconds(30)
 export const RETRY_FIRST = Duration.millis(500)
@@ -205,56 +207,59 @@ const make = Effect.gen(function* () {
         .map((r): PluginNote => ({ message: cannotShow(name, shownKind(here, r.kind)) })),
     )
 
-  const ensure = (name: string, kind: string, sessions: ReadonlyMap<string, string>, always = false) =>
-    lock.withLock(name)(
-      Effect.gen(function* () {
-        const row = yield* db.machineNamed(name)
-        const here = yield* runtimes.all
-        const locate = here.find((r) => r.id === kind)?.locate
-        const label = shownKind(here, kind)
-        if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, label) } as View
-        const seen = there.get(name)
-        const reported = seen?.runtimes.find((r) => r.kind === kind)
-        if (reported?.link === undefined)
-          return {
-            terminals: NONE,
-            note:
-              seen === undefined
-                ? `${name} has not answered since vibestd started`
-                : reported === undefined
-                  ? `${name} has no ${kind} runtime`
-                  : `${kind} on ${name} is ${reported.status}${reported.reason ? ` (${reported.reason})` : ""}`,
-          } as View
-        const look = locate({ id: name, target: row.target, link: reported.link }, sessions).pipe(
-          Effect.catchCause((cause) =>
-            Effect.succeed({
-              missing: false,
+  const ensure = Effect.fn("Machines.ensure")(
+    (name: string, kind: string, sessions: ReadonlyMap<string, string>, always = false) =>
+      lock.withLock(name)(
+        Effect.gen(function* () {
+          const row = yield* db.machineNamed(name)
+          const here = yield* runtimes.all
+          const locate = here.find((r) => r.id === kind)?.locate
+          const label = shownKind(here, kind)
+          if (row === undefined || locate === undefined)
+            return { terminals: NONE, note: cannotShow(name, label) } as View
+          const seen = there.get(name)
+          const reported = seen?.runtimes.find((r) => r.kind === kind)
+          if (reported?.link === undefined)
+            return {
               terminals: NONE,
-              note: `${kind} here could not look for ${name}: ${errorMessage(cause)}`,
-            }),
-          ),
-        )
-        const first = yield* look
-        if (!first.missing) return first as View
-        const key = `${name}\0${kind}`
-        const last = repairs.get(key)
-        if (
-          !always &&
-          last !== undefined &&
-          (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(REPAIR_PAUSE)
-        )
-          return { terminals: NONE, note: last.note } as View
-        const notes = yield* fire(row, "connect", kind)
-        const again = yield* look
-        if (!again.missing) {
-          repairs.delete(key)
-          return again as View
-        }
-        const note = again.note ?? (notes.map(noteText).join("; ") || `${name}'s agents are not in ${label} here`)
-        repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
-        return { terminals: NONE, note } as View
-      }),
-    )
+              note:
+                seen === undefined
+                  ? `${name} has not answered since vibestd started`
+                  : reported === undefined
+                    ? `${name} has no ${kind} runtime`
+                    : `${kind} on ${name} is ${reported.status}${reported.reason ? ` (${reported.reason})` : ""}`,
+            } as View
+          const look = locate({ id: name, target: row.target, link: reported.link }, sessions).pipe(
+            Effect.catchCause((cause) =>
+              Effect.succeed({
+                missing: false,
+                terminals: NONE,
+                note: `${kind} here could not look for ${name}: ${errorMessage(cause)}`,
+              }),
+            ),
+          )
+          const first = yield* look
+          if (!first.missing) return first as View
+          const key = `${name}\0${kind}`
+          const last = repairs.get(key)
+          if (
+            !always &&
+            last !== undefined &&
+            (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(REPAIR_PAUSE)
+          )
+            return { terminals: NONE, note: last.note } as View
+          const notes = yield* fire(row, "connect", kind)
+          const again = yield* look
+          if (!again.missing) {
+            repairs.delete(key)
+            return again as View
+          }
+          const note = again.note ?? (notes.map(noteText).join("; ") || `${name}'s agents are not in ${label} here`)
+          repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
+          return { terminals: NONE, note } as View
+        }),
+      ),
+  )
 
   const set = (name: string, entry: Omit<Entry, "since">) =>
     Effect.gen(function* () {
@@ -475,43 +480,42 @@ const make = Effect.gen(function* () {
   )
 
   return {
-    add: (name: string, target: string) =>
-      Effect.gen(function* () {
-        const problem = nameProblem(name) ?? targetProblem(target)
-        if (problem !== undefined) return yield* failed(problem)
-        if ((yield* db.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
-        const pipe = yield* Scope.make()
-        const opened = yield* open(name, target).pipe(
-          Scope.provide(pipe),
-          Effect.timeoutOrElse({
-            duration: ADD_TIMEOUT,
-            orElse: () => Effect.fail(new MachineDown({ message: `${name} did not answer in 30 s` })),
-          }),
-          Effect.mapError((e) =>
-            e.stop === "mismatch" ? new MachineIncompatible({ machine: name, message: e.message }) : failed(e.message),
-          ),
-          Effect.onError(() => Scope.close(pipe, Exit.void)),
-        )
-        const id = opened.hello.id
-        const added = id === self.id ? undefined : yield* db.addMachine({ name, target, vibestdId: id })
-        if (added === undefined) {
-          yield* Scope.close(pipe, Exit.void)
-          if (id === self.id) return yield* failed(`${name} is this vibestd`)
-          const same = yield* db.machineWithVibestd(id)
-          if (same !== undefined) return yield* new AlreadyAdded({ machine: same.name, id })
-          return yield* failed(alreadyNamed(name))
-        }
-        yield* start(name, { row: added, opened, scope: pipe })
-        yield* heard(name, opened.hello.runtimes)
-        const notes = yield* lock.withLock(name)(fire(added, "connect"))
-        return {
-          name,
-          id,
-          vibestd: opened.hello.name,
-          version: opened.version,
-          notes: [...(yield* coreNotes(name)), ...notes],
-        }
-      }),
+    add: Effect.fn("Machines.add")(function* (name: string, target: string) {
+      const problem = nameProblem(name) ?? targetProblem(target)
+      if (problem !== undefined) return yield* failed(problem)
+      if ((yield* db.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
+      const pipe = yield* Scope.make()
+      const opened = yield* open(name, target).pipe(
+        Scope.provide(pipe),
+        Effect.timeoutOrElse({
+          duration: ADD_TIMEOUT,
+          orElse: () => Effect.fail(new MachineDown({ message: `${name} did not answer in 30 s` })),
+        }),
+        Effect.mapError((e) =>
+          e.stop === "mismatch" ? new MachineIncompatible({ machine: name, message: e.message }) : failed(e.message),
+        ),
+        Effect.onError(() => Scope.close(pipe, Exit.void)),
+      )
+      const id = opened.hello.id
+      const added = id === self.id ? undefined : yield* db.addMachine({ name, target, vibestdId: id })
+      if (added === undefined) {
+        yield* Scope.close(pipe, Exit.void)
+        if (id === self.id) return yield* failed(`${name} is this vibestd`)
+        const same = yield* db.machineWithVibestd(id)
+        if (same !== undefined) return yield* new AlreadyAdded({ machine: same.name, id })
+        return yield* failed(alreadyNamed(name))
+      }
+      yield* start(name, { row: added, opened, scope: pipe })
+      yield* heard(name, opened.hello.runtimes)
+      const notes = yield* lock.withLock(name)(fire(added, "connect"))
+      return {
+        name,
+        id,
+        vibestd: opened.hello.name,
+        version: opened.version,
+        notes: [...(yield* coreNotes(name)), ...notes],
+      }
+    }),
 
     ensure,
 
@@ -557,39 +561,39 @@ const make = Effect.gen(function* () {
 
     states,
 
-    remove: (name: string) =>
-      Effect.gen(function* () {
-        const row = yield* db.machineNamed(name)
-        const fiber = fibers.get(name)
-        fibers.delete(name)
-        if (fiber !== undefined) yield* Fiber.interrupt(fiber)
-        entries.delete(name)
-        if (row === undefined || !(yield* db.removeMachine(name)))
-          return yield* new UnknownMachine({ machine: name, machines: (yield* db.machines).map((row) => row.name) })
-        const notes = yield* lock.withLock(name)(fire(row, "remove"))
-        there.delete(name)
-        noted.delete(name)
-        for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
-        return { notes }
-      }),
+    remove: Effect.fn("Machines.remove")(function* (name: string) {
+      const row = yield* db.machineNamed(name)
+      const fiber = fibers.get(name)
+      fibers.delete(name)
+      if (fiber !== undefined) yield* Fiber.interrupt(fiber)
+      entries.delete(name)
+      if (row === undefined || !(yield* db.removeMachine(name)))
+        return yield* new UnknownMachine({ machine: name, machines: (yield* db.machines).map((row) => row.name) })
+      const notes = yield* lock.withLock(name)(fire(row, "remove"))
+      there.delete(name)
+      noted.delete(name)
+      for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
+      return { notes }
+    }),
 
-    link: (name: string) =>
-      Effect.gen(function* () {
-        if ((yield* db.machineNamed(name)) === undefined)
-          return yield* new UnknownMachine({ machine: name, machines: (yield* db.machines).map((row) => row.name) })
-        const entry = entries.get(name)
-        if (entry?.state === "connected" && entry.link !== undefined) return entry.link
-        return yield* unavailable(name, entry)
-      }),
+    link: Effect.fn("Machines.link")(function* (name: string) {
+      if ((yield* db.machineNamed(name)) === undefined)
+        return yield* new UnknownMachine({ machine: name, machines: (yield* db.machines).map((row) => row.name) })
+      const entry = entries.get(name)
+      if (entry?.state === "connected" && entry.link !== undefined) return entry.link
+      return yield* unavailable(name, entry)
+    }),
   }
 })
 
-export class Machines extends Context.Service<Machines, Effect.Success<typeof make>>()("vibest/Machines") {
-  static readonly layer = Layer.effect(Machines, make)
+export type Interface = Effect.Success<typeof make>
 
-  static readonly node = LayerNode.make({
-    service: Machines,
-    layer: Machines.layer,
-    deps: [Db.node, MachineTransport.node, Plugins.node, Runtimes.node, Identity.node],
-  })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Machines") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [Db.node, machineTransportNode, Plugins.node, Runtimes.node, Identity.node],
+})

@@ -26,8 +26,7 @@ import * as SocketServer from "effect/socket/SocketServer"
 
 import { AdmissionLive, CallerGateLive, ProtocolGateLive } from "./gates.ts"
 import * as CallerChecks from "./handlers/caller.ts"
-import * as DaemonHandlers from "./handlers/daemon.ts"
-import { Identity as HandlerIdentity, Shutdown } from "./handlers/daemon.ts"
+import { DaemonHandlers } from "./handlers/daemon.ts"
 import * as EntryHandlers from "./handlers/entry.ts"
 import * as InboxHandlers from "./handlers/inbox.ts"
 import * as IntegrationHandlers from "./handlers/integration.ts"
@@ -36,7 +35,7 @@ import { remoteHandlers } from "./handlers/remote.ts"
 import * as SessionHandlers from "./handlers/session.ts"
 import { sessionListing } from "./listing.ts"
 import { Machines } from "./machine/machines.ts"
-import { Peers } from "./machine/peer.ts"
+import { Peer } from "./machine/peer.ts"
 import { Remote } from "./machine/remote.ts"
 import { services } from "./services.ts"
 import { UpdateCheck } from "./update-check.ts"
@@ -95,19 +94,19 @@ export const node = LayerNode.make({
     Git.node,
     Harness.node,
     Harnesses.node,
-    HandlerIdentity.node,
+    DaemonHandlers.identityNode,
     Inbox.node,
     Integration.node,
     EntrySession.node,
     Machines.node,
-    Peers.node,
+    Peer.node,
     Plugins.node,
     Processes.node,
     Project.node,
     Remote.node,
     Runtimes.node,
     Session.node,
-    Shutdown.node,
+    DaemonHandlers.shutdownNode,
     RepositoryUrl.node,
     Subscriptions.node,
     UpdateCheck.node,

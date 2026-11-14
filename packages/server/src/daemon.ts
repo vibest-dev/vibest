@@ -12,7 +12,7 @@ import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
-import { Identity as HandlerIdentity, Shutdown } from "./handlers/daemon.ts"
+import { DaemonHandlers } from "./handlers/daemon.ts"
 import * as ShutdownDeadline from "./shutdown-deadline.ts"
 import type { ShutdownHost } from "./shutdown-deadline.ts"
 
@@ -135,8 +135,8 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),
-          HandlerIdentity.node.replace(Layer.succeed(HandlerIdentity, identity)),
-          Shutdown.node.replace(Layer.succeed(Shutdown, shutdown)),
+          DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, identity)),
+          DaemonHandlers.shutdownNode.replace(Layer.succeed(DaemonHandlers.Shutdown, shutdown)),
         ],
       }),
     )

@@ -264,7 +264,7 @@ export const wire = Effect.gen(function* () {
 
 export const hostReplacements = [
   App.node.replace(Layer.succeed(App.Service, { version: VERSION })),
-  UpdateCheck.node.replace(Layer.succeed(UpdateCheck, Effect.succeed(NOT_CHECKED))),
+  UpdateCheck.node.replace(Layer.succeed(UpdateCheck.Service, Effect.succeed(NOT_CHECKED))),
 ]
 
 export const testLayer = (options: TestOptions = {}) => sessionFrom({ version: VERSION, ...options })

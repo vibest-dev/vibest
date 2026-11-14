@@ -17,7 +17,7 @@ export const make = Effect.gen(function* () {
   const db = yield* Db
   const harnesses = yield* Harnesses.Service
   const integration = yield* Integration.Service
-  const remote = yield* Remote
+  const remote = yield* Remote.Service
 
   const hook = (
     sessionId: string,

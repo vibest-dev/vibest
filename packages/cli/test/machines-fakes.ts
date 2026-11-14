@@ -7,7 +7,7 @@ import type { SpawnInput, Session } from "@vibest/core/session"
 import { peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
-import type { MachineTransport } from "@vibest/server/machine/machines"
+import type { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { Clock, Deferred, Effect, Layer } from "effect"
 import { RpcClient } from "effect/rpc"
@@ -59,7 +59,7 @@ export class Net {
     return Effect.forEach(this.routes.get(host)?.pipes ?? [], (p) => p.cut, { discard: true })
   }
 
-  transport(dial: SocketConnector["Service"]): MachineTransport["Service"] {
+  transport(dial: SocketConnector["Service"]): Machines.MachineTransport["Service"] {
     const { argv: seen, routes } = this
     return (argv) =>
       Effect.gen(function* () {

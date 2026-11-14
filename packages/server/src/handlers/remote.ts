@@ -10,7 +10,7 @@ import { Effect, Stream } from "effect"
 
 import type { Listing } from "../listing.ts"
 import { Machines } from "../machine/machines.ts"
-import { Peers } from "../machine/peer.ts"
+import { Peer } from "../machine/peer.ts"
 import { address, type At, type ListScope, Remote } from "../machine/remote.ts"
 import type { Checks } from "./caller.ts"
 
@@ -45,9 +45,9 @@ export const remoteHandlers = (
     const db = yield* Db
     const self = yield* Identity.Service
     const { version } = yield* App.Service
-    const machines = yield* Machines
-    const peers = yield* Peers
-    const remote = yield* Remote
+    const machines = yield* Machines.Service
+    const peers = yield* Peer.Service
+    const remote = yield* Remote.Service
     const runtimes = yield* Runtimes.Service
     const { cliOnly } = deps
 

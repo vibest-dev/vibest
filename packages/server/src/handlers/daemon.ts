@@ -18,13 +18,15 @@ import { stopOnce as stopDaemon } from "../stop.ts"
 import { UpdateCheck } from "../update-check.ts"
 import type { Checks, Handlers } from "./caller.ts"
 
-export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {
-  static readonly node = LayerNode.unbound(Identity)
-}
+export * as DaemonHandlers from "./daemon.ts"
 
-export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>()("vibest/DaemonShutdown") {
-  static readonly node = LayerNode.unbound(Shutdown)
-}
+export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {}
+
+export const identityNode = LayerNode.unbound(Identity)
+
+export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>()("vibest/DaemonShutdown") {}
+
+export const shutdownNode = LayerNode.unbound(Shutdown)
 
 export const make = ({ cliOnly }: Checks) =>
   Effect.gen(function* () {
@@ -33,7 +35,7 @@ export const make = ({ cliOnly }: Checks) =>
     const plugins = yield* Plugins
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
-    const updateStatus = yield* UpdateCheck
+    const updateStatus = yield* UpdateCheck.Service
     const { version } = yield* App.Service
     const shutdown = yield* Shutdown
     const drain = yield* Drain.Service

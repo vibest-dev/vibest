@@ -8,7 +8,7 @@ import { Project } from "@vibest/core/project"
 import { Session } from "@vibest/core/session"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
-import { Shutdown } from "@vibest/server/handlers/daemon"
+import { DaemonHandlers } from "@vibest/server/handlers/daemon"
 import * as Server from "@vibest/server/server"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
 
@@ -62,7 +62,7 @@ const stopFromCli = (repo: string) =>
     return e?._tag === "DaemonBusy" ? e.blockers : (e?._tag ?? "defect")
   })
 
-const shutdownDone = Effect.flatMap(Shutdown, Deferred.isDone)
+const shutdownDone = Effect.flatMap(DaemonHandlers.Shutdown, Deferred.isDone)
 const draining = Effect.flatMap(Drain.Service, (d) => until(d.phase, (p) => p === "draining"))
 const stopOnceIdle = (repo: string) =>
   Effect.gen(function* () {

@@ -18,6 +18,8 @@ import {
 import { NoRuntime } from "@vibest/schema/session"
 import { Context, Effect, Layer, Stream } from "effect"
 
+export * as Peer from "./peer.ts"
+
 const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
   const { read } = new TextEncoder().encodeInto(row.content, new Uint8Array(OUTBOX_ITEM_MAX))
@@ -34,64 +36,68 @@ const make = Effect.gen(function* () {
   const git = yield* Git.Service
 
   return {
-    spawn: (peer: string, project: string, reportTo: string, input: PayloadOf<"Peer.Spawn">) =>
-      Effect.gen(function* () {
-        const bytes = new TextEncoder().encode(input.prompt).length
-        if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
-        const rows = yield* db.remoteProjects
-        const exact = rows.filter((row) => row.remote === input.repository)
-        const { identity } = input
-        const matched =
-          exact.length > 0 || identity === undefined
-            ? exact
-            : (yield* Effect.forEach(
-                rows,
-                (row) => Effect.map(repositoryIdentity(row.remote), (id) => (id === identity ? [row] : [])),
-                { concurrency: 8 },
-              )).flat()
-        const found = matched.filter((row, i) => matched.findIndex((other) => other.id === row.id) === i)
-        const here = `${self.name} has no checkout of ${input.repository}: clone it there and run vibest project add in it`
-        if (found.length === 0) return yield* new NoProject({ message: here })
-        if (found.length > 1)
-          return yield* new NoProject({
-            message: `${self.name} has several projects for ${input.repository}: ${found.map((p) => p.directory ?? p.id).join(", ")}`,
-          })
-        const target = found[0]!
-        if (target.repositories !== 1 || target.directory === null)
-          return yield* new NoProject({
-            message: `${self.name}'s project for ${input.repository} has several repositories; another machine runs agents only in a single-repository project`,
-          })
-        if (!(yield* git.hasCommit(target.directory, input.commit)))
-          return yield* new NoCommit({
-            message: `${self.name}'s checkout ${target.directory} does not have ${input.commit}: push it and fetch it there`,
-          })
-        const spawned = yield* sessions
-          .spawn({
-            machine: { id: "local" },
-            root: target.directory,
-            projectId: target.id,
-            name: input.title ?? defaultSessionName(input.prompt),
-            prompt: input.prompt,
-            agent: input.agent,
-            harness: input.harness,
-            provider: input.provider,
-            model: input.model,
-            runtime: input.runtime,
-            request: input.request,
-            commit: input.commit,
-            origin: { peer, project, reportTo },
-          })
-          .pipe(Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })))
-        return {
-          session: spawned.id,
-          harness: spawned.harness,
-          ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
-          ...(spawned.model === undefined ? {} : { model: spawned.model }),
-          directory: target.directory,
-          decidedBy: spawned.decidedBy,
-          trace: spawned.trace,
-        }
-      }),
+    spawn: Effect.fn("Peer.spawn")(function* (
+      peer: string,
+      project: string,
+      reportTo: string,
+      input: PayloadOf<"Peer.Spawn">,
+    ) {
+      const bytes = new TextEncoder().encode(input.prompt).length
+      if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
+      const rows = yield* db.remoteProjects
+      const exact = rows.filter((row) => row.remote === input.repository)
+      const { identity } = input
+      const matched =
+        exact.length > 0 || identity === undefined
+          ? exact
+          : (yield* Effect.forEach(
+              rows,
+              (row) => Effect.map(repositoryIdentity(row.remote), (id) => (id === identity ? [row] : [])),
+              { concurrency: 8 },
+            )).flat()
+      const found = matched.filter((row, i) => matched.findIndex((other) => other.id === row.id) === i)
+      const here = `${self.name} has no checkout of ${input.repository}: clone it there and run vibest project add in it`
+      if (found.length === 0) return yield* new NoProject({ message: here })
+      if (found.length > 1)
+        return yield* new NoProject({
+          message: `${self.name} has several projects for ${input.repository}: ${found.map((p) => p.directory ?? p.id).join(", ")}`,
+        })
+      const target = found[0]!
+      if (target.repositories !== 1 || target.directory === null)
+        return yield* new NoProject({
+          message: `${self.name}'s project for ${input.repository} has several repositories; another machine runs agents only in a single-repository project`,
+        })
+      if (!(yield* git.hasCommit(target.directory, input.commit)))
+        return yield* new NoCommit({
+          message: `${self.name}'s checkout ${target.directory} does not have ${input.commit}: push it and fetch it there`,
+        })
+      const spawned = yield* sessions
+        .spawn({
+          machine: { id: "local" },
+          root: target.directory,
+          projectId: target.id,
+          name: input.title ?? defaultSessionName(input.prompt),
+          prompt: input.prompt,
+          agent: input.agent,
+          harness: input.harness,
+          provider: input.provider,
+          model: input.model,
+          runtime: input.runtime,
+          request: input.request,
+          commit: input.commit,
+          origin: { peer, project, reportTo },
+        })
+        .pipe(Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })))
+      return {
+        session: spawned.id,
+        harness: spawned.harness,
+        ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
+        ...(spawned.model === undefined ? {} : { model: spawned.model }),
+        directory: target.directory,
+        decidedBy: spawned.decidedBy,
+        trace: spawned.trace,
+      }
+    }),
 
     outbox: (peer: string): Stream.Stream<OutboxItem> =>
       Stream.unwrap(
@@ -123,16 +129,18 @@ const make = Effect.gen(function* () {
         }),
       ),
 
-    ack: (peer: string, ids: ReadonlyArray<string>) => db.ackOutbox(peer, ids),
+    ack: Effect.fn("Peer.ack")((peer: string, ids: ReadonlyArray<string>) => db.ackOutbox(peer, ids)),
   }
 })
 
-export class Peers extends Context.Service<Peers, Effect.Success<typeof make>>()("vibest/Peers") {
-  static readonly layer = Layer.effect(Peers, make)
+export type Interface = Effect.Success<typeof make>
 
-  static readonly node = LayerNode.make({
-    service: Peers,
-    layer: Peers.layer,
-    deps: [Bus.node, Db.node, Git.node, Session.node, Identity.node],
-  })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Peers") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [Bus.node, Db.node, Git.node, Session.node, Identity.node],
+})

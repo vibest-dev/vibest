@@ -40,8 +40,8 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
-import { Identity as HandlerIdentity, Shutdown } from "../../../server/src/handlers/daemon.ts"
-import { MachineTransport } from "../../../server/src/machine/machines.ts"
+import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
+import { Machines } from "../../../server/src/machine/machines.ts"
 import { services } from "../../../server/src/services.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
 import { tempDirectory } from "./directory.ts"
@@ -149,11 +149,12 @@ const readyOnStart = LayerNode.make({
   deps: [runtimeNode, Db.node],
 })
 
-const noTransport: MachineTransport["Service"] = () => Effect.fail(new Error("no machine transport in this test"))
+const noTransport: Machines.MachineTransport["Service"] = () =>
+  Effect.fail(new Error("no machine transport in this test"))
 
 const defaultSsh = Layer.succeed(RepositoryUrl.Service, { hostName: (alias) => Effect.succeed(alias) })
 
-const defaultTransport = Layer.succeed(MachineTransport, noTransport)
+const defaultTransport = Layer.succeed(Machines.MachineTransport, noTransport)
 
 const defaultSpawn = Spawn.configured({ maxSessions: undefined })
 
@@ -193,8 +194,8 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       PlatformNode.sqlClient,
       Runtimes.hostEnvNode,
       Identity.node,
-      HandlerIdentity.node,
-      Shutdown.node,
+      DaemonHandlers.identityNode,
+      DaemonHandlers.shutdownNode,
       fakeProcesses,
       Processes.node,
       fakeGit,
@@ -209,7 +210,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
     [
       PlatformNode.layout.replace(home),
       App.node.replace(Layer.succeed(App.Service, { version: "test" })),
-      UpdateCheck.node.replace(Layer.succeed(UpdateCheck, Effect.succeed(NOT_CHECKED))),
+      UpdateCheck.node.replace(Layer.succeed(UpdateCheck.Service, Effect.succeed(NOT_CHECKED))),
       Runtimes.node.replace(runtimes),
       Harness.node.replace(harnessLayer()),
       Harnesses.node.replace(harnessesLayer()),
@@ -217,11 +218,11 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Plugins.node.replace(plugins),
       Spawn.node.replace(defaultSpawn),
       RepositoryUrl.node.replace(defaultSsh),
-      MachineTransport.node.replace(defaultTransport),
+      Machines.machineTransportNode.replace(defaultTransport),
       Runtimes.hostEnvNode.replace(noHostEnv),
       Identity.node.replace(Layer.sync(Identity.Service, () => ({ id: randomId(), name: "test-host" }))),
-      HandlerIdentity.node.replace(Layer.succeed(HandlerIdentity, {})),
-      Shutdown.node.replace(Layer.effect(Shutdown, Deferred.make<void>())),
+      DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, {})),
+      DaemonHandlers.shutdownNode.replace(Layer.effect(DaemonHandlers.Shutdown, Deferred.make<void>())),
       ...replacements,
     ],
   )
@@ -229,8 +230,8 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
 export const sshHosts = (hosts: Readonly<Record<string, string>> | undefined) =>
   Layer.succeed(RepositoryUrl.Service, { hostName: (alias: string) => Effect.succeed(hosts?.[alias] ?? alias) })
 
-export const transportLayer = (transport: MachineTransport["Service"] | undefined) =>
-  Layer.succeed(MachineTransport, transport ?? noTransport)
+export const transportLayer = (transport: Machines.MachineTransport["Service"] | undefined) =>
+  Layer.succeed(Machines.MachineTransport, transport ?? noTransport)
 
 export interface TestOptions extends FakeRuntimeOptions {
   readonly hooked?: ReadonlyArray<string>
@@ -247,7 +248,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly missingBinary?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
   readonly sshHosts?: Readonly<Record<string, string>>
-  readonly transport?: MachineTransport["Service"]
+  readonly transport?: Machines.MachineTransport["Service"]
   readonly sessions?: (sessions: Session.Interface, db: Db["Service"]) => Session.Interface
   readonly identity?: DaemonIdentity
   readonly version?: string
@@ -299,10 +300,10 @@ export const sessionFrom = (options: TestOptions = {}) =>
       ...(options.sessions === undefined ? [] : [sessionsDecorated(options.sessions)]),
       ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
       RepositoryUrl.node.replace(sshHosts(options.sshHosts)),
-      MachineTransport.node.replace(transportLayer(options.transport)),
+      Machines.machineTransportNode.replace(transportLayer(options.transport)),
       ...(options.identity === undefined
         ? []
-        : [HandlerIdentity.node.replace(Layer.succeed(HandlerIdentity, options.identity))]),
+        : [DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, options.identity))]),
     ],
     pluginsHost(options.plugins ?? [], {
       ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),

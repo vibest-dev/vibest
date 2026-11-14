@@ -25,7 +25,7 @@ import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
-import { MachineTransport } from "@vibest/server/machine/machines"
+import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
@@ -295,7 +295,7 @@ const hostId = readHostId(
 
 const theExitSaysWhyTheLineEnded = () => undefined
 
-const transport: MachineTransport["Service"] = (argv) =>
+const transport: Machines.MachineTransport["Service"] = (argv) =>
   Effect.acquireRelease(
     Effect.try({
       try: () => Bun.spawn([...argv], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env } }),
@@ -346,7 +346,7 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.layout],
     }),
   ),
-  MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
+  Machines.machineTransportNode.replace(Layer.succeed(Machines.MachineTransport, transport)),
   PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
   builtinsNode.replace(
     LayerNode.make({
@@ -385,12 +385,12 @@ export const replacements: LayerNode.Replacements = [
 export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))
 
 export const updateCheck = (
-  construct: Effect.Effect<UpdateCheck["Service"], never, Scope.Scope | HttpClient.HttpClient>,
+  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient>,
 ) =>
   UpdateCheck.node.replace(
     LayerNode.make({
-      service: UpdateCheck,
-      layer: Layer.effect(UpdateCheck, construct),
+      service: UpdateCheck.Service,
+      layer: Layer.effect(UpdateCheck.Service, construct),
       deps: [PlatformNode.httpClient],
     }),
   )
