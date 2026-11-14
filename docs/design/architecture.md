@@ -610,8 +610,8 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 
 - Each module exports itself as a namespace (`export * as Inbox from "./inbox.ts"`) holding its `Service` (a
   `Context.Service` class), `Interface`, `layer`, `node` and, with options, `configured`, as OpenCode does. The
-  rules are in [`.agents/rules/effect.md`](../../.agents/rules/effect.md); its Status line lists the modules that still
-  have the older shape (a class with `static readonly layer` and `node`).
+  rules are in [`.agents/rules/effect.md`](../../.agents/rules/effect.md). A host input the module needs (such as
+  `Identity.HostFacts`) keeps its own class with a `<name>Node` beside the module's service.
 - Services are assembled from a **service graph**: each entry is `{ service, layer, dependencies }` with a scope.
   A narrower scope may depend on a wider one, never the reverse, checked at type level. The graph compiles to
   one `Layer`.
