@@ -1,5 +1,6 @@
 import { Bus, type BusEvent } from "@vibest/core/bus"
-import { Db, runtimeOf, terminalOf } from "@vibest/core/database/db"
+import { Db } from "@vibest/core/database/db"
+import { runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { keyedLock } from "@vibest/core/effect/keyed-mutex"
 import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"

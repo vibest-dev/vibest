@@ -29,7 +29,6 @@ import { RpcClient, RpcSerialization } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
 
 import { SocketConnector } from "./socket-connector.ts"
-export { SocketConnector } from "./socket-connector.ts"
 
 export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
 

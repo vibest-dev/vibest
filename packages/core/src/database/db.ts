@@ -13,14 +13,19 @@ import {
   ExecutionEnded,
 } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
-import { type AgentStatus, AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/session"
+import {
+  type AgentStatus,
+  AmbiguousSession,
+  NoSuchSession,
+  RuntimeAddress,
+  type HarnessId,
+} from "@vibest/schema/session"
 import { Context, Effect, Layer, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import type { HarnessId } from "../harness.ts"
 import { SessionLive } from "../session/live.ts"
 import { inboxMethods } from "./db-inbox.ts"
 import { remoteQueries, type PeerScope, type PeerStart } from "./db-remote.ts"
@@ -35,35 +40,6 @@ import {
 import { makeStore } from "./db-store.ts"
 import { apply } from "./migration.ts"
 import * as Projectors from "./projectors.ts"
-
-export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
-export { InboxKind, type ProcessEndReason } from "@vibest/schema/event"
-export { RuntimeAddress, InboxRow, InboxStatus, AgentStatus, ExecutionState } from "@vibest/schema/session"
-export {
-  AddressJson,
-  encodeAddress,
-  SessionRow,
-  NewSession,
-  type NewInboxRow,
-  type SpawnedBefore,
-  type RepositoryRow,
-  type ExecutionEnd,
-  failureOf,
-  archived,
-  exitedAt,
-  executionStartedAt,
-  executionStateOf,
-  harnessIdOf,
-  pidOf,
-  placedTerminal,
-  reportedOf,
-  runtimeOf,
-  sessionEnded,
-  startOf,
-  terminalOf,
-  type SessionBrief,
-} from "./db-rows.ts"
-export { APPLICATION_ID, DatabaseOpenFailed, SchemaMismatch, inspectSchema } from "./db-schema.ts"
 
 export type SessionFilter = {
   readonly projectId?: string

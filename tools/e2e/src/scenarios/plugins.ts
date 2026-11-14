@@ -195,24 +195,6 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
         "the crash was not counted",
       )
       await fs.rm(path.join(w.vibestHome, "plugins", "throw.ts"))
-      await write(
-        path.join(w.vibestHome, "plugins", "mutate.ts"),
-        plugin("mutate", `(e) => Effect.sync(() => { e.harness = "pi" })`),
-      )
-      await until("the mutating plugin active", async () =>
-        (await list(w)).some((p) => p.id === "mutate" && p.status === "active"),
-      )
-      const mutated = await w.viaEntry(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
-        timeoutMs: 60_000,
-      })
-      expect(mutated.code !== 0, `run exited 0: ${mutated.stdout}`)
-      expect(mutated.stderr.includes("plugin mutate crashed: "), `crash not shown: ${mutated.stderr}`)
-      expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
-      expect(
-        (await list(w)).some((p) => p.id === "mutate" && p.crashed === 1),
-        "the crash was not counted",
-      )
-      await fs.rm(path.join(w.vibestHome, "plugins", "mutate.ts"))
     },
   },
   {
@@ -267,6 +249,26 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       expect((await lines(keep)) === 1, `keep was set up again: ${await lines(keep)} setups`)
       expect((await lines(after)) === 1, `after was set up again: ${await lines(after)} setups`)
+    },
+  },
+  {
+    id: "G16",
+    title:
+      "a plugin folder moved to another path and named there in vibest.json is listed at the new path and set up once",
+    run: async (w) => {
+      const seen = path.join(w.root, "mover.log")
+      const before = path.join(w.root, "before", "mover")
+      const after = path.join(w.root, "after", "mover")
+      await write(path.join(before, "index.ts"), counting("mover", seen))
+      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: [before] }))
+      await until("mover active", async () => (await list(w)).some((p) => p.id === "mover" && p.status === "active"))
+      await fs.mkdir(path.dirname(after), { recursive: true })
+      await fs.rename(before, after)
+      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: [after] }))
+      await until("mover listed at the new path", async () =>
+        (await list(w)).some((p) => p.id === "mover" && p.status === "active" && p.source.startsWith(after)),
+      )
+      expect((await setups(seen)).length === 1, `mover was set up ${(await setups(seen)).length} times`)
     },
   },
   {

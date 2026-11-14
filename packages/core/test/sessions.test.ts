@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { executionStateOf, exitedAt } from "@vibest/core/database/db"
+import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
 import { Sessions } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Fiber } from "effect"

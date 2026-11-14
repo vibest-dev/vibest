@@ -4,8 +4,6 @@ import { Context, Effect, Layer } from "effect"
 import { LayerNode } from "./effect/layer-node.ts"
 import type { AgentDefinition, AgentsShape } from "./plugin/host.ts"
 import * as Registry from "./plugin/registry.ts"
-export type { AgentDefinition }
-
 export const unknownAgent = (id: string, loaded: ReadonlyArray<AgentDefinition>) =>
   new UnknownAgent({
     agent: id,

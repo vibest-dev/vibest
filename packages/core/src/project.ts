@@ -1,9 +1,9 @@
+import { Layout } from "@vibest/schema/layout"
 import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
-import { Layout } from "./paths.ts"
 export { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 
 const SEARCH_HITS = 50

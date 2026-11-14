@@ -56,7 +56,7 @@ export interface PluginNote extends VibestPlugin.MachineNote {
 
 export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">
 
-export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions">
+export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions" | "move">
 
 export interface SpawnDecision extends Routing {
   readonly prompt: string
@@ -102,7 +102,7 @@ const info = (slot: Slot): PluginInfo => {
   const shown = slot.running?.candidate ?? candidate
   return {
     id: slot.running?.candidate.plugin.id ?? ("error" in candidate.plugin ? candidate.source : candidate.plugin.id),
-    source: shown.source,
+    source: candidate.source,
     revision: shown.revision,
     loadedAt: slot.loadedAt,
     status: running ? "active" : "failed",
@@ -120,20 +120,16 @@ const info = (slot: Slot): PluginInfo => {
 const ROUTE = ["prompt", "harness", "provider", "model", "machine", "runtime"] as const
 const REQUIRED: ReadonlyArray<(typeof ROUTE)[number]> = ["prompt", "machine"]
 
-const routed = (patch: VibestPlugin.AgentRoute) =>
-  ROUTE.filter((field) => Object.hasOwn(patch, field) && (patch[field] !== undefined || !REQUIRED.includes(field)))
+const routed = (before: VibestPlugin.AgentStartBefore, after: VibestPlugin.AgentStartBefore) =>
+  ROUTE.filter(
+    (field) =>
+      JSON.stringify(before[field]) !== JSON.stringify(after[field]) &&
+      (after[field] !== undefined || !REQUIRED.includes(field)),
+  )
 
-const readOnly = <T extends object>(event: T): T =>
-  Object.freeze(
-    Object.fromEntries(
-      Object.entries(event).map(([field, value]) => [
-        field,
-        value !== null && typeof value === "object"
-          ? Object.freeze(Array.isArray(value) ? [...value] : { ...value })
-          : value,
-      ]),
-    ),
-  ) as T
+const draftOf = <T extends object>(event: T): T => structuredClone(event)
+
+const readOnly = <T extends object>(event: T): T => Object.freeze(draftOf(event))
 
 const decide = (
   field: string,
@@ -362,6 +358,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             keyOf(slots[prefix]!.candidate) === keyOf(candidates[prefix]!)
           )
             prefix++
+          slots = slots.map((slot, i) => (i < prefix ? { ...slot, candidate: candidates[i]! } : slot))
           if (prefix === candidates.length && prefix === slots.length) return
           const retired = slots.slice(prefix)
           slots = slots.slice(0, prefix)
@@ -371,7 +368,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           for (const candidate of candidates.slice(prefix)) {
             const slot = yield* build(
               candidate,
-              retired.find((s) => s.candidate.source === candidate.source),
+              retired.find((s) => idOf(s.candidate) === idOf(candidate)),
               ids,
             )
             if (slot.running) ids.add(slot.running.candidate.plugin.id)
@@ -412,12 +409,13 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const runHook = Effect.fnUntraced(function* <N extends AgentHook>(
       name: N,
       hooks: ReadonlyArray<Hooks.Entry<N>>,
-      event: () => Hooks.Events[N],
-      apply: (value: Hooks.Results[N], plugin: string) => ReadonlyArray<typeof Change.Type>,
+      event: Hooks.Events[N],
+      commit: (draft: Hooks.Events[N], plugin: string) => ReadonlyArray<typeof Change.Type>,
       trace: Array<TraceEntry>,
     ) {
       for (const hook of hooks) {
-        const ran = yield* Hooks.run(name, hook, readOnly(event()), root, timeout)
+        const draft = draftOf(event)
+        const ran = yield* Hooks.run(name, hook, draft, root, timeout)
         const entry = { plugin: hook.plugin, hook: name, ms: ran.ms, changes: [] }
         if (ran.outcome === "timeout") {
           trace.push({ ...entry, outcome: "timeout", error: ran.error })
@@ -434,7 +432,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           yield* Effect.logWarning(`plugin ${hook.plugin} ${name} crashed`, ran.cause)
           return { plugin: hook.plugin, reason: `plugin ${hook.plugin} crashed: ${ran.error}` } satisfies Stopped
         }
-        const changes = ran.value === undefined ? [] : apply(ran.value, hook.plugin)
+        const changes = commit(draft, hook.plugin)
         if (changes.length > 0) hook.stats.changed++
         trace.push({ ...entry, outcome: "ok", changes })
         const summary =
@@ -477,15 +475,16 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       return yield* Effect.gen(function* () {
         const current = yield* subscriptions.list
         const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
-        let event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
+        const event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
         const decidedBy: Record<string, string> = {}
-        const route = (patch: VibestPlugin.AgentRoute, plugin: string) => {
-          const fields = routed(patch)
-          const changes = fields.map((field) => decide(field, event[field], patch[field], plugin, decidedBy))
-          event = { ...event, ...Object.fromEntries(fields.map((field) => [field, patch[field]])) }
+        const route = (draft: VibestPlugin.AgentStartBefore, plugin: string) => {
+          const fields = routed(event, draft)
+          const values = Object.fromEntries(fields.map((field) => [field, structuredClone(draft[field])]))
+          const changes = fields.map((field) => decide(field, event[field], values[field], plugin, decidedBy))
+          Object.assign(event, values)
           return changes
         }
-        const stopped = yield* runHook("agent.start.before", hooks, () => event, route, trace)
+        const stopped = yield* runHook("agent.start.before", hooks, event, route, trace)
         if (stopped !== undefined) return yield* refusal(stopped)
         return {
           prompt: event.prompt,
@@ -504,17 +503,18 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       const trace: Array<TraceEntry> = []
       const hooks = yield* admit("agent.fail")
       return yield* Effect.gen(function* () {
-        const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list }
+        const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list, move: undefined }
         const decidedBy: Record<string, string> = {}
-        let move: VibestPlugin.AgentMove | undefined
-        const moveTo = (next: VibestPlugin.AgentMove, plugin: string) => {
-          const change = decide("move", move, next, plugin, decidedBy)
-          move = next
+        const moveTo = (draft: VibestPlugin.AgentFail, plugin: string) => {
+          if (JSON.stringify(draft.move) === JSON.stringify(event.move)) return []
+          const move = structuredClone(draft.move)
+          const change = decide("move", event.move, move, plugin, decidedBy)
+          event.move = move
           return [change]
         }
-        const stopped = yield* runHook("agent.fail", hooks, () => event, moveTo, trace)
+        const stopped = yield* runHook("agent.fail", hooks, event, moveTo, trace)
         if (stopped !== undefined) return yield* failure(stopped)
-        return { move, trace }
+        return { move: event.move, trace }
       })
     })
 

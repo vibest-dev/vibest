@@ -1,5 +1,6 @@
 import { assert, describe } from "@effect/vitest"
-import { Db, exitedAt, archived, executionStateOf } from "@vibest/core/database/db"
+import { Db } from "@vibest/core/database/db"
+import { exitedAt, archived, executionStateOf } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
 import { Sessions } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"

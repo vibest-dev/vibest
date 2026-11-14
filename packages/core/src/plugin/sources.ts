@@ -1,11 +1,11 @@
 import type { Plugin as PromisePlugin } from "@vibest/plugin"
 import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
+import { Layout } from "@vibest/schema/layout"
 import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
 import { LayerNode } from "../effect/layer-node.ts"
-import { Layout } from "../paths.ts"
 
 export class PluginLoader extends Context.Service<
   PluginLoader,
@@ -34,7 +34,8 @@ export interface Candidate {
   readonly plugin: AnyPlugin | { readonly error: string }
 }
 
-export const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options])
+export const keyOf = (c: Candidate) =>
+  JSON.stringify(["error" in c.plugin ? c.source : c.plugin.id, c.revision, c.options])
 
 export interface Watched {
   readonly paths: ReadonlySet<string>
@@ -136,7 +137,7 @@ export const makeSources = Effect.fnUntraced(function* (
       Effect.map((i) => i.type === "File"),
       Effect.orElseSucceed(() => false),
     )
-  const revisionOf = (graph: Graph) =>
+  const revisionOf = (graph: Graph, base: string) =>
     Effect.forEach(
       [...graph.files.map((f) => [f, false] as const), ...graph.unresolved.map((d) => [d, true] as const)],
       ([target, listing]) =>
@@ -145,7 +146,7 @@ export const makeSources = Effect.fnUntraced(function* (
           : fs.readFile(target).pipe(Effect.flatMap(sha))
         ).pipe(
           Effect.orElseSucceed(() => "missing"),
-          Effect.map((digest) => `${target}\0${digest}`),
+          Effect.map((digest) => `${path.relative(base, target)}\0${digest}`),
         ),
     ).pipe(
       Effect.flatMap((lines) => sha(utf8(lines.join("\n")))),
@@ -181,12 +182,16 @@ export const makeSources = Effect.fnUntraced(function* (
   const importEntry = Effect.fn(function* (file: string) {
     const previous = imported.get(file)
     const real = yield* canonical(file)
-    if (previous !== undefined && previous.real === real && (yield* revisionOf(previous.graph)) === previous.revision)
+    if (
+      previous !== undefined &&
+      previous.real === real &&
+      (yield* revisionOf(previous.graph, path.dirname(real))) === previous.revision
+    )
       return previous
     const graph = yield* Effect.try(() => loader.graph(real)).pipe(
       Effect.orElseSucceed((): Graph => ({ files: [real], unresolved: [] })),
     )
-    const revision = yield* revisionOf(graph)
+    const revision = yield* revisionOf(graph, path.dirname(real))
     const forget = [...new Set([...graph.files, ...(previous?.graph.files ?? [])])]
     const module = yield* Effect.tryPromise({
       try: () => loader.load(real, forget),
@@ -325,54 +330,43 @@ export const makeWatcher = (changed: (path: string) => void) =>
     const path = yield* Path.Path
     const loader = yield* PluginLoader
     const services = yield* Effect.context<never>()
-    const running = new Map<string, { readonly key: string; readonly close: () => void }>()
+    const running = new Map<string, () => void>()
     let current: Watched = { paths: new Set(), listings: new Set() }
-    const stop = (dir: string) => {
-      running.get(dir)?.close()
-      running.delete(dir)
-    }
-    yield* Effect.addFinalizer(() => Effect.sync(() => [...running.keys()].forEach(stop)))
+    yield* Effect.addFinalizer(() => Effect.sync(() => running.forEach((close) => close())))
 
-    const inode = (dir: string) =>
+    const isDirectory = (dir: string) =>
       fs.stat(dir).pipe(
-        Effect.map((info) => (info.type === "Directory" ? String(Option.getOrElse(info.ino, () => 0)) : undefined)),
-        Effect.orElseSucceed(() => undefined),
+        Effect.map((info) => info.type === "Directory"),
+        Effect.orElseSucceed(() => false),
       )
 
     const update = Effect.fn(function* (watched: Watched) {
-      const wanted = new Map<string, string>()
+      const wanted = new Set<string>()
       const paths = new Set<string>()
       const watchFor = Effect.fnUntraced(function* (target: string) {
         let name = target
-        let key = yield* inode(path.dirname(name))
-        while (key === undefined && path.dirname(name) !== name) {
+        let found = yield* isDirectory(path.dirname(name))
+        while (!found && path.dirname(name) !== name) {
           name = path.dirname(name)
-          key = yield* inode(path.dirname(name))
+          found = yield* isDirectory(path.dirname(name))
         }
-        const dir = path.dirname(name)
         paths.add(name)
-        if (key !== undefined) wanted.set(dir, key)
+        if (found) wanted.add(path.dirname(name))
       })
       for (const p of watched.paths) yield* watchFor(p)
       const listings = new Set<string>()
       for (const dir of watched.listings) {
-        const key = yield* inode(dir)
-        if (key === undefined) {
+        if (!(yield* isDirectory(dir))) {
           yield* watchFor(dir)
           continue
         }
         listings.add(dir)
-        wanted.set(dir, key)
+        wanted.add(dir)
       }
       current = { paths, listings }
 
       let rewatched = false
-      for (const [dir, { key }] of running) {
-        if (wanted.get(dir) === key) continue
-        stop(dir)
-        rewatched = true
-      }
-      for (const [dir, key] of wanted) {
+      for (const dir of wanted) {
         if (running.has(dir)) continue
         const watching = yield* Effect.try(() =>
           loader.watch(
@@ -393,7 +387,7 @@ export const makeWatcher = (changed: (path: string) => void) =>
           Effect.option,
         )
         if (Option.isNone(watching)) continue
-        running.set(dir, { key, close: watching.value })
+        running.set(dir, watching.value)
         rewatched = true
       }
       return rewatched

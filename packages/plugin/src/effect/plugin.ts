@@ -4,7 +4,6 @@ import type {
   AgentEditor,
   AgentFailures,
   AgentHooks,
-  AgentResults,
   MachineHookOptions,
   MachineHooks,
   MachineNote,
@@ -17,7 +16,7 @@ import type { Hooks, Registration, Transform } from "./registration.ts"
 import type { RuntimeDomain } from "./runtime.ts"
 
 export interface AgentDomain {
-  readonly hook: Hooks<AgentHooks, AgentResults, AgentFailures>
+  readonly hook: Hooks<AgentHooks, AgentFailures>
   readonly transform: Transform<AgentEditor>
 }
 

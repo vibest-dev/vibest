@@ -2,9 +2,6 @@ import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect"
 
 import { Git } from "./git.ts"
 
-export { NotInRepository } from "@vibest/schema/session"
-export { Git, GitError, type GitState } from "./git.ts"
-
 const gitDirectory = (p: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem

@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db, pidOf } from "@vibest/core/database/db"
+import { Db } from "@vibest/core/database/db"
+import { pidOf } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
 import { Sessions } from "@vibest/core/session"
 import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"

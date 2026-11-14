@@ -8,10 +8,9 @@ export const harnessDefaultPlugin = () =>
     id: "harness-default",
     effect: (context) =>
       context.agent.hook("start.before", (event) =>
-        Effect.succeed(
-          event.harness === undefined && event.harnesses.some((h) => h.harness === DEFAULT_HARNESS && h.available)
-            ? { harness: DEFAULT_HARNESS }
-            : undefined,
-        ),
+        Effect.sync(() => {
+          if (event.harness === undefined && event.harnesses.some((h) => h.harness === DEFAULT_HARNESS && h.available))
+            event.harness = DEFAULT_HARNESS
+        }),
       ),
   })

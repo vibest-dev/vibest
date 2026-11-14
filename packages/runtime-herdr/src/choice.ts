@@ -6,10 +6,8 @@ export const choicePlugin = (): VibestPlugin.Plugin.Plugin =>
     id: "runtime-choice",
     effect: (context) =>
       context.agent.hook("start.before", (event) =>
-        Effect.succeed(
-          event.runtime === undefined && event.parentRuntime !== undefined
-            ? { runtime: event.parentRuntime }
-            : undefined,
-        ),
+        Effect.sync(() => {
+          if (event.runtime === undefined && event.parentRuntime !== undefined) event.runtime = event.parentRuntime
+        }),
       ),
   })

@@ -9,7 +9,6 @@ import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { Layout } from "@vibest/core/paths"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/host"
 import { Processes } from "@vibest/core/processes"
@@ -21,6 +20,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
 import {
   Clock,
   ConfigProvider,
@@ -39,9 +39,9 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
-import * as ServerApp from "../../../server/src/app.ts"
+import { Identity, Shutdown } from "../../../server/src/handlers/daemon.ts"
 import { MachineTransport } from "../../../server/src/machine/machines.ts"
-import * as Server from "../../../server/src/server.ts"
+import { services } from "../../../server/src/services.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
 import { tempDirectory } from "./directory.ts"
 import { FakeGit } from "./fake-git.ts"
@@ -192,13 +192,13 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       PlatformNode.sqlClient,
       HostEnv.node,
       VibestdIdentity.node,
-      Server.Identity.node,
-      Server.Shutdown.node,
+      Identity.node,
+      Shutdown.node,
       fakeProcesses,
       Processes.node,
       fakeGit,
       runtimeNode,
-      ServerApp.services,
+      services,
       App.node,
       UpdateCheck.node,
       plugins,
@@ -219,8 +219,8 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       MachineTransport.node.replace(defaultTransport),
       HostEnv.node.replace(noHostEnv),
       VibestdIdentity.node.replace(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),
-      Server.Identity.node.replace(Layer.succeed(Server.Identity, {})),
-      Server.Shutdown.node.replace(Layer.effect(Server.Shutdown, Deferred.make<void>())),
+      Identity.node.replace(Layer.succeed(Identity, {})),
+      Shutdown.node.replace(Layer.effect(Shutdown, Deferred.make<void>())),
       ...replacements,
     ],
   )
@@ -297,9 +297,7 @@ export const sessionFrom = (options: TestOptions = {}) =>
       ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
       SshHosts.node.replace(sshHosts(options.sshHosts)),
       MachineTransport.node.replace(transportLayer(options.transport)),
-      ...(options.identity === undefined
-        ? []
-        : [Server.Identity.node.replace(Layer.succeed(Server.Identity, options.identity))]),
+      ...(options.identity === undefined ? [] : [Identity.node.replace(Layer.succeed(Identity, options.identity))]),
     ],
     pluginsHost(options.plugins ?? [], {
       ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),

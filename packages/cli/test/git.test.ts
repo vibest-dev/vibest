@@ -1,9 +1,9 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db, type NewSession } from "@vibest/core/database/db"
+import { Db } from "@vibest/core/database/db"
+import type { NewSession } from "@vibest/core/database/db-rows"
 import * as Projectors from "@vibest/core/database/projectors"
 import { Git } from "@vibest/core/git"
-import { Layout } from "@vibest/core/paths"
 import {
   createIsolatedWorktrees,
   createProject,
@@ -14,6 +14,7 @@ import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { SessionLive } from "@vibest/core/session/live"
 import { copyIncluded, gitState, mainCheckout } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout } from "@vibest/schema/layout"
 import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"

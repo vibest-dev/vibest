@@ -1,17 +1,18 @@
-import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand } from "@vibest/client/client"
+import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import type { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
 import type { ReplayDiffers } from "@vibest/core/bus"
-import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db"
+import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db-schema"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"
-import { Layout, VibestCommand } from "@vibest/core/paths"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
-import * as Server from "./server.ts"
+import { Identity, Shutdown } from "./handlers/daemon.ts"
 import * as ShutdownDeadline from "./shutdown-deadline.ts"
 import type { ShutdownHost } from "./shutdown-deadline.ts"
 
@@ -45,8 +46,6 @@ export interface Host extends ShutdownHost {
     filename: string,
   ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
 }
-
-export { HANDOFF_ENV } from "./server.ts"
 
 const HANDOFF_TIMEOUT = Duration.seconds(30)
 const STOP_REPLY_GRACE = Duration.millis(200)
@@ -134,8 +133,8 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),
-          Server.Identity.node.replace(Layer.succeed(Server.Identity, identity)),
-          Server.Shutdown.node.replace(Layer.succeed(Server.Shutdown, shutdown)),
+          Identity.node.replace(Layer.succeed(Identity, identity)),
+          Shutdown.node.replace(Layer.succeed(Shutdown, shutdown)),
         ],
       }),
     )

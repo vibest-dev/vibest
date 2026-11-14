@@ -102,12 +102,12 @@ interface AgentContext {
 }
 
 export interface AgentStartBefore extends AgentContext {
-  readonly prompt: string
-  readonly harness: string | undefined
-  readonly provider: string | undefined
-  readonly model: string | undefined
-  readonly machine: { readonly id: string }
-  readonly runtime: string | undefined
+  prompt: string
+  harness: string | undefined
+  provider: string | undefined
+  model: string | undefined
+  machine: { readonly id: string }
+  runtime: string | undefined
   readonly parentRuntime: string | undefined
   readonly machines: ReadonlyArray<MachineInfo>
 }
@@ -119,15 +119,7 @@ export interface AgentFail extends AgentContext {
   readonly input: string
   readonly harness: string
   readonly provider: string | undefined
-}
-
-export interface AgentRoute {
-  readonly prompt?: string
-  readonly harness?: string | undefined
-  readonly provider?: string | undefined
-  readonly model?: string | undefined
-  readonly machine?: { readonly id: string }
-  readonly runtime?: string | undefined
+  move: AgentMove | undefined
 }
 
 export interface AgentMove {
@@ -139,11 +131,6 @@ export interface AgentMove {
 export interface AgentHooks {
   readonly "start.before": AgentStartBefore
   readonly fail: AgentFail
-}
-
-export interface AgentResults extends Record<keyof AgentHooks, unknown> {
-  readonly "start.before": AgentRoute
-  readonly fail: AgentMove
 }
 
 export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
