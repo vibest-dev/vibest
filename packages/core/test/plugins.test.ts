@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf } from "@vibest/core/database/db-rows"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugin"
@@ -19,6 +18,7 @@ import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
 import { until, yieldToIo } from "./lib/observe.ts"
 import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
+import { memoryBus } from "./platform/bun.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
@@ -275,7 +275,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(Bus.layer),
+      Effect.provide(memoryBus),
     ),
   )
 
@@ -306,7 +306,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(Bus.layer),
+      Effect.provide(memoryBus),
     ),
   )
 
@@ -350,7 +350,7 @@ describe("plugins: spawn hook", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
       ),
   )
 })
@@ -377,7 +377,7 @@ const loaded = (dir: string) =>
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(Bus.layer),
+    Layer.provide(memoryBus),
     Layer.build,
     Effect.map(Context.get(Plugins)),
   )

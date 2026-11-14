@@ -6,15 +6,16 @@ import { Effect, Layer, PubSub, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { noHostEnv } from "./lib/harnesses.ts"
+import { memoryBus } from "./platform/bun.ts"
 
-const layer = Runtimes.layer.pipe(Layer.provideMerge(Bus.layer), Layer.provide(noHostEnv))
+const layer = Runtimes.layer.pipe(Layer.provideMerge(memoryBus), Layer.provide(noHostEnv))
 
 const follow = (events: Stream.Stream<RuntimeApi.RuntimeEvent>) =>
   Effect.gen(function* () {
     const bus = yield* Bus
     const runtimes = yield* Runtimes
     const seen = yield* Queue.unbounded<BusEvent>()
-    yield* bus.subscribe.pipe(
+    yield* bus.subscribe().pipe(
       Effect.flatMap((subscription) =>
         Stream.fromSubscription(subscription).pipe(Stream.runForEach((event) => Queue.offer(seen, event))),
       ),

@@ -34,7 +34,7 @@ export const remoteQueries = ({
   sql,
   reads,
   tx,
-  emit,
+  publish,
   queueInbox,
   queueForPeer,
   placed,
@@ -72,7 +72,7 @@ export const remoteQueries = ({
           Effect.gen(function* () {
             const taken = yield* sql`SELECT 1 FROM machine WHERE name = ${row.name} OR vibestd_id = ${row.vibestdId}`
             if (taken.length > 0) return undefined
-            yield* emit(MachineAdded, { data: { name: row.name, target: row.target, vibestd: row.vibestdId } })
+            yield* publish(MachineAdded, { data: { name: row.name, target: row.target, vibestd: row.vibestdId } })
             return yield* machineNamed(row.name)
           }),
         ).pipe(Effect.orDie),
@@ -81,7 +81,7 @@ export const remoteQueries = ({
         tx(
           Effect.gen(function* () {
             if ((yield* machineNamed(name)) === undefined) return false
-            yield* emit(MachineRemoved, { data: { name } })
+            yield* publish(MachineRemoved, { data: { name } })
             return true
           }),
         ).pipe(Effect.orDie),
@@ -89,7 +89,7 @@ export const remoteQueries = ({
       machineConnected: (name: string) =>
         tx(
           Effect.gen(function* () {
-            if ((yield* machineNamed(name)) !== undefined) yield* emit(MachineConnected, { data: { name } })
+            if ((yield* machineNamed(name)) !== undefined) yield* publish(MachineConnected, { data: { name } })
           }),
         ).pipe(Effect.orDie),
 
@@ -163,13 +163,13 @@ export const remoteQueries = ({
                 const found = yield* sql<{ id: string }>`SELECT id FROM outbox WHERE peer_id = ${peer}
                   AND ${sql.in("id", ids)} ORDER BY seq`
                 const [first, ...rest] = found.map((row) => row.id)
-                if (first !== undefined) yield* emit(OutboxAcked, { data: { peer, ids: [first, ...rest] } })
+                if (first !== undefined) yield* publish(OutboxAcked, { data: { peer, ids: [first, ...rest] } })
               }),
             )
         ).pipe(Effect.orDie),
 
       notePeer: (peer: { readonly id: string; readonly name: string }) =>
-        tx(emit(PeerSeen, { data: { id: peer.id, name: peer.name } })).pipe(Effect.asVoid, Effect.orDie),
+        tx(publish(PeerSeen, { data: { id: peer.id, name: peer.name } })).pipe(Effect.asVoid, Effect.orDie),
 
       peerKnown: (id: string) =>
         sql`SELECT 1 FROM peer WHERE id = ${id}`.pipe(

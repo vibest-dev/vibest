@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
     const missed = db.closeExecution(session.id, execution, "not_started")
-    const subscription = yield* bus.subscribe
+    const subscription = yield* bus.subscribe()
     const delivered = yield* send.pipe(
       Effect.as(false),
       Effect.catchTag("RuntimeError", (error) =>

@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { withChanges } from "@vibest/core/bus"
-import { equalToReplay, followFacts, installLedger, makeJournal, rebuild } from "@vibest/core/database/journal"
-import { PROJECTION_VERSION } from "@vibest/core/database/projectors"
-import { Catalog, type Fact } from "@vibest/schema/event"
-import { Effect, Exit, Fiber, Layer, Queue, Stream } from "effect"
+import { Bus, equalToReplay, RuntimeReset, TerminalExited } from "@vibest/core/bus"
+import { PROJECTION_VERSION } from "@vibest/core/database/db-schema"
+import { installLedger } from "@vibest/core/database/migration"
+import * as Projectors from "@vibest/core/database/projectors"
+import { Catalog, type Fact, type FactOf } from "@vibest/schema/event"
+import { Effect, Exit, Fiber, Layer, PubSub, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { memorySqlite } from "./platform/bun.ts"
@@ -18,14 +19,15 @@ const MACHINE = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 const ITEM = "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f"
 const ITEM_2 = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
 
-const memory = () => Layer.fresh(memorySqlite)
+const memory = () => Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))
 
 const ledger = Effect.gen(function* () {
   yield* installLedger
-  const published: Array<ReadonlyArray<Fact>> = []
-  const journal = yield* makeJournal((facts) => Effect.sync(() => void published.push(facts)))
+  const bus = yield* Bus
+  const subscription = yield* bus.subscribe()
+  const published = PubSub.takeUpTo(subscription, Number.MAX_SAFE_INTEGER)
   const sql = yield* SqlClient.SqlClient
-  return { journal, published, sql }
+  return { bus, published, sql }
 })
 
 const replayDifference = (sql: SqlClient.SqlClient) => equalToReplay(sql).pipe(Effect.provide(memory()))
@@ -34,8 +36,8 @@ const eventCount = (sql: SqlClient.SqlClient) =>
   sql<{ n: number }>`SELECT count(*) AS n FROM event`.pipe(Effect.map((rows) => rows[0]!.n))
 
 const story = Effect.gen(function* () {
-  const { journal, sql } = yield* ledger
-  const { emit, commit } = journal
+  const { bus, sql } = yield* ledger
+  const { publish: emit, transaction: commit } = bus
   const ids = yield* commit(
     Effect.gen(function* () {
       yield* emit(Catalog["machine.added"], { at: 100, data: { name: "mb", target: "root@mb", vibestd: MACHINE } })
@@ -190,12 +192,12 @@ const story = Effect.gen(function* () {
       return { mainProcess, task, subProcess, execution, result, placeholder, notice, typed }
     }),
   )
-  return { ...ids, sql, journal }
+  return { ...ids, sql, bus }
 })
 
 const rowsOf = <A extends object>(sql: SqlClient.SqlClient, query: string) => sql.unsafe<A>(query)
 
-describe("journal projectors", () => {
+describe("projectors", () => {
   it.effect("project facts: created, repositories, entry, move", () =>
     Effect.gen(function* () {
       const { sql } = yield* story
@@ -219,19 +221,19 @@ describe("journal projectors", () => {
 
   it.effect("repositories_changed leaves a path owned by another project alone", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      yield* journal.commit(
+      const { bus, sql } = yield* ledger
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], {
+          yield* bus.publish(Catalog["project.created"], {
             projectId: P,
             data: { directory: "/a", repositories: [{ path: "/a" }] },
           })
-          yield* journal.emit(Catalog["project.created"], { projectId: OTHER_PROJECT, data: { repositories: [] } })
-          yield* journal.emit(Catalog["project.repositories_changed"], {
+          yield* bus.publish(Catalog["project.created"], { projectId: OTHER_PROJECT, data: { repositories: [] } })
+          yield* bus.publish(Catalog["project.repositories_changed"], {
             projectId: OTHER_PROJECT,
             data: { repositories: [{ path: "/a", remote: "r" }] },
           })
-          yield* journal.emit(Catalog["project.repositories_changed"], {
+          yield* bus.publish(Catalog["project.repositories_changed"], {
             projectId: P,
             data: { repositories: [{ path: "/a", remote: "mine" }] },
           })
@@ -298,11 +300,11 @@ describe("journal projectors", () => {
 
   it.effect("session.ended keeps the first end time and drops the session's outbox", () =>
     Effect.gen(function* () {
-      const { sql, journal } = yield* story
-      yield* journal.commit(
+      const { sql, bus } = yield* story
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["session.ended"], { sessionId: REMOTE, at: 700, data: { reason: "archived" } })
-          yield* journal.emit(Catalog["session.ended"], { sessionId: REMOTE, at: 800, data: { reason: "replaced" } })
+          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 700, data: { reason: "archived" } })
+          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 800, data: { reason: "replaced" } })
         }),
       )
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
@@ -364,14 +366,14 @@ describe("journal projectors", () => {
 
   it.effect("a placed process that fails to launch stays the session's current process", () =>
     Effect.gen(function* () {
-      const { sql, journal } = yield* story
-      const placed = yield* journal.commit(
+      const { sql, bus } = yield* story
+      const placed = yield* bus.transaction(
         Effect.gen(function* () {
-          const id = yield* journal.emit(Catalog["process.started"], {
+          const id = yield* bus.publish(Catalog["process.started"], {
             sessionId: SUB,
             data: { harness: "pi", runtime: "herdr", terminal: "w1:p3" },
           })
-          yield* journal.emit(Catalog["process.ended"], {
+          yield* bus.publish(Catalog["process.ended"], {
             sessionId: SUB,
             data: { process: id, reason: "launch_failed" },
           })
@@ -386,19 +388,19 @@ describe("journal projectors", () => {
 
   it.effect("a first placeholder that fails to launch stays the session's process when there is no other", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      const placeholder = yield* journal.commit(
+      const { bus, sql } = yield* ledger
+      const placeholder = yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* journal.emit(Catalog["session.created"], {
+          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+          yield* bus.publish(Catalog["session.created"], {
             sessionId: SUB,
             data: { project: P, agent: "subagent", name: "s", directory: "" },
           })
-          const id = yield* journal.emit(Catalog["process.started"], {
+          const id = yield* bus.publish(Catalog["process.started"], {
             sessionId: SUB,
             data: { harness: "pi", runtime: "herdr" },
           })
-          yield* journal.emit(Catalog["process.ended"], {
+          yield* bus.publish(Catalog["process.ended"], {
             sessionId: SUB,
             data: { process: id, reason: "launch_failed" },
           })
@@ -413,11 +415,11 @@ describe("journal projectors", () => {
 
   it.effect("a second live process for one session fails the transaction", () =>
     Effect.gen(function* () {
-      const { sql, journal } = yield* story
+      const { sql, bus } = yield* story
       const before = yield* eventCount(sql)
-      const exit = yield* journal
-        .commit(
-          journal.emit(Catalog["process.started"], { sessionId: MAIN, data: { harness: "pi", runtime: "herdr" } }),
+      const exit = yield* bus
+        .transaction(
+          bus.publish(Catalog["process.started"], { sessionId: MAIN, data: { harness: "pi", runtime: "herdr" } }),
         )
         .pipe(Effect.exit)
       assert.isTrue(Exit.isFailure(exit))
@@ -427,9 +429,9 @@ describe("journal projectors", () => {
 
   it.effect("execution facts: started, ended once with its reply", () =>
     Effect.gen(function* () {
-      const { sql, journal, execution, typed, subProcess, mainProcess } = yield* story
-      yield* journal.commit(
-        journal.emit(Catalog["execution.ended"], {
+      const { sql, bus, execution, typed, subProcess, mainProcess } = yield* story
+      yield* bus.transaction(
+        bus.publish(Catalog["execution.ended"], {
           sessionId: SUB,
           at: 999,
           data: { execution: execution, outcome: "lost" },
@@ -518,10 +520,10 @@ describe("journal projectors", () => {
 
   it.effect("a second notice with the same peer item fails the transaction", () =>
     Effect.gen(function* () {
-      const { journal } = yield* story
-      const exit = yield* journal
-        .commit(
-          journal.emit(Catalog["inbox.queued"], {
+      const { bus } = yield* story
+      const exit = yield* bus
+        .transaction(
+          bus.publish(Catalog["inbox.queued"], {
             sessionId: MAIN,
             data: { kind: "notice", recipient: MAIN, content: "again", status: "pending", peerItem: ITEM },
           }),
@@ -533,7 +535,7 @@ describe("journal projectors", () => {
 
   it.effect("machine, peer and outbox facts", () =>
     Effect.gen(function* () {
-      const { sql, journal } = yield* story
+      const { sql, bus } = yield* story
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [])
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM peer"), [{ id: PEER, name: "mac2", connectedAt: 170 }])
       const [queued] = yield* sql<{ seq: number }>`SELECT seq FROM event WHERE type = 'outbox.queued' ORDER BY seq DESC`
@@ -549,10 +551,10 @@ describe("journal projectors", () => {
           createdAt: 511,
         },
       ])
-      yield* journal.commit(
-        journal.emit(Catalog["machine.added"], { at: 900, data: { name: "mc", target: "mc", vibestd: MACHINE } }),
+      yield* bus.transaction(
+        bus.publish(Catalog["machine.added"], { at: 900, data: { name: "mc", target: "mc", vibestd: MACHINE } }),
       )
-      yield* journal.commit(journal.emit(Catalog["machine.connected"], { at: 950, data: { name: "mc" } }))
+      yield* bus.transaction(bus.publish(Catalog["machine.connected"], { at: 950, data: { name: "mc" } }))
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [
         { name: "mc", target: "mc", vibestdId: MACHINE, connectedAt: 950, createdAt: 900 },
       ])
@@ -577,21 +579,25 @@ describe("journal projectors", () => {
   )
 })
 
-describe("journal", () => {
-  it.effect("emit outside commit dies", () =>
+describe("bus", () => {
+  it.effect("publish outside a transaction commits and publishes it on its own", () =>
     Effect.gen(function* () {
-      const { journal } = yield* ledger
-      const exit = yield* journal.emit(Catalog["machine.connected"], { data: { name: "mb" } }).pipe(Effect.exit)
-      assert.isTrue(Exit.hasDies(exit))
+      const { bus, published, sql } = yield* ledger
+      yield* bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })
+      assert.strictEqual(yield* eventCount(sql), 1)
+      assert.deepStrictEqual(
+        (yield* published).map((event) => event.type),
+        ["machine.connected"],
+      )
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("emit from another fiber than the transaction's dies", () =>
+  it.effect("publish from another fiber than the transaction's dies", () =>
     Effect.gen(function* () {
-      const { journal } = yield* ledger
-      const exit = yield* journal
-        .commit(
-          Effect.forkChild(journal.emit(Catalog["machine.connected"], { data: { name: "mb" } })).pipe(
+      const { bus } = yield* ledger
+      const exit = yield* bus
+        .transaction(
+          Effect.forkChild(bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })).pipe(
             Effect.flatMap(Fiber.join),
           ),
         )
@@ -602,9 +608,9 @@ describe("journal", () => {
 
   it.effect("a payload with a key the definition does not have dies and writes nothing", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      const exit = yield* journal
-        .commit(journal.emit(Catalog["machine.connected"], { data: { name: "mb", extra: 1 } as never }))
+      const { bus, sql } = yield* ledger
+      const exit = yield* bus
+        .transaction(bus.publish(Catalog["machine.connected"], { data: { name: "mb", extra: 1 } as never }))
         .pipe(Effect.exit)
       assert.isTrue(Exit.hasDies(exit))
       assert.strictEqual(yield* eventCount(sql), 0)
@@ -613,39 +619,40 @@ describe("journal", () => {
 
   it.effect("a rolled back commit publishes nothing; nested commits publish once, in seq order, after the outer", () =>
     Effect.gen(function* () {
-      const { journal, published } = yield* ledger
-      const failed = yield* journal
-        .commit(
-          Effect.andThen(journal.emit(Catalog["peer.seen"], { data: { id: PEER, name: "a" } }), Effect.fail("stop")),
+      const { bus, published } = yield* ledger
+      const failed = yield* bus
+        .transaction(
+          Effect.andThen(bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } }), Effect.fail("stop")),
         )
         .pipe(Effect.exit)
       assert.isTrue(Exit.isFailure(failed))
-      assert.deepStrictEqual(published, [])
-      yield* journal.commit(
+      assert.deepStrictEqual(yield* published, [])
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["machine.added"], { data: { name: "mb", target: "mb", vibestd: MACHINE } })
-          yield* journal.commit(journal.emit(Catalog["machine.connected"], { data: { name: "mb" } }))
-          assert.deepStrictEqual(published, [])
+          yield* bus.publish(Catalog["machine.added"], { data: { name: "mb", target: "mb", vibestd: MACHINE } })
+          yield* bus.transaction(bus.publish(Catalog["machine.connected"], { data: { name: "mb" } }))
+          assert.deepStrictEqual(yield* published, [])
         }),
       )
+      const facts = (yield* published).filter((event): event is Fact => "seq" in event)
       assert.deepStrictEqual(
-        published.map((facts) => facts.map((fact) => fact.type)),
-        [["machine.added", "machine.connected"]],
+        facts.map((fact) => fact.type),
+        ["machine.added", "machine.connected"],
       )
-      assert.isTrue(published[0]![0]!.seq < published[0]![1]!.seq)
+      assert.isTrue(facts[0]!.seq < facts[1]!.seq)
     }).pipe(Effect.provide(memory())),
   )
 
   it.effect("after-commit effects run only once the outermost transaction commits", () =>
     Effect.gen(function* () {
-      const { journal } = yield* ledger
+      const { bus } = yield* ledger
       const ran: Array<string> = []
-      const mark = (name: string) => journal.afterCommit(() => void ran.push(name))
-      yield* journal.commit(mark("rolled back").pipe(Effect.andThen(Effect.fail("stop")))).pipe(Effect.exit)
+      const mark = (name: string) => bus.afterCommit(() => void ran.push(name))
+      yield* bus.transaction(mark("rolled back").pipe(Effect.andThen(Effect.fail("stop")))).pipe(Effect.exit)
       assert.deepStrictEqual(ran, [])
-      yield* journal.commit(
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.commit(mark("nested"))
+          yield* bus.transaction(mark("nested"))
           assert.deepStrictEqual(ran, [])
         }),
       )
@@ -657,21 +664,19 @@ describe("journal", () => {
 
   it.effect("a commit publishes its facts and then one change signal per session and per project it touched", () =>
     Effect.gen(function* () {
-      yield* installLedger
-      const published: Array<ReadonlyArray<unknown>> = []
-      const journal = yield* makeJournal((events) => Effect.sync(() => void published.push(withChanges(events))))
-      yield* journal.commit(
+      const { bus, published } = yield* ledger
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* journal.emit(Catalog["session.created"], {
+          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+          yield* bus.publish(Catalog["session.created"], {
             sessionId: MAIN,
             data: { project: P, agent: "main", name: "main", directory: "" },
           })
-          yield* journal.emit(Catalog["session.renamed"], { sessionId: MAIN, data: { name: "again" } })
+          yield* bus.publish(Catalog["session.renamed"], { sessionId: MAIN, data: { name: "again" } })
         }),
       )
       assert.deepStrictEqual(
-        published[0]!.map((event) => (event as { type: string }).type),
+        (yield* published).map((event) => event.type),
         ["project.created", "session.created", "session.renamed", "project.changed", "session.changed"],
       )
     }).pipe(Effect.provide(memory())),
@@ -679,20 +684,20 @@ describe("journal", () => {
 
   it.effect("each fact numbers on in its own aggregate: a session, a project, or the ledger", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      yield* journal.commit(
+      const { bus, sql } = yield* ledger
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* journal.emit(Catalog["session.created"], {
+          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+          yield* bus.publish(Catalog["session.created"], {
             sessionId: MAIN,
             data: { project: P, agent: "main", name: "main", directory: "" },
           })
-          yield* journal.emit(Catalog["inbox.queued"], {
+          yield* bus.publish(Catalog["inbox.queued"], {
             sessionId: MAIN,
             data: { kind: "send", sender: MAIN, content: "hi", status: "pending" },
           })
-          yield* journal.emit(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
-          yield* journal.emit(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })
+          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
+          yield* bus.publish(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })
         }),
       )
       const [ledgerId] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
@@ -708,19 +713,19 @@ describe("journal", () => {
 
   it.effect("projects and publishes the stored form, so routing given in another key order equals its replay", () =>
     Effect.gen(function* () {
-      const { journal, sql, published } = yield* ledger
+      const { bus, sql, published } = yield* ledger
       const routing = {
         trace: [{ ms: 1, plugin: "p", hook: "h", outcome: "ok", changes: [{ to: "pi", field: "harness" }] }],
         decidedBy: {},
       }
-      yield* journal.commit(
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* journal.emit(Catalog["session.created"], {
+          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+          yield* bus.publish(Catalog["session.created"], {
             sessionId: MAIN,
             data: { project: P, agent: "main", name: "main", directory: "" },
           })
-          yield* journal.emit(Catalog["process.started"], {
+          yield* bus.publish(Catalog["process.started"], {
             sessionId: MAIN,
             data: { harness: "pi", runtime: "herdr", routing: routing as never },
           })
@@ -729,24 +734,24 @@ describe("journal", () => {
       const stored =
         '{"decidedBy":{},"trace":[{"plugin":"p","hook":"h","outcome":"ok","ms":1,"changes":[{"field":"harness","to":"pi"}]}]}'
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT routing FROM process"), [{ routing: stored }])
-      const started = published.flat().find((fact) => fact.type === "process.started")!
-      assert.strictEqual(JSON.stringify(started.data.routing), stored)
+      const started = (yield* published).find((event) => event.type === "process.started")!
+      assert.strictEqual(JSON.stringify((started as FactOf<"process.started">).data.routing), stored)
       assert.strictEqual(yield* replayDifference(sql), undefined)
     }).pipe(Effect.provide(memory())),
   )
 
   it.effect("a session fact given a project too dies and writes nothing", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      const exit = yield* journal
-        .commit(
+      const { bus, sql } = yield* ledger
+      const exit = yield* bus
+        .transaction(
           Effect.gen(function* () {
-            yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-            yield* journal.emit(Catalog["session.created"], {
+            yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+            yield* bus.publish(Catalog["session.created"], {
               sessionId: MAIN,
               data: { project: P, agent: "main", name: "main", directory: "" },
             })
-            yield* journal.emit(Catalog["session.renamed"], {
+            yield* bus.publish(Catalog["session.renamed"], {
               projectId: OTHER_PROJECT,
               sessionId: MAIN,
               data: { name: "x" },
@@ -761,14 +766,14 @@ describe("journal", () => {
 
   it.effect("a fact may be earlier than the one before it", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      yield* journal.commit(
+      const { bus, sql } = yield* ledger
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["machine.added"], {
+          yield* bus.publish(Catalog["machine.added"], {
             at: 500,
             data: { name: "mb", target: "mb", vibestd: MACHINE },
           })
-          yield* journal.emit(Catalog["machine.connected"], { at: 400, data: { name: "mb" } })
+          yield* bus.publish(Catalog["machine.connected"], { at: 400, data: { name: "mb" } })
         }),
       )
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT at FROM event ORDER BY seq"), [{ at: 500 }, { at: 400 }])
@@ -777,8 +782,8 @@ describe("journal", () => {
 
   it.effect("the log refuses updates and never reuses a position", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      const emitConnected = journal.commit(journal.emit(Catalog["machine.connected"], { data: { name: "mb" } }))
+      const { bus, sql } = yield* ledger
+      const emitConnected = bus.transaction(bus.publish(Catalog["machine.connected"], { data: { name: "mb" } }))
       const first = yield* emitConnected
       const second = yield* emitConnected
       const update = yield* sql`UPDATE event SET at = 0 WHERE seq = ${first}`.pipe(Effect.exit)
@@ -793,14 +798,14 @@ describe("journal", () => {
   )
 })
 
-describe("journal rebuild", () => {
+describe("rebuild", () => {
   it.effect("a database whose read model is another version replays to the same state", () =>
     Effect.gen(function* () {
       const { sql } = yield* story
       yield* sql`UPDATE meta SET value = '0' WHERE key = 'projection'`
       yield* sql`CREATE TABLE answer (execution INTEGER PRIMARY KEY)`
       yield* sql`DELETE FROM inbox`
-      yield* rebuild
+      yield* (yield* Bus).rebuild
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT value FROM meta WHERE key = 'projection'"), [
         { value: String(PROJECTION_VERSION) },
       ])
@@ -815,7 +820,7 @@ describe("journal rebuild", () => {
     Effect.gen(function* () {
       const { sql } = yield* story
       yield* sql`INSERT INTO event (aggregate, seq, at, type, data) VALUES (${SUB}, 99, 1, 'session.purged', '{}')`
-      const error = yield* rebuild.pipe(Effect.flip)
+      const error = yield* (yield* Bus).rebuild.pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
       assert.include(error.message, `event ${SUB} 99`)
       const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
@@ -824,7 +829,49 @@ describe("journal rebuild", () => {
   )
 })
 
-describe("journal reads by cursor", () => {
+describe("project", () => {
+  it.effect("a replay reaching a fact type no domain registered a projector for fails and names it", () =>
+    Effect.gen(function* () {
+      yield* installLedger
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
+        VALUES (${PEER}, 1, 1, 'peer.seen', '{"id":"p","name":"a"}')`
+      const error = yield* (yield* Bus).rebuild.pipe(Effect.flip)
+      assert.strictEqual(error._tag, "UnknownFact")
+      assert.include(error.message, `event ${PEER} 1: peer.seen has no projector`)
+    }).pipe(Effect.provide(Bus.layer.pipe(Layer.provideMerge(Layer.fresh(memorySqlite))))),
+  )
+})
+
+describe("delivery order", () => {
+  it.effect("a subscriber publishing a follow-up fact does not overtake the rest of the batch", () =>
+    Effect.gen(function* () {
+      yield* installLedger
+      const bus = yield* Bus
+      const first = yield* bus.subscribe([Catalog["peer.seen"]])
+      const second = yield* bus.subscribe([Catalog["peer.seen"], Catalog["machine.connected"]])
+      yield* Stream.fromSubscription(first).pipe(
+        Stream.take(1),
+        Stream.runForEach(() => bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })),
+        Effect.forkScoped,
+      )
+      yield* Effect.yieldNow
+      yield* bus.transaction(
+        Effect.gen(function* () {
+          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
+          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "b" } })
+        }),
+      )
+      const seen = yield* Effect.forEach([1, 2, 3], () => PubSub.take(second))
+      assert.deepStrictEqual(
+        seen.map((event) => (event as Fact).seq),
+        [1, 2, 3],
+      )
+    }).pipe(Effect.provide(memory()), Effect.scoped),
+  )
+})
+
+describe("log", () => {
   const project = { projectId: P, data: { directory: "/w/app", repositories: [] } }
   const session = (sessionId: string) => ({
     sessionId,
@@ -834,28 +881,29 @@ describe("journal reads by cursor", () => {
 
   it.effect("a session read pages past 1000 facts in seq order and a log read keeps each seq rising", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      yield* journal.commit(
+      const { bus } = yield* ledger
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], project)
-          yield* journal.emit(Catalog["session.created"], session(MAIN))
-          yield* journal.emit(Catalog["session.created"], session(SUB))
+          yield* bus.publish(Catalog["project.created"], project)
+          yield* bus.publish(Catalog["session.created"], session(MAIN))
+          yield* bus.publish(Catalog["session.created"], session(SUB))
           for (let i = 0; i < 1100; i++)
-            yield* journal.emit(Catalog["session.renamed"], {
+            yield* bus.publish(Catalog["session.renamed"], {
               sessionId: i < 1050 ? MAIN : SUB,
               data: { name: `n${i}` },
             })
         }),
       )
-      const read = (cursor: Parameters<typeof followFacts>[2]) =>
-        Stream.runCollect(followFacts(sql, Effect.void, cursor, false)).pipe(Effect.map((rows) => Array.from(rows)))
-      const own = yield* read({ session: MAIN, after: 0 })
+      const read = (input: { readonly aggregate?: string }) =>
+        Stream.runCollect(bus.log({ ...input, follow: false })).pipe(Effect.map((rows) => Array.from(rows)))
+      const own = yield* read({ aggregate: MAIN })
       assert.deepStrictEqual(
         own.map((r) => r.seq),
         seqs(1051),
       )
-      const all = yield* read({ log: 0 })
+      const all = yield* read({})
       assert.strictEqual(all.length, 1103)
+      assert.deepStrictEqual(Object.keys(all[0]!).sort(), ["aggregate", "at", "data", "seq", "type"])
       for (const aggregate of [P, MAIN, SUB]) {
         const mine = all.filter((r) => r.aggregate === aggregate)
         assert.deepStrictEqual(
@@ -868,20 +916,17 @@ describe("journal reads by cursor", () => {
 
   it.effect("a follow started before two commits yields each fact once and in order", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      const wake = yield* Queue.unbounded<void>()
-      const fiber = yield* Stream.runCollect(
-        followFacts(sql, Queue.take(wake), { session: MAIN, after: 0 }, true).pipe(Stream.take(2)),
-      ).pipe(Effect.forkChild)
-      yield* journal.commit(
+      const { bus } = yield* ledger
+      const fiber = yield* Stream.runCollect(bus.log({ aggregate: MAIN, follow: true }).pipe(Stream.take(2))).pipe(
+        Effect.forkChild,
+      )
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], project)
-          yield* journal.emit(Catalog["session.created"], session(MAIN))
+          yield* bus.publish(Catalog["project.created"], project)
+          yield* bus.publish(Catalog["session.created"], session(MAIN))
         }),
       )
-      yield* Queue.offer(wake, undefined)
-      yield* journal.commit(journal.emit(Catalog["session.renamed"], { sessionId: MAIN, data: { name: "x" } }))
-      yield* Queue.offer(wake, undefined)
+      yield* bus.transaction(bus.publish(Catalog["session.renamed"], { sessionId: MAIN, data: { name: "x" } }))
       const rows = Array.from(yield* Fiber.join(fiber))
       assert.deepStrictEqual(
         rows.map((r) => [r.seq, r.type]),
@@ -895,32 +940,53 @@ describe("journal reads by cursor", () => {
 
   it.effect("a finite read stops at the watermark taken when it starts and a resume starts after a seq", () =>
     Effect.gen(function* () {
-      const { journal, sql } = yield* ledger
-      yield* journal.commit(
+      const { bus } = yield* ledger
+      yield* bus.transaction(
         Effect.gen(function* () {
-          yield* journal.emit(Catalog["project.created"], project)
-          yield* journal.emit(Catalog["session.created"], session(MAIN))
+          yield* bus.publish(Catalog["project.created"], project)
+          yield* bus.publish(Catalog["session.created"], session(MAIN))
         }),
       )
       const rename = (name: string) =>
-        journal.commit(journal.emit(Catalog["session.renamed"], { sessionId: MAIN, data: { name } }))
-      const read = (cursor: Parameters<typeof followFacts>[2]) =>
-        Stream.runCollect(followFacts(sql, Effect.void, cursor, false).pipe(Stream.tap(() => rename("late")))).pipe(
+        bus.transaction(bus.publish(Catalog["session.renamed"], { sessionId: MAIN, data: { name } }))
+      const read = (input: { readonly aggregate?: string }) =>
+        Stream.runCollect(bus.log({ ...input, follow: false }).pipe(Stream.tap(() => rename("late")))).pipe(
           Effect.map((rows) => Array.from(rows)),
         )
-      const own = yield* read({ session: MAIN, after: 0 })
+      const own = yield* read({ aggregate: MAIN })
       assert.deepStrictEqual(
         own.map((r) => r.seq),
         [1],
       )
-      const whole = yield* read({ log: 0 })
+      const whole = yield* read({})
       assert.strictEqual(whole.length, 3)
       yield* rename("x")
-      const resumed = yield* Stream.runCollect(followFacts(sql, Effect.void, { session: MAIN, after: 1 }, false))
+      const resumed = yield* Stream.runCollect(bus.log({ aggregate: MAIN, after: 1, follow: false }))
       assert.deepStrictEqual(
         Array.from(resumed).map((r) => r.seq),
         seqs(6).slice(1),
       )
     }).pipe(Effect.provide(memory())),
+  )
+})
+
+const exited = { type: "terminal.exited", runtime: "r", terminal: { machine: "local", id: "t" } } as const
+const released = { type: "runtime.reset", runtime: "r", machine: "local" } as const
+
+describe("subscribe", () => {
+  it.effect("a subscriber of one type retains no other type, and several types keep publish order", () =>
+    Effect.gen(function* () {
+      const bus = yield* Bus
+      const one = yield* bus.subscribe([TerminalExited])
+      const both = yield* bus.subscribe([TerminalExited, RuntimeReset])
+      const all = yield* bus.subscribe()
+      yield* bus.observe(released)
+      yield* bus.observe(released)
+      yield* bus.observe(exited)
+      yield* bus.observe(released)
+      assert.deepStrictEqual(yield* PubSub.takeAll(one), [exited])
+      assert.deepStrictEqual(yield* PubSub.takeAll(both), [released, released, exited, released])
+      assert.strictEqual((yield* PubSub.takeAll(all)).length, 4)
+    }).pipe(Effect.provide(memory()), Effect.scoped),
   )
 })
