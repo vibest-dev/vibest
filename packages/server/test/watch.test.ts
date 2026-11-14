@@ -44,7 +44,7 @@ const withEntry = Effect.gen(function* () {
   const project = yield* projectOf(repo)
   yield* herdr.addPane("w1:p8", "ws", repo)
   yield* herdr.seedAgent("w1:p8")
-  const started = yield* db.startEntry(
+  const started = yield* db.session.startEntry(
     project,
     "pi",
     false,
@@ -128,7 +128,7 @@ describe("Watch", () => {
       yield* next(isSnapshot)
       const moved = `${yield* tempDirectory("vibest-moved-")}/repo`
       yield* Effect.promise(() => fs.cp(repo, moved, { recursive: true }))
-      yield* db.moveProject(project, moved, [])
+      yield* db.project.moveProject(project, moved, [])
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
           e._tag === "Session" && e.session.id === entryId && e.session.worktree === moved,
@@ -165,7 +165,7 @@ describe("Watch", () => {
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
       const terminal = (yield* herdr.terminalOf(id))!
       yield* herdr.endExecution(id)
-      yield* db.setStatus(id, "idle")
+      yield* db.session.setStatus(id, "idle")
       const isProject = (activity: string) => (e: WatchEvent) =>
         e._tag === "Project" && e.project.id === project && e.project.activity === activity
       yield* next((e): e is WatchEvent => isSession("idle", 0)(e))
@@ -220,9 +220,9 @@ describe("Watch", () => {
       const second = yield* watching(repo)
       yield* first.next(isSnapshot)
       yield* second.next(isSnapshot)
-      const briefs = db.sessionBriefs
+      const briefs = db.session.sessionBriefs
       let reads = 0
-      Object.assign(db, {
+      Object.assign(db.session, {
         sessionBriefs: (ids: Parameters<typeof briefs>[0]) => {
           reads++
           return briefs(ids)
@@ -230,11 +230,11 @@ describe("Watch", () => {
       })
       const inStatus = (status: string) => (e: WatchEvent) =>
         e._tag === "Session" && e.session.id === entryId && e.session.status === status
-      yield* db.setStatus(entryId, "working")
+      yield* db.session.setStatus(entryId, "working")
       yield* first.next((e): e is WatchEvent => inStatus("working")(e))
       yield* second.next((e): e is WatchEvent => inStatus("working")(e))
       reads = 0
-      yield* db.setStatus(entryId, "idle")
+      yield* db.session.setStatus(entryId, "idle")
       yield* first.next((e): e is WatchEvent => inStatus("idle")(e))
       yield* second.next((e): e is WatchEvent => inStatus("idle")(e))
       assert.strictEqual(reads, 1)
@@ -249,9 +249,9 @@ describe("Watch", () => {
       const { project } = yield* withEntry
       const feed = yield* WatchFeed.Service
       const before = yield* feed.subscribe
-      const read = db.watchProjects
+      const read = db.project.watchProjects
       let failing = true
-      Object.assign(db, {
+      Object.assign(db.project, {
         watchProjects: (id?: string) => (failing ? Effect.die("unreadable") : read(id)),
       })
       yield* bus.observe({ type: "project.changed", projectId: project })

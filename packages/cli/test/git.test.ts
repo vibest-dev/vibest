@@ -443,9 +443,13 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           )
           yield* sh(repo, "remote", "add", "origin", "git@github.com:O/R.git")
           const first = yield* resolve(repo)
-          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), first.id, { cwd: repo })
-          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), first.id, { cwd: `${repo}/sub` })
-          yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), first.id, { cwd: `${repo}-other` })
+          yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), first.id, { cwd: repo })
+          yield* db.session.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), first.id, {
+            cwd: `${repo}/sub`,
+          })
+          yield* db.session.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), first.id, {
+            cwd: `${repo}-other`,
+          })
           const ours = layout.allocationWorktree("repo", "ab12")
           yield* fs.makeDirectory(path.dirname(ours), { recursive: true })
           yield* sh(repo, "worktree", "add", "-q", "--detach", ours)
@@ -466,7 +470,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
             repo,
             moved,
           ])
-          assert.isUndefined(yield* db.projectAt(moved))
+          assert.isUndefined(yield* db.project.projectAt(moved))
           const done = yield* resolve(moved, true)
           assert.strictEqual(done.id, first.id)
           assert.strictEqual(done.directory, moved)
@@ -475,18 +479,21 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
             repaired: [ours],
             manual: [`git -C ${moved} worktree repair ${theirs}`],
           })
-          assert.deepStrictEqual(yield* db.projectAt(moved), { id: first.id, directory: moved })
-          assert.strictEqual(yield* db.sessionDirectory("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), moved)
-          assert.strictEqual(yield* db.sessionDirectory("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), `${moved}/sub`)
-          assert.strictEqual(yield* db.sessionDirectory("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), `${repo}-other`)
+          assert.deepStrictEqual(yield* db.project.projectAt(moved), { id: first.id, directory: moved })
+          assert.strictEqual(yield* db.session.sessionDirectory("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), moved)
+          assert.strictEqual(yield* db.session.sessionDirectory("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), `${moved}/sub`)
+          assert.strictEqual(
+            yield* db.session.sessionDirectory("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+            `${repo}-other`,
+          )
           assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
           assert.strictEqual(yield* fs.readFileString(path.join(theirs, ".git")), theirsGit)
           const again = path.join(dir, "c")
           yield* fs.rename(moved, again)
           const other = yield* resolve(again, false)
           assert.notStrictEqual(other.id, first.id)
-          assert.deepStrictEqual(yield* db.projectAt(again), { id: other.id, directory: again })
-          assert.strictEqual(yield* db.projectDirectory(first.id), moved)
+          assert.deepStrictEqual(yield* db.project.projectAt(again), { id: other.id, directory: again })
+          assert.strictEqual(yield* db.project.projectDirectory(first.id), moved)
         }).pipe(Effect.provide(database(file)), Effect.provide(Layer.effect(Layout, Layout.make(home))))
       }),
   )
@@ -526,14 +533,14 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           const moved = path.join(dir, "b", "repo")
           yield* fs.makeDirectory(path.dirname(moved))
           yield* fs.rename(repo, moved)
-          const dyingDb = { ...db, moveProject: () => Effect.die("vibestd stopped") }
+          const dyingDb = { ...db, project: { ...db.project, moveProject: () => Effect.die("vibestd stopped") } }
           assert.isTrue(Exit.isFailure(yield* Effect.exit(resolve(moved, true, dyingDb))))
           assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
-          assert.strictEqual(yield* db.projectDirectory(first.id), repo)
+          assert.strictEqual(yield* db.project.projectDirectory(first.id), repo)
           assert.strictEqual((yield* Effect.flip(resolve(moved)))._tag, "ProjectMoved")
           const done = yield* resolve(moved, true)
           assert.deepStrictEqual("moved" in done && done.moved, { from: repo, repaired: [], manual: [] })
-          assert.deepStrictEqual(yield* db.projectAt(moved), { id: first.id, directory: moved })
+          assert.deepStrictEqual(yield* db.project.projectAt(moved), { id: first.id, directory: moved })
         }).pipe(
           Effect.provide(database(path.join(dir, "vibest.db"))),
           Effect.provide(Layer.effect(Layout, Layout.make(path.join(dir, "home")))),

@@ -198,8 +198,8 @@ describe("pi-vibest", () => {
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("pi")
-        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.startEntry(
+        yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        const coord = yield* db.session.startEntry(
           yield* projectOf("r"),
           "pi",
           false,
@@ -209,7 +209,7 @@ describe("pi-vibest", () => {
           },
           { agent: "coordinator" },
         )
-        yield* db.insertNoticeTo(coord.sessionId, "survives the gap")
+        yield* db.inbox.insertNoticeTo(coord.sessionId, "survives the gap")
         const notes: Array<string> = []
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
@@ -251,7 +251,7 @@ describe("pi-vibest", () => {
         const layout = yield* Layout
         const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const project = yield* projectOf("r")
-        yield* db.insertSession({ id, ...idleRow("pi") }, project)
+        yield* db.session.insertSession({ id, ...idleRow("pi") }, project)
         const s = yield* session({
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: id,
@@ -260,11 +260,11 @@ describe("pi-vibest", () => {
         })
         yield* s.emit("session_start", { reason: "startup" }, tuiStart)
         yield* TestClock.withLive(Effect.sleep("200 millis"))
-        assert.isUndefined(yield* db.readyAt(id))
+        assert.isUndefined(yield* db.session.readyAt(id))
         yield* Layer.build(
           Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
         )
-        yield* untilVirtual(db.readyAt(id), (at) => at !== undefined)
+        yield* untilVirtual(db.session.readyAt(id), (at) => at !== undefined)
       }).pipe(Effect.scoped, Effect.provide(pulling())),
     15_000,
   )
@@ -278,8 +278,8 @@ describe("pi-vibest", () => {
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("claude")
-        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.startEntry(
+        yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        const coord = yield* db.session.startEntry(
           yield* projectOf("r"),
           "pi",
           false,
@@ -307,7 +307,7 @@ describe("pi-vibest", () => {
           { reason: "startup" },
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
-        const report = (message: string) => db.insertNoticeTo(coord.sessionId, message)
+        const report = (message: string) => db.inbox.insertNoticeTo(coord.sessionId, message)
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
@@ -409,9 +409,9 @@ describe("pi-vibest", () => {
       const db = yield* Db
       yield* runtime.addPane("w1:p7", "ws", "/")
       const row = idleRow("pi")
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
-      const coord = yield* db.startEntry(
+      yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+      yield* db.session.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
+      const coord = yield* db.session.startEntry(
         yield* projectOf("r"),
         "pi",
         false,
@@ -421,7 +421,7 @@ describe("pi-vibest", () => {
         },
         { agent: "coordinator" },
       )
-      yield* db.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
+      yield* db.inbox.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
 
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
@@ -463,7 +463,7 @@ describe("pi-vibest", () => {
         (n) => n === 1,
       )
       yield* finishExecution(s, executionOf(s.messages[0]!.message))
-      yield* db.insertNoticeTo(coord.sessionId, "<agent-message>two</agent-message>")
+      yield* db.inbox.insertNoticeTo(coord.sessionId, "<agent-message>two</agent-message>")
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 2,
@@ -490,8 +490,8 @@ describe("pi-vibest", () => {
       const db = yield* Db
       const sql = yield* SqlClient.SqlClient
       const row = idleRow("pi")
-      yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
-      const coord = yield* db.startEntry(
+      yield* db.session.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
+      const coord = yield* db.session.startEntry(
         yield* projectOf("r"),
         "pi",
         false,
@@ -575,7 +575,7 @@ describe("pi-vibest", () => {
         Boolean,
       )
       assert.strictEqual(yield* saved, s1)
-      yield* db.noteConversation(launched.sessionId, "other")
+      yield* db.session.noteConversation(launched.sessionId, "other")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
@@ -594,7 +594,7 @@ describe("pi-vibest", () => {
           .harnessSessionId,
         "s-fork",
       )
-      yield* db.noteConversation(launched.sessionId, "kept")
+      yield* db.session.noteConversation(launched.sessionId, "kept")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
       const renewed = yield* c["Project.EntrySession"]({

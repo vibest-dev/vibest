@@ -30,17 +30,21 @@ export const make = Effect.gen(function* () {
   const integration = yield* Integration.Service
   const seenLocked = yield* KeyedMutex.make<string>()
 
-  const startedByPeer = (scope: NonNullable<Parameters<typeof db.resolveSession>[1]>, id: string, direct: boolean) =>
+  const startedByPeer = (
+    scope: NonNullable<Parameters<typeof db.session.resolveSession>[1]>,
+    id: string,
+    direct: boolean,
+  ) =>
     Effect.gen(function* () {
       if (scope.session === undefined) return true
-      const route = direct ? yield* db.creatorOf(id) : yield* db.nearestAlive(id)
+      const route = direct ? yield* db.session.creatorOf(id) : yield* db.session.nearestAlive(id)
       return route !== undefined && "peer" in route && route.peer === scope.peer && route.session === scope.session
     })
 
   const managed = (method: MethodOf<"owner">, input: string) =>
     Effect.gen(function* () {
       const { c, scope } = yield* reach(method)
-      const id = yield* db.resolveSession(input, scope)
+      const id = yield* db.session.resolveSession(input, scope)
       if (c === undefined) {
         if (scope !== undefined && !(yield* startedByPeer(scope, id, false)))
           return yield* new Forbidden({
@@ -49,11 +53,11 @@ export const make = Effect.gen(function* () {
           })
         return id
       }
-      const session = yield* db.getSession(id)
+      const session = yield* db.session.getSession(id)
       if (!session || session.entry) {
-        const identity = yield* db.sessionIdentity(id)
+        const identity = yield* db.session.sessionIdentity(id)
         if (identity?.entry) {
-          const directory = yield* db.projectDirectory(identity.projectId)
+          const directory = yield* db.project.projectDirectory(identity.projectId)
           const name =
             directory !== undefined && directory !== ""
               ? directory.slice(directory.lastIndexOf("/") + 1)
@@ -65,7 +69,7 @@ export const make = Effect.gen(function* () {
         }
         return yield* new NoSuchSession({ id, message: `no session ${id}` })
       }
-      const manager = yield* db.nearestAlive(id)
+      const manager = yield* db.session.nearestAlive(id)
       if (c._tag === "Session" && (manager === undefined || !("local" in manager) || manager.local !== c.sessionId))
         return yield* new Forbidden({
           method,
@@ -92,7 +96,7 @@ export const make = Effect.gen(function* () {
           model: input.model,
           env: input.env,
           agent: input.agent,
-          share: input.share === undefined ? undefined : yield* db.resolveSession(input.share),
+          share: input.share === undefined ? undefined : yield* db.session.resolveSession(input.share),
           archive: input.archive,
           runtime: input.runtime,
           parentSessionId: c.sessionId,
@@ -115,7 +119,7 @@ export const make = Effect.gen(function* () {
                 ),
               )
           const { c, scope } = yield* reach("Send")
-          const target = yield* db.resolveSession(input, scope)
+          const target = yield* db.session.resolveSession(input, scope)
           if (c === undefined && scope !== undefined && !(yield* startedByPeer(scope, target, true)))
             return yield* new Forbidden({
               method: "Send",
@@ -154,12 +158,12 @@ export const make = Effect.gen(function* () {
     Get: (p) =>
       routed.Get(p, (input) =>
         Effect.gen(function* () {
-          const id = yield* db.resolveSession(input, (yield* reach("Get")).scope)
+          const id = yield* db.session.resolveSession(input, (yield* reach("Get")).scope)
           const row = yield* sessions.get(id)
-          const session = Listing.toInfo(row, (yield* db.sessionBriefs([id])).get(id))
+          const session = Listing.toInfo(row, (yield* db.session.sessionBriefs([id])).get(id))
           return {
             ...session,
-            reply: (yield* db.latestReply(id)) ?? null,
+            reply: (yield* db.session.latestReply(id)) ?? null,
           }
         }),
       ),
@@ -184,7 +188,7 @@ export const make = Effect.gen(function* () {
           const id =
             session === undefined
               ? undefined
-              : yield* db
+              : yield* db.session
                   .resolveSession(session)
                   .pipe(
                     Effect.catchTag("AmbiguousSession", (e) =>
@@ -221,9 +225,9 @@ export const make = Effect.gen(function* () {
     "Session.Seen": ({ id, finished }) =>
       Effect.gen(function* () {
         yield* cliOnly("Session.Seen")
-        const identity = yield* db.sessionIdentity(id)
+        const identity = yield* db.session.sessionIdentity(id)
         if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-        const at = yield* db.getSession(id)
+        const at = yield* db.session.getSession(id)
         if (at === undefined || !runtimeOf(at) || terminalOf(at).id === "") return
         const address = terminalOf(at)
         const rt = runtimes.find(runtimeOf(at))
@@ -243,7 +247,7 @@ export const make = Effect.gen(function* () {
         yield* self("Session.Ready", id)
         const read = reader(headers)
         if (conversation !== undefined) {
-          const row = yield* db.sessionIdentity(id)
+          const row = yield* db.session.sessionIdentity(id)
           if (row?.entry === true && conversation.harness === row.harness)
             yield* integration.conversation(id, conversation.id, processOf(read))
           return {}

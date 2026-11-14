@@ -240,7 +240,7 @@ layer(Platform.services)(
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           const pending = yield* Effect.gen(function* () {
             const db = yield* Db
-            yield* db.insertSession(
+            yield* db.session.insertSession(
               {
                 id: "b0050001-b005-4b00-8b00-b0050001b005",
                 agent: "general",
@@ -261,7 +261,7 @@ layer(Platform.services)(
               },
               yield* projectOf("seeded-project"),
             )
-            return (yield* db.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
+            return (yield* db.inbox.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
           }).pipe(
             Effect.provide(
               Db.layer.pipe(
@@ -299,7 +299,7 @@ layer(Platform.services)(
             assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
             assert.isFalse(yield* probe(layout.socket))
             const rows = yield* Effect.flatMap(Db, (db) =>
-              db.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
+              db.inbox.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
             ).pipe(
               Effect.provide(
                 Db.layer.pipe(

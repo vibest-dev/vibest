@@ -1,13 +1,13 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
-import type { OutboxRow } from "@vibest/core/database/db-remote"
+import type { OutboxRow } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { defaultSessionName, Session } from "@vibest/core/session"
 import type { PayloadOf } from "@vibest/protocol/rpc"
-import { OutboxAcked, OutboxQueued, SessionEnded } from "@vibest/schema/event"
+import { OutboxQueued } from "@vibest/schema/event"
 import {
   NoCommit,
   NoProject,
@@ -17,9 +17,11 @@ import {
   PromptTooLarge,
 } from "@vibest/schema/machine"
 import { NoRuntime } from "@vibest/schema/session"
-import { Context, Effect, Layer, Stream } from "effect"
+import { Context, Effect, Layer, Option, Queue, Stream } from "effect"
 
 export * as Peer from "./peer.ts"
+
+export const OUTBOX_PAGE = 100
 
 const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
@@ -45,7 +47,7 @@ const make = Effect.gen(function* () {
     ) {
       const bytes = new TextEncoder().encode(input.prompt).length
       if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
-      const rows = yield* db.remoteProjects
+      const rows = yield* db.remote.remoteProjects
       const exact = rows.filter((row) => row.remote === input.repository)
       const { identity } = input
       const matched =
@@ -103,30 +105,32 @@ const make = Effect.gen(function* () {
     outbox: (peer: string): Stream.Stream<OutboxItem> =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const subscription = yield* bus.subscribe([SessionEnded, OutboxQueued, OutboxAcked])
-          const sent = new Set<string>()
-          const batch = Effect.gen(function* () {
-            const rows = yield* db.outboxOf(peer)
-            const present = new Set(rows.map((row) => row.id))
-            for (const id of sent) if (!present.has(id)) sent.delete(id)
-            const fresh = rows.filter((row) => !sent.has(row.id))
-            for (const row of fresh) sent.add(row.id)
-            return fresh.map(outboxItem)
-          })
-          const wake = Stream.fromSubscription(subscription).pipe(
-            Stream.filter((event) => event.type === "session.ended" || event.data.peer === peer),
+          const subscription = yield* bus.subscribe([OutboxQueued])
+          const slot = yield* Queue.sliding<void>(1)
+          yield* Stream.fromSubscription(subscription).pipe(
+            Stream.filter((event) => event.data.peer === peer),
+            Stream.runForEach(() => Queue.offer(slot, undefined)),
+            Effect.forkScoped,
           )
-          return Stream.concat(Stream.make(undefined), wake).pipe(
-            Stream.mapEffect((event) => {
-              if (event?.type === "outbox.acked") for (const id of event.data.ids) sent.delete(id)
-              return batch
-            }),
-            Stream.flattenIterable,
+          let cursor = 0
+          const pages = Stream.paginate(undefined, () =>
+            db.remote.outboxOf(peer, cursor, OUTBOX_PAGE).pipe(
+              Effect.map((rows) => {
+                cursor = rows.at(-1)?.seq ?? cursor
+                return [
+                  rows.map(outboxItem),
+                  rows.length < OUTBOX_PAGE ? Option.none() : Option.some(undefined),
+                ] as const
+              }),
+            ),
+          )
+          return Stream.concat(Stream.make(undefined), Stream.fromQueue(slot)).pipe(
+            Stream.flatMap(() => pages, { concurrency: 1 }),
           )
         }),
       ),
 
-    ack: Effect.fn("Peer.ack")((peer: string, ids: ReadonlyArray<string>) => db.ackOutbox(peer, ids)),
+    ack: Effect.fn("Peer.ack")((peer: string, ids: ReadonlyArray<string>) => db.remote.ackOutbox(peer, ids)),
   }
 })
 

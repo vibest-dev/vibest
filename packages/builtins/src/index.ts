@@ -7,6 +7,7 @@ import { plugin as runtimeHerdr } from "@vibest/runtime-herdr/plugin"
 import { Effect } from "effect"
 
 import { agentPlugin } from "./agent.ts"
+import { archiveOnIdlePlugin } from "./archive-on-idle.ts"
 import { harnessDefaultPlugin } from "./harness-default.ts"
 
 export interface Builtin {
@@ -26,6 +27,7 @@ const builtin = (plugin: Plugin.Plugin): Builtin => ({
 export const pre = Effect.gen(function* () {
   const pi = yield* piPlugin
   const claude = yield* claudePlugin
+  const archiveOnIdle = yield* archiveOnIdlePlugin
   return [
     builtin(agentPlugin),
     builtin(pi),
@@ -33,6 +35,7 @@ export const pre = Effect.gen(function* () {
     builtin(runtimeHerdrCore),
     builtin(runtimeHerdr),
     builtin(choicePlugin()),
+    builtin(archiveOnIdle),
     builtin(harnessDefaultPlugin()),
   ]
 })

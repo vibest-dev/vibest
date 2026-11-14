@@ -21,9 +21,9 @@ export const entryOfProject = (repo: string) =>
   Effect.gen(function* () {
     const db = yield* Db
     const projectId = yield* projectOf(repo)
-    const found = yield* db.entryOf(projectId)
+    const found = yield* db.session.entryOf(projectId)
     if (found !== undefined) return found.id
-    return (yield* db.startEntry(
+    return (yield* db.session.startEntry(
       projectId,
       "pi",
       false,
@@ -74,11 +74,14 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { r
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
     })
-    yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
+    yield* until(
+      db.session.getSession(id),
+      (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
+    )
     yield* sessions.check(id)
     yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
-    const row = (yield* db.getSession(id))!
+    const row = (yield* db.session.getSession(id))!
     return { id, row, sessions, db, entryId: yield* entryOfProject(repo) }
   })
 
@@ -95,7 +98,7 @@ export const idleSession = (repo: string, extra: { readonly archive?: boolean } 
 
 export const sessionWorktree = (id: string) =>
   Effect.gen(function* () {
-    const located = yield* (yield* Db).sessionDirectory(id)
+    const located = yield* (yield* Db).session.sessionDirectory(id)
     if (!located) return yield* Effect.die(`no worktree for ${id}`)
     return located
   })

@@ -126,7 +126,7 @@ describe("SQLite", () => {
       yield* createFileFirst
       const dir = `${file}-repo`
       const create = Effect.gen(function* () {
-        return yield* (yield* Db).createProject(dir, [{ path: `${dir}/app`, remote: "git@example.com:a.git" }])
+        return yield* (yield* Db).project.createProject(dir, [{ path: `${dir}/app`, remote: "git@example.com:a.git" }])
       }).pipe(Effect.provide(open))
       const [a, b] = yield* Effect.all([create, create], { concurrency: 2 })
       assert.strictEqual(a, b)
@@ -148,18 +148,18 @@ describe("a vibestd restart", () => {
       const id = yield* Effect.gen(function* () {
         const db = yield* Db
         const place = { runtime: "fake", address: { machine: "local", id: "a" } }
-        const { sessionId } = yield* db.startEntry(yield* projectOf("a"), "claude", false, place, {
+        const { sessionId } = yield* db.session.startEntry(yield* projectOf("a"), "claude", false, place, {
           agent: "coordinator",
         })
-        yield* db.insertNoticeTo(sessionId, "a")
+        yield* db.inbox.insertNoticeTo(sessionId, "a")
         const [row] = yield* (yield* SqlClient.SqlClient)<{
           id: number
         }>`SELECT id FROM inbox WHERE session_id = ${sessionId}`
-        assert.deepStrictEqual(yield* db.claim(sessionId, [row!.id]), [row!.id])
+        assert.deepStrictEqual(yield* db.inbox.claim(sessionId, [row!.id]), [row!.id])
         return row!.id
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
-        yield* (yield* Db).recoverDelivering(() => "")
+        yield* (yield* Db).inbox.recoverDelivering(() => "")
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox WHERE id = ${id}`
       }).pipe(Effect.provide(database(file)))
