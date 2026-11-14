@@ -61,3 +61,7 @@ it exits within 10 seconds plus a short log flush even if a layer, for example a
 releasing. The log and stderr name each layer still releasing and for how long; a second signal during the stop exits at
 once. A `vibest daemon restart` of such a vibestd still brings the new one up: the start and readiness waits are longer
 than the deadline.
+
+## D12. Log file
+
+vibestd writes `vibestd.log` in the vibest home itself. A start over a log larger than 10 MiB leaves at most the last 5 MiB, from a line boundary, and later lines follow that tail. It does not trim again until the next start.

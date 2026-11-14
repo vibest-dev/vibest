@@ -34,7 +34,7 @@ proof it exited, so the new vibestd waits for the lock, boundedly. With `--versi
 replacement ends in about two minutes whatever the other side does, not counting the wait for the yes.
 
 Every start of vibestd (`vibest daemon`, the auto-start of a CLI or a harness plugin, the new vibestd of a handoff)
-goes through `spawnDaemon`: a shell that starts vibestd in the background and exits, and that the caller waits for.
+goes through `spawnDaemon`: a shell that starts vibestd in the background, discards that process's own output, and exits, and that the caller waits for. vibestd opens its log itself (`captureDaemonLog`).
 vibestd is then adopted by launchd on macOS, and on Linux by the nearest subreaper (such as `systemd --user`) or
 init, so a long-lived caller such as a Pi process or an old vibestd never leaves it a zombie. A process is exited for vibest (`liveness`) when `kill(pid, 0)` fails or it is a
 zombie (`sysctl` `KERN_PROC_PID` on macOS, `/proc/<pid>/stat` on Linux); every wait for an old vibestd or harness to
@@ -54,6 +54,12 @@ the outer command has exited. This hidden flag is a contract between versions: t
 new one reads it, so every later version keeps accepting `--restart-agents-after <pid>` and `--yes` with this meaning.
 When vibestd still runs another version (a declined restart), the old process offers the restarts itself. A CLI older
 than vibestd is told to run `vibest update` again, or how to stop vibestd by hand to keep the older version.
+
+## Log file
+
+`vibestd.log` in the vibest home is vibestd's own log. The foreground process opens it at startup and points its standard output and error at it, so the file fills whether or not the starter redirected anything. A line another process appends, such as a Cursor hook, lands in the same file.
+
+At that startup, and not again until the next one, a file larger than 10 MiB is compacted in place to the last 5 MiB, beginning at the next line (a tail with no newline is kept as the raw last 5 MiB). Bytes appended during that rewrite can be dropped. The same inode stays, so a descriptor already open on the file keeps appending to what remains.
 
 ## Daemon start
 

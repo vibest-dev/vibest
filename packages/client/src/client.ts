@@ -283,19 +283,16 @@ export const spawnDaemon = (
 ) =>
   Effect.gen(function* () {
     const layout = yield* Layout
-    const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const log = path.join(layout.home, "vibestd.log")
     yield* Effect.gen(function* () {
       const handle = yield* spawner.spawn(
         ChildProcess.make(
           "sh",
           [
             "-c",
-            'mkdir -p "$1" && log=$2 && shift 2 && { "$@" >>"$log" 2>&1 & }',
+            'mkdir -p "$1" && shift && { "$@" >/dev/null 2>&1 & }',
             "sh",
             layout.home,
-            log,
             ...command,
             "daemon",
             "--foreground",
@@ -325,17 +322,16 @@ export const spawnDaemon = (
 
 export const startDaemon = Effect.gen(function* () {
   const layout = yield* Layout
-  const path = yield* Path.Path
   const fs = yield* FileSystem.FileSystem
-  const log = path.join(layout.home, "vibestd.log")
-  const logAt = yield* fs.stat(log).pipe(
+  const logAt = yield* fs.stat(layout.log).pipe(
     Effect.map((info) => Number(info.size)),
     Effect.orElseSucceed(() => 0),
   )
   yield* spawnDaemon(yield* VibestCommand)
   if (yield* awaitDaemon(layout.socket)) return
-  const bytes = yield* fs.readFile(log).pipe(Effect.orElseSucceed(() => new Uint8Array()))
-  const text = Array.from(bytes.subarray(logAt), (b) => String.fromCharCode(b)).join("")
+  const bytes = yield* fs.readFile(layout.log).pipe(Effect.orElseSucceed(() => new Uint8Array()))
+  const from = bytes.length < logAt ? 0 : logAt
+  const text = Array.from(bytes.subarray(from), (b) => String.fromCharCode(b)).join("")
   const tagged = text
     .split("\n")
     .map((line) => /^([A-Z][A-Za-z0-9]*): (.+)$/.exec(line.trim()))
@@ -343,7 +339,7 @@ export const startDaemon = Effect.gen(function* () {
     .at(-1)
   return yield* new DaemonUnavailable({
     socket: layout.socket,
-    message: tagged ? `${tagged[1]}: ${tagged[2]}` : `vibestd did not come up; see ${log}`,
+    message: tagged ? `${tagged[1]}: ${tagged[2]}` : `vibestd did not come up; see ${layout.log}`,
   })
 })
 

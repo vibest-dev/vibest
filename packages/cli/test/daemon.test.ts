@@ -57,9 +57,10 @@ describe.concurrent("vibestd.pid lock", () => {
       yield* fs.writeFileString(layout.daemonInfo, "")
       yield* fs.chmod(layout.daemonInfo, 0o400)
       const run = yield* daemon(layout.home)
+      const log = yield* fs.readFileString(layout.log)
       assert.strictEqual(run.code, 1)
-      assert.include(run.stderr, "DaemonLockUnavailable")
-      assert.include(run.stderr, "EACCES")
+      assert.include(log, "DaemonLockUnavailable")
+      assert.include(log, "EACCES")
       assert.isFalse(yield* fs.exists(layout.database))
       assert.isFalse(yield* probe(layout.socket))
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -75,7 +76,7 @@ describe.concurrent("vibestd.pid lock", () => {
         yield* fs.writeFileString(layout.socket, "")
         const run = yield* daemon(layout.home)
         assert.strictEqual(run.code, 1)
-        assert.include(run.stderr, "DaemonNotAnswering")
+        assert.include(yield* fs.readFileString(layout.log), "DaemonNotAnswering")
         assert.isTrue(yield* fs.exists(layout.socket))
         assert.isFalse(yield* fs.exists(layout.database))
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -104,12 +105,14 @@ describe.concurrent("vibestd.pid lock", () => {
     () =>
       Effect.gen(function* () {
         for (const answer of [true, false]) {
+          const fs = yield* FileSystem.FileSystem
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           yield* listen(layout.socket, answer)
           const run = yield* daemon(layout.home)
+          const log = yield* fs.readFileString(layout.log)
           assert.strictEqual(run.code, 1)
-          assert.include(run.stderr, "DaemonSocketInUse")
-          assert.include(run.stderr, answer ? "answers Ping" : "does not answer Ping")
+          assert.include(log, "DaemonSocketInUse")
+          assert.include(log, answer ? "answers Ping" : "does not answer Ping")
           assert.strictEqual(yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })), answer)
           assert.isFalse(yield* (yield* FileSystem.FileSystem).exists(layout.database))
         }
@@ -136,13 +139,11 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.strictEqual(exited.length, 3)
         assert.strictEqual(running.length, 1)
         assert.isUndefined(running[0]!.pollUnsafe())
-        for (const run of exited) {
-          assert.strictEqual(run.code, 0)
-          assert.include(run.stdout + run.stderr, "already running")
-        }
+        for (const run of exited) assert.strictEqual(run.code, 0)
         assert.strictEqual(Platform.liveness(ping.pid!), "alive")
         yield* recordedInfo(layout.daemonInfo, ping.instance)
         const fs = yield* FileSystem.FileSystem
+        assert.include(yield* fs.readFileString(layout.log), "already running")
         const identity = JSON.parse(yield* fs.readFileString(layout.identity)) as { id: string }
         assert.match(identity.id, ID, "the starts made one identity")
         assert.deepStrictEqual(
