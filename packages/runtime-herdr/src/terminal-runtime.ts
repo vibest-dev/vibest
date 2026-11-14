@@ -1,5 +1,5 @@
-import type * as VibestPlugin from "@vibest/plugin"
-import { Runtime as RuntimeApi } from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
+import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { ID, randomId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
@@ -134,9 +134,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.catchCause((cause: Cause.Cause<unknown>) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.void
-          : Effect.logError(`${what}: ${Cause.pretty(cause)}`).pipe(
-              Effect.andThen(PubSub.publish(events, { type: "reset" })),
-            ),
+          : Effect.logError(what, cause).pipe(Effect.andThen(PubSub.publish(events, { type: "reset" }))),
       )
     const subscribedPanes = new Set<string>()
     const agentNameByPane = new Map<string, string>()

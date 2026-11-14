@@ -1,5 +1,5 @@
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Harnesses } from "@vibest/core/harness"

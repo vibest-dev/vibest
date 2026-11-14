@@ -1,9 +1,9 @@
-import type { GuardCall } from "@vibest/plugin"
+import type { GuardCall } from "@vibest/plugin/effect"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 
 import { Agents } from "./agents.ts"
 import { Harnesses } from "./harness.ts"
-import { Layout, VibestCommand } from "./paths.ts"
 import { Runtimes } from "./runtimes.ts"
 
 export interface ToolCall {

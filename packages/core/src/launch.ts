@@ -1,10 +1,10 @@
-import { LaunchFailed } from "@vibest/schema/session"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
 
 import { Agents, unknownAgent } from "./agents.ts"
-import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
-import type { AgentsShape } from "./host.ts"
-import { Layout, VibestCommand } from "./paths.ts"
+import { encodeCommand, Harness, Harnesses } from "./harness.ts"
+import type { AgentsShape } from "./plugin/host.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
 import {
   projectText,

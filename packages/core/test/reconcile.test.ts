@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
-import { Db, exitedAt } from "@vibest/core/db"
-import { Sessions, START_TIMEOUT } from "@vibest/core/sessions"
+import { Db } from "@vibest/core/database/db"
+import { exitedAt } from "@vibest/core/database/db-rows"
+import { Sessions, START_TIMEOUT } from "@vibest/core/session"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
 

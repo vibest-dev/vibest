@@ -1,4 +1,4 @@
-import type { Runtime } from "@vibest/plugin"
+import type { Runtime } from "@vibest/plugin/effect"
 import type { Fact } from "@vibest/schema/event"
 import type { RuntimeAddress } from "@vibest/schema/session"
 import { Context, type Duration, Effect, Layer, Option, PubSub, type Scope } from "effect"

@@ -1,4 +1,4 @@
-import type { HarnessOption } from "@vibest/plugin"
+import type { HarnessOption } from "@vibest/plugin/effect"
 import { VibestCommand } from "@vibest/schema/layout"
 import type { HarnessChoice } from "@vibest/schema/session"
 import { addPluginHint, HarnessUnavailable } from "@vibest/schema/session"
@@ -7,12 +7,9 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
-import type { HarnessDefinition, HarnessesShape } from "./host.ts"
 import { listModels, type Model } from "./models.ts"
-import * as Registry from "./registry.ts"
-export { type HarnessId, HarnessUnavailable } from "@vibest/schema/session"
-export type { HarnessDefinition }
-
+import type { HarnessDefinition, HarnessesShape } from "./plugin/host.ts"
+import * as Registry from "./plugin/registry.ts"
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
 export const unprovided = (id: string, loaded: ReadonlyArray<HarnessDefinition>) =>
@@ -36,7 +33,6 @@ export const makeHarnesses: Effect.Effect<HarnessesShape> = Effect.sync(() => {
       }),
     find,
     transform: registry.transform,
-    reload: registry.reload,
   }
 })
 

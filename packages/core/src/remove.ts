@@ -1,16 +1,17 @@
+import { Layout } from "@vibest/schema/layout"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Clock, Duration, Effect, FileSystem, Option, Path } from "effect"
 
 import { awaitOn, Bus } from "./bus.ts"
-import { Db, type SessionRow, runtimeOf, terminalOf, exitedAt } from "./db.ts"
-import { Layout } from "./paths.ts"
+import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
+import { Db } from "./database/db.ts"
+import { Git } from "./git.ts"
 import { Processes, validPid } from "./processes.ts"
-import { listProjectRepositories, workspaceGit } from "./project-create.ts"
+import { listProjectRepositories, workspaceGit } from "./project/create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { removeSystemPrompt } from "./system-prompt.ts"
-import { Git, gitState, mainCheckout, removeWorktree } from "./worktree.ts"
-export { RemoveOutcome } from "@vibest/schema/remove"
+import { gitState, mainCheckout, removeWorktree } from "./worktree.ts"
 
 type ProcessState = RemoveOutcome["processes"]
 

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Layout } from "@vibest/core/paths"
 import { Project, type ProjectScope } from "@vibest/core/project"
+import { Layout } from "@vibest/schema/layout"
 import { Effect, FileSystem, Layer, Path } from "effect"
 
 import { tempDirectory } from "./lib/directory.ts"

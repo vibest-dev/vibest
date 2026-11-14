@@ -4,7 +4,7 @@ import { FetchHttpClient, HttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import type { DatabaseOpenFailed, SchemaMismatch } from "../db-schema.ts"
+import type { DatabaseOpenFailed, SchemaMismatch } from "../database/db-schema.ts"
 import { LayerNode } from "./layer-node.ts"
 
 export const fileSystem = LayerNode.unbound(FileSystem.FileSystem)

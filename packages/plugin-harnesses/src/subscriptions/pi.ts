@@ -1,8 +1,8 @@
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 import type { SubscriptionAccount } from "@vibest/schema/subscription"
 import { Effect } from "effect"
 
-import { parseJson, record, runCli } from "./index.ts"
+import { parseJson, record, runCli, type Spawner } from "./index.ts"
 
 export const piAccount = (check: unknown): SubscriptionAccount => {
   const c = record(check)
@@ -30,15 +30,15 @@ export const providersFromList = (text: string): ReadonlyArray<string> | undefin
   return [...names]
 }
 
-export const piSubscription = (home: string) =>
+export const piSubscription = (spawner: Spawner) => (home: string) =>
   Effect.gen(function* () {
-    const listed = yield* runCli("pi", ["--list-models"], home)
+    const listed = yield* runCli(spawner, "pi", ["--list-models"], home)
     const providers = listed === undefined ? undefined : providersFromList(listed)
     if (providers === undefined) return [{ provider: "", error: "pi --list-models failed" }]
     const reads: Array<Harness.SubscriptionRead> = []
     for (const provider of providers) {
       const check = parseJson(
-        yield* runCli("pi", ["auth", "check", "--provider", provider, "--json", "--no-refresh"], home),
+        yield* runCli(spawner, "pi", ["auth", "check", "--provider", provider, "--json", "--no-refresh"], home),
       )
       reads.push(
         check === undefined

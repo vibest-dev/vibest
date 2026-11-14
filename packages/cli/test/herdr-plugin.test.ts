@@ -4,8 +4,8 @@ import os from "node:os"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Db, terminalOf } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
+import { terminalOf } from "@vibest/core/database/db-rows"
 import { Project } from "@vibest/core/project"
 import {
   ACTIONS,
@@ -21,6 +21,7 @@ import {
   projectDirectory,
   type Verb,
 } from "@vibest/runtime-herdr/commands"
+import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { Effect, FileSystem, Layer } from "effect"
 import { TestClock } from "effect/testing"

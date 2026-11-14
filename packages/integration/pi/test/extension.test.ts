@@ -21,11 +21,11 @@ import {
   entryPending,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { noticeEnvelope } from "@vibest/core/replies"
 import * as Platform from "@vibest/platform-bun/bun"
+import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"

@@ -1,8 +1,9 @@
-import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
-import type { HarnessDefinition, HarnessesShape } from "@vibest/core/host"
+import { Harness, Harnesses, makeHarnesses } from "@vibest/core/harness"
 import { normalizeModels } from "@vibest/core/models"
+import type { HarnessDefinition, HarnessesShape } from "@vibest/core/plugin/host"
 import { HostEnv, Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { HarnessUnavailable } from "@vibest/schema/session"
 import { Effect, Layer, type Scope } from "effect"
 
 const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])

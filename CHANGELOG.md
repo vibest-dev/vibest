@@ -7,6 +7,26 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Agent hooks change the event instead of returning a decision** (plugin authors): `agent.hook("start.before" | "fail", callback)`
+  callbacks return nothing (`Effect<void, …>`, Promise `void`) and assign to the event (their own deep copy of it): `start.before` events have
+  mutable `prompt`, `harness`, `provider`, `model`, `machine` and `runtime`; `fail` events have a mutable `move`.
+  `AgentRoute` and `AgentResults` are gone. Each callback works on its own deep copy and the host copies the changed fields
+  back (deep-copied again) only when it succeeded within its 5 s deadline, so a timeout or failure changes nothing. Migrate
+  `Effect.succeed({ harness: "pi" })` to `Effect.sync(() => { event.harness = "pi" })` and a returned move to
+  `event.move = { harness, … }`. Machine hooks still return notes.
+- **A start while plugins are still loading is refused** (users; RPC clients of `Spawn`, `Launch`,
+  `Project.StartEntry` and `Peer.Spawn`): `agent.start.before` and `agent.fail` wait up to 10 s for plugin
+  activation and then fail with `PluginsNotActive`, naming the plugins still loading, instead of running with only
+  the plugins already active. Retry once `vibest plugins` shows them active. `vibest plugins` no longer waits
+  for activation; it lists the plugins that are active when it is called.
+- **Plugin API members without a caller removed** (plugin authors): `context.runtime.reload` and `context.harness.reload` (`Definitions.reload` of the Promise entry) are gone; the editors of `agent.transform`, `runtime.transform` and `harness.transform` no longer have `list`, `get` and `remove`, the agent and runtime editors no longer have `update` (the editors are `add`, plus `update` on the harness editor; a registration's `dispose` removes what a transform added); `Fact`, `FactOf` and `FactType` are no longer re-exported from either entry (import them from `@vibest/schema/event`); `Harness.LaunchInput` is no longer exported (use `Parameters<HarnessDefinition["launchArgs"]>[0]`). `@vibest/plugin/testing` no longer re-exports `RuntimeDefinition` (import it from `@vibest/plugin/effect` as `Runtime.RuntimeDefinition`) and no longer exports `ContractError`, `ContractFailure` and `ContractOptions`. No longer exported from the entries: `AgentContext`, `MachineRuntime`, `MachineRuntimeThere`, `StartupPane`, `HarnessEvent`, `CallerValues`, `CaptureOptions`, `SubscriptionDomain` (Effect) and `Cleanup`, `Definitions` (Promise). They return when a caller needs them.
+- **Plugin entry points split into Promise and Effect** (plugin authors): `@vibest/plugin` is now the Promise API only
+  (`Plugin.define({ id, setup })`, a Promise `Context`) and `@vibest/plugin/effect` is the Effect API
+  (`Plugin.define({ id, effect })`, `Context`, `Hooks`, `Registration`, `Transform`, `Runtime`, `Harness`, `capture`,
+  `reconnectSchedule`). `Plugin.define` takes one shape per entry; `Plugin.Plugin` is no longer a union and
+  `Plugin.effectOf` is gone (the host picks the form itself; `@vibest/plugin/promise/adapter` exports the Promise adapter `fromPromise`). `PromiseContext`, `PromiseRegistration` and `PromiseDefinitions`
+  are now `Plugin.Context`, `Registration` and `Definitions` of the Promise entry. `Subscription`, `SubscriptionAccount` and `SubscriptionLimit` are no longer exported from either entry: import them from `@vibest/schema/subscription`. `@vibest/plugin/testing` `machineHooks` accepts only Effect plugins (a Promise plugin throws `TypeError: plugin.effect is not a function`); migrate `machineHooks(plugin)` to `machineHooks({ id: plugin.id, effect: fromPromise(plugin) })` with `fromPromise` from `@vibest/plugin/promise/adapter`. Migrate: an Effect plugin changes
+  `from "@vibest/plugin"` to `from "@vibest/plugin/effect"`; a Promise plugin keeps its import.
 - **A `vibest.json` plugin entry must be a folder** (plugin authors, users with single-file entries): an entry that names
   a file is skipped with a warning, as OpenCode does. Put the file in `~/.vibest/plugins/`, or move it to a folder with
   an `index.ts` (or a `package.json` with `exports`) and name the folder. The shipped Cursor plugin is now
@@ -158,22 +178,12 @@ release. Each release lists what broke, who is affected and how to migrate under
   move is two executions instead of one. A reply that arrives after vibestd gave an execution up as `lost` is an
   execution of its own. An execution stopped in its terminal (Esc) is `interrupted`, with no failure and no notice,
   like `vibest interrupt`.
-- **Plugin hooks return their decisions** (plugin authors): hooks no longer change the event they are given. Each
-  callback gets a read-only event (frozen: an assignment throws, and the plugin is reported as crashed, so a run it
-  routes fails with `plugin <id> crashed: …`) and returns what it decides, which core applies in plugin order, a
-  later plugin overriding an earlier one as before. `agent.start.before` returns an `AgentRoute` (any of `prompt`,
-  `harness`, `provider`, `model`, `machine`, `runtime`; `undefined` unsets `harness`, `provider`, `model` or
-  `runtime` and leaves `prompt` and `machine` as they are), `agent.fail` returns an
-  `AgentMove`, and `machine.connect`/`machine.remove` return their notes. `AgentFail` has no `move` and
-  `MachineEvent` has no `notes`; `@vibest/plugin/testing` `machineHooks().fire` takes an event without `notes`. The
-  trace's `changes` list the fields each callback returned. Migrate: `e.harness = "pi"` becomes
-  `return { harness: "pi" }` (for example `Effect.succeed({ harness: "pi" })`), `e.move = m` becomes `return m`, and
-  `e.notes.push(n)` becomes `return [n]`.
-- **Promise plugins** (plugin authors): a plugin may be `Plugin.define({ id, setup })` instead of `{ id, effect }`:
+- **Machine hooks return their notes** (plugin authors): `machine.connect`/`machine.remove` callbacks return their
+  notes instead of pushing to `event.notes`; `MachineEvent` has no `notes`, and `@vibest/plugin/testing`
+  `machineHooks().fire` takes an event without `notes`. Migrate `e.notes.push(n)` to `return [n]`.
+- **Promise plugins** (plugin authors): a plugin may be `Plugin.define({ id, setup })` from `@vibest/plugin` instead of `{ id, effect }` from `@vibest/plugin/effect`:
   `setup` gets a context of Promises (hook callbacks return a value or a Promise and refuse by throwing
   `AgentRefused`, `event.subscribe` is an `AsyncIterable`) and may return a cleanup that runs when the plugin unloads.
-  `Plugin.Plugin` is now the union `EffectPlugin | PromisePlugin`, so code that calls `plugin.effect` on a
-  `Plugin.Plugin` calls `Plugin.effectOf(plugin)` instead.
 - **Agent messaging** (users, plugin authors, anyone calling the RPC): an execution that ends normally or is
   interrupted sends nothing. Agents send what they decide to with `vibest send <id> -- '<message>'`, subject to the
   creator-routing rules above; `vibest ls` shows state and `vibest result <id>` reads the last reply. vibest sends
@@ -242,3 +252,7 @@ release. Each release lists what broke, who is affected and how to migrate under
 - The entry session's row in `vibest ls` (and `--json`) now shows the git state of its directory and the repository
   root git reports for it, like any session working in that directory; it used to show no git state and its directory
   as the repository root.
+- vibestd stops within 10 seconds (plus a 1.5 s log flush) when asked to stop by SIGTERM, SIGINT, a terminal hangup or
+  `vibest daemon restart`, even if a layer such as a plugin teardown never finishes: it logs and prints the layers
+  still releasing, with how long each has been, and exits; a second signal exits at once. The start and readiness waits
+  of `vibest daemon` and `vibest daemon restart` grew from 10 s to 21.5 s so a replacement outlasts that deadline.

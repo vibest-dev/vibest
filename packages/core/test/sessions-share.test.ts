@@ -1,5 +1,6 @@
 import { assert, describe } from "@effect/vitest"
-import { Db, terminalOf, exitedAt } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
+import { terminalOf, exitedAt } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
 import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { TestClock } from "effect/testing"

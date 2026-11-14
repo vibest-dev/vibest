@@ -1,5 +1,6 @@
 import { Bus } from "@vibest/core/bus"
-import { Db, type NewSession } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
+import type { NewSession } from "@vibest/core/database/db-rows"
 import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layer } from "effect"

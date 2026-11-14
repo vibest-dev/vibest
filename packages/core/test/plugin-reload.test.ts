@@ -3,9 +3,19 @@ import module from "node:module"
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Layout } from "@vibest/core/paths"
-import { Builtins, type Candidate, DEBOUNCE, makeHost, PluginLoader, Plugins, RECHECK } from "@vibest/core/plugins"
-import { Plugin } from "@vibest/plugin"
+import {
+  Builtins,
+  type Candidate,
+  DEBOUNCE,
+  makeHost,
+  PluginLoader,
+  Plugins,
+  PluginsNotActive,
+  RECHECK,
+} from "@vibest/core/plugin"
+import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
 import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -20,7 +30,7 @@ const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.voi
       Effect.gen(function* () {
         events.push(`setup ${tag}`)
         yield* Effect.addFinalizer(() => Effect.sync(() => events.push(`close ${tag}`)))
-        yield* ctx.agent.hook("start.before", () => Effect.succeed({ model: tag }))
+        yield* ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = tag)))
         yield* setup
       }),
   })
@@ -56,8 +66,11 @@ const event = {
 }
 const takeEvents = Effect.sync(() => events.splice(0))
 
-const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E>) =>
-  makeHost().pipe(
+const host = <A, E>(
+  f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E>,
+  timeout?: Duration.Input,
+) =>
+  makeHost(timeout === undefined ? {} : { timeout }).pipe(
     Effect.flatMap(f),
     Effect.scoped,
     Effect.provide(subscriptionsLayer),
@@ -133,10 +146,10 @@ describe("plugins: activation", () => {
           effect: (ctx) =>
             Effect.gen(function* () {
               yield* Effect.addFinalizer(() => Effect.sync(() => events.push("close slow")))
-              yield* ctx.agent.hook("start.before", () =>
+              yield* ctx.agent.hook("start.before", (e) =>
                 Deferred.succeed(entered, undefined).pipe(
                   Effect.andThen(Deferred.await(gate)),
-                  Effect.as({ model: "slow" }),
+                  Effect.andThen(Effect.sync(() => void (e.model = "slow"))),
                 ),
               )
             }),
@@ -187,22 +200,23 @@ const counters = ((globalThis as { __vibestReload?: Record<string, number> }).__
 const count = (key: string) => counters[key] ?? 0
 
 const pluginFile = (id: string, key: string, model: string, imports = "") => `${imports}
-import { Plugin } from "@vibest/plugin"
+import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 const c = (globalThis.__vibestReload ??= {})
 c["import:${key}"] = (c["import:${key}"] ?? 0) + 1
 export default Plugin.define({
   id: ${JSON.stringify(id)},
-  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.succeed({ model: ${model} })))),
+  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${model} })))),
 })
 `
 
 const fsEventsDeliveryUnderLoad = Duration.seconds(60)
+const TEST_TIMEOUT = Duration.toMillis(fsEventsDeliveryUnderLoad) * 2
 const waiters = new Set<() => void>()
 const wake = () => {
   for (const waiter of waiters) waiter()
 }
-const untilSignal = (ready: () => boolean, what: string, within: Duration.Input = "10 seconds") =>
+const untilSignal = (ready: () => boolean, what: string, within: Duration.Input = fsEventsDeliveryUnderLoad) =>
   Effect.callback<void>((resume) => {
     const check = () => {
       if (!ready()) return
@@ -226,6 +240,39 @@ const watchGate: {
 }
 const watchSees = (directory: string, name: string) => Effect.sync(() => watchGate.listeners.get(directory)!(name))
 const vibestJsonReads = { count: 0 }
+const CONFIG_READS_PER_RELOAD = 2
+type ConfigPause = {
+  on: boolean
+  gate: Promise<void>
+  release: () => void
+  blocked: boolean
+  mark: boolean
+  reads: number
+}
+const pausingConfigReads = (fs: FileSystem.FileSystem, config: string, pause: ConfigPause): FileSystem.FileSystem => {
+  const readConfig = (path: string, encoding?: string): ReturnType<FileSystem.FileSystem["readFileString"]> => {
+    const read = () => {
+      if (pause.mark && path === config) pause.reads++
+      return fs.readFileString(path, encoding)
+    }
+    if (!pause.on || path !== config) return read()
+    pause.blocked = true
+    const waiting = pause.gate
+    return Effect.promise(() => waiting).pipe(
+      Effect.andThen(() => {
+        pause.blocked = false
+        return read()
+      }),
+    )
+  }
+  return new Proxy(fs, {
+    get(target, prop, receiver) {
+      if (prop === "readFileString") return readConfig
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+}
 const nativeRequire = module.createRequire(import.meta.url)
 const freshRequire = async (entry: string, files: ReadonlyArray<string>) => {
   for (const file of files) delete nativeRequire.cache[file]
@@ -241,7 +288,20 @@ const makeLoader = (): PluginLoader["Service"] => {
       wake()
       return platform.parseJsonc(text)
     },
-    load: freshRequire,
+    load: async (entry, files) => {
+      const marker = /hold-import:(\w+)/.exec(await Bun.file(entry).text())?.[1]
+      const gate = (
+        globalThis as {
+          __vibestHoldImport?: { entered: Set<string>; promise: Promise<void>; wake: () => void }
+        }
+      ).__vibestHoldImport
+      if (marker !== undefined && gate !== undefined) {
+        gate.entered.add(marker)
+        gate.wake()
+        await gate.promise
+      }
+      return freshRequire(entry, files)
+    },
     watch: (directory, changed, failed) => {
       watchGate.listeners.set(directory, changed)
       watchGate.failures.set(directory, failed)
@@ -322,7 +382,7 @@ describe("plugins: supervisor", () => {
     candidate(
       `builtin:${id}`,
       id,
-      Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed(undefined)) }),
+      Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.void) }),
     )
   const startedWith = (plugins: Plugins["Service"]) =>
     plugins.start(event).pipe(Effect.map((s) => s.trace.map((t) => t.plugin)))
@@ -337,19 +397,28 @@ describe("plugins: supervisor", () => {
         const config = path.join(dir, "vibest.json")
         const builtins = [builtinCandidate("harness-x"), builtinCandidate("runtime-y"), builtinCandidate("runtime-z")]
         yield* fs.writeFileString(config, `{ "plugins": ["-*", "-runtime.*", "-runtime-*", "-harness-x"] }`)
-        const { clocked, rescanned } = yield* timers
-        const plugins = yield* clocked(supervise(dir, builtins))
-        assert.deepStrictEqual(yield* startedWith(plugins), ["runtime-y", "runtime-z"])
-        yield* fs.writeFileString(config, `{ "plugins": ["-runtime-y", "-harness-x"] }`)
-        yield* rescanned(startedWith(plugins), (ids) => ids.join() === "runtime-z", "runtime-y removed")
-        yield* fs.writeFileString(config, `{ "plugins": [] }`)
-        yield* rescanned(
-          startedWith(plugins),
-          (ids) => ids.join() === "harness-x,runtime-y,runtime-z",
-          "the builtins back after un-removing",
+        const plugins = yield* TestClock.withLive(supervise(dir, builtins))
+        const active = plugins.list.pipe(
+          Effect.map((rows) =>
+            rows
+              .filter((row) => row.status === "active")
+              .map((row) => row.id)
+              .sort()
+              .join(),
+          ),
         )
+        const untilActive = (want: string, what: string) =>
+          TestClock.withLive(eventually(active, (ids) => ids === want, what))
+        yield* untilActive("runtime-y,runtime-z", "the kept builtins")
+        assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["runtime-y", "runtime-z"])
+        yield* fs.writeFileString(config, `{ "plugins": ["-runtime-y", "-harness-x"] }`)
+        yield* untilActive("runtime-z", "runtime-y removed")
+        assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["runtime-z"])
+        yield* fs.writeFileString(config, `{ "plugins": [] }`)
+        yield* untilActive("harness-x,runtime-y,runtime-z", "the builtins back")
+        assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["harness-x", "runtime-y", "runtime-z"])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -363,16 +432,26 @@ describe("plugins: supervisor", () => {
         yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
         yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a1"`))
         watchGate.hold = true
-        const { clocked, rescanned } = yield* timers
-        const service = yield* clocked(supervise(dir))
-        assert.strictEqual((yield* service.start(event)).model, "a1")
+        const service = yield* TestClock.withLive(supervise(dir))
+        const model = TestClock.withLive(service.start(event).pipe(Effect.map((s) => s.model)))
+        if (!(yield* TestClock.withLive(service.settled))) return yield* Effect.die("activation did not settle")
+        assert.strictEqual(yield* model, "a1")
         yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a2"`))
-        yield* rescanned(service.start(event), (s) => s.model === "a2", "the unreported save")
+        yield* TestClock.withLive(
+          eventually(
+            Effect.sync(() => count("setup:unreported-a")),
+            (n) => n >= 2,
+            "the unreported save",
+          ),
+        )
+        assert.strictEqual(yield* model, "a2")
         const reads = vibestJsonReads.count
-        yield* rescanned(
-          Effect.sync(() => vibestJsonReads.count),
-          (n) => n > reads,
-          "a rescan with nothing changed",
+        yield* TestClock.withLive(
+          eventually(
+            Effect.sync(() => vibestJsonReads.count),
+            (n) => n > reads,
+            "a rescan with nothing changed",
+          ),
         )
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.strictEqual(count("setup:unreported-a"), 2)
@@ -381,7 +460,92 @@ describe("plugins: supervisor", () => {
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    20_000,
+    TEST_TIMEOUT,
+  )
+
+  it.effect(
+    "a burst during the delay keeps readiness closed until that pass imports an unreported edit",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        const pluginsDir = path.join(dir, "plugins")
+        const file = path.join(pluginsDir, "a.ts")
+        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
+        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a1"`))
+        watchGate.hold = true
+        const service = yield* TestClock.withLive(supervise(dir))
+        assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
+        yield* watchSees(pluginsDir, "a.ts")
+        yield* watchSees(pluginsDir, "a.ts")
+        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a2"`))
+        const starting = yield* Effect.forkChild(TestClock.withLive(service.start(event)))
+        yield* TestClock.withLive(Effect.sleep("20 millis"))
+        assert.isUndefined(starting.pollUnsafe(), "a start was admitted before the burst settled")
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
+        assert.strictEqual(started.model, "a2")
+      }).pipe(
+        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
+    TEST_TIMEOUT,
+  )
+
+  it.effect(
+    "an otherwise unchanged rescan that outlasts the recheck reopens readiness",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
+        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "slow-scan-a", `"a1"`))
+        const config = path.join(dir, "vibest.json")
+        const pause: ConfigPause = {
+          on: false,
+          gate: Promise.resolve(),
+          release: () => {},
+          blocked: false,
+          mark: false,
+          reads: 0,
+        }
+        const service = yield* TestClock.withLive(
+          supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, pausingConfigReads(fs, config, pause))),
+        )
+        assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
+        const setups = count("setup:slow-scan-a")
+        watchGate.hold = true
+        pause.on = true
+        pause.gate = new Promise<void>((resolve) => {
+          pause.release = resolve
+        })
+        yield* TestClock.withLive(
+          eventually(
+            Effect.sync(() => pause.blocked),
+            (blocked) => blocked,
+            "the rescan to start reading",
+          ),
+        )
+        const starting = yield* Effect.forkChild(TestClock.withLive(service.start(event)))
+        yield* TestClock.withLive(Effect.sleep(RECHECK))
+        yield* TestClock.withLive(Effect.sleep("100 millis"))
+        assert.isUndefined(starting.pollUnsafe(), "the recheck during the slow rescan reopened readiness")
+        pause.mark = true
+        pause.on = false
+        pause.release()
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
+        const readsUntilReady = pause.reads
+        assert.strictEqual(started.model, "a1")
+        assert.strictEqual(count("setup:slow-scan-a"), setups)
+        assert.strictEqual(readsUntilReady, CONFIG_READS_PER_RELOAD, "a rescan tick scheduled another reload")
+      }).pipe(
+        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -404,7 +568,7 @@ describe("plugins: supervisor", () => {
           "the watch to be set up again",
         )
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -425,7 +589,7 @@ describe("plugins: supervisor", () => {
         assert.strictEqual((yield* service.start(event)).model, "a1")
         yield* fs.writeFileString(
           file,
-          `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: (ctx) => Effect.promise(() => { globalThis.__vibestGate.gate.entered = true; return globalThis.__vibestGate.released }).pipe(Effect.andThen(ctx.agent.hook("start.before", () => Effect.succeed({ model: "a2" })))) })\n`,
+          `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: (ctx) => Effect.promise(() => { globalThis.__vibestGate.gate.entered = true; return globalThis.__vibestGate.released }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = "a2" })))) })\n`,
         )
         yield* rescanned(
           Effect.sync(() => gate.entered),
@@ -436,14 +600,14 @@ describe("plugins: supervisor", () => {
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.isUndefined(starting.pollUnsafe(), "the start waits while the new revision sets up")
         gate.release()
-        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
         assert.strictEqual(started.model, "a2")
       }).pipe(
         Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -458,7 +622,7 @@ describe("plugins: supervisor", () => {
           wake,
         })
         watchGate.hold = true
-        const stuckA = `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true; globalThis.__vibestStuck.wake() }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`
+        const stuckA = `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true; globalThis.__vibestStuck.wake() }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`
         yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), stuckA)
         yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z1"`))
         const plugins = yield* supervise(dir)
@@ -469,7 +633,7 @@ describe("plugins: supervisor", () => {
         yield* TestClock.adjust("6 seconds")
         assert.isUndefined(spawning.pollUnsafe(), "readiness opened on the pre-change activation")
         yield* TestClock.adjust("200 millis")
-        const s = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("5 seconds")))
+        const s = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
         assert.strictEqual(s.model, "z2")
         assert.deepStrictEqual(
           s.trace.map((t) => t.plugin),
@@ -487,6 +651,261 @@ describe("plugins: supervisor", () => {
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    15_000,
+    TEST_TIMEOUT,
+  )
+
+  it.effect("a start during setup is refused and names the plugins still loading", () =>
+    host(
+      (h) =>
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const slow = Plugin.define({
+            id: "slow",
+            effect: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          })
+          yield* Effect.sync(h.holdNow)
+          const activating = yield* Effect.forkChild(
+            h.activate([candidate("slow", "1", slow), candidate("later", "1", logged("later", "later"))]),
+          )
+          yield* Deferred.await(entered)
+          const starting = yield* Effect.forkChild(h.service.start(event))
+          yield* TestClock.adjust("10 seconds")
+          const failed = yield* Effect.flip(Fiber.join(starting))
+          assert.ok(failed instanceof PluginsNotActive)
+          assert.deepStrictEqual(failed.plugins, ["slow", "later"])
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(activating)
+        }),
+      "30 seconds",
+    ),
+  )
+
+  const blockedSubscriptions = (entered: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+    Layer.succeed(
+      Subscriptions,
+      Subscriptions.of({
+        list: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as([])),
+        report: () => Effect.void,
+        poll: Effect.void,
+      }),
+    )
+
+  it.effect("a reload while subscriptions are read keeps the hooks captured with readiness", () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* makeHost().pipe(
+        Effect.flatMap((h) =>
+          Effect.gen(function* () {
+            yield* h.activate([candidate("a", "1", logged("a", "a1"))])
+            const starting = yield* Effect.forkChild(h.service.start(event))
+            yield* Deferred.await(entered)
+            yield* h.activate([])
+            yield* Deferred.succeed(release, undefined)
+            assert.deepStrictEqual(
+              (yield* Fiber.join(starting)).trace.map((t) => t.plugin),
+              ["a"],
+            )
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(blockedSubscriptions(entered, release)),
+        Effect.provide(harnessesLayer()),
+        Effect.provide(runtimesLayer),
+        Effect.provide(Agents.layer),
+        Effect.provide(Bus.layer),
+      )
+    }),
+  )
+
+  it.effect("a reload while subscriptions are read keeps the fail hook captured with readiness", () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const failing = Plugin.define({
+        id: "a",
+        effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi" }))),
+      })
+      yield* makeHost().pipe(
+        Effect.flatMap((h) =>
+          Effect.gen(function* () {
+            yield* h.activate([candidate("a", "1", failing)])
+            const moved = yield* Effect.forkChild(
+              h.service.fail({
+                project: "/r",
+                agent: "general",
+                parentSessionId: undefined,
+                harnesses: event.harnesses,
+                attempts: [],
+                sessionId: "s",
+                reason: "limited",
+                error: "limited",
+                input: "p",
+                harness: "claude",
+                provider: undefined,
+              }),
+            )
+            yield* Deferred.await(entered)
+            yield* h.activate([])
+            yield* Deferred.succeed(release, undefined)
+            assert.strictEqual((yield* Fiber.join(moved)).move?.harness, "pi")
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(blockedSubscriptions(entered, release)),
+        Effect.provide(harnessesLayer()),
+        Effect.provide(runtimesLayer),
+        Effect.provide(Agents.layer),
+        Effect.provide(Bus.layer),
+      )
+    }),
+  )
+
+  it.effect(
+    "a rescan that finds a plugin without a watch notification keeps readiness closed while it imports",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        const entered = new Set<string>()
+        let releaseImport = () => {}
+        const held = new Promise<void>((resolve) => {
+          releaseImport = resolve
+        })
+        ;(
+          globalThis as {
+            __vibestHoldImport?: { entered: Set<string>; promise: Promise<void>; wake: () => void }
+          }
+        ).__vibestHoldImport = { entered, promise: held, wake }
+        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "scan-a", '"a1"'))
+        watchGate.hold = true
+        const { clocked, rescanned, armed } = yield* timers
+        const service = yield* clocked(supervise(dir))
+        assert.strictEqual((yield* service.start(event)).model, "a1")
+        yield* fs.writeFileString(
+          path.join(dir, "plugins", "b.ts"),
+          "// hold-import:b\n" + pluginFile("b", "scan-b", '"b1"'),
+        )
+        yield* rescanned(
+          Effect.sync(() => entered.has("b")),
+          (seen) => seen,
+          "b's import",
+        )
+        const starting = yield* clocked(Effect.forkChild(service.start(event)))
+        yield* armed(Duration.seconds(10))
+        assert.isUndefined(starting.pollUnsafe(), "the start ran while b was still importing")
+        const listed = yield* service.list
+        assert.ok(listed.some((plugin) => plugin.id === "a" && plugin.status === "active"))
+        assert.ok(!listed.some((plugin) => plugin.id === "b"))
+        releaseImport()
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
+        assert.deepStrictEqual(started.trace.map((t) => t.plugin).sort(), ["a", "b"])
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            watchGate.hold = false
+            ;(globalThis as { __vibestHoldImport?: unknown }).__vibestHoldImport = undefined
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
+    TEST_TIMEOUT,
+  )
+})
+
+describe("plugins: hook events are detached copies", () => {
+  const hooked = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void>) =>
+    candidate(id, "1", Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) }))
+  const failInput = {
+    project: "/r",
+    agent: "general",
+    parentSessionId: undefined,
+    harnesses: event.harnesses,
+    attempts: [],
+    sessionId: "s",
+    reason: "limited" as const,
+    error: "limited",
+    input: "p",
+    harness: "claude",
+    provider: undefined,
+  }
+
+  it.effect("a reference a plugin keeps cannot change the result or the trace after its callback succeeded", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const kept: { machine?: { id: string } } = {}
+        yield* h.activate([
+          hooked("keeper", (e) =>
+            Effect.sync(() => {
+              kept.machine = { id: "chosen" }
+              e.machine = kept.machine
+            }),
+          ),
+        ])
+        const decision = yield* h.service.start(event)
+        kept.machine!.id = "changed later"
+        assert.strictEqual(decision.machine.id, "chosen")
+        assert.deepStrictEqual(decision.trace[0]!.changes[0]!.to, { id: "chosen" })
+      }),
+    ),
+  )
+
+  it.effect("writes to nested data before a failure and before and after a timeout never reach the input", () =>
+    host(
+      (h) =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>()
+          const input = structuredClone(event)
+          const late: { write?: () => void } = {}
+          yield* h.activate([
+            hooked("crash", (e) =>
+              Effect.sync(() => void Object.assign(e.harnesses[0]!, { available: false })).pipe(
+                Effect.andThen(Effect.die("boom")),
+              ),
+            ),
+          ])
+          assert.strictEqual((yield* h.service.start(input).pipe(Effect.flip))._tag, "AgentRefused")
+          assert.deepStrictEqual(input, event)
+          yield* h.activate([
+            hooked("timeout", (e) =>
+              Effect.sync(() => {
+                Object.assign(e.harnesses[1]!, { available: false })
+                late.write = () => void Object.assign(e.harnesses[2]!, { available: false })
+              }).pipe(Effect.andThen(Deferred.await(gate))),
+            ),
+          ])
+          const starting = yield* Effect.forkChild(h.service.start(input).pipe(Effect.flip))
+          yield* TestClock.adjust("20 millis")
+          assert.strictEqual((yield* Fiber.join(starting))._tag, "AgentRefused")
+          late.write!()
+          assert.deepStrictEqual(input, event)
+        }),
+      "20 millis",
+    ),
+  )
+
+  it.effect("a later fail hook can clear an earlier move and is named as the decider", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const failing = (id: string, move: { harness: string } | undefined) =>
+          candidate(
+            id,
+            "1",
+            Plugin.define({
+              id,
+              effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = move))),
+            }),
+          )
+        yield* h.activate([failing("sets", { harness: "pi" }), failing("clears", undefined)])
+        const result = yield* h.service.fail(failInput)
+        assert.isUndefined(result.move)
+        assert.deepStrictEqual(result.trace[1]!.changes, [
+          { field: "move", from: { harness: "pi" }, overwrote: "sets" },
+        ])
+      }),
+    ),
   )
 })

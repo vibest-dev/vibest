@@ -1,10 +1,10 @@
-import type { Harness as PluginHarness } from "@vibest/plugin"
+import type { Harness as PluginHarness } from "@vibest/plugin/effect"
 import type { HarnessChoice } from "@vibest/schema/session"
 import { HarnessUnavailable } from "@vibest/schema/session"
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import type { HarnessDefinition } from "./host.ts"
+import type { HarnessDefinition } from "./plugin/host.ts"
 
 export const Model = Schema.Struct({
   harness: Schema.String,

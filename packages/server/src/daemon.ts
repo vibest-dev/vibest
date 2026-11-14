@@ -1,17 +1,20 @@
-import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand } from "@vibest/client/client"
+import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import type { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
-import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/db"
+import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db-schema"
+import type { ReplayDiffers } from "@vibest/core/database/journal"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"
-import type { ReplayDiffers } from "@vibest/core/journal"
-import { Layout, VibestCommand } from "@vibest/core/paths"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
-import * as Server from "./server.ts"
+import { Identity, Shutdown } from "./handlers/daemon.ts"
+import * as ShutdownDeadline from "./shutdown-deadline.ts"
+import type { ShutdownHost } from "./shutdown-deadline.ts"
 
 export const DaemonInfo = Schema.Struct({
   pid: Schema.Number,
@@ -35,7 +38,7 @@ export class LockFailed extends Schema.TaggedError<LockFailed>()("LockFailed", {
   message: Schema.String,
 }) {}
 
-export interface Host {
+export interface Host extends ShutdownHost {
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
@@ -43,8 +46,6 @@ export interface Host {
     filename: string,
   ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
 }
-
-export { HANDOFF_ENV } from "./server.ts"
 
 const HANDOFF_TIMEOUT = Duration.seconds(30)
 const STOP_REPLY_GRACE = Duration.millis(200)
@@ -124,13 +125,16 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       startedAt: yield* Clock.currentTimeMillis,
     }
     const shutdown = yield* Deferred.make<void>()
+    const releases = new LayerNode.Releases()
+    yield* ShutdownDeadline.install(host, releases, shutdown)
     yield* Layer.build(
       LayerNode.compile(daemon, {
+        releases,
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),
-          Server.Identity.node.replace(Layer.succeed(Server.Identity, identity)),
-          Server.Shutdown.node.replace(Layer.succeed(Server.Shutdown, shutdown)),
+          Identity.node.replace(Layer.succeed(Identity, identity)),
+          Shutdown.node.replace(Layer.succeed(Shutdown, shutdown)),
         ],
       }),
     )

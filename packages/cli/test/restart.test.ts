@@ -1,12 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db, executionStateOf, exitedAt, pidOf } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
+import { executionStateOf, exitedAt, pidOf } from "@vibest/core/database/db-rows"
 import { line } from "@vibest/core/inbox"
-import { VibestCommand } from "@vibest/core/paths"
 import { noticeEnvelope } from "@vibest/core/replies"
+import { Sessions } from "@vibest/core/session"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
 import { CONTINUE, continueText } from "@vibest/core/session/restart"
-import { Sessions } from "@vibest/core/sessions"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { VibestCommand } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Clock, Effect, Fiber, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
@@ -227,7 +228,7 @@ describe("restart in place", () => {
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([entryId, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* until(herdr.callsTo("run"), (runs) => runs.some((r) => r.argv[0] === "env"))
-      assert.includeMembers([...(yield* processes.signaled)], [pid, 400])
+      yield* until(processes.signaled, (signaled) => [pid, 400].every((p) => signaled.includes(p)))
       yield* db.patchLive(entryId, { pid: 500, ready: null })
       yield* db.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))

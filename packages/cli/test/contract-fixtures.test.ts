@@ -3,8 +3,8 @@ import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders } from "@vibest/client/client"
-import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
+import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { Effect, Layer, type Scope } from "effect"
 

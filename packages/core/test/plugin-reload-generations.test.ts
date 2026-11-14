@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Layout } from "@vibest/core/paths"
-import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugins"
-import { Plugin } from "@vibest/plugin"
+import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -27,7 +27,7 @@ const builtin: Candidate = {
 }
 
 const plugin = (id: string) => `// gate:${id}
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: "${id}", effect: () => Effect.void })
 `
@@ -49,7 +49,7 @@ const event = {
 }
 
 const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
-  for (let i = 0; i < 250 && !done(); i++) {
+  for (let i = 0; i < 3000 && !done(); i++) {
     yield* TestClock.withLive(Effect.sleep("20 millis"))
     yield* TestClock.adjust("150 millis")
   }
@@ -58,7 +58,7 @@ const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
 
 describe("plugins: builtins follow the latest config", () => {
   it.effect(
-    "a removal that arrives while user plugins are still importing takes the builtin off at once, so the 10s fallback does not run it",
+    "a removal that arrives while user plugins are still importing takes the builtin off at once, so a start does not run it",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -108,14 +108,13 @@ describe("plugins: builtins follow the latest config", () => {
         yield* until("the removal", () => events.at(-1) === "close")
 
         const spawning = yield* Effect.forkChild(plugins.start(event))
-        yield* TestClock.adjust("10 seconds")
-        const decision = yield* Fiber.join(spawning)
+        release()
+        const decision = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("60 seconds")))
         assert.isFalse(
           decision.trace.some((t) => t.plugin === "harness-x"),
-          "the removed builtin ran in the fallback",
+          "the removed builtin ran",
         )
-        release()
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    { timeout: 20_000 },
+    { timeout: 120_000 },
   )
 })

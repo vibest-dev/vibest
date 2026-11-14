@@ -1,15 +1,13 @@
-import * as VibestPlugin from "@vibest/plugin"
-import { reconnectSchedule } from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
+import { reconnectSchedule } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
-import * as Registry from "./registry.ts"
-
-export { NoRuntime }
+import type { HostEnv as HostEnvShape, RuntimesShape } from "./plugin/host.ts"
+import * as Registry from "./plugin/registry.ts"
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
@@ -18,8 +16,6 @@ export type AgentState = VibestPlugin.Runtime.AgentState
 export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 export const RuntimeError = VibestPlugin.Runtime.RuntimeError
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
-
-export type { RuntimesShape }
 
 export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
 
@@ -65,7 +61,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
       Stream.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Stream.failCause(cause)
-          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`)).pipe(
+          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended`, cause)).pipe(
               Stream.drain,
               Stream.concat(Stream.fail("reconnect")),
             ),
@@ -99,7 +95,6 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   const all = Effect.sync(() => registry.get())
   return {
     transform: registry.transform,
-    reload: registry.reload,
     all,
     find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
     route: (id) =>

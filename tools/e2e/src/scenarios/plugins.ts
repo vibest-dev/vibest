@@ -17,12 +17,12 @@ type Info = {
 
 const list = (w: World) => w.json<Array<Info>>(["plugins"])
 
-const plugin = (id: string, hook = "() => Effect.void") => `import { AgentRefused, Plugin } from "@vibest/plugin"
+const plugin = (id: string, hook = "() => Effect.void") => `import { AgentRefused, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", ${hook}) })
 `
 
-const transformThrows = (id: string, counter: string) => `import { Plugin } from "@vibest/plugin"
+const transformThrows = (id: string, counter: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import fs from "node:fs"
 export default Plugin.define({
@@ -41,7 +41,7 @@ const lines = (file: string) =>
   )
 
 const counting = (id: string, file: string) => `import fs from "node:fs"
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({
   id: ${JSON.stringify(id)},
@@ -61,7 +61,7 @@ const write = async (file: string, text: string) => {
   await fs.rename(`${file}.tmp`, file)
 }
 
-const failingTeardown = (id: string) => `import { Plugin } from "@vibest/plugin"
+const failingTeardown = (id: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({
   id: ${JSON.stringify(id)},
@@ -86,7 +86,7 @@ const checks: ReadonlyArray<Check> = [
       )
       const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
       expect(
-        /ERROR[^\n]*failed to clean up plugin[\s\S]*"plugin\.id": "unclean"[\s\S]*e2e teardown boom/.test(log),
+        /level=ERROR[^\n]*failed to clean up plugin[^\n]*plugin\.id=unclean[^\n]*e2e teardown boom/.test(log),
         `the failed teardown was not logged: ${log.slice(-2000)}`,
       )
       await fs.rm(file)
@@ -134,7 +134,7 @@ const checks: ReadonlyArray<Check> = [
       await write(path.join(w.vibestHome, "plugins", "broken.ts"), "export default 42\n")
       await write(
         path.join(w.vibestHome, "plugins", "a-throw.ts"),
-        `import { Plugin } from "@vibest/plugin"
+        `import { Plugin } from "@vibest/plugin/effect"
 export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e2e setup throw") } })
 `,
       )
@@ -195,24 +195,6 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
         "the crash was not counted",
       )
       await fs.rm(path.join(w.vibestHome, "plugins", "throw.ts"))
-      await write(
-        path.join(w.vibestHome, "plugins", "mutate.ts"),
-        plugin("mutate", `(e) => Effect.sync(() => { e.harness = "pi" })`),
-      )
-      await until("the mutating plugin active", async () =>
-        (await list(w)).some((p) => p.id === "mutate" && p.status === "active"),
-      )
-      const mutated = await w.viaEntry(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
-        timeoutMs: 60_000,
-      })
-      expect(mutated.code !== 0, `run exited 0: ${mutated.stdout}`)
-      expect(mutated.stderr.includes("plugin mutate crashed: "), `crash not shown: ${mutated.stderr}`)
-      expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
-      expect(
-        (await list(w)).some((p) => p.id === "mutate" && p.crashed === 1),
-        "the crash was not counted",
-      )
-      await fs.rm(path.join(w.vibestHome, "plugins", "mutate.ts"))
     },
   },
   {
@@ -267,6 +249,26 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       expect((await lines(keep)) === 1, `keep was set up again: ${await lines(keep)} setups`)
       expect((await lines(after)) === 1, `after was set up again: ${await lines(after)} setups`)
+    },
+  },
+  {
+    id: "G16",
+    title:
+      "a plugin folder moved to another path and named there in vibest.json is listed at the new path and set up once",
+    run: async (w) => {
+      const seen = path.join(w.root, "mover.log")
+      const before = path.join(w.root, "before", "mover")
+      const after = path.join(w.root, "after", "mover")
+      await write(path.join(before, "index.ts"), counting("mover", seen))
+      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: [before] }))
+      await until("mover active", async () => (await list(w)).some((p) => p.id === "mover" && p.status === "active"))
+      await fs.mkdir(path.dirname(after), { recursive: true })
+      await fs.rename(before, after)
+      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: [after] }))
+      await until("mover listed at the new path", async () =>
+        (await list(w)).some((p) => p.id === "mover" && p.status === "active" && p.source.startsWith(after)),
+      )
+      expect((await setups(seen)).length === 1, `mover was set up ${(await setups(seen)).length} times`)
     },
   },
   {

@@ -58,7 +58,7 @@ Reference implementations:
 | D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest send` carries what it decides to say; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | D12 | Where omac's implementation is good, vibest copies its code and tests and refactors them (session → Agent and Run, inbox row → Message, plugin hooks → §7 kinds) instead of designing again. §15 lists every part.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | D13 | The engine knows one kind of session, described by an agent definition. Routing, permissions and whether a session may spawn are data and plugin policy, never branches in the code. The coordinator mode (one entry session and its subagents) is the configuration of the default plugin (§1.1). Status: built for agent definitions (`coordinator` and `general` are definitions a builtin plugin registers; no code branch on either); the other planned parts of §1 are not.                                                                                                                                                                                                                          |
-| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                               |
+| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/effect/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                        |
 
 ## 1. A multi-CLI agent engine
 
@@ -149,67 +149,73 @@ started, an entry session) cannot answer results with results (rule 4), and that
 
 ## 2. Layers
 
+**Packages.** Most workspace packages export `./*` → `./src/*.ts`, so an import names the module
+(`@vibest/core/database/db`); `plugin`, `builtins`, the herdr SDKs and `integration/cursor` export named entries
+(`@vibest/plugin/effect`, `@vibest/plugin/testing`). A module imports a name from the module that defines it (no re-exports of other
+modules' names, except a domain facade re-exporting its own domain, see below).
+
+| Package                 | Role                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`                | Browser-safe contracts: branded ids, domain structs and errors, fact definitions (`event.ts`), the layout, `PROTOCOL` and `VERSION` (`version.ts`).                                               |
+| `plugin`                | The plugin authoring API, as an Effect plugin (`effect/`) or a Promise plugin (`promise/`).                                                                                                       |
+| `protocol`              | The single `RpcGroup` (effect/rpc, one JSON object per line), caller and peer headers, tagged errors, the contract in `contract/`.                                                                |
+| `client`                | The Effect RPC client with the per-command preflight and auto-start, the socket connector, the release lookup (`release.ts`).                                                                     |
+| `core`                  | The agent engine: persistence and the ledger, the Bus, sessions and their executions, the inbox, the plugin host, harness, runtime and agent catalogs.                                            |
+| `server`                | vibestd: the RPC handlers, admission, the service graph roots (`services.ts`, `app.ts`), the socket and HTTP listeners, other machines (`machine/`), the hourly update check (`update-check.ts`). |
+| `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                   |
+| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `harness-default`.                                      |
+| `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.  |
+| `plugin-harnesses`      | The harness plugins `pi`, `claude` and the Cursor plugin file users add: one `HarnessDefinition` per CLI.                                                                                         |
+| `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                             |
+| `runtime-herdr-core`    | The Runtime port on herdr-core (hc).                                                                                                                                                              |
+| `effect-herdr-sdk`      | Effect client for the herdr socket API.                                                                                                                                                           |
+| `effect-herdr-core-sdk` | Effect client for the herdr-core socket API.                                                                                                                                                      |
+| `integration/claude`    | The vibest Claude Code plugin (one hooks module), loaded with `claude --plugin-dir`.                                                                                                              |
+| `integration/pi`        | The vibest Pi extension, loaded with `pi -e`.                                                                                                                                                     |
+| `integration/cursor`    | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`), loaded with `cursor-agent --plugin-dir`.                                                                        |
+
+`packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); `cli-darwin-arm64` and `cli-linux-x64` carry
+the compiled binary.
+
+**Dependencies.** What each package's `src` may import of the workspace:
+
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│ Product (packages/cli): product identity + runtime-herdr                  │
-│                         + herdr plugin + presenter + CLI                   │
-├───────────────────────────────────────────────────────────────────────────┤
-│ Builtin plugins: harness adapters and integrations · workspace types       │
-│   scheduling · guard · knowledge · skills (delegate, pipeline) · check     │
-├───────────────────────────────────────────────────────────────────────────┤
-│ Plugin API (OpenCode V2, effect or setup)                                  │
-├───────────────────────────────────────────────────────────────────────────┤
-│ Core: schema contracts · lifecycles · execution · scheduling framework     │
-│       durable events · plugin host · ports                                 │
-├───────────────────────────────────────────────────────────────────────────┤
-│ herdr (agent runtime)                                                      │
-└───────────────────────────────────────────────────────────────────────────┘
+schema               nothing
+plugin               schema
+protocol             schema
+client               schema, protocol
+core                 schema, plugin
+server               schema, plugin, core, protocol, client
+platform-bun         schema, plugin, core, client, server, builtins (and effect-herdr-sdk)
+builtins             plugin, plugin-harnesses, runtime-herdr, runtime-herdr-core
+cli                  schema, protocol, client, builtins, server/daemon (and HANDOFF_ENV of server/server), #platform
+plugin-harnesses     plugin, schema
+runtime-herdr-core   plugin, schema, effect-herdr-core-sdk
+runtime-herdr        plugin, schema, protocol, client, effect-herdr-sdk
+integration/claude   schema, protocol
+integration/pi       schema, protocol, client
+integration/cursor   nothing
+effect-herdr-*-sdk   nothing
 ```
 
-**Packages.** Runtime dependencies flow one way: `schema` → `core` and `protocol` → `server`. `client` depends
-on `schema` and `protocol` only. Plugin types derive from the client API. Besides `server`, only `platform-bun` imports `core`; `packages/cli`
-reaches vibestd through `client`, `protocol` and `schema`, and the daemon through `server/daemon`
-(scoped `no-restricted-imports` in `.oxlintrc.json`).
+oxlint enforces the list with `vibest/package-imports` (`tools/oxlint/package-imports.mjs`, one map): it checks static
+imports, re-exports, dynamic `import()` and type queries (`import("…").T`) in each package's `src`, refuses a relative
+path that leaves the package, and lets only `commands/handlers/daemon/default.ts` take `HANDOFF_ENV` from
+`@vibest/server/server`. Bun stays behind `platform/` directories, `bun.ts` adapters and `packages/platform-bun`
+(`.agents/rules/bun-runtime-boundary.md`).
 
-| Package              | Role                                                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`             | Browser-safe contracts: branded IDs, domain structs, event definitions, configuration schema, the Harness and Workspace type contracts.                                                                       |
-| `protocol`           | The single `RpcGroup` (effect/rpc, JSON-RPC 2.0 as one JSON object per line), the protocol number, caller headers, tagged errors (copied from omac `rpc.ts`, `protocol.ts`).                                  |
-| `core`               | Persistence, event bus, Run and Agent execution, scheduling framework, plugin host, ports.                                                                                                                    |
-| `server`             | Handlers implementing `protocol`, the ACCESS table and admission, the daemon's service graph, the unix socket listener (omac `server.ts`, `daemon.ts`).                                                       |
-| `client`             | Effect RPC client with the per-command Ping preflight and auto-start rules (omac `client.ts`).                                                                                                                |
-| `plugin`             | Plugin authoring API (an Effect or a Promise plugin).                                                                                                                                                         |
-| `effect-herdr-sdk`   | Effect client for the herdr socket API.                                                                                                                                                                       |
-| `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                                        |
-| `plugin-harnesses`   | Builtin plugins `harness-pi`, `harness-claude` (and the Cursor plugin file users add): one `HarnessDefinition` per CLI (launch side, models, subscription reader, guard answer, how its vibest plugin loads). |
-| `integration/claude` | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`.           |
-| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to `extension.mjs` (reporting, guard, inbox) and `presentation.mjs` (tool grouping, compact user messages). Both loaded with `pi -e`.            |
-| `integration/cursor` | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                                    |
-| `plugin-git`         | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                                  |
-| `builtins`           | The builtin plugins in load order (`pre`): `harness-pi`, `harness-claude`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `harness-default`. Only the binary's composition root reads it.           |
-| `plugin-guard`       | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                                   |
-| `plugin-knowledge`   | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                                     |
-| `plugin-skills`      | Builtin skills for the entry session: delegate, pipeline. Replaceable and removable.                                                                                                                          |
-| `cli`                | Composition root of the Herdr TUI product.                                                                                                                                                                    |
+**Core layout.** As OpenCode lays out `packages/core/src`: a domain with several files has a root facade beside a
+folder of the same name, and the facade re-exports its own domain's names; a one-file domain stays at the root.
 
-Bun stays behind `platform/` directories, `bun.ts` adapters and `packages/platform-bun` (`.agents/rules/bun-runtime-boundary.md`).
-
-**Current layout (omac copied and split, every omac feature kept).** The plugin packages above are later steps; today
-the code sits in:
-
-| Package                                                  | Holds (omac source)                                                                                                                                                                                                                                                                                                                          |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/schema` (`@vibest/schema`)                     | The contracts `protocol` and `client` need, moved out of core modules: session, inbox and harness schemas and errors, the `project` / `session` / `inbox` / `message` rows (`model.ts`), plugin traces, Project store inputs, `RemoveOutcome`, `Layout`, `messageOf`, `describeSpawn`, `addPluginHint`. Core modules re-export some of them. |
-| `packages/protocol`                                      | `rpc.ts`, `protocol.ts`. Depends on `schema` only.                                                                                                                                                                                                                                                                                           |
-| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (scoped `no-restricted-imports` in `.oxlintrc.json` check `schema`, `core`, `server`, `protocol`, `client`).                                                                      |
-| `packages/runtime-herdr`                                 | The Runtime port on herdr: `runtime.ts` and `pool.ts` (omac `herdr-pool.ts`). The only package besides `effect-herdr-sdk` and `packages/cli` that imports herdr.                                                                                                                                                                             |
-| `packages/server`                                        | `server.ts`, `daemon.ts`.                                                                                                                                                                                                                                                                                                                    |
-| `packages/client`                                        | `client.ts`; `release.ts`, the latest-release lookup that `vibest update` and vibestd's hourly check share. Depends on `schema` and `protocol` only.                                                                                                                                                                                         |
-| `packages/cli` (`@vibest/cli`)                           | `cli.ts`, `main.ts` (passes the platform's `Host` and `replacements` to the daemon), `replace.ts`, `ask.ts`, `bin/vibest.cjs`, the build script, and the omac CLI tests.                                                                                                                                                                     |
-| `packages/platform-bun` (`@vibest/platform-bun`)         | The Bun platform of the binary: `bun.ts` (the daemon `Host`, its `replacements`, `services`, `runMain`, `exec`) and `plugin-source.ts`. Private, bundled into the binary; `packages/cli` maps `#platform` to it.                                                                                                                             |
-| `packages/integration/claude`, `packages/integration/pi` | omac's `packages/claude`, `packages/pi-omac` (with its coordinator TUI). omac's standalone `extensions/pi-tui` package is removed. `packages/integration/cursor` is new.                                                                                                                                                                     |
-
-Each workspace package exports `./*` → `./src/*.ts`; imports name the module (`@vibest/core/db`).
+| Where                                                                                                                                                                                                                                                                                                                       | Holds                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `session.ts` + `session/`                                                                                                                                                                                                                                                                                                   | Sessions: spawn, placement, executions, delivery, exits, archive, move, restart, entry, reconcile, locks, live state |
+| `plugin.ts` + `plugin/`                                                                                                                                                                                                                                                                                                     | The plugin host: sources, supervisor, registry, hooks, host                                                          |
+| `project.ts` + `project/`                                                                                                                                                                                                                                                                                                   | Projects: create, identity, activity                                                                                 |
+| `database/`                                                                                                                                                                                                                                                                                                                 | `db.ts` and its `db-*.ts` modules, the journal, projectors, ledger reads, migrations                                 |
+| `effect/`                                                                                                                                                                                                                                                                                                                   | `LayerNode`, the platform tokens, `bounded.ts`, `keyed-mutex.ts`                                                     |
+| `subscriptions/`                                                                                                                                                                                                                                                                                                            | Harness subscription usage (`Subscriptions`, served by `vibest subscriptions`)                                       |
+| `bus.ts`, `reactor.ts`, `inbox.ts`, `batch.ts`, `harness.ts`, `models.ts`, `agents.ts`, `runtimes.ts`, `caller.ts`, `launch.ts`, `remove.ts`, `replies.ts`, `system-prompt.ts`, `integration.ts`, `guard.ts`, `git.ts`, `worktree.ts`, `repository-url.ts`, `processes.ts`, `identity.ts`, `paths.ts`, `drain.ts`, `app.ts` | One-file domains                                                                                                     |
 
 ## 3. Core domain
 
@@ -354,7 +360,7 @@ below it and subscribing to the events it handles itself:
 | `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                          |
 | `entry.ts` (`EntrySession`)    | starting and resuming the entry session                                                          |
 
-`packages/core/src/sessions.ts` (`Sessions`) is the facade the server and the CLI call: it delegates to these modules and
+`packages/core/src/session.ts` (`Sessions`) is the facade the server and the CLI call: it delegates to these modules and
 itself only reads (`get`, `list`, `peek`, and `view`, which adds a session's directory and git state).
 
 How these modules keep the rules:
@@ -601,23 +607,27 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 
 ## 5. Service composition
 
-- Services are `Context.Service` classes; each module exports itself as a namespace
-  (`export * as Run from "./run.js"`).
+- Each module exports itself as a namespace (`export * as Inbox from "./inbox.ts"`) holding its `Service` (a
+  `Context.Service` class), `Interface`, `layer`, `node` and, with options, `configured`, as OpenCode does. The
+  rules are in [`.agents/rules/effect.md`](../../.agents/rules/effect.md); its Status line lists the modules that still
+  have the older shape (a class with `static readonly layer` and `node`).
 - Services are assembled from a **service graph**: each entry is `{ service, layer, dependencies }` with a scope.
   A narrower scope may depend on a wider one, never the reverse, checked at type level. The graph compiles to
   one `Layer`.
-- Configuration replaces entries at the composition root (`Database.entry.replace(Database.configured(...))`).
+- Configuration replaces entries at the composition root (`PlatformNode.sqlClientLayer.replace(…)` in
+  `packages/platform-bun/src/bun.ts`).
   Product identity and runtime are replacements, which is how one core yields several isolated products.
 - Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
-  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
-  left out, and `unbound` is infallible). Each service has a `node` listing its `deps`; what the host supplies
+  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; `unbound` is infallible).
+  Its release tracking is kept: `LayerNode.Releases` records each node whose layer is still releasing, and when
+  shutdown passes its deadline the daemon prints them (`server/src/daemon.ts`, `server/src/shutdown-deadline.ts`). Each service has a `node` listing its `deps`; what the host supplies
   (the platform services, the daemon's identity) is an unbound node. The SQL client, the socket server and the HTTP
   server can fail to open, so the host supplies each as an infallible layer token (`SqlClientLayer`,
   `SocketServerLayer`, `HttpServerLayer`: an unbound node whose value is a `Layer`), and a real provider node
   (`sqlClient`, `socketServer`, `httpServer`) consumes the token and carries the failure (`DatabaseOpenFailed`,
   `SchemaMismatch`, `SqlError`, `SocketServerError`, `ServeError`) in its type; a host that omits a token is
-  refused when the graph is compiled. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
-  the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
+  refused when the graph is compiled. The roots are `services` (`packages/server/src/services.ts`) and `daemon`
+  (`packages/server/src/app.ts`), which adds the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
   replacements. The platform (`packages/platform-bun/src/bun.ts`) exports `replacements` for everything it supplies
   (platform services, sqlite, the sockets, the machine transport, the plugin loader, the builtin plugins, the host
   environment, the process platform, the host facts); its `Host` keeps only `lock` and `checkDatabase`, which run
@@ -626,10 +636,10 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 - Today there is only the daemon scope: plugins and catalogs are the same for every Project. Tags exist in
   `LayerNode` and are not declared until a project scope is built.
 
-| Scope       | Lives                                                               | Holds                                                                                                                    |
-| ----------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **daemon**  | once per daemon                                                     | Product, Database, Event bus, Project registry, Machine registry, Run and Agent execution, Scheduler queue, event stream |
-| **project** | one compiled graph per Project, in a `LayerMap` keyed by Project id | Configuration, catalogs (definitions, harnesses, skills, Workspace types, commands), plugin registry and supervisor      |
+| Scope                   | Lives                                                               | Holds                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **daemon**              | once per daemon                                                     | the database and its ledger, the Bus, projects, machines, sessions and their executions, the inbox, the plugin host, the harness, runtime and agent catalogs |
+| **project** (not built) | one compiled graph per Project, in a `LayerMap` keyed by Project id | the plugin registry and supervisor, the agent, harness and runtime catalogs, for that project's sessions                                                     |
 
 ## 6. Persistence and events
 
@@ -662,45 +672,51 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
 
 ## 7. Plugin architecture
 
-**Definition** (`packages/plugin/src/plugin.ts`): a plugin is an id and either an effect or a Promise setup.
+**Definition**: a plugin is an id and either an effect or a Promise setup, one per entry point as in OpenCode:
+`@vibest/plugin/effect` (`packages/plugin/src/effect/plugin.ts`) defines `{ id, effect }` and `@vibest/plugin`
+(`packages/plugin/src/promise/plugin.ts`) defines `{ id, setup }`; `Plugin.define` takes one shape each. The domain types
+both use (`domain.ts`) are exported from both.
 
 ```ts
-export type Plugin =
-  | { readonly id: string; readonly effect: (context: Context) => Effect.Effect<void, never, Scope.Scope> }
-  | { readonly id: string; readonly setup: (context: PromiseContext) => Promise<Cleanup | void> | Cleanup | void }
-export const define = <P extends Plugin>(plugin: P) => plugin
+export interface Plugin {
+  readonly id: string
+  readonly effect: (context: Context) => Effect.Effect<void, never, Scope.Scope>
+}
+export interface Plugin {
+  readonly id: string
+  readonly setup: (context: Context) => Promise<Cleanup | void> | Cleanup | void
+}
 ```
 
-A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/plugin/src/promise.ts`, as OpenCode's
-`promise/adapter.ts`), so both forms share one loading, failure and reload path. Its `PromiseContext` has the same
+A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/plugin/src/promise/adapter.ts`, as OpenCode's
+`promise/adapter.ts`; core's plugin host picks the form; `@vibest/plugin/promise/adapter` exports the adapter `fromPromise`), so both forms share one loading, failure and reload path. Its Promise `Context` has the same
 domains with Promises: `hook` callbacks return `Promise<result | void>` or the result, and refuse by throwing
 `AgentRefused`; registrations resolve to `{ dispose(): Promise<void> }`; `event.subscribe` is an `AsyncIterable`,
-closed when the plugin unloads; `subscription.report` and `reload` return Promises; `transform` takes the same
+closed when the plugin unloads; `subscription.report` returns a Promise; `transform` takes the same
 synchronous editor (runtime and harness definitions stay Effect types, so their authors write Effect). The `Cleanup`
 `setup` returns runs when the plugin's scope closes; registrations made later, from inside `setup`, still belong to
 that scope.
 
-**Two capabilities**, as OpenCode V2: `transform(editor)` with a synchronous editor (`list`, `get`, `add`, `update`,
-`remove`) plus `reload()` for the definition registries, and `hook(name, callback)` for live interception. Both return
+**Two capabilities**, as OpenCode V2: `transform(editor)` with a synchronous editor (`add`, plus `update` on the harness editor), and `hook(name, callback)` for live interception. Both return
 a `Registration` (`{ dispose }`) owned by the plugin's scope: unloading the plugin disposes everything it registered,
-and `dispose` may be called earlier (a second call is a no-op). Registries are `packages/core/src/registry.ts`, a port
+and `dispose` may be called earlier (a second call is a no-op). Registries are `packages/core/src/plugin/registry.ts`, a port
 of V2's `State`: transforms apply in registration order on a lazy rebuild, a plugin's setup runs in one `group` (a
 throwing transform disables the whole plugin and removes its earlier registrations; a disabled plugin is not set up
 again until its own revision or options change), and an activation runs in one
 `batch` (one rebuild and one notification however many plugins changed). Removing a plugin's transform restores the
 definitions it changed or removed. Editor callbacks are synchronous: load effectful data before registering a
-transform or reloading.
+transform.
 
-**Context domains** (`packages/plugin/src/index.ts`):
+**Context domains** (`packages/plugin/src/effect/index.ts`):
 
-| Domain         | Members               | Edits                                                               |
-| -------------- | --------------------- | ------------------------------------------------------------------- |
-| `options`      | the plugin's options  | —                                                                   |
-| `agent`        | `hook`                | `start.before`, `fail`                                              |
-| `runtime`      | `transform`, `reload` | `RuntimeDefinition`s by `id`, each with its optional `caller` (§10) |
-| `harness`      | `transform`, `reload` | `HarnessDefinition`s by `id` (§8)                                   |
-| `subscription` | `report`              | one `(harness, provider)` row's limits                              |
-| `event`        | `subscribe`           | — (observes the ledger's facts)                                     |
+| Domain         | Members              | Edits                                                               |
+| -------------- | -------------------- | ------------------------------------------------------------------- |
+| `options`      | the plugin's options | —                                                                   |
+| `agent`        | `hook`               | `start.before`, `fail`                                              |
+| `runtime`      | `transform`          | `RuntimeDefinition`s by `id`, each with its optional `caller` (§10) |
+| `harness`      | `transform`          | `HarnessDefinition`s by `id` (§8)                                   |
+| `subscription` | `report`             | one `(harness, provider)` row's limits                              |
+| `event`        | `subscribe`          | — (observes the ledger's facts)                                     |
 
 Domains such as workspaces, definitions, commands, skills, plugin RPC and storage are planned and not part of the API
 yet.
@@ -719,18 +735,19 @@ starting it, not its life.
 
 **Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
 
-| Hook                 | Returns                                                                                      | Runs                                                     |
-| -------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `agent.start.before` | `AgentRoute`: any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime`, or void | before every Agent starts, the entry session included    |
-| `agent.fail`         | `AgentMove` (`{ harness, provider?, model? }`) or void                                       | a started Agent's execution failed (today a usage limit) |
+| Hook                 | Changes (by assigning to the event)                                   | Runs                                                     |
+| -------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every Agent starts, the entry session included    |
+| `agent.fail`         | `move` (`{ harness, provider?, model? }`)                             | a started Agent's execution failed (today a usage limit) |
 
-Every event carries the Project, the caller, the current Subscriptions, and the earlier tries, and is read-only:
-each callback gets a frozen copy (its object fields frozen too), so assigning to it throws and counts as that
-plugin crashing. Callbacks run sequentially in plugin order and return what they decide; core applies each
-returned value before the next callback, so a later plugin sees (and may override) what an earlier one decided. On
-`agent.start.before` the fields a route names replace the event's (`undefined`
-unsets `harness`, `provider`, `model` or `runtime`, and leaves `prompt` and `machine` as they are); on
-`agent.fail` the last move returned wins. The trace attributes each field to the plugin that returned it
+Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. A callback returns
+nothing and changes the event by assigning to its fields (OpenCode's shared mutated event). Each callback gets its own
+copy of the event as decided so far and core copies the changed fields back only when the callback succeeded within
+its deadline, so a callback that times out, fails or writes after its deadline leaves no partial or late write. Callbacks
+run sequentially in plugin order, so a later plugin sees (and may override) what an earlier one decided. On
+`agent.start.before` an assigned `undefined` unsets `harness`, `provider`, `model` or `runtime`, and is ignored for
+`prompt` and `machine`; fields outside that list are not copied back; on `agent.fail` the last `move` assigned wins.
+The trace attributes each field to the plugin that changed it
 last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
 crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On
@@ -755,10 +772,10 @@ poll of a harness that reads usage. `agent.fail`'s `reason` is a union with one 
 
 **Counters and traces** (omac `plugins.ts`): per plugin and hook, calls, changes, crashes, timeouts, refusals,
 and the last error, shown by `vibest plugins`; every trace entry is `{ plugin, hook, ms, outcome:
-"ok" | "refused" | "crashed" | "timeout", changes }`, where `changes` is the value that callback returned, field by
+"ok" | "refused" | "crashed" | "timeout", changes }`, where `changes` is what that callback changed, field by
 field, with the value it replaced.
 
-**Dispatch:** sequential in plugin order; each callback gets a frozen view of the event as decided so far; every
+**Dispatch:** sequential in plugin order; each callback gets a copy of the event as decided so far, committed only on success; every
 callback is bounded by a 5 s timeout (waiting on its fiber, so an uninterruptible region still returns on
 time).
 
@@ -768,10 +785,14 @@ running one as it is (not torn down or set up again, and neither are the plugins
 both revisions, while with changed options it is failed and the old one is not restored; one whose setup fails falls
 back to the previous one; neither is retried until it changes; a plugin file found in the plugins
 directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
-last mention; an activation latch gates entry points; builtin plugins activate while vibestd's
-layers are built, before it listens, so a request that routes to a builtin runtime never finds it unregistered
-(user plugins activate afterwards, in the background; a runtime a user plugin registers can still be missing for
-a request admitted before that). A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`
+last mention; an activation latch gates `agent.start.before` and `agent.fail`. They wait up to 10 s
+for the pending generation; if it is still not active the operation fails with `PluginsNotActive`, naming the
+plugins still loading, and does not run on the plugins already active. The hooks for that call are the ones
+active at the gate, so a reload during the reads that follow does not change them. `vibest plugins` reads the plugins
+already active and does not wait. Machine hooks keep their current reads. Builtin plugins activate while vibestd's layers are built, before it listens, so a request
+that routes to a builtin runtime never finds it unregistered. User plugins activate afterwards, in the background,
+and a start during that activation is refused rather than admitted without them. Choosing a place and reading the
+caller's runtime do not wait, so the first start waits once, at this gate. A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`
 does), because every builtin setup runs before vibestd listens and a slow one would push startup past the
 client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and module file changes, debounced by
 100 ms.
@@ -779,7 +800,7 @@ client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and 
 **Loading and watching:** local plugin changes reload without repeating unchanged imports; failed revisions keep
 the previous one. See [loading and watching](plugin-loading.md#loading-and-watching) for watch and reload details.
 
-**Loading on Bun:** plugins share vibestd's `effect` and `@vibest/plugin` instances while local modules reload.
+**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin` and `@vibest/plugin/effect` instances while local modules reload.
 See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module lifetime details.
 
 **Order:**
@@ -825,7 +846,7 @@ configure (skills are builtin, §4.2).
 
 herdr runs the process; the adapter knows how this CLI wants to be started and told things (launch side) and
 loads vibest's plugin into the CLI so its work comes back as events (integration side). The contract is
-`HarnessDefinition` in `@vibest/plugin` (`packages/plugin/src/harness.ts`); `packages/plugin-harnesses` implements
+`HarnessDefinition` in `@vibest/plugin` (`packages/plugin/src/effect/harness.ts`); `packages/plugin-harnesses` implements
 Claude Code and Pi as the builtin plugins `harness-claude` and `harness-pi` (Cursor as a plugin file users add), each adding its
 definition with `context.harness.transform`. Core and the CLI hold no adapter: vibestd answers `Harnesses.List` (each
 row with its `binary`) and `Integration.Guard` from the registered definitions. A user plugin may add a harness or
@@ -1184,7 +1205,7 @@ that must be the user's own with mode 0700 and no symlink, checked with one `lst
 nothing can be swapped between two checks. Archive removes the session's directory once its processes have exited
 (they may still read the prompt or report an execution end); the system cleans the rest.
 
-`vibest project create` (`core/project-create.ts`) checks everything before it writes anything, and on failure or
+`vibest project create` (`core/project/create.ts`) checks everything before it writes anything, and on failure or
 interruption removes only what it created. Each copy is independent (`--no-hardlinks`, no alternates), on the
 source's branch, with the source's origin, `origin/*` refs and upstream; the local path it was cloned from is not
 kept as a remote, and uncommitted changes are not copied. A directory is a multi-repository project when it is not
@@ -1209,7 +1230,7 @@ and are the acceptance for each part.
 | herdr client                               | `packages/effect-herdr-sdk`                                                                                                                      | regenerate for herdr 0.9.5, pin its protocol                                    | —                                                                                                          |
 | herdr connections                          | `herdr-pool.ts`                                                                                                                                  | moved to `runtime-herdr/pool.ts`                                                | `live.test.ts`                                                                                             |
 | Protocol, caller, ACCESS, admission        | `rpc.ts`, `protocol.ts`, `server.ts`, `client.ts`                                                                                                | methods for Run, Agent, Message, knowledge; roles main / subagent / user / open | `rpc.test.ts`                                                                                              |
-| Daemon lock, instance, replacement, update | `daemon.ts`, `core/drain.ts`, `replace.ts`, `cli.ts`, `update.ts`                                                                                | blockers are unfinished daemon operations, never Agents                         | `daemon.test.ts`, `stop.test.ts`                                                                           |
+| Daemon lock, instance, replacement, update | `daemon.ts`, `core/drain.ts`, `replace.ts`, `commands/handlers/daemon/`, `update.ts`                                                             | blockers are unfinished daemon operations, never Agents                         | `daemon.test.ts`, `stop.test.ts`                                                                           |
 | Distribution                               | `packages/cli/bin`, `packages/cli-*`, `scripts/build.ts`                                                                                         | names                                                                           | `release-smoke.test.ts`                                                                                    |
 | Database                                   | `db.ts`, `platform-bun/src/bun.ts`                                                                                                               | tables of §6                                                                    | —                                                                                                          |
 | Starting an Agent                          | `session/spawn.ts`, `session/placement.ts`, `worktree.ts`, `harness.ts` (the `Harnesses` registry; the adapters are `packages/plugin-harnesses`) | session → Agent in a Run; Workspace types                                       | `sessions.test.ts`, `worktree-group.test.ts`                                                               |
@@ -1272,4 +1293,5 @@ Paths are in `anomalyco/opencode` at `f0944f0`. These are sources to read when i
 
 Where vibest differs: protocol, persistence, delivery, and daemon come from omac (§15), not from OpenCode;
 graphs are per Project, not per directory; decision points survive restarts; notify hooks have a timeout; no
-coding-agent domain; harness adapters sit on top of an external runtime (herdr).
+coding-agent domain; harness adapters sit on top of an external runtime (herdr). Plugin activation is a gate with
+a 10 s bound that refuses with `PluginsNotActive`, not an unbounded wait.

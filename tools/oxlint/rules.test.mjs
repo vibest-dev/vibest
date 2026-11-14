@@ -180,22 +180,22 @@ describe("import policy", () => {
   const core = importing("@vibest/core/x")
   const scopedFindings = (source, file) => oxlintFindings(source, file, { scoped: true })
   const refused = ["1 eslint(no-restricted-imports)"]
+  const outside = ["1 vibest(package-imports)"]
 
-  it("neutral packages refuse herdr and Bun; bun.ts and platform/ accept only Bun", () => {
+  it("neutral packages refuse herdr and Bun; bun.ts and platform/ accept Bun but not herdr", () => {
     for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
       const path = `packages/core/src/${file}`
-      expect(scopedFindings(herdr, path)).toEqual(refused)
+      expect(scopedFindings(herdr, path)).toEqual(outside)
       expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
     }
   })
 
   it.each(["integration/claude", "plugin-harnesses", "runtime-herdr", "runtime-herdr-core"])(
-    "%s refuses other vibest packages and Bun; bun.ts and platform/ accept only Bun",
+    "%s refuses @vibest/core and Bun; bun.ts and platform/ accept only Bun",
     (root) => {
-      const internal = importing("@vibest/core")
       for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
         const path = `packages/${root}/src/${file}`
-        expect(scopedFindings(internal, path)).toEqual(refused)
+        expect(scopedFindings(core, path)).toEqual(outside)
         expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
       }
     },
@@ -208,10 +208,10 @@ describe("import policy", () => {
       expect(scopedFindings(bun, file)).toEqual(refused)
   })
 
-  it("the CLI refuses @vibest/core and herdr in its top-level sources only", () => {
-    expect(scopedFindings(core, "packages/cli/src/a.ts")).toEqual(refused)
-    expect(scopedFindings(herdr, "packages/cli/src/a.ts")).toEqual(refused)
-    expect(scopedFindings(core, "packages/cli/src/sub/a.ts")).toEqual([])
+  it("the CLI refuses @vibest/core and herdr in every source file", () => {
+    expect(scopedFindings(core, "packages/cli/src/a.ts")).toEqual(outside)
+    expect(scopedFindings(herdr, "packages/cli/src/a.ts")).toEqual(outside)
+    expect(scopedFindings(core, "packages/cli/src/commands/handlers/a.ts")).toEqual(outside)
   })
 })
 
@@ -221,7 +221,7 @@ describe("ledger access rules", () => {
   it("event-reads: only the journal reads the event table and position", () => {
     const source = "export const q = `SELECT * FROM event`\nexport const p = { position: 1 }\n"
     expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
-    expect(oxlintFindings(source, core("journal.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("database/journal.ts"))).toEqual([])
     expect(oxlintFindings(source, core("a.test.ts"))).toEqual([])
   })
 
@@ -239,16 +239,16 @@ describe("ledger access rules", () => {
       "3 vibest(projector-writes)",
       "4 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(source, core("projectors.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("database/projectors.ts"))).toEqual([])
   })
 
   it("projector-writes: db.ts may hold only its one opening write", () => {
     const opening = "export const a = `UPDATE meta SET value = value WHERE key = ''`\n"
-    expect(oxlintFindings(opening, core("db.ts"))).toEqual([])
-    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("db.ts"))).toEqual([
+    expect(oxlintFindings(opening, core("database/db.ts"))).toEqual([])
+    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("database/db.ts"))).toEqual([
       "2 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(`export const a = "DELETE FROM meta"\n`, core("db.ts"))).toEqual([
+    expect(oxlintFindings(`export const a = "DELETE FROM meta"\n`, core("database/db.ts"))).toEqual([
       "1 vibest(projector-writes)",
     ])
   })
@@ -279,9 +279,9 @@ export const i = setInterval
 
   it("no-background-loop: the approved file keeps only its one loop", () => {
     const forever = "export const a = pipe(x, Effect.forever)\n"
-    expect(oxlintFindings(forever, "packages/core/src/plugin-supervisor.ts")).toEqual([])
+    expect(oxlintFindings(forever, "packages/core/src/plugin/supervisor.ts")).toEqual([])
     expect(
-      oxlintFindings(forever + forever.replace("const a", "const b"), "packages/core/src/plugin-supervisor.ts"),
+      oxlintFindings(forever + forever.replace("const a", "const b"), "packages/core/src/plugin/supervisor.ts"),
     ).toEqual(["2 vibest(no-background-loop)"])
   })
 })
@@ -299,5 +299,41 @@ export const three = () => {
 export const bump = () => ++one + two
 `),
     ).toEqual(["1 vibest(no-module-let)", "2 vibest(no-module-let)"])
+  })
+})
+
+describe("package-imports", () => {
+  it("checks dynamic imports, type queries, re-exports and relative paths that leave the package", () => {
+    const source = `import * as a from "./a.ts"
+import * as b from "../../server/src/server.ts"
+export * from "../../../packages/core/src/bus.ts"
+export type C = import("../../server/src/server.ts").C
+export type D = typeof import("@vibest/client/client")
+export const e = [a, b, import("@vibest/protocol/rpc"), import("@vibest/schema/id")]
+export { f } from "@vibest/server/server"
+`
+    expect(oxlintFindings(source, "packages/core/src/x.ts")).toEqual([
+      "2 vibest(package-imports)",
+      "4 vibest(package-imports)",
+      "5 vibest(package-imports)",
+      "6 vibest(package-imports)",
+      "7 vibest(package-imports)",
+    ])
+  })
+
+  it("lets only the daemon handler take HANDOFF_ENV, by a named static import, from @vibest/server/server", () => {
+    const handler = "packages/cli/src/commands/handlers/daemon/default.ts"
+    const named = `import { HANDOFF_ENV } from "@vibest/server/server"\nexport const v = HANDOFF_ENV\n`
+    expect(oxlintFindings(named, handler)).toEqual([])
+    expect(oxlintFindings(named, "packages/cli/src/commands/handlers/status.ts")).toEqual(["1 vibest(package-imports)"])
+    for (const other of [
+      `import { layer } from "@vibest/server/server"\nexport const v = layer\n`,
+      `import * as Server from "@vibest/server/server"\nexport const v = Server\n`,
+      `import { HANDOFF_ENV, layer } from "@vibest/server/server"\nexport const v = [HANDOFF_ENV, layer]\n`,
+      `export const v = import("@vibest/server/server")\n`,
+      `export const v = import(\`@vibest/server/server\`)\n`,
+      `import { x } from "@vibest/server/server/x"\nexport const v = x\n`,
+    ])
+      expect(oxlintFindings(other, handler)).toEqual(["1 vibest(package-imports)"])
   })
 })

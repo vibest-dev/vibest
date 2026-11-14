@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Fiber, Sink, Stdio, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { soleEntry } from "../src/cli.ts"
+import { soleEntry } from "../src/commands/handlers/default.ts"
 
 const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>) =>
   Stdio.layerTest({

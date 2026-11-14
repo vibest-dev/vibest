@@ -1,5 +1,6 @@
 import {
   cliHeaders,
+  DAEMON_START_TIMEOUT,
   connect,
   described,
   importCheck,
@@ -187,7 +188,14 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
           ),
         ),
       )
-    const now = Option.getOrUndefined(yield* readPing(layout.socket))
+    const now = (yield* readPing(layout.socket).pipe(
+      Effect.repeat({
+        until: (p) => Option.isSome(p) && p.value.instance !== old.instance,
+        schedule: Schedule.spaced("200 millis"),
+      }),
+      Effect.timeoutOption(DAEMON_START_TIMEOUT),
+      Effect.map(Option.flatten),
+    )).pipe(Option.getOrUndefined)
     if (!now)
       return yield* fail("unknown", `the old vibestd stopped answering, and nothing answers on ${layout.socket} now`)
     if (!isTarget(now, old, target))

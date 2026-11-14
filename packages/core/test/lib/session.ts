@@ -1,27 +1,26 @@
 import { Agents } from "@vibest/core/agents"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
-import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { MachineTransport } from "@vibest/core/machines"
-import { Layout } from "@vibest/core/paths"
-import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
+import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
+import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/host"
 import { Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
 import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
+import { Sessions } from "@vibest/core/session"
 import { Spawn } from "@vibest/core/session/spawn"
-import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
 import {
   Clock,
   ConfigProvider,
@@ -34,18 +33,20 @@ import {
   Layer,
   Path,
   Ref,
+  Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
-import * as ServerApp from "../../../server/src/app.ts"
-import * as Server from "../../../server/src/server.ts"
+import { Identity, Shutdown } from "../../../server/src/handlers/daemon.ts"
+import { MachineTransport } from "../../../server/src/machine/machines.ts"
+import { services } from "../../../server/src/services.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
-import { services } from "../platform/bun.ts"
+import { services as platformServices } from "../platform/bun.ts"
 import { tempDirectory } from "./directory.ts"
 import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime, KIND, type FakeRuntimeOptions } from "./fake-runtime.ts"
+import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
 import { harnessLayer, harnessesLayer, noHostEnv } from "./harnesses.ts"
 import { compile, fakeGit, fakeProcesses, fakeRuntime, platform } from "./layers.ts"
 
@@ -119,8 +120,8 @@ export const pluginsHost = (
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
         if (options.activateLate) {
-          host.ready.closeUnsafe()
-          yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
+          const release = host.holdNow()
+          yield* host.activate(candidates).pipe(Effect.andThen(release), Effect.forkScoped)
         } else yield* host.activate(candidates)
         return Context.make(Plugins, host.service).pipe(
           Context.add(PluginHost, {
@@ -177,7 +178,9 @@ export const cryptoReplacement = (decorate: (crypto: Crypto.Crypto) => Crypto.Cr
   platform.replace(
     LayerNode.make({
       name: "test/Platform",
-      layer: Layer.effect(Crypto.Crypto, Effect.map(Crypto.Crypto, decorate)).pipe(Layer.provideMerge(services)),
+      layer: Layer.effect(Crypto.Crypto, Effect.map(Crypto.Crypto, decorate)).pipe(
+        Layer.provideMerge(platformServices),
+      ),
       deps: [],
     }),
   )
@@ -215,13 +218,13 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       PlatformNode.sqlClient,
       HostEnv.node,
       VibestdIdentity.node,
-      Server.Identity.node,
-      Server.Shutdown.node,
+      Identity.node,
+      Shutdown.node,
       fakeProcesses,
       Processes.node,
       fakeGit,
       runtimeNode,
-      ServerApp.services,
+      services,
       App.node,
       UpdateCheck.node,
       plugins,
@@ -242,8 +245,8 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       MachineTransport.node.replace(defaultTransport),
       HostEnv.node.replace(noHostEnv),
       VibestdIdentity.node.replace(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),
-      Server.Identity.node.replace(Layer.succeed(Server.Identity, {})),
-      Server.Shutdown.node.replace(Layer.effect(Server.Shutdown, Deferred.make<void>())),
+      Identity.node.replace(Layer.succeed(Identity, {})),
+      Shutdown.node.replace(Layer.effect(Shutdown, Deferred.make<void>())),
       ...replacements,
     ],
   )
@@ -276,17 +279,29 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly version?: string
 }
 
+const unusedRuntime = (
+  id: string,
+  caller: VibestPlugin.Runtime.RuntimeCaller,
+): VibestPlugin.Runtime.RuntimeDefinition => {
+  const unused = () => Effect.die(new Error(`runtime ${id} is only a caller`))
+  return {
+    id,
+    caller,
+    status: () => Effect.succeed({ status: "online" }),
+    open: unused,
+    send: unused,
+    read: unused,
+    process: unused,
+    close: unused,
+    events: Stream.empty,
+  }
+}
+
 export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
   VibestPlugin.Plugin.define({
     id: `runtime-${id}-caller`,
     effect: (context) =>
-      context.runtime
-        .transform((editor) => {
-          const own = editor.get(id)
-          if (own === undefined) editor.add({ ...editor.get(KIND)!, id, caller })
-          else editor.update(id, (definition) => (definition.caller = caller))
-        })
-        .pipe(Effect.asVoid),
+      context.runtime.transform((editor) => editor.add(unusedRuntime(id, caller))).pipe(Effect.asVoid),
   })
 
 const harnessStandIn = (options: TestOptions) => ({
@@ -310,9 +325,7 @@ export const sessionFrom = (options: TestOptions = {}) =>
       ...(options.crypto === undefined ? [] : [cryptoReplacement(options.crypto)]),
       SshHosts.node.replace(sshHosts(options.sshHosts)),
       MachineTransport.node.replace(transportLayer(options.transport)),
-      ...(options.identity === undefined
-        ? []
-        : [Server.Identity.node.replace(Layer.succeed(Server.Identity, options.identity))]),
+      ...(options.identity === undefined ? [] : [Identity.node.replace(Layer.succeed(Identity, options.identity))]),
     ],
     pluginsHost(options.plugins ?? [], {
       ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),

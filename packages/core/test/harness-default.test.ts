@@ -4,7 +4,7 @@ import { Effect } from "effect"
 import { harnessDefaultPlugin } from "../../builtins/src/harness-default.ts"
 import { Agents } from "../src/agents.ts"
 import { Bus } from "../src/bus.ts"
-import { Plugins } from "../src/plugins.ts"
+import { Plugins } from "../src/plugin.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
 const event = (harness: string | undefined, claude: boolean) => ({

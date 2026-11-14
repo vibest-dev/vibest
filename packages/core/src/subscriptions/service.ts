@@ -1,10 +1,11 @@
-import type { SubscriptionReport } from "@vibest/plugin"
+import type { SubscriptionReport } from "@vibest/plugin/effect"
+import type { HarnessId } from "@vibest/schema/session"
 import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscription"
 import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
 
 import { LayerNode } from "../effect/layer-node.ts"
-import { Harness, type HarnessId, Harnesses } from "../harness.ts"
-import type { HarnessDefinition, SubscriptionsShape } from "../host.ts"
+import { Harness, Harnesses } from "../harness.ts"
+import type { HarnessDefinition, SubscriptionsShape } from "../plugin/host.ts"
 import { logFailure } from "../reactor.ts"
 
 const MINUTE = "1 minute"

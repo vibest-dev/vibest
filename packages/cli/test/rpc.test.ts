@@ -2,16 +2,17 @@ import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, incompatibleDaemon, protocolHeaders } from "@vibest/client/client"
-import { Db, executionStateOf } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
-import { projectRoot } from "@vibest/core/project-create"
+import { Db } from "@vibest/core/database/db"
+import { executionStateOf } from "@vibest/core/database/db-rows"
+import { projectRoot } from "@vibest/core/project/create"
 import { unwrapped } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/sessions"
-import { Plugin } from "@vibest/plugin"
+import { Sessions } from "@vibest/core/session"
+import { PRESENT_TIMEOUT } from "@vibest/core/session/entry"
+import { Plugin } from "@vibest/plugin/effect"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
 import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
+import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -267,7 +268,7 @@ describe("vibest.sock", () => {
         terminal: "test/p1",
       }).pipe(Effect.forkChild)
       yield* held.reached
-      yield* TestClock.adjust(Server.PRESENT_TIMEOUT)
+      yield* TestClock.adjust(PRESENT_TIMEOUT)
       const saved = yield* Fiber.join(launch)
       assert.isString(saved.sessionId)
       const again = yield* c["Project.EntrySession"]({
@@ -276,7 +277,7 @@ describe("vibest.sock", () => {
         fresh: false,
         terminal: "test/p1",
       }).pipe(Effect.forkChild)
-      yield* TestClock.adjust(Server.PRESENT_TIMEOUT)
+      yield* TestClock.adjust(PRESENT_TIMEOUT)
       assert.strictEqual((yield* Fiber.join(again)).sessionId, saved.sessionId)
     }),
   )

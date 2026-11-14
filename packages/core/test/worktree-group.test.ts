@@ -1,11 +1,13 @@
 import fs from "node:fs"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Db, type NewSession, exitedAt, executionStateOf } from "@vibest/core/db"
-import type { HarnessId } from "@vibest/core/harness"
-import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
-import { Sessions } from "@vibest/core/sessions"
+import { Db } from "@vibest/core/database/db"
+import { type NewSession, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
+import { sameWorktreeBucket } from "@vibest/core/paths"
+import { Sessions } from "@vibest/core/session"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
+import { Layout } from "@vibest/schema/layout"
+import type { HarnessId } from "@vibest/schema/session"
 import { Deferred, Effect, Exit, Fiber, FileSystem, Path, Scheduler, type Scope } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"

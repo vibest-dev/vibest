@@ -2,8 +2,7 @@ import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
 import { agentsLayer } from "@vibest/core/test/lib/agents"
 import { entryPending, projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
@@ -18,6 +17,7 @@ import {
   subscriptionsLayer,
 } from "@vibest/core/test/lib/harnesses"
 import { NOT_CHECKED } from "@vibest/protocol/rpc"
+import { Layout } from "@vibest/schema/layout"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import { UpdateCheck } from "@vibest/server/update-check"
 import { Effect, FileSystem, Layer, Option, Stream } from "effect"

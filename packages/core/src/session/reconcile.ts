@@ -4,7 +4,6 @@ import { Clock, Context, Duration, Effect, Layer, Option, Ref } from "effect"
 
 import { Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
 import {
-  Db,
   type SessionRow,
   sessionEnded,
   harnessIdOf,
@@ -14,7 +13,8 @@ import {
   executionStateOf,
   executionStartedAt,
   archived,
-} from "../db.ts"
+} from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harness.ts"
 import { Inbox } from "../inbox.ts"

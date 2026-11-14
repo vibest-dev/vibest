@@ -1,16 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Harness, HarnessUnavailable } from "@vibest/core/harness"
-import { Layout } from "@vibest/core/paths"
-import { Plugins } from "@vibest/core/plugins"
+import { Harness } from "@vibest/core/harness"
+import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { Plugin } from "@vibest/plugin"
-import { claude, cursor, pi } from "@vibest/plugin-harnesses"
+import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
 import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
-import { claudeSubscription } from "@vibest/plugin-harnesses/subscriptions/claude"
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
-import { piSubscription } from "@vibest/plugin-harnesses/subscriptions/pi"
+import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
+import { HarnessUnavailable } from "@vibest/schema/session"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
@@ -116,17 +115,30 @@ const fakeMachine = (options: {
   )
   const onMachine = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provide(machine), Effect.provide(Platform.services), Effect.orDie)
-  const definitions = [
-    { ...claude, subscription: (dir: string) => onMachine(claudeSubscription(dir)) },
-    {
-      ...cursor,
-      subscription: (dir: string) =>
-        onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(dir, problem))),
-    },
-    { ...pi, subscription: (dir: string) => onMachine(piSubscription(dir)) },
-  ]
+  const registered = (assembled: typeof claudePlugin) =>
+    Effect.gen(function* () {
+      const plugin = yield* assembled
+      const added: Array<HarnessTypes.HarnessDefinition> = []
+      const editor = { add: (definition: HarnessTypes.HarnessDefinition) => added.push(definition) }
+      const registration = { dispose: Effect.void }
+      const ctx = {
+        harness: {
+          transform: (edit: (e: typeof editor) => unknown) => Effect.sync(() => (edit(editor), registration)),
+        },
+      } as unknown as Parameters<typeof plugin.effect>[0]
+      yield* plugin.effect(ctx)
+      return added[0]!
+    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+  const cursorDefinition = {
+    ...cursor,
+    subscription: (dir: string) =>
+      onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(spawner)(dir, problem))),
+  }
+  const definitions = Effect.all([registered(claudePlugin), registered(piPlugin)]).pipe(
+    Effect.map(([claudeDefinition, piDefinition]) => [claudeDefinition, cursorDefinition, piDefinition]),
+  )
   const fakes = Subscriptions.testLayer.pipe(
-    Layer.provideMerge(harnessesLayer(definitions)),
+    Layer.provideMerge(Layer.unwrap(Effect.map(definitions, harnessesLayer))),
     Layer.provideMerge(harnessLayer(options.installed)),
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>

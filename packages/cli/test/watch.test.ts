@@ -3,11 +3,12 @@ import fs from "node:fs/promises"
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import type { WatchEvent } from "@vibest/protocol/rpc"
+import { Layout } from "@vibest/schema/layout"
+import { WATCH_BACKLOG } from "@vibest/server/handlers/session"
 import * as Server from "@vibest/server/server"
 import { Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
 
@@ -227,8 +228,7 @@ describe("Watch", () => {
       yield* w.send({ jsonrpc: "2.0", id: 1, method: "Watch", params: null, headers: Object.entries(cliHeaders(repo)) })
       const first = yield* w.recv
       assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
-      for (let i = 0; i < Server.WATCH_BACKLOG + 500; i++)
-        yield* bus.observe({ type: "project.changed", projectId: project })
+      for (let i = 0; i < WATCH_BACKLOG + 500; i++) yield* bus.observe({ type: "project.changed", projectId: project })
       const ack = { jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: 1 } }
       for (;;) {
         yield* w.send(ack)

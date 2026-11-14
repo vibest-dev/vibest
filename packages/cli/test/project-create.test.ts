@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db, exitedAt, executionStateOf } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
+import { exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
 import { Project } from "@vibest/core/project"
 import {
   createIsolatedWorktrees,
@@ -9,11 +9,12 @@ import {
   listProjectRepositories,
   projectRepositories,
   projectRoot,
-} from "@vibest/core/project-create"
-import { Sessions } from "@vibest/core/sessions"
+} from "@vibest/core/project/create"
+import { Sessions } from "@vibest/core/session"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { liveDaemon } from "@vibest/runtime-herdr/commands"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { Effect, Exit, FileSystem, Layer, Path, PlatformError, type Scope } from "effect"
 import { TestClock } from "effect/testing"

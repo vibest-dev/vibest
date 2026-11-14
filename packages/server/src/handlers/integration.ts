@@ -1,15 +1,15 @@
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
+import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { harnessCatalog, Harnesses, unprovided } from "@vibest/core/harness"
 import { type HookCaller, Integration } from "@vibest/core/integration"
-import { LOCAL_MACHINE } from "@vibest/core/ledger-read"
 import { forProvider } from "@vibest/core/models"
-import { Remote } from "@vibest/core/remote"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"
 import { Caller, Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
 import type * as Headers from "effect/http/Headers"
 
 import { noteOpen, processOf, reader } from "../gates.ts"
+import { Remote } from "../machine/remote.ts"
 import type { Handlers } from "./caller.ts"
 
 export const make = Effect.gen(function* () {

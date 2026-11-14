@@ -9,21 +9,23 @@ import { pre } from "@vibest/builtins"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
-import { DatabaseOpenFailed, inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
+import { SQL_NAMES } from "@vibest/core/database/db"
+import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
+import { checkReplay } from "@vibest/core/database/journal"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
-import { checkReplay } from "@vibest/core/journal"
-import { MachineTransport } from "@vibest/core/machines"
-import { Layout } from "@vibest/core/paths"
-import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugins"
+import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugin"
 import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/core/processes"
 import { HostEnv } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPluginEffect from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
+import { Layout } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
+import { MachineTransport } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
@@ -139,6 +141,7 @@ export const runMain = BunRuntime.runMain
 const provided: Readonly<Record<string, object>> = {
   effect,
   "@vibest/plugin": VibestPlugin,
+  "@vibest/plugin/effect": VibestPluginEffect,
   "effect/process/ChildProcess": ChildProcess,
   "effect/process/ChildProcessSpawner": ChildProcessSpawner,
   ...Object.fromEntries(
@@ -340,7 +343,13 @@ export const replacements: LayerNode.Replacements = [
   ),
   MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
   PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
-  builtinsNode.replace(Layer.succeed(Builtins, pre)),
+  builtinsNode.replace(
+    LayerNode.make({
+      name: "vibest/Builtins",
+      layer: Layer.effect(Builtins, pre),
+      deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
+    }),
+  ),
   HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
   ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
   Server.socketServerLayer.replace(
@@ -379,7 +388,24 @@ export const updateCheck = (
     }),
   )
 
-export const daemon: Host = { lock, checkDatabase }
+const onSignals: Host["onSignals"] = (onSignal) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const hangup = () => process.kill(process.pid, "SIGTERM")
+      const interactive = process.stdin.isTTY || process.stdout.isTTY
+      process.on("SIGTERM", onSignal)
+      process.on("SIGINT", onSignal)
+      if (interactive) process.on("SIGHUP", hangup)
+      return () => {
+        process.off("SIGTERM", onSignal)
+        process.off("SIGINT", onSignal)
+        process.off("SIGHUP", hangup)
+      }
+    }),
+    (off) => Effect.sync(off),
+  ).pipe(Effect.asVoid)
+
+export const daemon: Host = { lock, checkDatabase, onSignals, exit: (code) => Effect.sync(() => process.exit(code)) }
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")

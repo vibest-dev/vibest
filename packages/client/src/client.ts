@@ -29,11 +29,12 @@ import { RpcClient, RpcSerialization } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
 
 import { SocketConnector } from "./socket-connector.ts"
-export { SocketConnector } from "./socket-connector.ts"
 
 export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
 
-export const DAEMON_START_TIMEOUT = Duration.seconds(10)
+export const SHUTDOWN_DEADLINE = Duration.seconds(10)
+export const SHUTDOWN_FLUSH = Duration.millis(1_500)
+export const DAEMON_START_TIMEOUT = Duration.sum(Duration.sum(SHUTDOWN_DEADLINE, SHUTDOWN_FLUSH), Duration.seconds(10))
 
 export class DaemonUnavailable extends Schema.TaggedError<DaemonUnavailable>()("DaemonUnavailable", {
   socket: Schema.String,
@@ -109,7 +110,7 @@ const fromEnv = Effect.gen(function* () {
     cwd: (yield* Path.Path).resolve("."),
   }
 }).pipe(
-  Effect.tapCause((cause) => Effect.logDebug(`session claim headers fell back to the request: ${Cause.pretty(cause)}`)),
+  Effect.tapCause((cause) => Effect.logDebug("session claim headers fell back to the request", cause)),
   Effect.orElseSucceed(() => ({})),
 )
 

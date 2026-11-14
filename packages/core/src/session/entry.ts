@@ -1,26 +1,27 @@
-import { addPluginHint, describeSpawn, LaunchFailed, NoRuntime, type RuntimeMachine } from "@vibest/schema/session"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import {
+  addPluginHint,
+  describeSpawn,
+  LaunchFailed,
+  NoRuntime,
+  type RuntimeMachine,
+  type RuntimeAddress,
+  HarnessUnavailable,
+  type HarnessId,
+} from "@vibest/schema/session"
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
-import {
-  AddressJson,
-  Db,
-  encodeAddress,
-  harnessIdOf,
-  pidOf,
-  placedTerminal,
-  type RuntimeAddress,
-  type SessionRow,
-} from "../db.ts"
+import { AddressJson, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import * as KeyedMutex from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import { Harness, harnessOptions, Harnesses, HarnessUnavailable, type HarnessId } from "../harness.ts"
+import { Harness, harnessOptions, Harnesses } from "../harness.ts"
 import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
-import { Layout, VibestCommand } from "../paths.ts"
-import { Plugins } from "../plugins.ts"
+import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"

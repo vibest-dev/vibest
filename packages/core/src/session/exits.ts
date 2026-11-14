@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect"
 
-import { Db, type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf } from "../db.ts"
+import { type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf } from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Inbox } from "../inbox.ts"
 import type { Runtime, Terminal } from "../runtimes.ts"
