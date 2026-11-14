@@ -163,7 +163,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 | `core`                  | The agent engine: persistence and the ledger, the Bus, sessions and their executions, the inbox, the plugin host, harness, runtime and agent catalogs.                                            |
 | `server`                | vibestd: the RPC handlers, admission, the service graph roots (`services.ts`, `app.ts`), the socket and HTTP listeners, other machines (`machine/`), the hourly update check (`update-check.ts`). |
 | `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                   |
-| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `harness-default`.                                      |
+| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `archive-on-idle`, `harness-default`.                   |
 | `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.  |
 | `plugin-harnesses`      | The harness plugins `pi`, `claude` and the Cursor plugin file users add: one `HarnessDefinition` per CLI.                                                                                         |
 | `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                             |
@@ -352,7 +352,7 @@ below it and subscribing to the events it handles itself:
 | `executions.ts` (`Executions`) | typing a prompt, waiting for ready, interrupting a harness, closing an execution                 |
 | `placement.ts` (`Placement`)   | the worktree, environment, system prompt and argv of a start; opening the terminal; notices      |
 | `move.ts` (`Move`)             | moving a session to another harness after a usage limit                                          |
-| `archive.ts` (`Archive`)       | remove, archive, `--archive-on-idle` and finishing an archive vibestd stopped in                 |
+| `archive.ts` (`Archive`)       | remove, the idle-archive check, finishing an archive vibestd stopped in                          |
 | `delivery.ts` (`Delivery`)     | send, queued inbox rows, the next batch after an execution, interrupt, typed prompts             |
 | `exits.ts` (`Exits`)           | recording a harness exit and what a usage limit leaves behind                                    |
 | `spawn.ts` (`Spawn`)           | admitting and starting a session, `VIBEST_MAX_SESSIONS`                                          |
@@ -509,6 +509,7 @@ start cut off before its terminal was recorded is undone as a failed launch (its
 lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
 `--archive-on-idle` decides under the session's lock, at a completed execution end and whenever a row it sent or was sent leaves
 `pending`/`delivering`: a session with work again (a queued Message, a row still waiting in either direction, or a newer execution) stays, and a clean archive sends no notice, since each notice is a entry session execution.
+The builtin plugin `archive-on-idle` subscribes to those facts and calls that check; `"-archive-on-idle"` removes the plugin, and the flag then archives nothing.
 
 ## 4. Patterns
 
@@ -808,7 +809,7 @@ See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module
 
 ```
 builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude,
-                        runtime-herdr-core, runtime-herdr, runtime-choice, harness-default
+                        runtime-herdr-core, runtime-herdr, runtime-choice, archive-on-idle, harness-default
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 

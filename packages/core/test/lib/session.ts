@@ -17,6 +17,8 @@ import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
+import { IdleArchive } from "@vibest/core/session/archive"
+import { SessionLive } from "@vibest/core/session/live"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
@@ -40,6 +42,7 @@ import {
 import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
+import { ArchiveOnIdle, archiveOnIdlePlugin } from "../../../builtins/src/archive-on-idle.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
 import { Machines } from "../../../server/src/machine/machines.ts"
@@ -121,13 +124,32 @@ export const pluginsHost = (
     layer: Layer.effectContext(
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
+        const idle = yield* IdleArchive
+        const live = yield* SessionLive
+        const archiveOnIdle = yield* archiveOnIdlePlugin.pipe(
+          Effect.provideService(ArchiveOnIdle, {
+            optedIn: live.archivesOnIdle,
+            consider: idle.consider,
+            parties: idle.parties,
+            localCreator: idle.localCreator,
+          }),
+        )
+        const loaded = [
+          ...candidates,
+          {
+            source: "builtin:archive-on-idle",
+            revision: "archive-on-idle",
+            options: {},
+            plugin: archiveOnIdle,
+          },
+        ]
         if (options.activateLate) {
           const release = host.holdNow()
-          yield* host.activate(candidates).pipe(Effect.andThen(release), Effect.forkScoped)
-        } else yield* host.activate(candidates)
+          yield* host.activate(loaded).pipe(Effect.andThen(release), Effect.forkScoped)
+        } else yield* host.activate(loaded)
         return Context.make(Plugins, host.service).pipe(
           Context.add(PluginHost, {
-            load: (added) => host.activate([...candidates, ...added.map(candidateOf)]),
+            load: (added) => host.activate([...loaded, ...added.map(candidateOf)]),
           }),
         )
       }),
@@ -136,8 +158,10 @@ export const pluginsHost = (
       Agents.node,
       Bus.node,
       Harnesses.node,
+      IdleArchive.node,
       Hooks.Service.node,
       Runtimes.node,
+      SessionLive.node,
       Subscriptions.node,
       platform,
       home,

@@ -1,8 +1,6 @@
-import { ExecutionEnded, InboxMoved, SessionEnded } from "@vibest/schema/event"
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
-import { Bus } from "../bus.ts"
 import {
   type SessionRow,
   sessionEnded,
@@ -28,6 +26,39 @@ import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
+interface IdleArchiveOps {
+  readonly consider: (ids: ReadonlyArray<string>) => Effect.Effect<void>
+  readonly parties: (sessionId: string, inbox: number) => Effect.Effect<ReadonlyArray<string>>
+  readonly localCreator: (sessionId: string) => Effect.Effect<string | undefined>
+}
+
+const unbound: IdleArchiveOps = {
+  consider: () => Effect.void,
+  parties: () => Effect.succeed([]),
+  localCreator: () => Effect.succeed(undefined),
+}
+
+export class IdleArchive extends Context.Service<
+  IdleArchive,
+  IdleArchiveOps & { readonly bind: (ops: IdleArchiveOps) => Effect.Effect<void> }
+>()("vibest/IdleArchive") {
+  static readonly layer = Layer.effect(
+    IdleArchive,
+    Effect.gen(function* () {
+      const slot = yield* Ref.make(unbound)
+      const current = Ref.get(slot)
+      return {
+        consider: (ids) => current.pipe(Effect.flatMap((ops) => ops.consider(ids))),
+        parties: (sessionId, inbox) => current.pipe(Effect.flatMap((ops) => ops.parties(sessionId, inbox))),
+        localCreator: (sessionId) => current.pipe(Effect.flatMap((ops) => ops.localCreator(sessionId))),
+        bind: (ops) => Ref.set(slot, ops),
+      }
+    }),
+  )
+
+  static readonly node = LayerNode.make({ service: IdleArchive, layer: IdleArchive.layer, deps: [] })
+}
+
 const make = Effect.gen(function* () {
   const db = yield* Db
   const fs = yield* FileSystem.FileSystem
@@ -39,7 +70,6 @@ const make = Effect.gen(function* () {
   const sessionLive = yield* SessionLive
   const { notice, recount } = yield* Placement
   const { interruptAgent, settleAfterInterrupt } = yield* Executions
-  const reactor = yield* Reactor.make
   const archives = yield* FiberSet.make()
   const { locked } = locks
   const logged = Reactor.logFailure
@@ -215,33 +245,25 @@ const make = Effect.gen(function* () {
     ).pipe(logged(`archive ${id}`)),
   )
 
-  const archiveSoon = (ids: ReadonlyArray<string>) =>
+  const archiveSoon = Effect.fn("Archive.archiveSoon")((ids: ReadonlyArray<string>) =>
     Effect.forEach(
       ids,
       (id) =>
         FiberSet.run(archives, drain.work(`archive ${id}`, archiveIfIdle(id).pipe(logged(`archive ${id}`)), true)),
       { discard: true },
-    )
-
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void,
-  )
-  yield* reactor.on([InboxMoved], (event) =>
-    event.data.to === "pending" || event.data.to === "delivering"
-      ? Effect.void
-      : db.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon)),
-  )
-  yield* reactor.on([SessionEnded], (event) =>
-    db
-      .creatorOf(event.sessionId!)
-      .pipe(
-        Effect.flatMap((creator) =>
-          creator !== undefined && "local" in creator ? archiveSoon([creator.local]) : Effect.void,
-        ),
-      ),
+    ),
   )
 
-  return { undoCutOffStart, remove, finishArchive }
+  yield* (yield* IdleArchive).bind({
+    consider: archiveSoon,
+    parties: (sessionId, inbox) => db.inboxParties(sessionId, inbox),
+    localCreator: (sessionId) =>
+      db
+        .creatorOf(sessionId)
+        .pipe(Effect.map((creator) => (creator !== undefined && "local" in creator ? creator.local : undefined))),
+  })
+
+  return { undoCutOffStart, remove, finishArchive, archiveSoon }
 })
 
 export class Archive extends Context.Service<Archive, Effect.Success<typeof make>>()("vibest/Archive") {
@@ -253,8 +275,8 @@ export class Archive extends Context.Service<Archive, Effect.Success<typeof make
     service: Archive,
     layer: Archive.layer,
     deps: [
-      Bus.node,
       Db.node,
+      IdleArchive.node,
       Drain.node,
       Executions.node,
       Inbox.node,

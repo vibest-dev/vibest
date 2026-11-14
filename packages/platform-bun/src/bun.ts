@@ -6,6 +6,7 @@ import os from "node:os"
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { pre } from "@vibest/builtins"
+import { ArchiveOnIdle } from "@vibest/builtins/archive-on-idle"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
@@ -19,6 +20,8 @@ import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugin"
 import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
 import { Runtimes } from "@vibest/core/runtimes"
+import { IdleArchive } from "@vibest/core/session/archive"
+import { SessionLive } from "@vibest/core/session/live"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
@@ -352,8 +355,30 @@ export const replacements: LayerNode.Replacements = [
   builtinsNode.replace(
     LayerNode.make({
       name: "vibest/Builtins",
-      layer: Layer.effect(Builtins, pre),
-      deps: [PlatformNode.fileSystem, PlatformNode.path, PlatformNode.childProcessSpawner],
+      layer: Layer.effect(Builtins, pre).pipe(
+        Layer.provide(
+          Layer.effect(
+            ArchiveOnIdle,
+            Effect.gen(function* () {
+              const idle = yield* IdleArchive
+              const live = yield* SessionLive
+              return {
+                optedIn: live.archivesOnIdle,
+                consider: idle.consider,
+                parties: idle.parties,
+                localCreator: idle.localCreator,
+              }
+            }),
+          ),
+        ),
+      ),
+      deps: [
+        PlatformNode.fileSystem,
+        PlatformNode.path,
+        PlatformNode.childProcessSpawner,
+        IdleArchive.node,
+        SessionLive.node,
+      ],
     }),
   ),
   Runtimes.hostEnvNode.replace(Layer.succeed(Runtimes.HostEnv, { drop: dropEnv })),

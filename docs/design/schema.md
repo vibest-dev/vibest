@@ -373,7 +373,8 @@ E2E runs it on every world's database at the end of each check.
 - `vibest run --archive-on-idle`: the flag is kept only in the memory of the vibestd that started the session (set at
   the spawn, cleared when the session ends), never in a fact or the read model. A session started with it is archived
   the first time it is idle after a completed execution with nothing waiting; once that vibestd stops (a restart,
-  `vibest update`), nothing archives it on its own.
+  `vibest update`), nothing archives it on its own. The builtin plugin `archive-on-idle` is what archives it;
+  `"-archive-on-idle"` in `vibest.json` removes the plugin and the flag then does nothing.
 
 ## Not stored
 
