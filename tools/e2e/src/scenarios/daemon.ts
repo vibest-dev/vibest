@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
+import { LOG_KEEP_BYTES, LOG_MAX_BYTES } from "../../../../packages/platform-bun/src/log-file.ts"
 import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
@@ -95,9 +96,10 @@ const checks: ReadonlyArray<Check> = [
       {
         const before = (await running(w)).pid
         const r = await w.run(w.repository, [binary, "daemon", "--foreground"], { timeoutMs: 15_000 })
+        const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
         expect(
-          r.code === 0 && /already running/.test(r.stdout + r.stderr),
-          `second vibestd: ${r.code} ${r.stdout}${r.stderr}`,
+          r.code === 0 && log.includes("already running"),
+          `second vibestd: ${r.code} ${r.stdout}${r.stderr}\n${log.slice(-500)}`,
         )
         expect((await running(w)).pid === before, "the first vibestd changed")
       }
@@ -283,6 +285,42 @@ const checks: ReadonlyArray<Check> = [
         follower?.kill()
         await p.close()
       }
+    },
+  },
+  {
+    id: "D12",
+    title:
+      "D12 vibestd writes vibestd.log itself, and a start over a log larger than 10 MiB keeps the last 5 MiB from a line boundary",
+    run: async (w) => {
+      await w.daemon()
+      const log = path.join(w.vibestHome, "vibestd.log")
+      await until("vibestd wrote its log", async () =>
+        (await fs.readFile(log, "utf8").catch(() => "")).includes("level="),
+      )
+      await w.stopDaemon()
+      const old = await w.daemonPid()
+      expect(old === undefined || !alive(old), `vibestd ${old} still alive`)
+      const line = `${"x".repeat(127)}\n`
+      const lines = Math.ceil((LOG_MAX_BYTES + 1) / line.length)
+      await fs.writeFile(log, `HEAD-LOG-TRIM-MARKER\n${line.repeat(lines)}TAIL-LOG-TRIM-MARKER\n`)
+      expect((await fs.stat(log)).size > LOG_MAX_BYTES, "the planted log is not over the trim point")
+      await w.ok(["daemon"])
+      await until("vibestd wrote after the trim", async () =>
+        (await fs.readFile(log, "utf8").catch(() => "")).includes("level="),
+      )
+      const after = await fs.readFile(log, "utf8")
+      expect(!after.includes("HEAD-LOG-TRIM-MARKER"), "the head of the large log survived the start")
+      expect(after.includes("TAIL-LOG-TRIM-MARKER"), "the tail of the large log was dropped")
+      expect(
+        Buffer.byteLength(after) <= LOG_KEEP_BYTES + 256 * 1024,
+        `trimmed log is ${Buffer.byteLength(after)} bytes`,
+      )
+      expect(
+        /^(?:x{127}|TAIL-LOG-TRIM-MARKER)\n/.test(after),
+        `trimmed log does not start on a line: ${after.slice(0, 40)}`,
+      )
+      const tailAt = after.indexOf("TAIL-LOG-TRIM-MARKER")
+      expect(after.indexOf("level=", tailAt) > tailAt, "vibestd wrote nothing after the kept tail")
     },
   },
 ]

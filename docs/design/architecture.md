@@ -1195,7 +1195,7 @@ npm in its prefix. Its own entries:
   vibest.db                  the ledger and read model (with its -wal and -shm files)
   identity.json              this machine's id, name and machine_id; created or rewritten at every vibestd start
   vibest.sock  vibest-http.sock   vibestd's RPC socket, and the HTTP socket the Claude plugin reports to
-  vibestd.pid  vibestd.log   vibestd's start lock and record, and its log
+  vibestd.pid  vibestd.log   vibestd's start lock and record, and its log (trimmed at startup; see daemon.md)
   projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```
