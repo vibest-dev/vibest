@@ -1,11 +1,8 @@
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import { Runtimes } from "@vibest/core/runtimes"
-import { Session } from "@vibest/core/session"
 import { WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
 import { Cause, Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from "effect"
 
-import { sessionListing } from "./listing.ts"
+import * as Listing from "./listing.ts"
 
 export * as WatchFeed from "./watch-feed.ts"
 
@@ -30,11 +27,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus
-    const listing = sessionListing({
-      db: yield* Db,
-      sessions: yield* Session.Service,
-      runtimes: yield* Runtimes.Service,
-    })
+    const listing = yield* Listing.Service
     const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()
 
     const publish = (event: WatchEvent) =>

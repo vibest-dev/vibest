@@ -4,6 +4,7 @@ import { Effect, Stream } from "effect"
 
 import { processOf, reader } from "../gates.ts"
 import type { Handlers } from "./caller.ts"
+import { group } from "./group.ts"
 
 export const make = Effect.gen(function* () {
   const inbox = yield* Inbox.Service
@@ -21,3 +22,5 @@ export const make = Effect.gen(function* () {
       ),
   } satisfies Handlers
 })
+
+export const layer = group(["Inbox.Subscribe", "Inbox.Take"]).toLayer(make)

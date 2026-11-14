@@ -4,7 +4,7 @@ import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type ACCESS, Caller, type CallerShape, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
 import { NotInRepository } from "@vibest/schema/session"
-import { Effect } from "effect"
+import { Context, Effect, Layer } from "effect"
 import type { RpcGroup } from "effect/rpc"
 
 type Access = typeof ACCESS
@@ -87,3 +87,7 @@ export const make = Effect.gen(function* () {
 })
 
 export type Checks = Effect.Success<typeof make>
+
+export class Service extends Context.Service<Service, Checks>()("vibest/CallerChecks") {}
+
+export const layer = Layer.effect(Service, make)

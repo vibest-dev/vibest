@@ -31,9 +31,9 @@ import * as EntryHandlers from "./handlers/entry.ts"
 import * as InboxHandlers from "./handlers/inbox.ts"
 import * as IntegrationHandlers from "./handlers/integration.ts"
 import * as ProjectHandlers from "./handlers/project.ts"
-import { remoteHandlers } from "./handlers/remote.ts"
+import * as RemoteHandlers from "./handlers/remote.ts"
 import * as SessionHandlers from "./handlers/session.ts"
-import { sessionListing } from "./listing.ts"
+import * as Listing from "./listing.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
 import { Remote } from "./machine/remote.ts"
@@ -43,29 +43,25 @@ import { WatchFeed } from "./watch-feed.ts"
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
-export const handlers = VibestRpcs.toLayer(
-  Effect.gen(function* () {
-    const checks = yield* CallerChecks.make
-    const listing = sessionListing({
-      db: yield* Db,
-      sessions: yield* Session.Service,
-      runtimes: yield* Runtimes.Service,
-    })
-    const remote = yield* remoteHandlers({ ...checks, listed: listing.listed })
-    return VibestRpcs.of({
-      ...remote.methods,
-      ...(yield* DaemonHandlers.make(checks)),
-      ...(yield* SessionHandlers.make(checks, remote, listing)),
-      ...(yield* InboxHandlers.make),
-      ...(yield* IntegrationHandlers.make),
-      ...(yield* EntryHandlers.make(checks)),
-      ...(yield* ProjectHandlers.make(checks)),
-    })
-  }),
+export const handlers = Layer.mergeAll(
+  DaemonHandlers.layer,
+  SessionHandlers.layer,
+  InboxHandlers.layer,
+  IntegrationHandlers.layer,
+  EntryHandlers.layer,
+  ProjectHandlers.layer,
+  RemoteHandlers.layer,
+).pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer)),
+      RemoteHandlers.routingLayer.pipe(Layer.provideMerge(CallerChecks.layer)),
+    ),
+  ),
 )
 
 export const layer = RpcServer.layer(VibestRpcs).pipe(
-  Layer.provide(Layer.mergeAll(handlers.pipe(Layer.provide(WatchFeed.layer)), AdmissionLive)),
+  Layer.provide(Layer.mergeAll(handlers, AdmissionLive)),
   Layer.provide(CallerGateLive),
   Layer.provide(ProtocolGateLive),
   Layer.provide(RpcServer.layerProtocolSocketServer),
