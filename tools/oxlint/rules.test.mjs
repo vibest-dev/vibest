@@ -301,3 +301,23 @@ export const bump = () => ++one + two
     ).toEqual(["1 vibest(no-module-let)", "2 vibest(no-module-let)"])
   })
 })
+
+describe("package-relative-imports", () => {
+  const source = `import * as a from "./a.ts"
+import * as b from "../../server/src/server.ts"
+export * from "../../../packages/core/src/bus.ts"
+export const c = [a, b, import("../../pi/src/extension.ts")]
+`
+
+  it("reports a relative import that leaves the package, in core and in an integration", () => {
+    expect(oxlintFindings(source, "packages/core/src/x.ts")).toEqual([
+      "2 vibest(package-relative-imports)",
+      "4 vibest(package-relative-imports)",
+    ])
+    expect(oxlintFindings(source, "packages/integration/claude/src/x.ts")).toEqual([
+      "2 vibest(package-relative-imports)",
+      "3 vibest(package-relative-imports)",
+      "4 vibest(package-relative-imports)",
+    ])
+  })
+})
