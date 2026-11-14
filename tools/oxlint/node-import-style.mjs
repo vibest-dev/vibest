@@ -4,7 +4,7 @@ import { ledgerAccessRules } from "./ledger-access.mjs"
 import { noComments } from "./no-comments.mjs"
 import { noModuleLet } from "./no-module-let.mjs"
 import { noRestrictedDisable } from "./no-restricted-disable.mjs"
-import { packageRelativeImports } from "./package-relative-imports.mjs"
+import { packageImports } from "./package-imports.mjs"
 
 const { isBuiltin } = module
 
@@ -94,6 +94,6 @@ export default {
     "no-comments": noComments,
     ...ledgerAccessRules,
     "no-module-let": noModuleLet,
-    "package-relative-imports": packageRelativeImports,
+    "package-imports": packageImports,
   },
 }

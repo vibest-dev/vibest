@@ -24,7 +24,7 @@
     "vibest/projector-writes": "error",
     "vibest/no-background-loop": "error",
     "vibest/no-module-let": "error",
-    "vibest/package-relative-imports": "error",
+    "vibest/package-imports": "error",
     "eslint/no-unused-vars": "error",
     "eslint/no-unused-expressions": [
       "error",
@@ -60,10 +60,19 @@
   "overrides": [
     {
       "files": [
+        "packages/schema/src/**",
+        "packages/plugin/src/**",
+        "packages/protocol/src/**",
+        "packages/client/src/**",
+        "packages/core/src/**",
+        "packages/server/src/**",
         "packages/plugin-harnesses/src/**",
         "packages/runtime-herdr/src/**",
         "packages/runtime-herdr-core/src/**",
-        "packages/integration/*/src/**"
+        "packages/integration/*/src/**",
+        "packages/effect-herdr-sdk/src/**",
+        "packages/effect-herdr-core-sdk/src/**",
+        "tools/verify/src/**"
       ],
       "rules": {
         "eslint/no-restricted-imports": [
@@ -71,461 +80,8 @@
           {
             "patterns": [
               {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/protocol",
-                  "!@vibest/protocol/**",
-                  "!@vibest/client",
-                  "!@vibest/client/**"
-                ],
-                "message": "Builtin plugins and harness integrations import only @vibest/plugin, schema, protocol and client."
-              },
-              {
                 "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
                 "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/builtins/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**",
-                  "!@vibest/plugin-harnesses",
-                  "!@vibest/plugin-harnesses/**",
-                  "!@vibest/runtime-herdr",
-                  "!@vibest/runtime-herdr/**",
-                  "!@vibest/runtime-herdr-core",
-                  "!@vibest/runtime-herdr-core/**"
-                ],
-                "message": "The builtin list imports only @vibest/plugin, @vibest/plugin-harnesses, @vibest/runtime-herdr, @vibest/runtime-herdr-core."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/schema/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**"],
-                "message": "@vibest/schema imports no vibest package."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              },
-              {
-                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/plugin/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**", "!@vibest/schema", "!@vibest/schema/**"],
-                "message": "@vibest/plugin imports only @vibest/schema."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              },
-              {
-                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/protocol/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**", "!@vibest/schema", "!@vibest/schema/**"],
-                "message": "@vibest/protocol imports only @vibest/schema."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              },
-              {
-                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/client/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/protocol",
-                  "!@vibest/protocol/**"
-                ],
-                "message": "@vibest/client imports only @vibest/schema, @vibest/protocol."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              },
-              {
-                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/core/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**"
-                ],
-                "message": "@vibest/core imports only @vibest/schema, @vibest/plugin."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              },
-              {
-                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/server/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**",
-                  "!@vibest/core",
-                  "!@vibest/core/**",
-                  "!@vibest/protocol",
-                  "!@vibest/protocol/**",
-                  "!@vibest/client",
-                  "!@vibest/client/**"
-                ],
-                "message": "@vibest/server imports only @vibest/schema, @vibest/plugin, @vibest/core, @vibest/protocol, @vibest/client."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              },
-              {
-                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/platform-bun/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/builtins",
-                  "!@vibest/builtins/**",
-                  "!@vibest/client",
-                  "!@vibest/client/**",
-                  "!@vibest/core",
-                  "!@vibest/core/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/server",
-                  "!@vibest/server/**"
-                ],
-                "message": "@vibest/platform-bun imports only @vibest/builtins, @vibest/client, @vibest/core, @vibest/plugin, @vibest/schema, @vibest/server."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/cli/src/**/*.ts"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "paths": [
-              {
-                "name": "@vibest/server/server",
-                "allowImportNames": ["HANDOFF_ENV"],
-                "message": "The CLI takes only HANDOFF_ENV from @vibest/server/server, the module that defines it."
-              }
-            ],
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/builtins",
-                  "!@vibest/builtins/**",
-                  "!@vibest/client",
-                  "!@vibest/client/**",
-                  "!@vibest/protocol",
-                  "!@vibest/protocol/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/server/daemon",
-                  "!@vibest/server/daemon/**",
-                  "!@vibest/server/server",
-                  "!@vibest/server/server/**"
-                ],
-                "message": "The CLI does only client work: it imports @vibest/builtins, client, protocol, schema and @vibest/server/daemon, never @vibest/core or herdr."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/effect-herdr-sdk/src/**", "packages/effect-herdr-core-sdk/src/**", "tools/verify/src/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**"],
-                "message": "The herdr SDKs and tools/verify import no vibest package."
-              },
-              {
-                "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/schema/src/**/bun.ts", "packages/schema/src/platform/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**"],
-                "message": "@vibest/schema imports no vibest package."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/plugin/src/**/bun.ts", "packages/plugin/src/platform/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**", "!@vibest/schema", "!@vibest/schema/**"],
-                "message": "@vibest/plugin imports only @vibest/schema."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/protocol/src/**/bun.ts", "packages/protocol/src/platform/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**", "!@vibest/schema", "!@vibest/schema/**"],
-                "message": "@vibest/protocol imports only @vibest/schema."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/client/src/**/bun.ts", "packages/client/src/platform/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/protocol",
-                  "!@vibest/protocol/**"
-                ],
-                "message": "@vibest/client imports only @vibest/schema, @vibest/protocol."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/core/src/**/bun.ts", "packages/core/src/platform/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**"
-                ],
-                "message": "@vibest/core imports only @vibest/schema, @vibest/plugin."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["packages/server/src/**/bun.ts", "packages/server/src/platform/**"],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**",
-                  "!@vibest/core",
-                  "!@vibest/core/**",
-                  "!@vibest/protocol",
-                  "!@vibest/protocol/**",
-                  "!@vibest/client",
-                  "!@vibest/client/**"
-                ],
-                "message": "@vibest/server imports only @vibest/schema, @vibest/plugin, @vibest/core, @vibest/protocol, @vibest/client."
-              },
-              {
-                "regex": "^effect-herdr-",
-                "message": "Runtime-neutral packages never depend on herdr."
               }
             ]
           }
@@ -534,61 +90,35 @@
     },
     {
       "files": [
-        "packages/integration/*/src/**/bun.ts",
-        "packages/integration/*/src/platform/**",
+        "packages/schema/src/**/bun.ts",
+        "packages/plugin/src/**/bun.ts",
+        "packages/protocol/src/**/bun.ts",
+        "packages/client/src/**/bun.ts",
+        "packages/core/src/**/bun.ts",
+        "packages/server/src/**/bun.ts",
         "packages/plugin-harnesses/src/**/bun.ts",
-        "packages/plugin-harnesses/src/platform/**",
         "packages/runtime-herdr/src/**/bun.ts",
-        "packages/runtime-herdr/src/platform/**",
         "packages/runtime-herdr-core/src/**/bun.ts",
-        "packages/runtime-herdr-core/src/platform/**"
-      ],
-      "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@vibest/*",
-                  "@vibest/*/**",
-                  "!@vibest/plugin",
-                  "!@vibest/plugin/**",
-                  "!@vibest/schema",
-                  "!@vibest/schema/**",
-                  "!@vibest/protocol",
-                  "!@vibest/protocol/**",
-                  "!@vibest/client",
-                  "!@vibest/client/**"
-                ],
-                "message": "Builtin plugins and harness integrations import only @vibest/plugin, schema, protocol and client."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": [
+        "packages/integration/*/src/**/bun.ts",
         "packages/effect-herdr-sdk/src/**/bun.ts",
         "packages/effect-herdr-core-sdk/src/**/bun.ts",
         "tools/verify/src/**/bun.ts",
+        "packages/schema/src/platform/**",
+        "packages/plugin/src/platform/**",
+        "packages/protocol/src/platform/**",
+        "packages/client/src/platform/**",
+        "packages/core/src/platform/**",
+        "packages/server/src/platform/**",
+        "packages/plugin-harnesses/src/platform/**",
+        "packages/runtime-herdr/src/platform/**",
+        "packages/runtime-herdr-core/src/platform/**",
+        "packages/integration/*/src/platform/**",
         "packages/effect-herdr-sdk/src/platform/**",
         "packages/effect-herdr-core-sdk/src/platform/**",
         "tools/verify/src/platform/**"
       ],
       "rules": {
-        "eslint/no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["@vibest/*", "@vibest/*/**"],
-                "message": "The herdr SDKs and tools/verify import no vibest package."
-              }
-            ]
-          }
-        ]
+        "eslint/no-restricted-imports": "off"
       }
     }
   ],
