@@ -246,6 +246,7 @@ describe.concurrent("Session", () => {
         (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "completed",
       )
       assert.strictEqual(executionStateOf(done), "completed")
+      yield* settled
       assert.deepStrictEqual(
         yield* sql<{
           status: string

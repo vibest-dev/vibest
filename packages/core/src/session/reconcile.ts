@@ -28,6 +28,7 @@ import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+import { RunCoordinator } from "./run-coordinator.ts"
 
 export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)
@@ -156,6 +157,8 @@ const make = Effect.gen(function* () {
 
   const checkLocked = (id: string): Effect.Effect<void> => logged(`check ${id}`)(checkSession(id))
 
+  const wakes = yield* RunCoordinator.make<string, void>({ drain: checkLocked, merge: () => undefined })
+
   const onTerminal = (runtime: string, terminal: Terminal, working: boolean) =>
     Effect.gen(function* () {
       const id = yield* db.sessionAt(runtime, terminal)
@@ -163,7 +166,7 @@ const make = Effect.gen(function* () {
       const session = working ? yield* db.getSession(id) : undefined
       const execution = session && !inbox.pulls(harnessIdOf(session)) ? yield* db.openExecution(id) : undefined
       if (execution !== undefined) yield* db.acceptExecution(id, execution)
-      yield* checkSession(id)
+      yield* wakes.wake(id, undefined)
     })
 
   let reconciles = 0

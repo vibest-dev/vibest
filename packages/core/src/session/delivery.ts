@@ -39,6 +39,7 @@ import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+import { RunCoordinator } from "./run-coordinator.ts"
 
 export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused", {
   message: Schema.String,
@@ -258,29 +259,40 @@ const make = Effect.gen(function* () {
     return { id: heir.local }
   })
 
-  const queued = (id: string, inboxId: number | undefined) =>
+  const undeliverable = (id: string, rows: ReadonlySet<number>) => (cause: Cause.Cause<unknown>) =>
     Effect.gen(function* () {
-      const row = (yield* db.pendingInbox(id)).find((r) => r.id === inboxId)
-      if (row === undefined) return
-      const failed = (cause: Cause.Cause<unknown>) =>
-        Effect.gen(function* () {
-          const transient = Cause.findErrorOption(cause).pipe(
-            Option.exists(
-              (e) =>
-                Predicate.isTagged(e, "RuntimeUnreachable") ||
-                (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
-            ),
-          )
-          if (Cause.hasInterruptsOnly(cause) || transient || !(yield* db.pendingInbox(id)).some((r) => r.id === row.id))
-            return
-          const session = yield* db.getSession(id)
-          if (session !== undefined) yield* inbox.undelivered(session, [row], errorMessage(cause))
-        })
-      yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
+      if (rows.size === 0) return yield* Effect.failCause(cause)
+      const transient = Cause.findErrorOption(cause).pipe(
+        Option.exists(
+          (e) =>
+            Predicate.isTagged(e, "RuntimeUnreachable") ||
+            (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
+        ),
+      )
+      if (Cause.hasInterruptsOnly(cause) || transient) return
+      const stuck = (yield* db.pendingInbox(id)).filter((r) => rows.has(r.id))
+      const session = yield* db.getSession(id)
+      if (stuck.length > 0 && session !== undefined) yield* inbox.undelivered(session, stuck, errorMessage(cause))
     })
 
-  const deliverNext = (id: string) =>
-    locked(id)(db.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe()
+  type Wake = { readonly rows: ReadonlySet<number>; readonly ended: boolean }
+
+  const due = (id: string, wake: Wake) =>
+    Effect.gen(function* () {
+      if (wake.ended && (yield* db.hasQueued(id))) return true
+      return wake.rows.size > 0 && (yield* db.pendingInbox(id)).some((r) => wake.rows.has(r.id))
+    })
+
+  const deliverWoken = (id: string, wake: Wake) =>
+    locked(id)(due(id, wake).pipe(Effect.flatMap((ready) => (ready ? deliver(id) : Effect.void)))).pipe(
+      Effect.catchCause(undeliverable(id, wake.rows)),
+      Reactor.logFailure(`deliver ${id}`),
+    )
+
+  const wakes = yield* RunCoordinator.make<string, Wake>({
+    drain: deliverWoken,
+    merge: (pending, next) => ({ rows: new Set([...pending.rows, ...next.rows]), ended: pending.ended || next.ended }),
+  })
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
@@ -345,9 +357,11 @@ const make = Effect.gen(function* () {
   })
 
   yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? Effect.void : deliverNext(event.sessionId!),
+    event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
   )
-  yield* reactor.on([InboxQueued], (event) => queued(event.sessionId!, event.seq))
+  yield* reactor.on([InboxQueued], (event) =>
+    wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),
+  )
 
   yield* db.recoverDelivering(
     (sessionId, messages) =>
