@@ -14,7 +14,7 @@
 12. Effect code does not leave Effect to run Effect: no `Effect.runSync`, `runFork` or `runPromise` inside a service or a handler.
 
 13. `catchCause` (and `Stream.catchCause`) belongs only at a supervision point: the Reactor's handler wrapper, the plugin supervisor and host, a runtime's event pump. It lets a pure interrupt through (`Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : …`), so cancelling the caller still cancels the work. Elsewhere catch the tagged failures you expect (`catchTag`, `catchTags`).
-14. A test compiles its service graph in the package of the module under test: `LayerNode.compile(node, [...base, replacements])` from that package's own `test/`, with fakes for the services below it, not another package's composition root.
+14. A test compiles its service graph in the package of the module under test: `LayerNode.compile(node, { replacements: [...base, ...replacements] })` from that package's own `test/`, with fakes for the services below it, not another package's composition root.
 
 Status: rules 1, 7 and 8 hold on main. Exceptions today:
 
@@ -26,5 +26,5 @@ Status: rules 1, 7 and 8 hold on main. Exceptions today:
 - Rule 10: `effect/bounded.ts` detaches the interrupt of a late fiber (`Effect.forkDetach`).
 - Rule 11: `server/src/handlers/session.ts` keeps a per-session lock (`seenLocked`).
 - Rule 12: `database/db-store.ts` runs after-commit effects with `Effect.runSync`; `plugin/sources.ts` and `server/src/shutdown-deadline.ts` fork from callbacks (rule 4).
-- Rule 13: `session/restart.ts`, `session/placement.ts` (`launch`), `runtimes.ts` (`runtimesHere`) and `server/src/machine/machines.ts` (`ensure`) catch every cause, pure interrupts included, outside a supervision point.
+- Rule 13: `session/restart.ts`, `session/placement.ts` (`launch`), `runtimes.ts` (`runtimesHere`) and `server/src/machine/machines.ts` (`ensure`) catch every cause, pure interrupts included, outside a supervision point; the supervision wrappers `reactor.ts` (`logFailure`) and `plugin/supervisor.ts` (the first activation) end a pure interrupt quietly instead of passing it on, and `session/delivery.ts` (`failed`) returns on one.
 - Rule 14: `core/test/lib/session.ts` composes server's `services` root with server's `Identity`, `Shutdown`, `MachineTransport` and `UpdateCheck`, and server behaviour (handlers, machines, the daemon) is tested under `packages/cli/test`.
