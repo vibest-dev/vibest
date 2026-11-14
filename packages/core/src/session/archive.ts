@@ -14,7 +14,6 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
-import { directoryLock } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Git } from "../git.ts"
@@ -26,7 +25,7 @@ import * as Remove from "../remove.ts"
 import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
 import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
-import { SessionLocks } from "./locks.ts"
+import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
 const make = Effect.gen(function* () {

@@ -14,8 +14,8 @@ import { until } from "./lib/observe.ts"
 import { makeRepository, restartSessions } from "./lib/session.ts"
 import { spawnInput, test as plainTest } from "./lib/sessions-helpers.ts"
 
-const test: typeof plainTest = (name, program, options, touches) =>
-  plainTest(name, program, { ...options, harnesses: [...HARNESSES, PULLING_PI] }, touches)
+const test: typeof plainTest = (name, program, options) =>
+  plainTest(name, program, { ...options, harnesses: [...HARNESSES, PULLING_PI] })
 
 const entryAsked = Effect.gen(function* () {
   const herdr = yield* FakeRuntime

@@ -44,6 +44,7 @@ import { Identity, Shutdown } from "../../../server/src/handlers/daemon.ts"
 import { MachineTransport } from "../../../server/src/machine/machines.ts"
 import { services } from "../../../server/src/services.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
+import { services as platformServices } from "../platform/bun.ts"
 import { tempDirectory } from "./directory.ts"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
@@ -183,6 +184,31 @@ const sessionsDecorated = (decorate: (sessions: Sessions["Service"], db: Db["Ser
 export const dbReplacement = (decorate: (db: Db["Service"]) => Db["Service"]) =>
   Db.node.replace(Db.node.mapLayer((layer) => Layer.effect(Db, Effect.map(Db, decorate)).pipe(Layer.provide(layer))))
 
+export const cryptoReplacement = (decorate: (crypto: Crypto.Crypto) => Crypto.Crypto) =>
+  platform.replace(
+    LayerNode.make({
+      name: "test/Platform",
+      layer: Layer.effect(Crypto.Crypto, Effect.map(Crypto.Crypto, decorate)).pipe(
+        Layer.provideMerge(platformServices),
+      ),
+      deps: [],
+    }),
+  )
+
+export const scriptedLeaves = (leaves: ReadonlyArray<string>) => {
+  let drawn = 0
+  return (crypto: Crypto.Crypto): Crypto.Crypto => ({
+    ...crypto,
+    randomBytes: (size) =>
+      size === 2
+        ? Effect.sync(() => {
+            const leaf = leaves[drawn++ % leaves.length]!
+            return Uint8Array.from([Number.parseInt(leaf.slice(0, 2), 16), Number.parseInt(leaf.slice(2), 16)])
+          })
+        : crypto.randomBytes(size),
+  })
+}
+
 export const makeRepository = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -253,6 +279,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly pluginTimeout?: Duration.Input
   readonly activateLate?: boolean
   readonly db?: (db: Db["Service"]) => Db["Service"]
+  readonly crypto?: (crypto: Crypto.Crypto) => Crypto.Crypto
   readonly missingBinary?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
   readonly sshHosts?: Readonly<Record<string, string>>
@@ -305,6 +332,7 @@ export const sessionFrom = (options: TestOptions = {}) =>
       ...(options.version === undefined ? [] : [App.node.replace(Layer.succeed(App, { version: options.version }))]),
       ...(options.sessions === undefined ? [] : [sessionsDecorated(options.sessions)]),
       ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
+      ...(options.crypto === undefined ? [] : [cryptoReplacement(options.crypto)]),
       SshHosts.node.replace(sshHosts(options.sshHosts)),
       MachineTransport.node.replace(transportLayer(options.transport)),
       ...(options.identity === undefined ? [] : [Identity.node.replace(Layer.succeed(Identity, options.identity))]),

@@ -1,7 +1,7 @@
 import { Bus, type BusEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
-import { keyedLock } from "@vibest/core/effect/keyed-mutex"
+import * as KeyedMutex from "@vibest/core/effect/keyed-mutex"
 import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
@@ -28,7 +28,7 @@ export const make = (
     const runtimes = yield* Runtimes
     const bus = yield* Bus
     const integration = yield* Integration
-    const seenLocked = keyedLock<string>()
+    const seenLocked = yield* KeyedMutex.make<string>()
 
     const startedByPeer = (scope: NonNullable<Parameters<typeof db.resolveSession>[1]>, id: string, direct: boolean) =>
       Effect.gen(function* () {

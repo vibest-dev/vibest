@@ -1,7 +1,7 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
 import { Db } from "@vibest/core/database/db"
 import type { MachineRow } from "@vibest/core/database/db-remote"
-import { keyedLock } from "@vibest/core/effect/keyed-mutex"
+import * as KeyedMutex from "@vibest/core/effect/keyed-mutex"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { errorMessage, type MachineHook, type PluginNote, Plugins, pluginsNode } from "@vibest/core/plugin"
@@ -173,7 +173,7 @@ const make = Effect.gen(function* () {
   const there = new Map<string, { readonly runtimes: ReadonlyArray<RuntimeThere>; readonly at: number }>()
   const noted = new Map<string, Map<string, { readonly notes: ReadonlyArray<PluginNote>; readonly at: number }>>()
   const repairs = new Map<string, { readonly at: number; readonly note: string }>()
-  const lock = keyedLock<string>()
+  const lock = yield* KeyedMutex.make<string>()
 
   const heard = (name: string, runtimes: ReadonlyArray<RuntimeThere> | undefined) =>
     Effect.map(Clock.currentTimeMillis, (at) => void there.set(name, { runtimes: runtimes ?? [], at }))
