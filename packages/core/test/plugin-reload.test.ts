@@ -3,7 +3,6 @@ import module from "node:module"
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Layout } from "@vibest/core/paths"
 import {
   Builtins,
   type Candidate,
@@ -16,6 +15,7 @@ import {
 } from "@vibest/core/plugin"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
 import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"
 import { TestClock } from "effect/testing"
 

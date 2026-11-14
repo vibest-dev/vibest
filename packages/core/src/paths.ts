@@ -1,6 +1,5 @@
 import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, Random } from "effect"
-export { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 
 const LEGACY_SESSION_DIRECTORY = /^[0-9a-f]{8}$/
 export const ALLOCATION_LEAF = /^[0-9a-f]{4}$/

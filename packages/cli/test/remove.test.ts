@@ -1,5 +1,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
-import { archived, Db, executionStateOf, exitedAt } from "@vibest/core/database/db"
+import { Db } from "@vibest/core/database/db"
+import { archived, executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
 import { cwdHolders, livenessOf, parseProcessTable, Processes, runFor, sessionTree } from "@vibest/core/processes"
 import { Sessions } from "@vibest/core/session"
 import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"

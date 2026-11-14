@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugin"
 import { Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { TestClock } from "effect/testing"
 
