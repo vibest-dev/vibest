@@ -43,8 +43,11 @@ describe.concurrent("Session", () => {
       const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 2)
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
       const db = yield* Db
-      assert.strictEqual(yield* db.currentProcessId(id), reporter)
-      yield* until(db.getSession(id), (row) => row !== undefined && exitedAt(row) === null && terminalOf(row).id !== "")
+      assert.strictEqual(yield* db.session.currentProcessId(id), reporter)
+      yield* until(
+        db.session.getSession(id),
+        (row) => row !== undefined && exitedAt(row) === null && terminalOf(row).id !== "",
+      )
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
     { hooked: ["pi"] },
@@ -59,9 +62,9 @@ describe.concurrent("Session", () => {
       const placed = (yield* herdr.callsTo("open")).length
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
-      yield* untilVirtual(db.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
+      yield* untilVirtual(db.session.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
       assert.deepStrictEqual(
-        (yield* db.inboxWithStatus(id, "failed")).map((r) => r.message),
+        (yield* db.inbox.inboxWithStatus(id, "failed")).map((r) => r.message),
         ["queued"],
       )
       assert.lengthOf(yield* herdr.callsTo("open"), placed)
@@ -104,7 +107,7 @@ describe.concurrent("Session", () => {
       const a = yield* idleSession(repo)
       yield* fs.remove(yield* sessionWorktree(a.id), { recursive: true })
       assert.deepInclude((yield* a.sessions.remove(a.id))!, { pane: "closed", workspace: "none", worktree: "gone" })
-      assert.isNotNull(exitedAt((yield* a.db.getSession(a.id))!))
+      assert.isNotNull(exitedAt((yield* a.db.session.getSession(a.id))!))
 
       const b = yield* idleSession(repo)
       const wb = yield* sessionWorktree(b.id)
@@ -139,11 +142,11 @@ describe.concurrent("Session", () => {
         yield* writeEnd(after.id, harness, aborted, 60_000)
         yield* TestClock.adjust("2 minutes")
         for (const { id, sessions, db } of [during, after]) {
-          const row = (yield* db.getSession(id))!
+          const row = (yield* db.session.getSession(id))!
           assert.isTrue(archived(row), id)
           yield* sessions.check(id)
           assert.deepStrictEqual(yield* executionAndSentCounts(id), { executions: 1, sent: 0 }, id)
-          assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "interrupted", id)
+          assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted", id)
           assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
         }
       }),
@@ -161,12 +164,12 @@ describe.concurrent("Session", () => {
         (exit) => exit !== undefined,
       )
       assert.strictEqual((yield* Effect.flip(Fiber.join(interrupting)))._tag, "SessionBusy")
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "open")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
       yield* writeEnd(id, "claude", claudeEnd("aborted"))
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "interrupted")
-      assert.isUndefined(yield* db.latestInbox(id, "notice"))
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted")
+      assert.isUndefined(yield* db.inbox.latestInbox(id, "notice"))
     }),
     { interruptIgnored: true },
   )

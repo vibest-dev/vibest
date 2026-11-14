@@ -26,9 +26,13 @@ describe("a Send retried with the same request across machines", () => {
       const spawned = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} }))
       const middle = onB(spawned.id)
       const child = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-      yield* b.db.insertSession({ ...peerSession, id: child, name: "child", createdAt: 1, lastActive: 1 }, b.project, {
-        parentSessionId: middle,
-      })
+      yield* b.db.session.insertSession(
+        { ...peerSession, id: child, name: "child", createdAt: 1, lastActive: 1 },
+        b.project,
+        {
+          parentSessionId: middle,
+        },
+      )
       const asB =
         (sessionId: string) =>
         <A, E>(effect: Effect.Effect<A, E>) =>
@@ -54,7 +58,7 @@ describe("a Send retried with the same request across machines", () => {
       yield* sendTwice(middle, entryId.slice(0, 8), toCreator)
       yield* arrived(1)
 
-      yield* b.db.archive(middle)
+      yield* b.db.session.archive(middle)
       const pastEnded = randomId()
       yield* sendTwice(child, middle, pastEnded)
       yield* arrived(2)
@@ -74,10 +78,10 @@ describe("a Send retried with the same request across machines", () => {
         Stream.runForEach((row) => Queue.offer(sent, row.id)),
         Effect.forkScoped,
       )
-      const queue = b.db.sendToPeer(randomId(), peer, randomId(), "x", item)
+      const queue = b.db.remote.sendToPeer(randomId(), peer, randomId(), "x", item)
       yield* queue
       assert.strictEqual(yield* Queue.take(sent), item)
-      yield* b.db.ackOutbox(peer, [item])
+      yield* b.db.remote.ackOutbox(peer, [item])
       yield* queue
       assert.strictEqual(yield* Queue.take(sent), item)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -89,19 +93,22 @@ describe("a Send retried with the same request across machines", () => {
       const peer = randomId()
       const a1 = yield* b.as(peer, "p1")
       const sender = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-      yield* b.db.insertSession({ ...peerSession, id: sender, name: "sender", createdAt: 1, lastActive: 1 }, b.project)
+      yield* b.db.session.insertSession(
+        { ...peerSession, id: sender, name: "sender", createdAt: 1, lastActive: 1 },
+        b.project,
+      )
       const item = randomId()
       const sent = yield* Queue.unbounded<string>()
       yield* a1.outbox.pipe(
         Stream.runForEach((row) => Queue.offer(sent, row.id)),
         Effect.forkScoped,
       )
-      yield* b.db.sendToPeer(sender, peer, randomId(), "x", item)
+      yield* b.db.remote.sendToPeer(sender, peer, randomId(), "x", item)
       assert.strictEqual(yield* Queue.take(sent), item)
-      yield* b.db.archive(sender)
-      yield* until(b.db.outboxOf(peer), (rows) => rows.length === 0)
+      yield* b.db.session.archive(sender)
+      yield* until(b.db.remote.outboxOf(peer), (rows) => rows.length === 0)
       yield* yieldToIo
-      yield* b.db.sendToPeer(sender, peer, randomId(), "x", item)
+      yield* b.db.remote.sendToPeer(sender, peer, randomId(), "x", item)
       assert.strictEqual(yield* Queue.take(sent), item)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

@@ -1,6 +1,6 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
-import type { OutboxRow } from "@vibest/core/database/db-remote"
+import type { OutboxRow } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
@@ -45,7 +45,7 @@ const make = Effect.gen(function* () {
     ) {
       const bytes = new TextEncoder().encode(input.prompt).length
       if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
-      const rows = yield* db.remoteProjects
+      const rows = yield* db.remote.remoteProjects
       const exact = rows.filter((row) => row.remote === input.repository)
       const { identity } = input
       const matched =
@@ -106,7 +106,7 @@ const make = Effect.gen(function* () {
           const subscription = yield* bus.subscribe([SessionEnded, OutboxQueued, OutboxAcked])
           const sent = new Set<string>()
           const batch = Effect.gen(function* () {
-            const rows = yield* db.outboxOf(peer)
+            const rows = yield* db.remote.outboxOf(peer)
             const present = new Set(rows.map((row) => row.id))
             for (const id of sent) if (!present.has(id)) sent.delete(id)
             const fresh = rows.filter((row) => !sent.has(row.id))
@@ -126,7 +126,7 @@ const make = Effect.gen(function* () {
         }),
       ),
 
-    ack: Effect.fn("Peer.ack")((peer: string, ids: ReadonlyArray<string>) => db.ackOutbox(peer, ids)),
+    ack: Effect.fn("Peer.ack")((peer: string, ids: ReadonlyArray<string>) => db.remote.ackOutbox(peer, ids)),
   }
 })
 

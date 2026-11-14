@@ -15,10 +15,10 @@ describe.concurrent("Session", () => {
   const sharersOfDirectory = (ownerId: string) =>
     Effect.gen(function* () {
       const db = yield* Db
-      const shared = yield* db.sessionDirectory(ownerId)
+      const shared = yield* db.session.sessionDirectory(ownerId)
       return yield* Effect.filter(
-        (yield* db.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),
-        (s) => db.sessionDirectory(s.id).pipe(Effect.map((d) => d === shared)),
+        (yield* db.session.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),
+        (s) => db.session.sessionDirectory(s.id).pipe(Effect.map((d) => d === shared)),
       )
     })
 
@@ -29,13 +29,16 @@ describe.concurrent("Session", () => {
     const options: TestOptions = {
       db: (db) => ({
         ...db,
-        insertSession: (...args) =>
-          state.armed
-            ? Deferred.succeed(reached, undefined).pipe(
-                Effect.andThen(Deferred.await(go)),
-                Effect.andThen(db.insertSession(...args)),
-              )
-            : db.insertSession(...args),
+        session: {
+          ...db.session,
+          insertSession: (...args) =>
+            state.armed
+              ? Deferred.succeed(reached, undefined).pipe(
+                  Effect.andThen(Deferred.await(go)),
+                  Effect.andThen(db.session.insertSession(...args)),
+                )
+              : db.session.insertSession(...args),
+        },
       }),
     }
     return {
@@ -128,7 +131,7 @@ describe.concurrent("Session", () => {
         assert.isTrue(yield* fs.exists(worktree))
       }).pipe(Effect.ensuring(split.release().pipe(Effect.ignore)))
       yield* until(
-        owner.db.getSession((yield* sharersOfDirectory(owner.id))[0]!.id),
+        owner.db.session.getSession((yield* sharersOfDirectory(owner.id))[0]!.id),
         (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
     }),
@@ -147,13 +150,13 @@ describe.concurrent("Session", () => {
       const worktree = yield* sessionWorktree(owner.id)
       const mid = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
       yield* until(
-        owner.db.getSession(mid.id),
+        owner.db.session.getSession(mid.id),
         (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
       const midPane = (yield* herdr.agent(mid.id))!.terminal
       yield* herdr.runtime.close({ id: midPane })
-      yield* owner.db.endProcess(mid.id, "exited")
-      yield* owner.db.setStatus(mid.id, "unknown")
+      yield* owner.db.session.endProcess(mid.id, "exited")
+      yield* owner.db.session.setStatus(mid.id, "unknown")
       yield* parkedBehindShare.arm
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
@@ -207,7 +210,7 @@ describe.concurrent("Session", () => {
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo, "claude")), share: owner.id })
       yield* held.reached
       yield* held.release("failed")
-      yield* until(owner.db.getSession(id), (w) => !!w && exitedAt(w) !== null)
+      yield* until(owner.db.session.getSession(id), (w) => !!w && exitedAt(w) !== null)
       const newCloses = (yield* herdr.callsTo("close"))
         .map((c) => c.terminal)
         .filter((pane) => !closesBefore.includes(pane))
@@ -215,12 +218,18 @@ describe.concurrent("Session", () => {
       assert.isTrue(HashMap.has(yield* herdr.panes, ownerPane))
       assert.isTrue(yield* fs.exists(worktree))
       assert.strictEqual((yield* herdr.callsTo("open")).length, created + 1)
-      assert.strictEqual(yield* owner.db.sessionDirectory(id), yield* owner.db.sessionDirectory(owner.id))
+      assert.strictEqual(
+        yield* owner.db.session.sessionDirectory(id),
+        yield* owner.db.session.sessionDirectory(owner.id),
+      )
       yield* owner.sessions.send(id, "start again")
       const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === created + 2)
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
-      yield* until(owner.db.getSession(id), (w) => w !== undefined && exitedAt(w) === null && terminalOf(w).id !== "")
-      assert.strictEqual(yield* owner.db.currentProcessId(id), reporter)
+      yield* until(
+        owner.db.session.getSession(id),
+        (w) => w !== undefined && exitedAt(w) === null && terminalOf(w).id !== "",
+      )
+      assert.strictEqual(yield* owner.db.session.currentProcessId(id), reporter)
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
   )

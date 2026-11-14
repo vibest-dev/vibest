@@ -25,11 +25,14 @@ describe("observed execution end", () => {
     Effect.gen(function* () {
       const { id, db } = yield* idleSession(yield* makeRepository)
       const before = yield* ends(id)
-      const { execution } = yield* db.startExecution(id, yield* Clock.currentTimeMillis)
-      assert.strictEqual(yield* db.endObserved(id, yield* observedEnd("pi", { text: "background" })), "unaccepted")
+      const { execution } = yield* db.session.startExecution(id, yield* Clock.currentTimeMillis)
+      assert.strictEqual(
+        yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "background" })),
+        "unaccepted",
+      )
       assert.deepStrictEqual(yield* ends(id), before)
-      assert.strictEqual(yield* db.openExecution(id), execution)
-      yield* db.acceptExecution(id, execution)
+      assert.strictEqual(yield* db.session.openExecution(id), execution)
+      yield* db.session.acceptExecution(id, execution)
       yield* writeEnd(id, "pi", { text: "mine" })
       assert.deepStrictEqual((yield* ends(id)).at(-1), { execution, outcome: "completed", reply: "mine" })
     }),
@@ -40,13 +43,16 @@ describe("observed execution end", () => {
     "a start or end report from an earlier process of the session is dropped",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const current = (yield* db.currentProcessId(id))!
+      const current = (yield* db.session.currentProcessId(id))!
       const earlier = current - 1
-      assert.isUndefined(yield* db.endObserved(id, yield* observedEnd("pi", { text: "old" }), earlier))
+      assert.isUndefined(yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "old" }), earlier))
       assert.deepStrictEqual(yield* ends(id), [])
-      assert.strictEqual(yield* db.endObserved(id, yield* observedEnd("pi", { text: "new" }), current), "completed")
-      yield* db.startObserved(id, "typed into the old process", yield* Clock.currentTimeMillis, earlier)
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
+      assert.strictEqual(
+        yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "new" }), current),
+        "completed",
+      )
+      yield* db.session.startObserved(id, "typed into the old process", yield* Clock.currentTimeMillis, earlier)
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
     }),
     { hooked: ["pi"] },
   )
@@ -62,11 +68,11 @@ describe("observed execution end", () => {
         { id, entry: false, harness: "claude" },
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
       )
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(executionStateOf(row), "failed")
       assert.isNotNull(exitedAt(row))
       assert.deepStrictEqual(
-        (yield* db.inboxWithStatus(id, "failed")).map((r) => r.message),
+        (yield* db.inbox.inboxWithStatus(id, "failed")).map((r) => r.message),
         ["queued"],
       )
     }),
@@ -85,7 +91,7 @@ describe("observed execution end", () => {
         { id, entry: false, harness: "pi" },
         JSON.stringify({ type: "agent_settled", text: "done while locked" }),
       )
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.strictEqual(yield* replyOf(id), "done while locked")
       yield* held.release()
       yield* Fiber.join(checking)
@@ -103,7 +109,7 @@ describe("observed execution end", () => {
       const held = yield* herdr.hold("send", id)
       yield* sessions.send(id, "next")
       yield* held.reached
-      const handed = yield* db.openExecution(id)
+      const handed = yield* db.session.openExecution(id)
       yield* writeEnd(id, "pi", { text: "done fast" })
       yield* held.release()
       const [row] = yield* until(
@@ -128,12 +134,12 @@ describe("observed execution end", () => {
       const checking = yield* Effect.forkChild(sessions.check(id))
       yield* held.reached
       yield* sessions.userPrompt(id, "typed during the check")
-      const typed = yield* db.openExecution(id)
+      const typed = yield* db.session.openExecution(id)
       yield* held.release()
       yield* Fiber.join(checking)
       assert.isDefined(typed)
-      assert.strictEqual(yield* db.openExecution(id), typed)
-      assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "pi")
+      assert.strictEqual(yield* db.session.openExecution(id), typed)
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "pi")
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
       assert.isEmpty(yield* sqlNotices(id))
     }),
@@ -151,13 +157,13 @@ describe("observed execution end", () => {
       yield* held.reached
       yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.userPrompt(id, "typed during the archive")
-      assert.isDefined(yield* db.openExecution(id))
+      assert.isDefined(yield* db.session.openExecution(id))
       yield* held.release()
       yield* Fiber.join(removing)
-      assert.isUndefined(yield* db.openExecution(id))
-      assert.notStrictEqual(executionStateOf((yield* db.getSession(id))!), "open")
+      assert.isUndefined(yield* db.session.openExecution(id))
+      assert.notStrictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
       yield* sessions.userPrompt(id, "typed after the archive")
-      assert.isUndefined(yield* db.openExecution(id))
+      assert.isUndefined(yield* db.session.openExecution(id))
     }),
     { hooked: ["pi"] },
   )
@@ -175,7 +181,7 @@ describe("observed execution end", () => {
       yield* held.release()
       const result = yield* Fiber.join(interrupting)
       assert.include(result.message, "finished its execution before the interrupt took effect")
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.strictEqual(yield* replyOf(id), "finished first")
     }),
     { hooked: ["pi"] },
