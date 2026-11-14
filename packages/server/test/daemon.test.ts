@@ -15,8 +15,8 @@ import { SocketServer } from "effect/socket/SocketServer"
 
 import * as Platform from "#platform"
 
-import { hostReplacements } from "./fakes.ts"
-import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "./fakes.ts"
+import { hostReplacements } from "./lib/fakes.ts"
+import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "./lib/fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
 

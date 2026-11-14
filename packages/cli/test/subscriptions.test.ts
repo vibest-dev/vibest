@@ -10,14 +10,6 @@ import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
 import { HarnessUnavailable } from "@vibest/schema/session"
 import * as Server from "@vibest/server/server"
-import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
-import { Sink } from "effect"
-import { Headers, HttpClient, HttpClientResponse } from "effect/http"
-import { ChildProcessSpawner } from "effect/process"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
 import {
   agentsLayer,
   runtimesLayer,
@@ -26,8 +18,15 @@ import {
   makeRepository,
   runVibest,
   testLayer,
-} from "./fakes.ts"
-import { memoryBus } from "./unit-helpers.ts"
+} from "@vibest/server/test/lib/fakes"
+import { memoryBus } from "@vibest/server/test/lib/unit-helpers"
+import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
+import { Sink } from "effect"
+import { Headers, HttpClient, HttpClientResponse } from "effect/http"
+import { ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const PI_SECRET = "pi-key-do-not-log"

@@ -6,12 +6,11 @@ import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
+import { projectOf, tempDirectory } from "@vibest/server/test/lib/fakes"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
-
-import { projectOf, tempDirectory } from "./fakes.ts"
 
 const database = (filename: string) =>
   Db.layer.pipe(

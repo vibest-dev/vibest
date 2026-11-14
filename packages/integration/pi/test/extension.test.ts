@@ -3,6 +3,13 @@ import net from "node:net"
 import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
 import { assert, describe, it } from "@effect/vitest"
+import { cliHeaders, connect } from "@vibest/client/client"
+import { Db } from "@vibest/core/database/db"
+import { Project } from "@vibest/core/project"
+import { noticeEnvelope } from "@vibest/core/replies"
+import * as Platform from "@vibest/platform-bun/bun"
+import { Layout } from "@vibest/schema/layout"
+import * as Server from "@vibest/server/server"
 import {
   authed,
   FakeRuntime,
@@ -19,14 +26,7 @@ import {
   untilVirtual,
   projectOf,
   entryPending,
-} from "@vibest/cli/test/fakes"
-import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/database/db"
-import { Project } from "@vibest/core/project"
-import { noticeEnvelope } from "@vibest/core/replies"
-import * as Platform from "@vibest/platform-bun/bun"
-import { Layout } from "@vibest/schema/layout"
-import * as Server from "@vibest/server/server"
+} from "@vibest/server/test/lib/fakes"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"

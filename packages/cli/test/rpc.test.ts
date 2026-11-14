@@ -13,15 +13,23 @@ import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
 import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
+import {
+  authed,
+  FakeRuntime,
+  makeRepository,
+  tempDirectory,
+  until,
+  writeEnd,
+  projectOf,
+} from "@vibest/server/test/lib/fakes"
+import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vibest/server/test/lib/rpc-helpers"
+import { session as draftSession } from "@vibest/server/test/lib/unit-helpers"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { withVibest } from "../src/client.ts"
 import { VERSION } from "../src/version.ts"
-import { authed, FakeRuntime, makeRepository, tempDirectory, until, writeEnd, projectOf } from "./fakes.ts"
-import { served, test, client, asCli, asEntry, asSession, failureTag } from "./rpc-helpers.ts"
-import { session as draftSession } from "./unit-helpers.ts"
 
 describe("vibest.sock", () => {
   test(

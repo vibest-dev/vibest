@@ -16,12 +16,6 @@ import { liveDaemon } from "@vibest/runtime-herdr/commands"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { Effect, Exit, FileSystem, Layer, Path, PlatformError, type Scope } from "effect"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
-import { clients } from "../src/client.ts"
 import {
   authed,
   FakeGit,
@@ -33,7 +27,13 @@ import {
   until,
   writeEnd,
   projectOf,
-} from "./fakes.ts"
+} from "@vibest/server/test/lib/fakes"
+import { Effect, Exit, FileSystem, Layer, Path, PlatformError, type Scope } from "effect"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
+
+import { clients } from "../src/client.ts"
 
 const scopedRealPathTempDirectory = (prefix: string) =>
   Effect.gen(function* () {

@@ -12,8 +12,8 @@ import * as Headers from "effect/http/Headers"
 import { CurrentLogAnnotations } from "effect/References"
 import { TestClock } from "effect/testing"
 
-import { VERSION } from "../src/version.ts"
 import {
+  VERSION,
   CLAUDE,
   CURSOR,
   FakeRuntime,
@@ -23,7 +23,7 @@ import {
   type TestServices,
   until,
   projectOf,
-} from "./fakes.ts"
+} from "./lib/fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () =>

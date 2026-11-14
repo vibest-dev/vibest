@@ -7,14 +7,13 @@ import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { run as runDaemon } from "@vibest/server/daemon"
+import { hostReplacements } from "@vibest/server/test/lib/fakes"
+import { PATH_WITHOUT_HARNESS_CLIS } from "@vibest/server/test/lib/fakes"
+import { memoryBus } from "@vibest/server/test/lib/unit-helpers"
 import { ConfigProvider, Effect, FileSystem, Layer, Path, PubSub, Queue, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
-
-import { hostReplacements } from "./fakes.ts"
-import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
-import { memoryBus } from "./unit-helpers.ts"
 
 const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
   id,

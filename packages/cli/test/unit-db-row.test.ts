@@ -1,9 +1,8 @@
 import { assert, it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
+import { projectOf } from "@vibest/server/test/lib/fakes"
+import { database, place, session } from "@vibest/server/test/lib/unit-helpers"
 import { Effect } from "effect"
-
-import { projectOf } from "./fakes.ts"
-import { database, place, session } from "./unit-helpers.ts"
 
 it.effect("a session row's open execution is the newest one and its last execution the one that ended before", () =>
   Effect.gen(function* () {

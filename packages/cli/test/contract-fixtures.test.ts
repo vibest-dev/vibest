@@ -6,12 +6,19 @@ import { cliHeaders } from "@vibest/client/client"
 import { Project } from "@vibest/core/project"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
+import {
+  type Line,
+  makeRepository,
+  tempDirectory,
+  testLayer,
+  type TestServices,
+  wire,
+} from "@vibest/server/test/lib/fakes"
 import { Effect, Layer, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
 import { VERSION } from "../src/version.ts"
-import { type Line, makeRepository, tempDirectory, testLayer, type TestServices, wire } from "./fakes.ts"
 
 const FIXTURES = path.join(import.meta.dirname, "..", "..", "..", "packages", "protocol", "contract", "fixtures")
 const RECORD = process.env["VIBEST_RECORD_FIXTURES"] === "1"

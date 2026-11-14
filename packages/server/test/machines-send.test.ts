@@ -7,8 +7,8 @@ import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { until, yieldToIo } from "./fakes.ts"
-import { onB, peerSession, repoStack, twoMachines } from "./machines-fakes.ts"
+import { until, yieldToIo } from "./lib/fakes.ts"
+import { onB, peerSession, repoStack, twoMachines } from "./lib/machines-fakes.ts"
 
 const outboxCount = Effect.flatMap(SqlClient.SqlClient, (sql) =>
   sql`SELECT id FROM outbox`.pipe(Effect.map((r) => r.length)),

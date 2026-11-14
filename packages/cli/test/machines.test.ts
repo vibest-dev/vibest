@@ -13,17 +13,15 @@ import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
 import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/server/machine/machines"
-import { Cause, Clock, type Context, Duration, Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect"
-import { RpcClient } from "effect/rpc"
-import * as Socket from "effect/socket/Socket"
-import { SqlClient } from "effect/sql"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
-import { teardown } from "../src/cli.ts"
-import { pipeStdio } from "../src/connect.ts"
-import { callerPlugin, FakeGit, runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "./fakes.ts"
+import {
+  callerPlugin,
+  FakeGit,
+  runVibest,
+  tempDirectory,
+  until,
+  untilVirtual,
+  yieldToIo,
+} from "@vibest/server/test/lib/fakes"
 import {
   A_ENTRY,
   COMMIT,
@@ -36,7 +34,17 @@ import {
   repoStack,
   served,
   twoMachines,
-} from "./machines-fakes.ts"
+} from "@vibest/server/test/lib/machines-fakes"
+import { Cause, Clock, type Context, Duration, Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect"
+import { RpcClient } from "effect/rpc"
+import * as Socket from "effect/socket/Socket"
+import { SqlClient } from "effect/sql"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
+
+import { teardown } from "../src/cli.ts"
+import { pipeStdio } from "../src/connect.ts"
 
 type Stack = Context.Context<Layer.Success<ReturnType<typeof served>>>
 

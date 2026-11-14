@@ -12,6 +12,16 @@ import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { Host } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
 import {
+  agentsLayer,
+  FakeGit,
+  HARNESSES,
+  harnessesLayer,
+  makeRepository,
+  runVibest,
+  tempDirectory,
+  testLayer,
+} from "@vibest/server/test/lib/fakes"
+import {
   Cause,
   ConfigProvider,
   Crypto,
@@ -35,16 +45,6 @@ import { Commands, entryFlags } from "../src/commands/commands.ts"
 import { Runtime as CliRuntime } from "../src/framework/runtime.ts"
 import { Spec } from "../src/framework/spec.ts"
 import { Host as CliHost } from "../src/host.ts"
-import {
-  agentsLayer,
-  FakeGit,
-  HARNESSES,
-  harnessesLayer,
-  makeRepository,
-  runVibest,
-  tempDirectory,
-  testLayer,
-} from "./fakes.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const RUNTIME_PROGRAMS = new Set(["herdr"])

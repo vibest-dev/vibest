@@ -8,8 +8,8 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, PluginHost, until, untilVirtual, yieldToIo } from "./fakes.ts"
-import { entryOn, fakeSpawns, Net, onB, repoStack } from "./machines-fakes.ts"
+import { FakeRuntime, PluginHost, until, untilVirtual, yieldToIo } from "./lib/fakes.ts"
+import { entryOn, fakeSpawns, Net, onB, repoStack } from "./lib/machines-fakes.ts"
 
 type Side = {
   readonly id: string

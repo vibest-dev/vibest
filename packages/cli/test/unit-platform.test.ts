@@ -1,11 +1,10 @@
 import { assert, layer } from "@effect/vitest"
 import { copyIncluded } from "@vibest/core/worktree"
 import { claude, cursor, pi } from "@vibest/plugin-harnesses"
+import { FakeGit, harnessesLayer, makeRepository, tempDirectory } from "@vibest/server/test/lib/fakes"
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
 
 import * as Platform from "#platform"
-
-import { FakeGit, harnessesLayer, makeRepository, tempDirectory } from "./fakes.ts"
 
 layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)), harnessesLayer([pi, claude, cursor])))(
   "on the platform",

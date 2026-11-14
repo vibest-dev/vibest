@@ -7,6 +7,7 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     include: [
       "packages/cli/test/**/*.test.ts",
+      "packages/server/test/**/*.test.ts",
       "packages/integration/claude/test/**/*.test.ts",
       "packages/effect-herdr-sdk/test/**/*.test.ts",
       "packages/effect-herdr-core-sdk/test/**/*.test.ts",

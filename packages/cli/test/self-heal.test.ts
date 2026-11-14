@@ -13,14 +13,6 @@ import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { readDaemonInfo } from "@vibest/server/daemon"
-import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
-import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
-import { replaceDaemon, type Timing } from "../src/replace.ts"
-import { VERSION } from "../src/version.ts"
 import {
   PATH_WITHOUT_HARNESS_CLIS,
   noteRecorded,
@@ -30,7 +22,15 @@ import {
   runVibest,
   stopRecorded,
   tempDirectory,
-} from "./fakes.ts"
+} from "@vibest/server/test/lib/fakes"
+import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
+import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
+
+import { replaceDaemon, type Timing } from "../src/replace.ts"
+import { VERSION } from "../src/version.ts"
 
 const typed = (text: string, terminal = true) =>
   Stdio.layerTest({

@@ -23,13 +23,21 @@ import {
 } from "@vibest/runtime-herdr/commands"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
+import {
+  FakeRuntime,
+  makeRepository,
+  projectOf,
+  runVibest,
+  stopRecorded,
+  tempDirectory,
+  testLayer,
+} from "@vibest/server/test/lib/fakes"
 import { Effect, FileSystem, Layer } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
 import { ARCHIVE_ROOTS, copyHerdrPlugin } from "../scripts/archive-layout.ts"
-import { FakeRuntime, makeRepository, projectOf, runVibest, stopRecorded, tempDirectory, testLayer } from "./fakes.ts"
 
 const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({
   workspaceId: undefined,

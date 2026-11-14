@@ -3,11 +3,6 @@ import { Db } from "@vibest/core/database/db"
 import { archived, executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
 import { cwdHolders, livenessOf, parseProcessTable, Processes, runFor, sessionTree } from "@vibest/core/processes"
 import { Session } from "@vibest/core/session"
-import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
-
-import * as Platform from "#platform"
-
 import {
   eventsOf,
   FakeRuntime,
@@ -26,7 +21,11 @@ import {
   systemPromptFile,
   projectOf,
   processesOn,
-} from "./fakes.ts"
+} from "@vibest/server/test/lib/fakes"
+import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
+
+import * as Platform from "#platform"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer(options))))

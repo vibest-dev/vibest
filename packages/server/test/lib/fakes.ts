@@ -25,10 +25,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { commandOf, note } from "../../../tools/reap.ts"
-import { VERSION } from "../src/version.ts"
-import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime } from "./fake-runtime.ts"
+import { commandOf, note } from "../../../../tools/reap.ts"
+export const VERSION = "0.0.0-local"
+import { FakeGit } from "@vibest/core/test/lib/fake-git"
+import { FakeRuntime } from "@vibest/core/test/lib/fake-runtime"
 
 export {
   agentsLayer,

@@ -5,13 +5,13 @@ import { HOOK_RETRY_DELAY } from "@vibest/client/client"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
+import { tempDirectory, untilVirtual } from "@vibest/server/test/lib/fakes"
 import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
 import { integrationPrompt, integrationReady, integrationStop } from "../src/integration.ts"
-import { tempDirectory, untilVirtual } from "./fakes.ts"
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationStop("claude", raw).pipe(

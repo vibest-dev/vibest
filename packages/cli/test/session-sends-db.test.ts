@@ -4,13 +4,12 @@ import { Db } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { systemPrompt } from "@vibest/core/system-prompt"
+import { entryPending, projectOf } from "@vibest/server/test/lib/fakes"
+import { place, session } from "@vibest/server/test/lib/unit-helpers"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
-
-import { entryPending, projectOf } from "./fakes.ts"
-import { place, session } from "./unit-helpers.ts"
 
 const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
   program.pipe(
