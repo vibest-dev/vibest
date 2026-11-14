@@ -45,10 +45,13 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       await addCursorPlugin(w, harnesses)
       try {
-        const plugins = await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })
-        expect(
-          plugins.some((p) => p.id === "harness-cursor" && p.status === "active"),
-          JSON.stringify(plugins),
+        await until(
+          "harness-cursor active",
+          async () =>
+            (await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })).some(
+              (p) => p.id === "harness-cursor" && p.status === "active",
+            ),
+          30_000,
         )
         const models = await w.json<Models>(["harness", "models", "cursor"], { env })
         expect(
