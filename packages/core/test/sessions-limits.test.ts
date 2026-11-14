@@ -1,17 +1,17 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
+import { harnessIdOf, exitedAt, executionStateOf, terminalOf } from "@vibest/core/database/db-rows"
 import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
-import { Effect, Fiber, FileSystem, HashMap } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { EXECUTIONS, until, writeEnd, systemPromptFile } from "./lib/observe.ts"
+import { EXECUTIONS, settled, until, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
   harnessOf,
@@ -40,11 +40,99 @@ describe.concurrent("Session", () => {
       assert.isTrue(yield* fs.exists(worktree))
       yield* opening.release("rate_limit: usage limit reached")
       yield* until(db.getSession(id), (row) => row !== undefined && exitedAt(row) !== null)
+      yield* settled
       assert.isFalse(yield* fs.exists(worktree))
       assert.include((yield* db.latestInbox(id, "notice"))!.message, "move died")
     }),
     { db: (db) => ({ ...db, limitSource: () => Effect.die(new Error("move died")) }) },
   )
+
+  {
+    const defect = { armed: false }
+    test(
+      "a move that dies after it opened the replacement terminal closes that terminal before removing the worktree",
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        const db = yield* Db
+        const fs = yield* FileSystem.FileSystem
+        const opening = yield* herdr.hold("open")
+        const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
+        yield* opening.reached
+        const worktree = yield* sessionWorktree(id)
+        const replacing = yield* herdr.hold("open")
+        yield* opening.release("rate_limit: usage limit reached")
+        yield* replacing.reached
+        defect.armed = true
+        yield* replacing.release()
+        yield* until(db.latestInbox(id, "notice"), (row) => row?.message.includes("move died") === true)
+        yield* settled
+        const replacement = terminalOf((yield* db.getSession(id))!)
+        assert.notStrictEqual(replacement.id, "")
+        assert.include(
+          (yield* herdr.callsTo("close")).map((call) => call.terminal),
+          replacement.id,
+        )
+        assert.isFalse(yield* fs.exists(worktree))
+      }),
+      {
+        plugins: [chooseNext],
+        db: (db) => ({
+          ...db,
+          getSession: (id) => {
+            if (!defect.armed) return db.getSession(id)
+            defect.armed = false
+            return Effect.die(new Error("move died"))
+          },
+        }),
+      },
+    )
+  }
+
+  {
+    const gate = { armed: false, reached: Deferred.makeUnsafe<void>(), go: Deferred.makeUnsafe<void>() }
+    test(
+      "a move that dies after another session joined its worktree with --share keeps the worktree for that session",
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        const db = yield* Db
+        const fs = yield* FileSystem.FileSystem
+        const sessions = yield* Session.Service
+        const repo = yield* makeRepository
+        const opening = yield* herdr.hold("open")
+        const { id } = yield* sessions.spawn(yield* spawnInput(repo))
+        yield* opening.reached
+        const worktree = yield* sessionWorktree(id)
+        const replacing = yield* herdr.hold("open")
+        yield* opening.release("rate_limit: usage limit reached")
+        yield* replacing.reached
+        gate.armed = true
+        yield* replacing.release()
+        yield* Deferred.await(gate.reached)
+        const borrower = yield* sessions.spawn({ ...(yield* spawnInput(repo)), share: id })
+        yield* until(db.getSession(borrower.id), (row) => row !== undefined && (row.process?.placedAt ?? null) !== null)
+        assert.strictEqual(yield* sessionWorktree(borrower.id), worktree)
+        yield* Deferred.succeed(gate.go, undefined)
+        yield* until(db.latestInbox(id, "notice"), (row) => row?.message.includes("move died") === true)
+        yield* settled
+        assert.isTrue(yield* fs.exists(worktree))
+        assert.isNull(exitedAt((yield* db.getSession(borrower.id))!))
+      }),
+      {
+        plugins: [chooseNext],
+        db: (db) => ({
+          ...db,
+          getSession: (id) => {
+            if (!gate.armed) return db.getSession(id)
+            gate.armed = false
+            return Deferred.succeed(gate.reached, undefined).pipe(
+              Effect.andThen(Deferred.await(gate.go)),
+              Effect.andThen(Effect.die(new Error("move died"))),
+            )
+          },
+        }),
+      },
+    )
+  }
 
   test(
     "a usage-limit failure of a running session reports the limit and starts nothing else",

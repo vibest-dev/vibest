@@ -322,14 +322,16 @@ const make = Effect.gen(function* () {
     yield* afterOpen(h, session, terminal.terminal, root, firstPrompt)
     return { _tag: "Started" } satisfies LaunchOutcome
   }, Effect.scoped)
-  const launchFailed = (session: SessionRow, cause: Cause.Cause<unknown>) =>
-    Effect.gen(function* () {
-      const execution = yield* db.openExecution(session.id)
-      if (execution !== undefined) yield* db.closeExecution(session.id, execution, "failed")
-      yield* db.endProcess(session.id, "launch_failed")
-      yield* db.setStatus(session.id, "unknown")
-      yield* notice(session, `${session.id} failed to start ${harnessIdOf(session)}: ${messageOf(Cause.squash(cause))}`)
-    })
+  const launchFailed = Effect.fn("Placement.launchFailed")(function* (
+    session: SessionRow,
+    cause: Cause.Cause<unknown>,
+  ) {
+    const execution = yield* db.openExecution(session.id)
+    if (execution !== undefined) yield* db.closeExecution(session.id, execution, "failed")
+    yield* db.endProcess(session.id, "launch_failed")
+    yield* db.setStatus(session.id, "unknown")
+    yield* notice(session, `${session.id} failed to start ${harnessIdOf(session)}: ${messageOf(Cause.squash(cause))}`)
+  })
 
   const launch = Effect.fn("Placement.launch")(
     (
@@ -343,21 +345,6 @@ const make = Effect.gen(function* () {
       launchRaw(h, target, session, root, firstPrompt, options).pipe(
         Effect.catchCause((cause) => launchFailed(session, cause).pipe(Effect.as<LaunchOutcome>({ _tag: "Failed" }))),
       ),
-    provided,
-  )
-
-  const abandon = Effect.fn("Placement.abandon")(
-    (session: SessionRow, root: string, options: LaunchOptions, cause: Cause.Cause<unknown>) =>
-      Effect.gen(function* () {
-        if (options.splitFrom === undefined) {
-          const worktree = yield* worktreeOf(session)
-          if (yield* listProjectRepositories(root)) yield* discardIsolatedWorktrees(worktree).pipe(Effect.ignore)
-          else yield* removeWorktree(root, worktree).pipe(Effect.ignore)
-          yield* fs.remove(worktree, { recursive: true }).pipe(Effect.ignore)
-        }
-        yield* removeSystemPrompt(session.id).pipe(Effect.ignore)
-        yield* launchFailed(session, cause)
-      }),
     provided,
   )
 
@@ -439,7 +426,7 @@ const make = Effect.gen(function* () {
     launchArgv,
     handTask,
     launch,
-    abandon,
+    launchFailed,
     resume,
     republish,
     recount,

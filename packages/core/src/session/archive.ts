@@ -72,6 +72,14 @@ const make = Effect.gen(function* () {
     yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
   })
 
+  const abandonLaunch = Effect.fn("Archive.abandonLaunch")(function* (id: string) {
+    const session = yield* getRow(id)
+    const h = yield* live(session)
+    yield* locks.withLock(directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
+      removal.release({ h, session, terminal: terminalOf(session), keepWorktree: false, reasons: [] }),
+    )
+  })
+
   const release = (id: string) =>
     db.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
 
@@ -241,7 +249,7 @@ const make = Effect.gen(function* () {
       ),
   )
 
-  return { undoCutOffStart, remove, finishArchive }
+  return { undoCutOffStart, abandonLaunch, remove, finishArchive }
 })
 
 export class Archive extends Context.Service<Archive, Effect.Success<typeof make>>()("vibest/Archive") {

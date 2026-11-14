@@ -33,6 +33,7 @@ import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, type Runtime, Runtimes } from "../runtimes.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
+import { Archive } from "./archive.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Move } from "./move.ts"
 import { type LaunchOptions, Placement } from "./placement.ts"
@@ -83,7 +84,8 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
     const git = yield* Git.Service
     const scope = yield* Effect.scope
     const locks = yield* SessionLocks
-    const { worktreeOf, launch, abandon } = yield* Placement
+    const { worktreeOf, launch, launchFailed } = yield* Placement
+    const { abandonLaunch } = yield* Archive
     const { rerun } = yield* Move
     const logged = Reactor.logFailure
     const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
@@ -104,7 +106,14 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
         Effect.flatMap((outcome) =>
           outcome._tag === "Limited"
             ? rerun(h, row, undefined, outcome.input, false, outcome.error, 0).pipe(
-                Effect.onExit((exit) => (Exit.isFailure(exit) ? abandon(row, root, options, exit.cause) : Effect.void)),
+                Effect.onExit((exit) =>
+                  Exit.isFailure(exit)
+                    ? launchFailed(row, exit.cause).pipe(
+                        Effect.andThen(abandonLaunch(row.id)),
+                        logged(`abandon ${row.id}`),
+                      )
+                    : Effect.void,
+                ),
               )
             : Effect.void,
         ),
@@ -397,6 +406,7 @@ export class Spawn extends Context.Service<Spawn, Effect.Success<ReturnType<type
     Git.node,
     Harness.node,
     Harnesses.node,
+    Archive.node,
     Move.node,
     Placement.node,
     pluginsNode,
