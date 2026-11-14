@@ -6,14 +6,8 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import {
-  claimHeaders,
-  type ClientServices,
-  connect,
-  hookCall,
-  SocketConnector,
-  makeClient,
-} from "@vibest/client/client"
+import { claimHeaders, type ClientServices, connect, hookCall, makeClient } from "@vibest/client/client"
+import { SocketConnector } from "@vibest/client/socket-connector"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 

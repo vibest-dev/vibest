@@ -18,7 +18,6 @@ import {
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
 import {
-  Db,
   type SessionRow,
   harnessIdOf,
   runtimeOf,
@@ -26,7 +25,8 @@ import {
   exitedAt,
   executionStateOf,
   archived,
-} from "../database/db.ts"
+} from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
 import { Harnesses } from "../harness.ts"

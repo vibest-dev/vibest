@@ -1,5 +1,6 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
-import { Db, type MachineRow } from "@vibest/core/database/db"
+import { Db } from "@vibest/core/database/db"
+import type { MachineRow } from "@vibest/core/database/db-remote"
 import { keyedLock } from "@vibest/core/effect/keyed-mutex"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { VibestdIdentity } from "@vibest/core/identity"

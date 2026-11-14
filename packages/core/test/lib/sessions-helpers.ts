@@ -1,9 +1,10 @@
 import { it } from "@effect/vitest"
-import { Db, executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/db"
-import type { HarnessId } from "@vibest/core/harness"
+import { Db } from "@vibest/core/database/db"
+import { executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/db-rows"
 import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
 import { Sessions } from "@vibest/core/session"
 import { isLimited, Plugin, stillLimited } from "@vibest/plugin/effect"
+import type { HarnessId } from "@vibest/schema/session"
 import { Effect, type Scope } from "effect"
 import { SqlClient } from "effect/sql"
 

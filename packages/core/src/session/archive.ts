@@ -4,7 +4,6 @@ import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } fr
 
 import { Bus } from "../bus.ts"
 import {
-  Db,
   type SessionRow,
   sessionEnded,
   runtimeOf,
@@ -12,18 +11,19 @@ import {
   exitedAt,
   executionStateOf,
   archived,
-} from "../database/db.ts"
+} from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
 import { directoryLock } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
+import { Git } from "../git.ts"
 import { Inbox } from "../inbox.ts"
 import { errorMessage } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
 import * as Remove from "../remove.ts"
 import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
-import { Git } from "../worktree.ts"
 import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"

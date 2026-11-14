@@ -10,6 +10,7 @@ const PROTECTED_RULES = new Set([
   "no-payload-sql",
   "projector-writes",
   "no-background-loop",
+  "package-imports",
 ])
 
 const parseDisableDirective = (commentValue) => {

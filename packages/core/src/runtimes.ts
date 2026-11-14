@@ -9,8 +9,6 @@ import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 
-export { NoRuntime }
-
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
 export type Terminal = RuntimeAddress
@@ -18,8 +16,6 @@ export type AgentState = VibestPlugin.Runtime.AgentState
 export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 export const RuntimeError = VibestPlugin.Runtime.RuntimeError
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
-
-export type { RuntimesShape }
 
 export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
 

@@ -1,6 +1,7 @@
 import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
-import { NoSuchSession } from "@vibest/schema/session"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { NoSuchSession, type HarnessUnavailable } from "@vibest/schema/session"
 import {
   Cause,
   Context,
@@ -18,7 +19,6 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { Agents } from "../agents.ts"
 import {
-  Db,
   type SessionRow,
   harnessIdOf,
   placedTerminal,
@@ -27,13 +27,14 @@ import {
   terminalOf,
   exitedAt,
   archived,
-} from "../database/db.ts"
+} from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import { encodeCommand, Harness, Harnesses, type HarnessUnavailable } from "../harness.ts"
+import { Git } from "../git.ts"
+import { encodeCommand, Harness, Harnesses } from "../harness.ts"
 import { Inbox } from "../inbox.ts"
 import { definitionIn } from "../launch.ts"
-import { Layout, VibestCommand } from "../paths.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
@@ -43,7 +44,7 @@ import {
 import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
 import { projectText, removeSystemPrompt, systemPrompt, writeSystemPrompt } from "../system-prompt.ts"
-import { addWorktree, copyIncluded, Git, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
+import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
 import type { LimitMove } from "./move.ts"
 

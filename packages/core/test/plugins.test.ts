@@ -1,15 +1,16 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
-import { Db, harnessIdOf } from "@vibest/core/database/db"
-import { Layout } from "@vibest/core/paths"
-import { Builtins, PluginLoader, Plugins, pluginsLayer, makePlugins } from "@vibest/core/plugin"
+import { Db } from "@vibest/core/database/db"
+import { harnessIdOf } from "@vibest/core/database/db-rows"
+import { Builtins, makePlugins, PluginLoader, Plugins, pluginsLayer } from "@vibest/core/plugin"
 import * as Hooks from "@vibest/core/plugin/hooks"
 import { Sessions } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin } from "@vibest/plugin"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin/effect"
 import type { Fact } from "@vibest/schema/event"
+import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -406,34 +407,40 @@ const event = {
   ],
 }
 
+const loadingFixture = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const dir = yield* packageHome
+  const plugins = path.join(dir, "plugins")
+  yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
+  yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))
+  yield* fs.writeFileString(path.join(plugins, "a.d.ts"), "export {}")
+  yield* fs.writeFileString(path.join(plugins, ".hidden.ts"), source("hidden", "from-hidden"))
+  yield* fs.writeFileString(path.join(plugins, "notes.md"), "not a plugin")
+  yield* fs.makeDirectory(path.join(plugins, "empty"))
+  yield* fs.makeDirectory(path.join(plugins, "node_modules"))
+  yield* fs.writeFileString(path.join(plugins, "broken.ts"), "export default 42\n")
+  for (const name of ["x", "y"]) {
+    yield* fs.makeDirectory(path.join(dir, name))
+    yield* fs.writeFileString(path.join(dir, name, "index.ts"), source(name, `from-${name}`))
+  }
+  yield* fs.writeFileString(path.join(dir, "a-file.ts"), source("f", "from-f"))
+  const config = (entries: ReadonlyArray<unknown>) =>
+    fs.writeFileString(
+      path.join(dir, "vibest.json"),
+      `// comments are fine\n{ "plugins": ${JSON.stringify(entries)}, }\n`,
+    )
+  return { dir, plugins, path, config }
+})
+
+const LOADING_TIMEOUT = 120_000
+
 describe("plugins: loading", () => {
   it.live(
-    "P1: plugins/ first in path order, then vibest.json in its order (a configured entry must be a folder); -x removes; bad entries fail visibly",
+    "P1: plugins/ first in path order, then vibest.json in its order (a configured entry must be a folder); -x removes",
     () =>
       Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* packageHome
-        const plugins = path.join(dir, "plugins")
-        yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
-        yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))
-        yield* fs.writeFileString(path.join(plugins, "a.d.ts"), "export {}")
-        yield* fs.writeFileString(path.join(plugins, ".hidden.ts"), source("hidden", "from-hidden"))
-        yield* fs.writeFileString(path.join(plugins, "notes.md"), "not a plugin")
-        yield* fs.makeDirectory(path.join(plugins, "empty"))
-        yield* fs.makeDirectory(path.join(plugins, "node_modules"))
-        yield* fs.writeFileString(path.join(plugins, "broken.ts"), "export default 42\n")
-        for (const name of ["x", "y"]) {
-          yield* fs.makeDirectory(path.join(dir, name))
-          yield* fs.writeFileString(path.join(dir, name, "index.ts"), source(name, `from-${name}`))
-        }
-        yield* fs.writeFileString(path.join(dir, "a-file.ts"), source("f", "from-f"))
-        const config = (entries: ReadonlyArray<unknown>) =>
-          fs.writeFileString(
-            path.join(dir, "vibest.json"),
-            `// comments are fine\n{ "plugins": ${JSON.stringify(entries)}, }\n`,
-          )
-
+        const { dir, plugins, path, config } = yield* loadingFixture
         yield* config(["./x", "./y", "-b", "vibest-plugin-npm@1.0.0", "./a-file.ts"])
         const first = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
@@ -451,14 +458,30 @@ describe("plugins: loading", () => {
         assert.include(listed.find((p) => p.id.startsWith("vibest-plugin-npm"))!.error, "not supported yet")
         assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
         assert.strictEqual((yield* first.start(event)).model, "from-y")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    LOADING_TIMEOUT,
+  )
 
+  it.live(
+    "P1: a bad config entry fails visibly and loads nothing",
+    () =>
+      Effect.gen(function* () {
+        const { dir, config } = yield* loadingFixture
         yield* config(["./x", "file://["])
         const invalid = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* invalid.list).map((p) => p.id),
           [],
         )
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    LOADING_TIMEOUT,
+  )
 
+  it.live(
+    "P1: -* removes every earlier plugin and the later entries load in their order",
+    () =>
+      Effect.gen(function* () {
+        const { dir, config } = yield* loadingFixture
         yield* config(["-*", "./y", "./x"])
         const second = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
@@ -467,6 +490,7 @@ describe("plugins: loading", () => {
         )
         assert.strictEqual((yield* second.start(event)).model, "from-x")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    LOADING_TIMEOUT,
   )
 })
 

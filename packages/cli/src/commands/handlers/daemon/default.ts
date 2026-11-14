@@ -1,6 +1,7 @@
 import { probe, startDaemon } from "@vibest/client/client"
 import { Layout } from "@vibest/schema/layout"
 import * as Daemon from "@vibest/server/daemon"
+import { HANDOFF_ENV } from "@vibest/server/server"
 import { Console, Effect } from "effect"
 
 import { userOnly } from "../../../caller.ts"
@@ -14,7 +15,7 @@ export default Runtime.handler(Commands.commands.daemon, ({ foreground, handoff 
       Effect.gen(function* () {
         if (foreground) {
           const host = yield* Host
-          delete process.env[Daemon.HANDOFF_ENV]
+          delete process.env[HANDOFF_ENV]
           return yield* Daemon.run(host.daemon, host.replacements, { handoff })
         }
         const layout = yield* Layout

@@ -10,9 +10,6 @@ import * as PlatformNode from "./effect/platform.ts"
 import { listModels, type Model } from "./models.ts"
 import type { HarnessDefinition, HarnessesShape } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
-export { type HarnessId, HarnessUnavailable } from "@vibest/schema/session"
-export type { HarnessDefinition }
-
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
 export const unprovided = (id: string, loaded: ReadonlyArray<HarnessDefinition>) =>

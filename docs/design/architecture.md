@@ -149,67 +149,73 @@ started, an entry session) cannot answer results with results (rule 4), and that
 
 ## 2. Layers
 
+**Packages.** Most workspace packages export `./*` → `./src/*.ts`, so an import names the module
+(`@vibest/core/database/db`); `plugin`, `builtins`, the herdr SDKs and `integration/cursor` export named entries
+(`@vibest/plugin/effect`, `@vibest/plugin/testing`). A module imports a name from the module that defines it (no re-exports of other
+modules' names, except a domain facade re-exporting its own domain, see below).
+
+| Package                 | Role                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`                | Browser-safe contracts: branded ids, domain structs and errors, fact definitions (`event.ts`), the layout, `PROTOCOL` and `VERSION` (`version.ts`).                                               |
+| `plugin`                | The plugin authoring API, as an Effect plugin (`effect/`) or a Promise plugin (`promise/`).                                                                                                       |
+| `protocol`              | The single `RpcGroup` (effect/rpc, one JSON object per line), caller and peer headers, tagged errors, the contract in `contract/`.                                                                |
+| `client`                | The Effect RPC client with the per-command preflight and auto-start, the socket connector, the release lookup (`release.ts`).                                                                     |
+| `core`                  | The agent engine: persistence and the ledger, the Bus, sessions and their executions, the inbox, the plugin host, harness, runtime and agent catalogs.                                            |
+| `server`                | vibestd: the RPC handlers, admission, the service graph roots (`services.ts`, `app.ts`), the socket and HTTP listeners, other machines (`machine/`), the hourly update check (`update-check.ts`). |
+| `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                   |
+| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `harness-default`.                                      |
+| `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.  |
+| `plugin-harnesses`      | The harness plugins `pi`, `claude` and the Cursor plugin file users add: one `HarnessDefinition` per CLI.                                                                                         |
+| `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                             |
+| `runtime-herdr-core`    | The Runtime port on herdr-core (hc).                                                                                                                                                              |
+| `effect-herdr-sdk`      | Effect client for the herdr socket API.                                                                                                                                                           |
+| `effect-herdr-core-sdk` | Effect client for the herdr-core socket API.                                                                                                                                                      |
+| `integration/claude`    | The vibest Claude Code plugin (one hooks module), loaded with `claude --plugin-dir`.                                                                                                              |
+| `integration/pi`        | The vibest Pi extension, loaded with `pi -e`.                                                                                                                                                     |
+| `integration/cursor`    | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`), loaded with `cursor-agent --plugin-dir`.                                                                        |
+
+`packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); `cli-darwin-arm64` and `cli-linux-x64` carry
+the compiled binary.
+
+**Dependencies.** What each package's `src` may import of the workspace:
+
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│ Product (packages/cli): product identity + runtime-herdr                  │
-│                         + herdr plugin + presenter + CLI                   │
-├───────────────────────────────────────────────────────────────────────────┤
-│ Builtin plugins: harness adapters and integrations · workspace types       │
-│   scheduling · guard · knowledge · skills (delegate, pipeline) · check     │
-├───────────────────────────────────────────────────────────────────────────┤
-│ Plugin API (OpenCode V2, effect or setup)                                  │
-├───────────────────────────────────────────────────────────────────────────┤
-│ Core: schema contracts · lifecycles · execution · scheduling framework     │
-│       durable events · plugin host · ports                                 │
-├───────────────────────────────────────────────────────────────────────────┤
-│ herdr (agent runtime)                                                      │
-└───────────────────────────────────────────────────────────────────────────┘
+schema               nothing
+plugin               schema
+protocol             schema
+client               schema, protocol
+core                 schema, plugin
+server               schema, plugin, core, protocol, client
+platform-bun         schema, plugin, core, client, server, builtins (and effect-herdr-sdk)
+builtins             plugin, plugin-harnesses, runtime-herdr, runtime-herdr-core
+cli                  schema, protocol, client, builtins, server/daemon (and HANDOFF_ENV of server/server), #platform
+plugin-harnesses     plugin, schema
+runtime-herdr-core   plugin, schema, effect-herdr-core-sdk
+runtime-herdr        plugin, schema, protocol, client, effect-herdr-sdk
+integration/claude   schema, protocol
+integration/pi       schema, protocol, client
+integration/cursor   nothing
+effect-herdr-*-sdk   nothing
 ```
 
-**Packages.** Runtime dependencies flow one way: `schema` → `core` and `protocol` → `server`. `client` depends
-on `schema` and `protocol` only. Plugin types derive from the client API. Besides `server`, only `platform-bun` imports `core`; `packages/cli`
-reaches vibestd through `client`, `protocol` and `schema`, and the daemon through `server/daemon`
-(scoped `no-restricted-imports` in `.oxlintrc.json`).
+oxlint enforces the list with `vibest/package-imports` (`tools/oxlint/package-imports.mjs`, one map): it checks static
+imports, re-exports, dynamic `import()` and type queries (`import("…").T`) in each package's `src`, refuses a relative
+path that leaves the package, and lets only `commands/handlers/daemon/default.ts` take `HANDOFF_ENV` from
+`@vibest/server/server`. Bun stays behind `platform/` directories, `bun.ts` adapters and `packages/platform-bun`
+(`.agents/rules/bun-runtime-boundary.md`).
 
-| Package              | Role                                                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`             | Browser-safe contracts: branded IDs, domain structs, event definitions, configuration schema, the Harness and Workspace type contracts.                                                                       |
-| `protocol`           | The single `RpcGroup` (effect/rpc, JSON-RPC 2.0 as one JSON object per line), the protocol number, caller headers, tagged errors (copied from omac `rpc.ts`, `protocol.ts`).                                  |
-| `core`               | Persistence, event bus, Run and Agent execution, scheduling framework, plugin host, ports.                                                                                                                    |
-| `server`             | Handlers implementing `protocol`, the ACCESS table and admission, the daemon's service graph, the unix socket listener (omac `server.ts`, `daemon.ts`).                                                       |
-| `client`             | Effect RPC client with the per-command Ping preflight and auto-start rules (omac `client.ts`).                                                                                                                |
-| `plugin`             | Plugin authoring API (an Effect or a Promise plugin).                                                                                                                                                         |
-| `effect-herdr-sdk`   | Effect client for the herdr socket API.                                                                                                                                                                       |
-| `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                                        |
-| `plugin-harnesses`   | Builtin plugins `harness-pi`, `harness-claude` (and the Cursor plugin file users add): one `HarnessDefinition` per CLI (launch side, models, subscription reader, guard answer, how its vibest plugin loads). |
-| `integration/claude` | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`.           |
-| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to `extension.mjs` (reporting, guard, inbox) and `presentation.mjs` (tool grouping, compact user messages). Both loaded with `pi -e`.            |
-| `integration/cursor` | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                                    |
-| `plugin-git`         | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                                  |
-| `builtins`           | The builtin plugins in load order (`pre`): `harness-pi`, `harness-claude`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `harness-default`. Only the binary's composition root reads it.           |
-| `plugin-guard`       | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                                   |
-| `plugin-knowledge`   | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                                     |
-| `plugin-skills`      | Builtin skills for the entry session: delegate, pipeline. Replaceable and removable.                                                                                                                          |
-| `cli`                | Composition root of the Herdr TUI product.                                                                                                                                                                    |
+**Core layout.** As OpenCode lays out `packages/core/src`: a domain with several files has a root facade beside a
+folder of the same name, and the facade re-exports its own domain's names; a one-file domain stays at the root.
 
-Bun stays behind `platform/` directories, `bun.ts` adapters and `packages/platform-bun` (`.agents/rules/bun-runtime-boundary.md`).
-
-**Current layout (omac copied and split, every omac feature kept).** The plugin packages above are later steps; today
-the code sits in:
-
-| Package                                                  | Holds (omac source)                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/schema` (`@vibest/schema`)                     | The contracts `protocol` and `client` need, moved out of core modules: session, inbox and harness schemas and errors, the `project` / `session` / `inbox` / `message` rows (`model.ts`), plugin traces, Project store inputs, `RemoveOutcome`, `Layout`, `messageOf`, `describeSpawn`, `addPluginHint`. Core modules re-export some of them.                                                                          |
-| `packages/protocol`                                      | `rpc.ts`, `protocol.ts`. Depends on `schema` only.                                                                                                                                                                                                                                                                                                                                                                    |
-| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (scoped `no-restricted-imports` in `.oxlintrc.json` check `schema`, `core`, `server`, `protocol`, `client`).                                                                                                                                               |
-| `packages/runtime-herdr`                                 | The Runtime port on herdr: `runtime.ts` and `pool.ts` (omac `herdr-pool.ts`). The only package besides `effect-herdr-sdk` and `packages/cli` that imports herdr.                                                                                                                                                                                                                                                      |
-| `packages/server`                                        | `server.ts`, `daemon.ts`.                                                                                                                                                                                                                                                                                                                                                                                             |
-| `packages/client`                                        | `client.ts`; `release.ts`, the latest-release lookup that `vibest update` and vibestd's hourly check share. Depends on `schema` and `protocol` only.                                                                                                                                                                                                                                                                  |
-| `packages/cli` (`@vibest/cli`)                           | `cli.ts` (failure printing and exit codes), `commands/commands.ts` (every command spec), `commands/handlers/` (one handler per command, loaded with `import()` when it runs) and `framework/` (spec and runtime), `main.ts` (the handler table; provides the platform's `Host`, `replacements` and `exec` as the `Host` service), `replace.ts`, `ask.ts`, `bin/vibest.cjs`, the build script, and the omac CLI tests. |
-| `packages/platform-bun` (`@vibest/platform-bun`)         | The Bun platform of the binary: `bun.ts` (the daemon `Host`, its `replacements`, `services`, `runMain`, `exec`) and `plugin-source.ts`. Private, bundled into the binary; `packages/cli` maps `#platform` to it.                                                                                                                                                                                                      |
-| `packages/integration/claude`, `packages/integration/pi` | omac's `packages/claude`, `packages/pi-omac` (with its coordinator TUI). omac's standalone `extensions/pi-tui` package is removed. `packages/integration/cursor` is new.                                                                                                                                                                                                                                              |
-
-Each workspace package exports `./*` → `./src/*.ts`; imports name the module (`@vibest/core/database/db`).
+| Where                                                                                                                                                                                                                                                                                                                       | Holds                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `session.ts` + `session/`                                                                                                                                                                                                                                                                                                   | Sessions: spawn, placement, executions, delivery, exits, archive, move, restart, entry, reconcile, locks, live state |
+| `plugin.ts` + `plugin/`                                                                                                                                                                                                                                                                                                     | The plugin host: sources, supervisor, registry, hooks, host                                                          |
+| `project.ts` + `project/`                                                                                                                                                                                                                                                                                                   | Projects: create, identity, activity                                                                                 |
+| `database/`                                                                                                                                                                                                                                                                                                                 | `db.ts` and its `db-*.ts` modules, the journal, projectors, ledger reads, migrations                                 |
+| `effect/`                                                                                                                                                                                                                                                                                                                   | `LayerNode`, the platform tokens, `bounded.ts`, `keyed-mutex.ts`                                                     |
+| `subscriptions/`                                                                                                                                                                                                                                                                                                            | Harness subscription usage (`Subscriptions`, served by `vibest subscriptions`)                                       |
+| `bus.ts`, `reactor.ts`, `inbox.ts`, `batch.ts`, `harness.ts`, `models.ts`, `agents.ts`, `runtimes.ts`, `caller.ts`, `launch.ts`, `remove.ts`, `replies.ts`, `system-prompt.ts`, `integration.ts`, `guard.ts`, `git.ts`, `worktree.ts`, `repository-url.ts`, `processes.ts`, `identity.ts`, `paths.ts`, `drain.ts`, `app.ts` | One-file domains                                                                                                     |
 
 ## 3. Core domain
 
@@ -601,23 +607,27 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 
 ## 5. Service composition
 
-- Services are `Context.Service` classes; each module exports itself as a namespace
-  (`export * as Run from "./run.js"`).
+- Each module exports itself as a namespace (`export * as Inbox from "./inbox.ts"`) holding its `Service` (a
+  `Context.Service` class), `Interface`, `layer`, `node` and, with options, `configured`, as OpenCode does. The
+  rules are in [`.agents/rules/effect.md`](../../.agents/rules/effect.md); its Status line lists the modules that still
+  have the older shape (a class with `static readonly layer` and `node`).
 - Services are assembled from a **service graph**: each entry is `{ service, layer, dependencies }` with a scope.
   A narrower scope may depend on a wider one, never the reverse, checked at type level. The graph compiles to
   one `Layer`.
-- Configuration replaces entries at the composition root (`Database.entry.replace(Database.configured(...))`).
+- Configuration replaces entries at the composition root (`PlatformNode.sqlClientLayer.replace(…)` in
+  `packages/platform-bun/src/bun.ts`).
   Product identity and runtime are replacements, which is how one core yields several isolated products.
 - Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
-  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
-  left out, and `unbound` is infallible). Each service has a `node` listing its `deps`; what the host supplies
+  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; `unbound` is infallible).
+  Its release tracking is kept: `LayerNode.Releases` records each node whose layer is still releasing, and when
+  shutdown passes its deadline the daemon prints them (`server/src/daemon.ts`, `server/src/shutdown-deadline.ts`). Each service has a `node` listing its `deps`; what the host supplies
   (the platform services, the daemon's identity) is an unbound node. The SQL client, the socket server and the HTTP
   server can fail to open, so the host supplies each as an infallible layer token (`SqlClientLayer`,
   `SocketServerLayer`, `HttpServerLayer`: an unbound node whose value is a `Layer`), and a real provider node
   (`sqlClient`, `socketServer`, `httpServer`) consumes the token and carries the failure (`DatabaseOpenFailed`,
   `SchemaMismatch`, `SqlError`, `SocketServerError`, `ServeError`) in its type; a host that omits a token is
-  refused when the graph is compiled. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
-  the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
+  refused when the graph is compiled. The roots are `services` (`packages/server/src/services.ts`) and `daemon`
+  (`packages/server/src/app.ts`), which adds the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
   replacements. The platform (`packages/platform-bun/src/bun.ts`) exports `replacements` for everything it supplies
   (platform services, sqlite, the sockets, the machine transport, the plugin loader, the builtin plugins, the host
   environment, the process platform, the host facts); its `Host` keeps only `lock` and `checkDatabase`, which run
@@ -626,10 +636,10 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 - Today there is only the daemon scope: plugins and catalogs are the same for every Project. Tags exist in
   `LayerNode` and are not declared until a project scope is built.
 
-| Scope       | Lives                                                               | Holds                                                                                                                    |
-| ----------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **daemon**  | once per daemon                                                     | Product, Database, Event bus, Project registry, Machine registry, Run and Agent execution, Scheduler queue, event stream |
-| **project** | one compiled graph per Project, in a `LayerMap` keyed by Project id | Configuration, catalogs (definitions, harnesses, skills, Workspace types, commands), plugin registry and supervisor      |
+| Scope                   | Lives                                                               | Holds                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **daemon**              | once per daemon                                                     | the database and its ledger, the Bus, projects, machines, sessions and their executions, the inbox, the plugin host, the harness, runtime and agent catalogs |
+| **project** (not built) | one compiled graph per Project, in a `LayerMap` keyed by Project id | the plugin registry and supervisor, the agent, harness and runtime catalogs, for that project's sessions                                                     |
 
 ## 6. Persistence and events
 
