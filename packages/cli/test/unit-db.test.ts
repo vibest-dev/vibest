@@ -5,10 +5,9 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf } from "@vibest/core/database/db-rows"
-import { APPLICATION_ID } from "@vibest/core/database/db-schema"
-import { makeJournal } from "@vibest/core/database/journal"
+import { APPLICATION_ID, PROJECTION_VERSION } from "@vibest/core/database/db-schema"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
-import { PROJECTION_VERSION } from "@vibest/core/database/projectors"
+import * as Projectors from "@vibest/core/database/projectors"
 import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -27,15 +26,16 @@ const fact = (
   input: { readonly sessionId?: string; readonly projectId?: string; readonly at?: number; readonly data: object },
 ) =>
   Effect.gen(function* () {
-    const journal = yield* makeJournal(() => Effect.void)
-    return yield* journal.commit(journal.emit(Catalog[type] as never, input as never))
+    const bus = yield* Bus
+    return yield* bus.publish(Catalog[type] as never, input as never)
   }).pipe(Effect.orDie)
 
 const memoryDb = () =>
   Db.layer.pipe(
-    Layer.provideMerge(Platform.sqlite(":memory:")),
-    Layer.provide(Bus.layer),
+    Layer.provide(Projectors.layer),
+    Layer.provideMerge(Bus.layer),
     Layer.provide(SessionLive.layer),
+    Layer.provideMerge(Platform.sqlite(":memory:")),
   )
 
 const ENTRY = { agent: "coordinator" } as const
@@ -99,7 +99,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(memoryDb())),
   )
 
-  const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
+  const memory = <A, E>(program: Effect.Effect<A, E, Bus | Db | SqlClient.SqlClient>) =>
     program.pipe(Effect.provide(memoryDb()))
 
   it.effect(
@@ -622,6 +622,9 @@ describe("Db", () => {
 
   const brokenInstall = (file: string, how: "fail" | "interrupt") =>
     Db.layer.pipe(
+      Layer.provide(Projectors.layer),
+      Layer.provide(Bus.layer),
+      Layer.provide(SessionLive.layer),
       Layer.provide(
         Layer.effect(
           SqlClient.SqlClient,
@@ -641,8 +644,6 @@ describe("Db", () => {
           }),
         ).pipe(Layer.provide(Platform.sqlite(file))),
       ),
-      Layer.provide(Bus.layer),
-      Layer.provide(SessionLive.layer),
     )
 
   it.effect("a failed or interrupted install rolls back, then a later open initializes", () =>
@@ -943,6 +944,9 @@ describe("Db", () => {
       const script = yield* fileAt(dir, "open.ts")
       const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/database/db.ts", import.meta.url))
       const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
+      const projectorsModule = url.fileURLToPath(
+        new URL("../../../packages/core/src/database/projectors.ts", import.meta.url),
+      )
       const liveModule = url.fileURLToPath(new URL("../../../packages/core/src/session/live.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../../platform-bun/src/bun.ts", import.meta.url))
       yield* fs.writeFileString(
@@ -950,10 +954,11 @@ describe("Db", () => {
         [
           'import { Effect, Layer } from "effect"',
           `import { Bus } from ${JSON.stringify(busModule)}`,
+          `import * as Projectors from ${JSON.stringify(projectorsModule)}`,
           `import { SessionLive } from ${JSON.stringify(liveModule)}`,
           `import { Db } from ${JSON.stringify(dbModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer)))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Projectors.layer), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer), Layer.provide(Platform.sqlite(process.argv[2]!))))))",
           "",
         ].join("\n"),
       )

@@ -1,4 +1,5 @@
-import { equalToReplay } from "@vibest/core/database/journal"
+import { equalToReplay } from "@vibest/core/bus"
+import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
@@ -38,7 +39,9 @@ const replayChecked = Layer.effectDiscard(
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
         if (!(yield* hasLedger(sql))) return
-        const difference = yield* equalToReplay(sql).pipe(Effect.provide(Layer.fresh(memorySqlite)))
+        const difference = yield* equalToReplay(sql).pipe(
+          Effect.provide(Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))),
+        )
         if (difference !== undefined)
           return yield* Effect.die(new Error(`the projections differ from a replay of the log: ${difference}`))
       }).pipe(Effect.orDie),

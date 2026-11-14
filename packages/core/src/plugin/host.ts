@@ -1,9 +1,9 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
+import { Catalog, type FactOf, type FactType } from "@vibest/schema/event"
 import { Effect, Stream } from "effect"
 
 import { Agents } from "../agents.ts"
-import { Bus, type BusEvent } from "../bus.ts"
+import { Bus } from "../bus.ts"
 import { Harnesses } from "../harness.ts"
 import { Runtimes } from "../runtimes.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
@@ -12,8 +12,6 @@ import * as Hooks from "./hooks.ts"
 type Short = keyof VibestPlugin.AgentHooks
 type AgentHook = `agent.${Short}`
 const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
-
-const isFact = (event: BusEvent): event is Fact => Object.hasOwn(Catalog, event.type)
 
 const factsFor =
   (bus: Bus["Service"], plugin: string): VibestPlugin.EventDomain["subscribe"] =>
@@ -26,11 +24,10 @@ const factsFor =
         ? Effect.void
         : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown fact types ${unknown.join(", ")}`)
     if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
-    const wanted = (fact: Fact): fact is FactOf<T> => known.size === 0 || known.has(fact.type)
-    return Stream.unwrap(Effect.andThen(warned, Effect.map(bus.subscribe, Stream.fromSubscription))).pipe(
-      Stream.filter(isFact),
-      Stream.filter(wanted),
-    )
+    const definitions = known.size === 0 ? Object.values(Catalog) : [...known].map((type) => Catalog[type as FactType])
+    return Stream.unwrap(
+      Effect.andThen(warned, Effect.map(bus.subscribe(definitions), Stream.fromSubscription)),
+    ) as Stream.Stream<FactOf<T>>
   }
 
 export interface Input {

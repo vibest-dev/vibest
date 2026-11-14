@@ -30,7 +30,7 @@ export const inboxMethods = (store: Store) => {
     insertInboxRow,
     endExecution,
     setStatus,
-    emit,
+    publish,
     currentProcessId,
   } = store
   const queuedBy = reads.queuedBy
@@ -45,7 +45,7 @@ export const inboxMethods = (store: Store) => {
     Effect.gen(function* () {
       if ((yield* openExecution(id)) !== execution) return false
       if ((yield* acceptedAt(id, execution)) === null)
-        yield* emit(ExecutionAccepted, { sessionId: id, data: { execution } })
+        yield* publish(ExecutionAccepted, { sessionId: id, data: { execution } })
       return true
     })
   const isEntry = (id: string) =>

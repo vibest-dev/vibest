@@ -3,8 +3,6 @@ import { shellQuote } from "@vibest/schema/layout"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { PROJECTION_SCHEMA, PROJECTION_VERSION } from "./projectors.ts"
-
 export const APPLICATION_ID = 0x76696265
 
 export const MIGRATION_TABLE = "migration"
@@ -68,6 +66,10 @@ const metaOf = (sql: SqlClient.SqlClient, key: "catalog" | "projection") =>
     Effect.map((rows) => (rows[0] === undefined ? undefined : Number(rows[0].value))),
   )
 
+export const setMeta = (sql: SqlClient.SqlClient, key: "catalog" | "projection", value: number) =>
+  sql`INSERT INTO meta (key, value) VALUES (${key}, ${String(value)})
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+
 export const ledgerOf = (sql: SqlClient.SqlClient) =>
   sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`.pipe(Effect.map((rows) => rows[0]?.value))
 
@@ -98,3 +100,128 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.flatMap((sql) => sql<{ n: number }>`SELECT count(*) AS n FROM sqlite_master`),
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
+
+export const PROJECTION_VERSION = 8
+
+export const PROJECTION_SCHEMA = [
+  `CREATE TABLE project (
+    id               TEXT PRIMARY KEY CHECK (length(id) = 36),
+    directory        TEXT UNIQUE,
+    entry_session_id TEXT
+  ) STRICT`,
+  `CREATE TABLE project_repository (
+    project_id TEXT NOT NULL,
+    path       TEXT NOT NULL UNIQUE,
+    remote_url TEXT
+  ) STRICT`,
+  `CREATE INDEX project_repository_project ON project_repository (project_id)`,
+  `CREATE TABLE session (
+    id                    TEXT PRIMARY KEY,
+    project_id            TEXT NOT NULL,
+    parent_session_id     TEXT,
+    agent                 TEXT NOT NULL,
+    name                  TEXT NOT NULL,
+    directory             TEXT NOT NULL,
+    origin_peer           TEXT,
+    origin_project        TEXT,
+    origin_session        TEXT,
+    created_at            INTEGER NOT NULL,
+    ended_at              INTEGER,
+    process_id            INTEGER,
+    active_at             INTEGER
+  ) STRICT`,
+  `CREATE INDEX session_project ON session (project_id)`,
+  `CREATE INDEX session_parent ON session (parent_session_id)`,
+  `CREATE INDEX session_live ON session (directory) WHERE ended_at IS NULL`,
+  `CREATE INDEX session_origin ON session (origin_peer, origin_project) WHERE origin_peer IS NOT NULL`,
+  `CREATE TABLE process (
+    session_id           TEXT NOT NULL,
+    id                   INTEGER NOT NULL,
+    harness              TEXT NOT NULL,
+    provider             TEXT,
+    model                TEXT,
+    routing              TEXT,
+    runtime              TEXT NOT NULL,
+    terminal             TEXT,
+    pid                  INTEGER,
+    integration_version  TEXT,
+    integration_protocol INTEGER,
+    conversation         TEXT,
+    started_at           INTEGER NOT NULL,
+    placed_at            INTEGER,
+    ready_at             INTEGER,
+    ended_at             INTEGER,
+    end_reason           TEXT,
+    PRIMARY KEY (session_id, id)
+  ) STRICT`,
+  `CREATE UNIQUE INDEX process_live ON process (session_id) WHERE ended_at IS NULL`,
+  `CREATE INDEX process_terminal ON process (runtime, terminal) WHERE ended_at IS NULL AND terminal IS NOT NULL`,
+  `CREATE TABLE execution (
+    session_id   TEXT NOT NULL,
+    id           INTEGER NOT NULL,
+    process_id   INTEGER,
+    typed        TEXT,
+    started_at   INTEGER NOT NULL,
+    accepted_at  INTEGER,
+    outcome      TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),
+    failure      TEXT,
+    failure_kind TEXT CHECK (failure_kind IN ('limit')),
+    reply        TEXT,
+    ended_at     INTEGER,
+    PRIMARY KEY (session_id, id)
+  ) STRICT`,
+  `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL`,
+  `CREATE TABLE inbox (
+    session_id        TEXT    NOT NULL,
+    id                INTEGER NOT NULL,
+    sender_session_id TEXT,
+    kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
+    content           TEXT    NOT NULL,
+    request           TEXT,
+    peer_item         TEXT,
+    status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
+    execution_id      INTEGER,
+    PRIMARY KEY (session_id, id)
+  ) STRICT`,
+  `CREATE INDEX inbox_status ON inbox (status, session_id)`,
+  `CREATE INDEX inbox_kind ON inbox (session_id, kind, id)`,
+  `CREATE INDEX inbox_execution ON inbox (session_id, execution_id) WHERE execution_id IS NOT NULL`,
+  `CREATE INDEX inbox_request ON inbox (request) WHERE request IS NOT NULL`,
+  `CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL`,
+  `CREATE TABLE machine (
+    name         TEXT PRIMARY KEY,
+    target       TEXT NOT NULL,
+    vibestd_id   TEXT NOT NULL UNIQUE CHECK (length(vibestd_id) = 36),
+    connected_at INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE TABLE peer (
+    id           TEXT PRIMARY KEY CHECK (length(id) = 36),
+    name         TEXT NOT NULL,
+    connected_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE TABLE outbox (
+    id         TEXT PRIMARY KEY CHECK (length(id) = 36),
+    seq        INTEGER NOT NULL,
+    peer_id    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    recipient  TEXT,
+    kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
+    content    TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX outbox_peer ON outbox (peer_id, seq)`,
+  `CREATE INDEX outbox_session ON outbox (session_id)`,
+]
+
+export const PROJECTION_TABLES = {
+  project: "id",
+  project_repository: "path",
+  session: "id",
+  process: "session_id, id",
+  execution: "session_id, id",
+  inbox: "session_id, id",
+  machine: "name",
+  peer: "id",
+  outbox: "id",
+} as const

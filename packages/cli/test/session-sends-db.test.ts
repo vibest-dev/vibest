@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { systemPrompt } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"
@@ -15,9 +16,10 @@ const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
   program.pipe(
     Effect.provide(
       Db.layer.pipe(
-        Layer.provideMerge(Platform.sqlite(":memory:")),
+        Layer.provide(Projectors.layer),
         Layer.provide(Bus.layer),
         Layer.provide(SessionLive.layer),
+        Layer.provideMerge(Platform.sqlite(":memory:")),
       ),
     ),
   )

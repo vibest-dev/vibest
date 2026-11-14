@@ -18,7 +18,7 @@ import { type AgentStatus, InboxStatus, RuntimeAddress } from "@vibest/schema/se
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
-import { Bus, type BusEvent, type Signal, withChanges } from "../bus.ts"
+import { Bus } from "../bus.ts"
 import { noticeEnvelope, sessionEnvelope } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
@@ -30,7 +30,6 @@ import {
   type Integration,
   type ExecutionEnd,
 } from "./db-rows.ts"
-import { makeJournal } from "./journal.ts"
 import { decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
 
 type InboxKey = { readonly session: string; readonly id: number }
@@ -92,8 +91,7 @@ const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, termina
 export const makeStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const bus = yield* Bus
-  const journal = yield* makeJournal<Signal>((events: ReadonlyArray<BusEvent>) => bus.published(withChanges(events)))
-  const { emit, commit: tx, notify, afterCommit } = journal
+  const { publish, transaction: tx, observe, afterCommit } = bus
   const afterCommitLive = (effect: Effect.Effect<void>) => afterCommit(() => Effect.runSync(effect))
   const reads = ledgerReads(sql)
   const now = Clock.currentTimeMillis
@@ -186,7 +184,7 @@ export const makeStore = Effect.gen(function* () {
   const startExecution = (sessionId: string, at: number, typed?: string) =>
     Effect.gen(function* () {
       const process = yield* currentProcessId(sessionId)
-      return yield* emit(ExecutionStarted, {
+      return yield* publish(ExecutionStarted, {
         sessionId,
         at,
         data: { ...(process === undefined ? {} : { process }), ...(typed ? { typed } : {}) },
@@ -209,7 +207,7 @@ export const makeStore = Effect.gen(function* () {
         const at = yield* now
         for (const r of moved) {
           const execution = to === "delivered" ? (into ?? (yield* openExecution(r.session))) : undefined
-          yield* emit(InboxMoved, {
+          yield* publish(InboxMoved, {
             sessionId: r.session,
             at,
             data: { inbox: r.id, to, ...(execution === undefined ? {} : { execution }) },
@@ -229,7 +227,7 @@ export const makeStore = Effect.gen(function* () {
     readonly peerItem?: string | undefined
     readonly at?: number | undefined
   }) =>
-    emit(InboxQueued, {
+    publish(InboxQueued, {
       sessionId: row.recipient,
       ...(row.at === undefined ? {} : { at: row.at }),
       data: {
@@ -248,14 +246,14 @@ export const makeStore = Effect.gen(function* () {
       const [task] = yield* sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${sessionId}
         AND kind = 'task' AND status = 'delivered' AND execution_id IS NULL`
       if (task !== undefined)
-        yield* emit(InboxMoved, { sessionId, at, data: { inbox: task.id, to: "delivered", execution } })
+        yield* publish(InboxMoved, { sessionId, at, data: { inbox: task.id, to: "delivered", execution } })
     })
 
   const endProcess = (id: string, reason: ProcessEndReason, at?: number) =>
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
       if (current === undefined || current.ended !== null) return false
-      yield* emit(ProcessEnded, {
+      yield* publish(ProcessEnded, {
         sessionId: id,
         ...(at === undefined ? {} : { at }),
         data: { process: current.id, reason },
@@ -278,7 +276,7 @@ export const makeStore = Effect.gen(function* () {
       if (live !== undefined && live.terminal === null && start.terminal !== "" && sameChoice(live, start)) {
         yield* placeProcess(id, start.terminal, start.pid, at)
         if (start.resume && start.resume !== live.conversation)
-          yield* emit(ProcessConversation, {
+          yield* publish(ProcessConversation, {
             sessionId: id,
             ...stamp,
             data: { process: live.id, conversation: start.resume },
@@ -286,8 +284,8 @@ export const makeStore = Effect.gen(function* () {
         return live.id
       }
       if (live !== undefined)
-        yield* emit(ProcessEnded, { sessionId: id, ...stamp, data: { process: live.id, reason: "superseded" } })
-      const seq = yield* emit(ProcessStarted, {
+        yield* publish(ProcessEnded, { sessionId: id, ...stamp, data: { process: live.id, reason: "superseded" } })
+      const seq = yield* publish(ProcessStarted, {
         sessionId: id,
         ...stamp,
         data: {
@@ -310,7 +308,7 @@ export const makeStore = Effect.gen(function* () {
       const live = yield* liveProcess(id)
       if (live !== undefined && live.terminal === null && sameChoice(live, start)) {
         if (start.resume && start.resume !== live.conversation)
-          yield* emit(ProcessConversation, { sessionId: id, data: { process: live.id, conversation: start.resume } })
+          yield* publish(ProcessConversation, { sessionId: id, data: { process: live.id, conversation: start.resume } })
         return live.id
       }
       return yield* startProcess(id, start)
@@ -320,7 +318,7 @@ export const makeStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const live = yield* liveProcess(id)
       if (live === undefined || live.terminal !== null) return undefined
-      yield* emit(ProcessPlaced, {
+      yield* publish(ProcessPlaced, {
         sessionId: id,
         ...(at === undefined ? {} : { at }),
         data: { process: live.id, terminal, ...(pid === undefined ? {} : { pid }) },
@@ -332,7 +330,7 @@ export const makeStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const [row] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${id}`
       if (row === undefined || row.name === name) return false
-      yield* emit(SessionRenamed, { sessionId: id, data: { name } })
+      yield* publish(SessionRenamed, { sessionId: id, data: { name } })
       return true
     })
 
@@ -340,7 +338,7 @@ export const makeStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
       if (row === undefined || row.endedAt !== null) return false
-      yield* emit(SessionEnded, { sessionId: id, data: { reason: "archived" } })
+      yield* publish(SessionEnded, { sessionId: id, data: { reason: "archived" } })
       yield* afterCommitLive(sessionLive.ended(id))
       return true
     })
@@ -350,7 +348,7 @@ export const makeStore = Effect.gen(function* () {
       const current = yield* currentProcess(id)
       if (current === undefined || current.conversation === conversation) return false
       if (process !== undefined && process !== current.id) return false
-      yield* emit(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
+      yield* publish(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
       return true
     })
 
@@ -358,7 +356,7 @@ export const makeStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const t = at ?? (yield* now)
       const execution = (yield* openExecution(id)) ?? (yield* startExecution(id, t))
-      yield* emit(ExecutionEnded, {
+      yield* publish(ExecutionEnded, {
         sessionId: id,
         at: t,
         data: {
@@ -396,7 +394,7 @@ export const makeStore = Effect.gen(function* () {
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
       const id = row.request ?? randomId()
       if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
-      yield* emit(OutboxQueued, {
+      yield* publish(OutboxQueued, {
         ...(row.at === undefined ? {} : { at: row.at }),
         data: {
           id,
@@ -518,7 +516,7 @@ export const makeStore = Effect.gen(function* () {
       const current = yield* findSession(id)
       if (current === undefined) return
       yield* afterCommitLive(remember({ ...current, status }))
-      yield* notify({ type: "session.changed", sessionId: id })
+      yield* observe({ type: "session.changed", sessionId: id })
     })
 
   const dropWaiting = (projectIdValue: string) =>
@@ -604,11 +602,11 @@ export const makeStore = Effect.gen(function* () {
     sessionLive,
     moving,
     remember,
-    emit,
+    publish,
     afterCommit,
     afterCommitLive,
     tx,
-    notify,
+    observe,
     projectPrefixTaken,
     repositoriesOf,
     changedRepositories,
