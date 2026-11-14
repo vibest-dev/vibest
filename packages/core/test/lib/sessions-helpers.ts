@@ -104,13 +104,7 @@ export const test = <E>(
   name: string,
   program: Effect.Effect<void, E, TestServices | Scope.Scope>,
   options?: TestOptions,
-  touchesProcessWideSeam = false,
-) =>
-  it.effect(
-    name,
-    () => program.pipe(Effect.provide(sessionFrom(options))),
-    touchesProcessWideSeam ? { concurrent: false } : undefined,
-  )
+) => it.effect(name, () => program.pipe(Effect.provide(sessionFrom(options))))
 
 export const SPAWN_HEAVY_TEST_TIMEOUT = 90_000
 

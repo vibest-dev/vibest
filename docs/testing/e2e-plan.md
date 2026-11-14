@@ -179,8 +179,10 @@ What the checks that drive real herdr panes rely on:
   is how an agent vibest starts names its own binary.
 - I9's Claude has no Glob or Grep tool and finds and searches with Bash (guard.test covers those tools). Its session
   rules say not to run herdr, and the model sometimes keeps to them: the check asks once more, for that call alone.
-- Pi renames its process to `pi`, and herdr may then show no argv for it: S10-pi proves the resume by B showing A's
-  conversation, and finds a harness by the program's own name, not a shell or `vibest` naming it in its arguments.
+- Pi renames its process to `pi` within a second of starting, and herdr then shows no argv for it: the S10 and S12 checks
+  never read Pi's launch arguments. They find Pi by herdr's pane agent or the program's own name (argv0), not a shell or
+  `vibest` naming it in its arguments; S10-resume proves the resume by the conversation the new process reports and the
+  earlier output on screen, and S10-launch by Pi listing the system prompt file in its loaded context.
 - S10 runs one execution first: vibest resumes only a conversation the harness wrote. It prompts through herdr's
   `agent.prompt`, as vibest does; an enter typed into Pi's editor only adds a line. herdr marks a finished execution nobody
   looked at `done`. A keeps only its shell once what the harness's extensions started (Pi's update checks) has ended.

@@ -14,7 +14,6 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
-import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
@@ -26,7 +25,7 @@ import * as Remove from "../remove.ts"
 import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
 import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
-import { SessionLocks } from "./locks.ts"
+import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
 const make = Effect.gen(function* () {
@@ -59,7 +58,7 @@ const make = Effect.gen(function* () {
     const what = `${session.id} never finished starting (vibestd stopped while it started)`
     if (yield* db.hadTerminal(session.id)) return yield* notice(session, `${what}.`)
     const ended = yield* getRow(session.id)
-    const out = yield* locks.withLock(KeyedMutex.directoryLock((yield* db.sessionDirectory(session.id)) ?? ""))(
+    const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(session.id)) ?? ""))(
       removal.release({ h, session: ended, terminal: undefined, keepWorktree: false, reasons: [] }),
     )
     let kept = out.worktree === "kept" ? out.reasons.join("; ") : undefined
@@ -110,7 +109,7 @@ const make = Effect.gen(function* () {
         }
         session = yield* getRow(id)
       }
-      const out = yield* locks.withLock(KeyedMutex.directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
+      const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
         removal.release({
           h,
           session,
@@ -203,7 +202,7 @@ const make = Effect.gen(function* () {
         const session = yield* getRow(id)
         if (!archived(session) || exitedAt(session) !== null) return
         const h = yield* live(session)
-        const out = yield* locks.withLock(KeyedMutex.directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
+        const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
           removal.release({ h, session, terminal: terminalOf(session), keepWorktree: true, reasons: [] }),
         )
         yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)

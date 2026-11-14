@@ -175,7 +175,7 @@ const make = Effect.gen(function* () {
   const there = new Map<string, { readonly runtimes: ReadonlyArray<RuntimeThere>; readonly at: number }>()
   const noted = new Map<string, Map<string, { readonly notes: ReadonlyArray<PluginNote>; readonly at: number }>>()
   const repairs = new Map<string, { readonly at: number; readonly note: string }>()
-  const lock = KeyedMutex.keyedLock<string>()
+  const lock = yield* KeyedMutex.make<string>()
 
   const heard = (name: string, runtimes: ReadonlyArray<RuntimeThere> | undefined) =>
     Effect.map(Clock.currentTimeMillis, (at) => void there.set(name, { runtimes: runtimes ?? [], at }))

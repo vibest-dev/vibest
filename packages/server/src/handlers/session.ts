@@ -28,7 +28,7 @@ export const make = (
     const runtimes = yield* Runtimes.Service
     const bus = yield* Bus
     const integration = yield* Integration.Service
-    const seenLocked = KeyedMutex.keyedLock<string>()
+    const seenLocked = yield* KeyedMutex.make<string>()
 
     const startedByPeer = (scope: NonNullable<Parameters<typeof db.resolveSession>[1]>, id: string, direct: boolean) =>
       Effect.gen(function* () {

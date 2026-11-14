@@ -9,7 +9,7 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
@@ -67,7 +67,7 @@ const make = Effect.gen(function* () {
   const vibestCommand = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const projectLocked = KeyedMutex.keyedLock<string>()
+  const projectLocked = yield* KeyedMutex.make<string>()
 
   const withHarness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -185,91 +185,97 @@ const make = Effect.gen(function* () {
       return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
     let opened: Terminal | undefined
     let claimedId: string | undefined
-    const command = yield* withHarness(
-      Launch.entryCommand({
-        harness: chosen,
-        agent,
-        root,
-        provider: decision.provider ?? null,
-        model: decision.model ?? null,
-        session: projectLocked.withLock(id)(
-          Effect.gen(function* () {
-            yield* notRunning(id, "")
-            const existing = yield* db.entryOf(id)
-            const sessionId =
-              existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
-            const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
-              root,
-              label: "vibest",
-              home: layout.home,
-              focus: input.focus,
-            })
-            opened = pane
-            const claimed = yield* db
-              .startEntry(
-                id,
-                chosen,
-                fresh,
-                { runtime: rt.id, address: pane },
-                {
-                  provider: decision.provider,
-                  model: decision.model,
-                  routing: { decidedBy: decision.decidedBy, trace: decision.trace },
-                  projectDirectory: root,
-                  agent,
-                  firstInput: firstInputOf(chosen),
-                  ...(existing === undefined || fresh ? { sessionId } : {}),
-                },
+    const closeLaunched = Effect.suspend(() =>
+      opened === undefined
+        ? Effect.void
+        : rt
+            .close(opened)
+            .pipe(
+              Effect.ignore,
+              Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
+            ),
+    )
+    return yield* Effect.gen(function* () {
+      const command = yield* withHarness(
+        Launch.entryCommand({
+          harness: chosen,
+          agent,
+          root,
+          provider: decision.provider ?? null,
+          model: decision.model ?? null,
+          session: projectLocked.withLock(id)(
+            Effect.gen(function* () {
+              yield* notRunning(id, "")
+              const existing = yield* db.entryOf(id)
+              const sessionId =
+                existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
+              const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
+                root,
+                label: "vibest",
+                home: layout.home,
+                focus: input.focus,
+              }).pipe(
+                Effect.tap((pane) =>
+                  Effect.sync(() => {
+                    opened = pane
+                  }),
+                ),
+                Effect.uninterruptible,
               )
-              .pipe(Effect.tapError(() => rt.close(pane).pipe(Effect.ignore)))
-            claimedId = claimed.sessionId
-            return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
-          }),
-        ),
-      }),
-    ).pipe(
-      Effect.catchTag("HarnessUnavailable", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
-      Effect.catchTag("SystemPromptDirUnsafe", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
-      Effect.tapError(() =>
-        opened === undefined
-          ? Effect.void
-          : rt
-              .close(opened)
-              .pipe(
-                Effect.ignore,
-                Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
-              ),
-      ),
-    )
-    if (opened === undefined) return yield* Effect.die("launch opened no terminal")
-    const pane = opened
-    yield* run(pane, Launch.restartArgv(command)).pipe(
-      Effect.catch((error) =>
-        rt
-          .close(pane)
-          .pipe(
-            Effect.ignore,
-            Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
-            Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message }))),
+              const claimed = yield* db
+                .startEntry(
+                  id,
+                  chosen,
+                  fresh,
+                  { runtime: rt.id, address: pane },
+                  {
+                    provider: decision.provider,
+                    model: decision.model,
+                    routing: { decidedBy: decision.decidedBy, trace: decision.trace },
+                    projectDirectory: root,
+                    agent,
+                    firstInput: firstInputOf(chosen),
+                    ...(existing === undefined || fresh ? { sessionId } : {}),
+                  },
+                )
+                .pipe(
+                  Effect.tap((claimed) =>
+                    Effect.sync(() => {
+                      claimedId = claimed.sessionId
+                    }),
+                  ),
+                  Effect.uninterruptible,
+                )
+              return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
+            }),
           ),
-      ),
-    )
-    const routing =
-      Object.keys(decision.decidedBy).length === 0
-        ? undefined
-        : describeSpawn({
-            harness: chosen,
-            provider: decision.provider,
-            model: decision.model,
-            decidedBy: decision.decidedBy,
-          })
-    return {
-      runtime: rt.id,
-      terminal: pane.id,
-      place: placeOf(rt, pane),
-      attach: rt.attach?.(at.target) ?? null,
-      ...(routing === undefined ? {} : { routing }),
-    }
+        }),
+      ).pipe(
+        Effect.catchTag("HarnessUnavailable", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
+        Effect.catchTag("SystemPromptDirUnsafe", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
+      )
+      if (opened === undefined) return yield* Effect.die("launch opened no terminal")
+      const pane = opened
+      yield* run(pane, Launch.restartArgv(command)).pipe(
+        Effect.mapError((error) => new LaunchFailed({ message: error.message })),
+      )
+      const routing =
+        Object.keys(decision.decidedBy).length === 0
+          ? undefined
+          : describeSpawn({
+              harness: chosen,
+              provider: decision.provider,
+              model: decision.model,
+              decidedBy: decision.decidedBy,
+            })
+      return {
+        runtime: rt.id,
+        terminal: pane.id,
+        place: placeOf(rt, pane),
+        attach: rt.attach?.(at.target) ?? null,
+        ...(routing === undefined ? {} : { routing }),
+      }
+    }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeLaunched)))
   })
 
   const start = Effect.fn("EntrySession.start")(function* (input: {

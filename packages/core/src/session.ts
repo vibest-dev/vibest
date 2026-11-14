@@ -27,10 +27,11 @@ import { Runtimes, RuntimeError } from "./runtimes.ts"
 import { Archive } from "./session/archive.ts"
 import { Delivery, type SendRefused, unreachable } from "./session/delivery.ts"
 import { SessionLive } from "./session/live.ts"
+import type { Restarted } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
-import { type Outdated, Restart, type Restarted } from "./session/restart.ts"
+import { type Outdated, Restart } from "./session/restart.ts"
 import { Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
 import { gitState, mainCheckout } from "./worktree.ts"
 
@@ -51,13 +52,7 @@ export {
 
 export { CONFIRM_TIMEOUT, READY_TIMEOUT, STOP_WAIT } from "./session/executions.ts"
 export { HOOK_GRACE, START_TIMEOUT } from "./session/reconcile.ts"
-export {
-  allocationNameSource,
-  defaultSessionName,
-  shareAdmitPause,
-  type SpawnInput,
-  type Spawned,
-} from "./session/spawn.ts"
+export { defaultSessionName, type SpawnInput, type Spawned } from "./session/spawn.ts"
 
 const SESSION_DEPS = [
   Archive.node,
@@ -271,7 +266,7 @@ export const make = Effect.gen(function* () {
     inMemory: Effect.gen(function* () {
       return {
         tracked: (yield* sessionLive.size).tracked,
-        locks: locks.size(),
+        locks: yield* locks.size,
         reconciles: yield* reconcile.reconciles,
       }
     }),

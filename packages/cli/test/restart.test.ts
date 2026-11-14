@@ -4,12 +4,12 @@ import { executionStateOf, exitedAt, pidOf } from "@vibest/core/database/db-rows
 import { line } from "@vibest/core/inbox"
 import { noticeEnvelope } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
-import { SessionLive } from "@vibest/core/session/live"
-import { CONTINUE, continueText, type Restarted } from "@vibest/core/session/restart"
+import { SessionLive, type Restarted } from "@vibest/core/session/live"
+import { CONTINUE, continueText } from "@vibest/core/session/restart"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { VibestCommand } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Clock, Effect, Ref, type Scope } from "effect"
+import { Clock, Effect, Fiber, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import { daemonPlan } from "../src/update.ts"
@@ -127,6 +127,34 @@ describe("restart in place", () => {
       yield* sessions.check(id)
       assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
       assert.include((yield* db.latestReply(id))!.text, "done")
+    }),
+  )
+
+  test(
+    "a second restart of an agent already being restarted joins it: one signal, one run, one continue notice, both callers get the result",
+    Effect.gen(function* () {
+      const { db, sessions, id, pid } = yield* busyPiSubagent
+      const herdr = yield* FakeRuntime
+      const processes = yield* FakeProcesses
+      const ran = yield* herdr.hold("run")
+      const first = yield* Effect.forkChild(sessions.restart([id]))
+      yield* ran.reached
+      const second = yield* Effect.forkChild(sessions.restart([id, id]))
+      yield* Effect.yieldNow
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false, status: "idle" }))
+      yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* ran.release()
+      const outcomes = [yield* Fiber.join(first), yield* Fiber.join(second)]
+      assert.deepStrictEqual(
+        outcomes.map((o) => o.map((r) => r.ok)),
+        [[true], [true]],
+      )
+      assert.deepStrictEqual(yield* processes.signaled, [pid])
+      assert.lengthOf(yield* herdr.callsTo("run"), 1)
+      assert.lengthOf(
+        (yield* herdr.callsTo("send")).filter((s) => s.text === noticeEnvelope(continueText(VERSION))),
+        1,
+      )
     }),
   )
 
