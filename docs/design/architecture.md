@@ -163,7 +163,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 | `core`                  | The agent engine: persistence and the ledger, the Bus, sessions and their executions, the inbox, the plugin host, harness, runtime and agent catalogs.                                            |
 | `server`                | vibestd: the RPC handlers, admission, the service graph roots (`services.ts`, `app.ts`), the socket and HTTP listeners, other machines (`machine/`), the hourly update check (`update-check.ts`). |
 | `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                   |
-| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `harness-default`.                                      |
+| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `archive-on-idle`, `harness-default`.                   |
 | `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.  |
 | `plugin-harnesses`      | The harness plugins `pi`, `claude` and the Cursor plugin file users add: one `HarnessDefinition` per CLI.                                                                                         |
 | `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                             |
@@ -207,15 +207,15 @@ path that leaves the package, and lets only `commands/handlers/daemon/default.ts
 **Core layout.** As OpenCode lays out `packages/core/src`: a domain with several files has a root facade beside a
 folder of the same name, and the facade re-exports its own domain's names; a one-file domain stays at the root.
 
-| Where                                                                                                                                                                                                                                                                                                                       | Holds                                                                                                                |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `session.ts` + `session/`                                                                                                                                                                                                                                                                                                   | Sessions: spawn, placement, executions, delivery, exits, archive, move, restart, entry, reconcile, locks, live state |
-| `plugin.ts` + `plugin/`                                                                                                                                                                                                                                                                                                     | The plugin host: sources, supervisor, registry, hooks, host                                                          |
-| `project.ts` + `project/`                                                                                                                                                                                                                                                                                                   | Projects: create, identity, activity                                                                                 |
-| `database/`                                                                                                                                                                                                                                                                                                                 | `db.ts` and its `db-*.ts` modules, the journal, projectors, ledger reads, migrations                                 |
-| `effect/`                                                                                                                                                                                                                                                                                                                   | `LayerNode`, the platform tokens, `bounded.ts`, `keyed-mutex.ts`                                                     |
-| `subscriptions/`                                                                                                                                                                                                                                                                                                            | Harness subscription usage (`Subscriptions`, served by `vibest subscriptions`)                                       |
-| `bus.ts`, `reactor.ts`, `inbox.ts`, `batch.ts`, `harness.ts`, `models.ts`, `agents.ts`, `runtimes.ts`, `caller.ts`, `launch.ts`, `remove.ts`, `replies.ts`, `system-prompt.ts`, `integration.ts`, `guard.ts`, `git.ts`, `worktree.ts`, `repository-url.ts`, `processes.ts`, `identity.ts`, `paths.ts`, `drain.ts`, `app.ts` | One-file domains                                                                                                     |
+| Where                                                                                                                                                                                                                                                                                                                       | Holds                                                                                                                       |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `session.ts` + `session/`                                                                                                                                                                                                                                                                                                   | Sessions: spawn, placement, executions, delivery, exits, archive, move, restart, entry, reconcile, locks, live state        |
+| `plugin.ts` + `plugin/`                                                                                                                                                                                                                                                                                                     | The plugin host: sources, supervisor, registry, hooks, host                                                                 |
+| `project.ts` + `project/`                                                                                                                                                                                                                                                                                                   | Projects: create, identity, activity                                                                                        |
+| `database/`                                                                                                                                                                                                                                                                                                                 | `db.ts` and its domain modules (`project`, `session`, `inbox`, `remote`), the journal, projectors, ledger reads, migrations |
+| `effect/`                                                                                                                                                                                                                                                                                                                   | `LayerNode`, the platform tokens, `bounded.ts`, `keyed-mutex.ts`                                                            |
+| `subscriptions/`                                                                                                                                                                                                                                                                                                            | Harness subscription usage (`Subscriptions`, served by `vibest subscriptions`)                                              |
+| `bus.ts`, `reactor.ts`, `inbox.ts`, `batch.ts`, `harness.ts`, `models.ts`, `agents.ts`, `runtimes.ts`, `caller.ts`, `launch.ts`, `remove.ts`, `replies.ts`, `system-prompt.ts`, `integration.ts`, `guard.ts`, `git.ts`, `worktree.ts`, `repository-url.ts`, `processes.ts`, `identity.ts`, `paths.ts`, `drain.ts`, `app.ts` | One-file domains                                                                                                            |
 
 ## 3. Core domain
 
@@ -352,7 +352,7 @@ below it and subscribing to the events it handles itself:
 | `executions.ts` (`Executions`) | typing a prompt, waiting for ready, interrupting a harness, closing an execution                 |
 | `placement.ts` (`Placement`)   | the worktree, environment, system prompt and argv of a start; opening the terminal; notices      |
 | `move.ts` (`Move`)             | moving a session to another harness after a usage limit                                          |
-| `archive.ts` (`Archive`)       | remove, archive, `--archive-on-idle` and finishing an archive vibestd stopped in                 |
+| `archive.ts` (`Archive`)       | remove, the idle-archive check, finishing an archive vibestd stopped in                          |
 | `delivery.ts` (`Delivery`)     | send, queued inbox rows, the next batch after an execution, interrupt, typed prompts             |
 | `exits.ts` (`Exits`)           | recording a harness exit and what a usage limit leaves behind                                    |
 | `spawn.ts` (`Spawn`)           | admitting and starting a session, `VIBEST_MAX_SESSIONS`                                          |
@@ -371,7 +371,7 @@ How these modules keep the rules:
   the session is no longer live and nothing is in flight on them (`forget`, under the lock).
 - Remove and archive close the execution and mark the session archived and exited under its lock. The aborted execution
   end their interrupt causes, landing during the interrupt or after the archive, writes nothing: an interrupted end
-  with no open execution is dropped (`Db.endObserved`).
+  with no open execution is dropped (`db.session.endObserved`).
 - Ready for input: a harness whose integration reports ready is ready once that report is on its row (a restart or
   move removes the previous one); any other once the runtime's state is idle, working or blocked. While neither (a
   harness starting, or a startup dialog such as Claude's folder trust) the harness's startup step answers it, polled
@@ -427,13 +427,13 @@ How these modules keep the rules:
 
 How an execution ends:
 
-- An execution end the harness reports (`Db.endObserved`) is written as it arrives, without the session lock, in one
+- An execution end the harness reports (`db.session.endObserved`) is written as it arrives, without the session lock, in one
   transaction: the `execution.ended` with the reply and the conversation, the session idle, and the error notice for a
   failed end that is not a usage limit. It is ignored for the entry session, for a harness the session no longer
   runs, before the current process's ready report when its harness reports ready, and when it is interrupted with no
   execution open. A completed or failed end with no execution open is an execution of its own (an execution typed in the terminal whose
   start was missed). vibestd's own closes (`lost`, `not_started`, `interrupted`, an exit) are conditional on the
-  execution they decided about still being open (`Db.closeExecution`), so an observed end that came first wins and the close
+  execution they decided about still being open (`db.session.closeExecution`), so an observed end that came first wins and the close
   writes nothing, notice included. A reply that arrives after vibestd closed the execution as `lost` is a new execution; it
   is not attached back. A usage-limit end closes its execution `failed` with failure kind `limit`; check then moves the session to the
   next harness, which resends the input in a new execution, so a limit is two executions. A move vibestd stopped part
@@ -509,6 +509,7 @@ start cut off before its terminal was recorded is undone as a failed launch (its
 lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
 `--archive-on-idle` decides under the session's lock, at a completed execution end and whenever a row it sent or was sent leaves
 `pending`/`delivering`: a session with work again (a queued Message, a row still waiting in either direction, or a newer execution) stays, and a clean archive sends no notice, since each notice is a entry session execution.
+The builtin plugin `archive-on-idle` subscribes to those facts and calls that check; `"-archive-on-idle"` removes the plugin, and the flag then archives nothing.
 
 ## 4. Patterns
 
@@ -808,7 +809,7 @@ See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module
 
 ```
 builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude,
-                        runtime-herdr-core, runtime-herdr, runtime-choice, harness-default
+                        runtime-herdr-core, runtime-herdr, runtime-choice, archive-on-idle, harness-default
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
@@ -1194,7 +1195,7 @@ npm in its prefix. Its own entries:
   vibest.db                  the ledger and read model (with its -wal and -shm files)
   identity.json              this machine's id, name and machine_id; created or rewritten at every vibestd start
   vibest.sock  vibest-http.sock   vibestd's RPC socket, and the HTTP socket the Claude plugin reports to
-  vibestd.pid  vibestd.log   vibestd's start lock and record, and its log
+  vibestd.pid  vibestd.log   vibestd's start lock and record, and its log (trimmed at startup; see daemon.md)
   projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```

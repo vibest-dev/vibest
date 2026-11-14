@@ -22,7 +22,7 @@ const entryAsked = Effect.gen(function* () {
   const sessions = yield* Session.Service
   const db = yield* Db
   const repo = yield* makeRepository
-  const entry = yield* db.startEntry(
+  const entry = yield* db.session.startEntry(
     yield* projectOf(repo),
     "pulling-pi",
     false,
@@ -34,8 +34,8 @@ const entryAsked = Effect.gen(function* () {
   )
   yield* herdr.seedAgent("test/coord")
   const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-  yield* until(db.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
-  yield* db.insertSend(entry.sessionId, "a question", undefined, id)
+  yield* until(db.session.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
+  yield* db.inbox.insertSend(entry.sessionId, "a question", undefined, id)
   return { db, sessions, inbox: yield* Inbox.Service, entryId: entry.sessionId, sender: id }
 })
 
@@ -64,7 +64,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       const { db, inbox, entryId } = yield* entryAsked
       const taken = yield* inbox.take(entryId, undefined)
       assert.include(taken!.text, "a question")
-      assert.deepStrictEqual(yield* db.openExecution(entryId), taken!.execution)
+      assert.deepStrictEqual(yield* db.session.openExecution(entryId), taken!.execution)
       assert.isUndefined(yield* inbox.take(entryId, undefined))
     }),
   )
@@ -74,12 +74,12 @@ describe.concurrent("an idle session takes its next batch", () => {
     Effect.gen(function* () {
       const { db, inbox, entryId } = yield* entryAsked
       const { execution } = (yield* inbox.take(entryId, undefined))!
-      assert.isTrue(yield* db.acceptExecution(entryId, execution))
-      assert.isTrue(yield* db.acceptExecution(entryId, execution))
+      assert.isTrue(yield* db.session.acceptExecution(entryId, execution))
+      assert.isTrue(yield* db.session.acceptExecution(entryId, execution))
       assert.strictEqual(yield* acceptedFacts(entryId), 1)
-      yield* db.closeExecution(entryId, execution, "completed", {})
-      assert.isFalse(yield* db.acceptExecution(entryId, execution))
-      assert.isUndefined(yield* db.openExecution(entryId))
+      yield* db.session.closeExecution(entryId, execution, "completed", {})
+      assert.isFalse(yield* db.session.acceptExecution(entryId, execution))
+      assert.isUndefined(yield* db.session.openExecution(entryId))
     }),
   )
 
@@ -92,8 +92,8 @@ describe.concurrent("an idle session takes its next batch", () => {
       yield* TestClock.adjust("9 seconds")
       yield* sessions.check(entryId)
       yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
-      assert.isUndefined(yield* db.openExecution(entryId))
-      assert.isFalse(yield* db.acceptExecution(entryId, execution))
+      assert.isUndefined(yield* db.session.openExecution(entryId))
+      assert.isFalse(yield* db.session.acceptExecution(entryId, execution))
     }),
   )
 
@@ -119,7 +119,7 @@ describe.concurrent("an idle session takes its next batch", () => {
     Effect.gen(function* () {
       const { db, sessions, entryId, sender } = yield* entryAsked
       const herdr = yield* FakeRuntime
-      const taken = (yield* db.takeInbox(entryId, undefined))!
+      const taken = (yield* db.inbox.takeInbox(entryId, undefined))!
       yield* sessions.typeTaken(entryId, taken.execution)
       const typed = yield* herdr.callsTo("send")
       assert.lengthOf(
@@ -129,7 +129,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       yield* TestClock.adjust("9 seconds")
       yield* sessions.check(entryId)
       yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
-      assert.isUndefined(yield* db.openExecution(entryId))
+      assert.isUndefined(yield* db.session.openExecution(entryId))
     }),
   )
 
@@ -139,15 +139,15 @@ describe.concurrent("an idle session takes its next batch", () => {
       const { db, sessions, inbox, entryId } = yield* entryAsked
       const herdr = yield* FakeRuntime
       const { execution } = (yield* inbox.take(entryId, undefined))!
-      yield* db.acceptExecution(entryId, execution)
-      yield* db.closeExecution(entryId, execution, "completed", {})
+      yield* db.session.acceptExecution(entryId, execution)
+      yield* db.session.closeExecution(entryId, execution, "completed", {})
       yield* sessions.typeTaken(entryId, execution)
       const typed = yield* herdr.callsTo("send")
       assert.lengthOf(
         typed.filter((c) => c.text?.includes("a question")),
         0,
       )
-      assert.isUndefined(yield* db.openExecution(entryId))
+      assert.isUndefined(yield* db.session.openExecution(entryId))
     }),
   )
 
@@ -157,10 +157,10 @@ describe.concurrent("an idle session takes its next batch", () => {
       const { db, sessions, inbox, entryId } = yield* entryAsked
       const { execution } = (yield* inbox.take(entryId, undefined))!
       yield* sessions.typeTaken(entryId, execution)
-      assert.isFalse(yield* db.executionAccepted(entryId))
+      assert.isFalse(yield* db.session.executionAccepted(entryId))
       yield* sessions.userPrompt(entryId, "a question")
-      assert.isTrue(yield* db.executionAccepted(entryId))
-      assert.deepStrictEqual(yield* db.openExecution(entryId), execution)
+      assert.isTrue(yield* db.session.executionAccepted(entryId))
+      assert.deepStrictEqual(yield* db.session.openExecution(entryId), execution)
     }),
   )
 
@@ -173,11 +173,11 @@ describe.concurrent("an idle session takes its next batch", () => {
         yield* inbox.take(entryId, undefined)
         yield* herdr.updateAgent("test/coord", (agent) => ({ ...agent, status, seq: agent.seq + 1 }))
         yield* sessions.check(entryId)
-        assert.isFalse(yield* db.executionAccepted(entryId))
+        assert.isFalse(yield* db.session.executionAccepted(entryId))
         yield* TestClock.adjust("9 seconds")
         yield* sessions.check(entryId)
         yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
-        assert.isUndefined(yield* db.openExecution(entryId))
+        assert.isUndefined(yield* db.session.openExecution(entryId))
       }),
     )
   }

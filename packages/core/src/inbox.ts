@@ -100,7 +100,7 @@ export const layer = Layer.effect(
     yield* reactor.on([InboxQueued], (event) => wake(event.sessionId))
     yield* reactor.on([InboxMoved], (event) => (event.data.to === "pending" ? wake(event.sessionId) : Effect.void))
     yield* reactor.on([TerminalExited], (event) =>
-      drain.work("entry session exited", db.clearEntry(event.runtime, event.terminal), true),
+      drain.work("entry session exited", db.session.clearEntry(event.runtime, event.terminal), true),
     )
 
     const stream = (sessionId: string) =>
@@ -123,13 +123,14 @@ export const layer = Layer.effect(
 
     const take = Effect.fn("Inbox.take")(function* (sessionId: string, process: number | undefined) {
       if ((yield* drain.phase) !== "open") return undefined
-      const session = yield* db.getSession(sessionId)
+      const session = yield* db.session.getSession(sessionId)
       if (session === undefined || !pulls(harnessIdOf(session))) return undefined
-      const taken = yield* drain.work(`take inbox of ${sessionId}`, db.takeInbox(sessionId, process))
+      const taken = yield* drain.work(`take inbox of ${sessionId}`, db.inbox.takeInbox(sessionId, process))
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
       const last = taken.rows.at(-1)!
-      const sender = last.kind === "notice" || last.sender === null ? undefined : yield* db.getSession(last.sender)
+      const sender =
+        last.kind === "notice" || last.sender === null ? undefined : yield* db.session.getSession(last.sender)
       return {
         execution: taken.execution,
         ids: taken.rows.map((r) => r.id),
@@ -139,7 +140,7 @@ export const layer = Layer.effect(
     })
 
     const undelivered = Effect.fn("Inbox.undelivered")((session: SessionRow, rows: Undelivered, reason: string) =>
-      db
+      db.inbox
         .setInboxStatus(
           session.id,
           rows.map((r) => r.id),
@@ -152,8 +153,8 @@ export const layer = Layer.effect(
               ([sender, group]) => {
                 const message = `A message to ${session.id} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
                 return sender === null
-                  ? db.insertInbox({ sessionId: session.id, message })
-                  : db.insertNoticeTo(sender, message)
+                  ? db.inbox.insertInbox({ sessionId: session.id, message })
+                  : db.inbox.insertNoticeTo(sender, message)
               },
               { discard: true },
             ),
@@ -163,7 +164,7 @@ export const layer = Layer.effect(
     )
 
     const dropQueue = Effect.fn("Inbox.dropQueue")((session: SessionRow, reason: string) =>
-      db
+      db.inbox
         .pendingInbox(session.id)
         .pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason)))),
     )
@@ -172,7 +173,7 @@ export const layer = Layer.effect(
       Effect.sync(() => handedOver.delete(handedKey(sessionId, execution))),
     )
 
-    return Service.of({ enqueue: db.insertInbox, pulls, take, stream, claimRetype, undelivered, dropQueue })
+    return Service.of({ enqueue: db.inbox.insertInbox, pulls, take, stream, claimRetype, undelivered, dropQueue })
   }),
 )
 

@@ -104,8 +104,9 @@ const make = Effect.gen(function* () {
 
   const entryArgv = (entry: SessionRow) =>
     Effect.gen(function* () {
-      yield* db.patchLive(entry.id, { ready: null })
-      const root = (yield* db.projectDirectory(entry.projectId)) || (yield* db.sessionDirectory(entry.id)) || ""
+      yield* db.session.patchLive(entry.id, { ready: null })
+      const root =
+        (yield* db.project.projectDirectory(entry.projectId)) || (yield* db.session.sessionDirectory(entry.id)) || ""
       const savedId = entry.process?.conversation ?? null
       const place = placedTerminal(entry)
       const command = yield* entryCommand({
@@ -116,7 +117,8 @@ const make = Effect.gen(function* () {
         model: entry.process?.model ?? null,
         session: Effect.succeed({
           sessionId: entry.id,
-          harnessSessionId: savedId !== null && (yield* db.canResumeConversation(entry.id, savedId)) ? savedId : null,
+          harnessSessionId:
+            savedId !== null && (yield* db.session.canResumeConversation(entry.id, savedId)) ? savedId : null,
           projectId: entry.projectId,
           ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
         }),
@@ -197,7 +199,7 @@ const make = Effect.gen(function* () {
           yield* restarting.mark(id)
           const sent = yield* processes.terminate(pid)
           if (sent === "denied") yield* restarting.clear(id)
-          else yield* db.restartProcess(id)
+          else yield* db.session.restartProcess(id)
           return sent
         }),
       )
@@ -233,7 +235,7 @@ const make = Effect.gen(function* () {
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
-      const session = yield* db.getSession(id)
+      const session = yield* db.session.getSession(id)
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
       const interrupted = executionStateOf(session) === "open"
@@ -247,7 +249,7 @@ const make = Effect.gen(function* () {
         pid: pidOf(session),
         harnessSessionId: session.process?.conversation ?? null,
         argv: againArgv(session),
-        liveNow: db.getSession(id).pipe(Effect.map(reportedOf)),
+        liveNow: db.session.getSession(id).pipe(Effect.map(reportedOf)),
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {
@@ -255,7 +257,7 @@ const make = Effect.gen(function* () {
             if (!interrupted) return { id, projectId, ok: true, message: `${id} restarted` }
             const missed = yield* prompt(
               h,
-              (yield* db.getSession(id)) ?? session,
+              (yield* db.session.getSession(id)) ?? session,
               terminalOf(session),
               noticeEnvelope(continueText(version)),
             )
@@ -290,14 +292,14 @@ const make = Effect.gen(function* () {
         harnessSessionId: entry.process?.conversation ?? null,
         argv: entryArgv(entry),
         liveNow: Effect.gen(function* () {
-          const row = yield* db.entryOf(projectId)
+          const row = yield* db.session.entryOf(projectId)
           return row?.id === id ? reportedOf(row) : undefined
         }),
         hint: "",
         onBack: (h) =>
           Effect.gen(function* () {
             if (!interrupted) return { id, projectId, ok: true, message: `${label} restarted` } satisfies Restarted
-            const row = yield* db.getSession(id)
+            const row = yield* db.session.getSession(id)
             const missed =
               row === undefined
                 ? "it is gone"
@@ -322,7 +324,7 @@ const make = Effect.gen(function* () {
   const reports = (harness: HarnessId) => harnesses.find(harness)?.ready === "integration"
 
   const outdated = Effect.gen(function* () {
-    const sessions = (yield* db.listSessions())
+    const sessions = (yield* db.session.listSessions())
       .filter(
         (row) =>
           !row.entry &&
@@ -342,7 +344,7 @@ const make = Effect.gen(function* () {
         harnessSessionId: row.process?.conversation ?? null,
         working: Effect.succeed<boolean | undefined>(executionStateOf(row) === "open"),
       }))
-    const entries = (yield* db.entrySessions)
+    const entries = (yield* db.session.entrySessions)
       .filter((entry) => reports(harnessIdOf(entry)) && !current(entry.process?.integration ?? undefined))
       .map((entry) => ({
         id: entry.id,
@@ -382,7 +384,7 @@ const make = Effect.gen(function* () {
     restarting.own(
       id,
       Effect.gen(function* () {
-        const entry = (yield* db.entrySessions).find((candidate) => candidate.id === id)
+        const entry = (yield* db.session.entrySessions).find((candidate) => candidate.id === id)
         return yield* entry === undefined ? restartAgent(id) : restartEntry(entry, working)
       }),
     )
@@ -406,7 +408,7 @@ const make = Effect.gen(function* () {
   const restartLater = (ids: ReadonlyArray<string>, after: number | undefined) =>
     Effect.gen(function* () {
       const working: Array<string> = []
-      for (const entry of yield* db.entrySessions) {
+      for (const entry of yield* db.session.entrySessions) {
         if (!ids.includes(entry.id)) continue
         if (
           stateOf((yield* entryRunning(entry)) ?? "unknown") === "working" ||

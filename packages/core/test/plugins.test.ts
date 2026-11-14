@@ -47,7 +47,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
   const db = yield* Db
   const herdr = yield* FakeRuntime
-  return { rows: (yield* db.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
+  return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
 
 describe("plugins: spawn hook", () => {
@@ -65,7 +65,7 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(s.harness, "claude")
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
-      const row = (yield* db.getSession(s.id))!
+      const row = (yield* db.session.getSession(s.id))!
       assert.strictEqual(harnessIdOf(row), "claude")
       assert.strictEqual(row.process?.model ?? null, "claude-haiku-5-5")
       assert.deepStrictEqual(row.process?.routing?.decidedBy, {
@@ -231,6 +231,7 @@ describe("plugins: spawn hook", () => {
           ["typo", "failed"],
           ["proto", "failed"],
           ["current", "active"],
+          ["archive-on-idle", "active"],
         ],
       )
       const supported = "agent.start.before, agent.fail"
