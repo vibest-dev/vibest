@@ -10,8 +10,9 @@ import { Harness } from "@vibest/core/harness"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
-import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/host"
+import { type Candidate, makeHost, Plugins, pluginsNode } from "@vibest/core/plugin"
+import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/domains"
+import * as Hooks from "@vibest/core/plugin/hooks"
 import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
@@ -130,7 +131,16 @@ export const pluginsHost = (
         )
       }),
     ),
-    deps: [Agents.node, Bus.node, Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
+    deps: [
+      Agents.node,
+      Bus.node,
+      Harnesses.node,
+      Hooks.Service.node,
+      Runtimes.node,
+      Subscriptions.node,
+      platform,
+      home,
+    ],
   })
 }
 
@@ -215,7 +225,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harness.node.replace(harnessLayer()),
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
-      Plugins.node.replace(plugins),
+      pluginsNode.replace(plugins),
       Spawn.node.replace(defaultSpawn),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),
@@ -325,7 +335,7 @@ export const restartSessions = Effect.gen(function* () {
     Harness.node.replace(Layer.succeed(Harness.Service, yield* Harness.Service)),
     Harnesses.node.replace(Layer.succeed(Harnesses.Service, yield* Harnesses.Service)),
     Inbox.node.replace(Layer.succeed(Inbox.Service, yield* Inbox.Service)),
-    Plugins.node.replace(Layer.succeed(Plugins, yield* Plugins)),
+    pluginsNode.replace(Layer.succeed(Plugins, yield* Plugins)),
     Processes.node.replace(Layer.succeed(Processes.Service, yield* Processes.Service)),
     Runtimes.node.replace(Layer.succeed(Runtimes.Service, yield* Runtimes.Service)),
     Subscriptions.node.replace(Layer.succeed(Subscriptions, yield* Subscriptions)),

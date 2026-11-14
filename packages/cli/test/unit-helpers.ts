@@ -1,14 +1,22 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import type { NewSession } from "@vibest/core/database/db-rows"
+import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layer } from "effect"
 
 import * as Platform from "#platform"
 
+export const memoryBus = Bus.layer.pipe(Layer.provide(Platform.sqlite(":memory:")))
+
 export const database = (filename: string) =>
-  Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer))
+  Db.layer.pipe(
+    Layer.provide(Projectors.layer),
+    Layer.provide(Bus.layer),
+    Layer.provide(SessionLive.layer),
+    Layer.provide(Platform.sqlite(filename)),
+  )
 
 export const session = (
   id: string,

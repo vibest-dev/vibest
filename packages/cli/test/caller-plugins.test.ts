@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { callerTarget, entryPlace, specHits, type CallerHit } from "@vibest/core/caller"
 import { Builtins, builtinsNode } from "@vibest/core/plugin"
-import type { Caller, RuntimeDefinition } from "@vibest/core/plugin/host"
+import type { Caller, RuntimeDefinition } from "@vibest/core/plugin/domains"
 import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
@@ -14,6 +14,7 @@ import * as Platform from "#platform"
 
 import { hostReplacements } from "./fakes.ts"
 import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
+import { memoryBus } from "./unit-helpers.ts"
 
 const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
   id,
@@ -92,7 +93,7 @@ describe("the runtime registry", () => {
       Effect.gen(function* () {
         const dropped: Array<string> = []
         const bus = yield* Bus
-        const seen = yield* bus.subscribe
+        const seen = yield* bus.subscribe()
         const runtimes = yield* makeRuntimes.pipe(
           Effect.provideService(Runtimes.HostEnv, { drop: (names) => void dropped.push(...names) }),
         )
@@ -132,7 +133,7 @@ describe("the runtime registry", () => {
           (yield* runtimes.all).map((runtime) => runtime.id),
           ["hc"],
         )
-      }).pipe(Effect.scoped, Effect.provide(Bus.layer)),
+      }).pipe(Effect.scoped, Effect.provide(memoryBus)),
   )
 })
 

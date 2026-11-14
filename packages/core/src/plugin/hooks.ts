@@ -1,8 +1,10 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
-import { Cause, Clock, Duration, Effect, Exit, Option, type Scope } from "effect"
+import type { Change, TraceEntry } from "@vibest/schema/plugin"
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, type Scope } from "effect"
 
 import { Bounded } from "../effect/bounded.ts"
+import { LayerNode } from "../effect/layer-node.ts"
 
 export interface Events {
   readonly "agent.start.before": VibestPlugin.AgentStartBefore
@@ -38,6 +40,7 @@ export type Stats = {
 
 export type Entry<N extends Name> = {
   readonly plugin: string
+  readonly activation: object
   readonly stats: Stats
   readonly runtime: string | undefined
   readonly callback: (event: Events[N]) => Effect.Effect<Results[N] | void, Failures[N]>
@@ -59,25 +62,38 @@ const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused =>
 
 const decision = <A>(value: A | void) => (typeof value === "object" && value !== null ? value : undefined)
 
-export const make = () => {
-  let table: Table = { "agent.start.before": [], "agent.fail": [], "machine.connect": [], "machine.remove": [] }
-  const register = <N extends Name>(name: N, entry: Entry<N>) =>
-    Effect.gen(function* () {
-      const list: ReadonlyArray<Entry<N>> = table[name]
-      table = { ...table, [name]: [...list, entry] }
-      const dispose = Effect.sync(() => {
-        const current: ReadonlyArray<Entry<N>> = table[name]
-        table = { ...table, [name]: current.filter((e) => e !== entry) }
-      })
-      yield* Effect.addFinalizer(() => dispose)
-      return { dispose } satisfies VibestPlugin.Registration
-    })
-  const get = <N extends Name>(name: N, runtime?: string): ReadonlyArray<Entry<N>> =>
-    table[name].filter((e) => runtime === undefined || e.runtime === undefined || e.runtime === runtime)
-  return { register, get }
+export interface Interface {
+  readonly register: <N extends Name>(
+    name: N,
+    entry: Entry<N>,
+  ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
+  readonly get: <N extends Name>(name: N, runtime: string | undefined, activation: object) => ReadonlyArray<Entry<N>>
 }
 
-export type Hooks = ReturnType<typeof make>
+export class Service extends Context.Service<Service, Interface>()("vibest/PluginHooks") {
+  static readonly layer = Layer.sync(Service, () => {
+    let table: Table = { "agent.start.before": [], "agent.fail": [], "machine.connect": [], "machine.remove": [] }
+    const register: Interface["register"] = (name, entry) =>
+      Effect.gen(function* () {
+        const list: ReadonlyArray<Entry<typeof name>> = table[name]
+        table = { ...table, [name]: [...list, entry] }
+        const dispose = Effect.sync(() => {
+          const current: ReadonlyArray<Entry<typeof name>> = table[name]
+          table = { ...table, [name]: current.filter((e) => e !== entry) }
+        })
+        yield* Effect.addFinalizer(() => dispose)
+        return { dispose } satisfies VibestPlugin.Registration
+      })
+    const get: Interface["get"] = (name, runtime, activation) =>
+      table[name].filter(
+        (e) =>
+          e.activation === activation && (runtime === undefined || e.runtime === undefined || e.runtime === runtime),
+      )
+    return Service.of({ register, get })
+  })
+
+  static readonly node = LayerNode.make({ service: Service, layer: Service.layer, deps: [] })
+}
 
 export const run = Effect.fnUntraced(function* <N extends Name>(
   name: N,
@@ -112,4 +128,47 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
   stats.crashed++
   stats.lastError = error
   return { ms, outcome: "crashed", error, cause } satisfies Outcome<N>
+})
+
+export type Stopped = { readonly plugin: string; readonly reason: string }
+
+type AgentName = "agent.start.before" | "agent.fail"
+
+export const dispatch = Effect.fnUntraced(function* <N extends AgentName>(
+  name: N,
+  hooks: ReadonlyArray<Entry<N>>,
+  event: Events[N],
+  commit: (draft: Events[N], plugin: string) => ReadonlyArray<typeof Change.Type>,
+  trace: Array<TraceEntry>,
+  scope: Scope.Scope,
+  timeout: Duration.Input,
+) {
+  for (const hook of hooks) {
+    const draft: Events[N] = structuredClone(event)
+    const ran = yield* run(name, hook, draft, scope, timeout)
+    const entry = { plugin: hook.plugin, hook: name, ms: ran.ms, changes: [] }
+    if (ran.outcome === "timeout") {
+      trace.push({ ...entry, outcome: "timeout", error: ran.error })
+      yield* Effect.logWarning(`plugin ${hook.plugin} ${name}: ${ran.error}`)
+      return { plugin: hook.plugin, reason: ran.error } satisfies Stopped
+    }
+    if (ran.outcome === "refused") {
+      trace.push({ ...entry, outcome: "refused", reason: ran.reason })
+      yield* Effect.log(`plugin ${hook.plugin} ${name}: refused (${ran.reason})`)
+      return { plugin: hook.plugin, reason: ran.reason } satisfies Stopped
+    }
+    if (ran.outcome === "crashed") {
+      trace.push({ ...entry, outcome: "crashed", error: ran.error })
+      yield* Effect.logWarning(`plugin ${hook.plugin} ${name} crashed`, ran.cause)
+      return { plugin: hook.plugin, reason: `plugin ${hook.plugin} crashed: ${ran.error}` } satisfies Stopped
+    }
+    const changes = commit(draft, hook.plugin)
+    if (changes.length > 0) hook.stats.changed++
+    trace.push({ ...entry, outcome: "ok", changes })
+    const summary =
+      changes.map((c) => `${c.field} ${JSON.stringify(c.from) ?? "-"} → ${JSON.stringify(c.to) ?? "-"}`).join(", ") ||
+      "no change"
+    yield* Effect.log(`plugin ${hook.plugin} ${name}: ${summary} (${ran.ms} ms)`)
+  }
+  return undefined
 })

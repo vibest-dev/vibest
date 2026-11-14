@@ -2,6 +2,7 @@ import { assert, describe, it, layer } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import type { NewSession } from "@vibest/core/database/db-rows"
+import * as Projectors from "@vibest/core/database/projectors"
 import { Git } from "@vibest/core/git"
 import {
   createIsolatedWorktrees,
@@ -104,7 +105,12 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
   })
 
 const database = (filename: string) =>
-  Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer))
+  Db.layer.pipe(
+    Layer.provide(Projectors.layer),
+    Layer.provide(Bus.layer),
+    Layer.provide(SessionLive.layer),
+    Layer.provide(Platform.sqlite(filename)),
+  )
 
 const session = (id: string): Omit<NewSession, "projectId"> => ({
   id,

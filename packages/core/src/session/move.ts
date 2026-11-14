@@ -10,7 +10,7 @@ import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harness, harnessOptions, preflight } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import { errorMessage, Plugins, PluginsNotActive } from "../plugin.ts"
+import { errorMessage, Plugins, pluginsNode, PluginsNotActive } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { RuntimeError, type Runtime, type Terminal } from "../runtimes.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
@@ -330,7 +330,7 @@ export class Move extends Context.Service<Move, Effect.Success<typeof make>>()("
       Harness.node,
       Harnesses.node,
       Placement.node,
-      Plugins.node,
+      pluginsNode,
       Processes.node,
       Subscriptions.node,
     ],

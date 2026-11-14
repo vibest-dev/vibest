@@ -4,6 +4,7 @@ import process from "node:process"
 import { BunServices, BunSocket } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { SocketConnector } from "@vibest/client/socket-connector"
+import { Bus } from "@vibest/core/bus"
 import { SQL_NAMES } from "@vibest/core/database/db"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import { Layer } from "effect"
@@ -25,3 +26,5 @@ export const services = Layer.mergeAll(
 )
 
 export const memorySqlite = SqliteClient.layer({ filename: ":memory:", disableWAL: true, ...SQL_NAMES })
+
+export const memoryBus = Bus.layer.pipe(Layer.provide(memorySqlite))

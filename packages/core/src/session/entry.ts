@@ -22,7 +22,7 @@ import { Harness, harnessOptions } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
-import { Plugins } from "../plugin.ts"
+import { Plugins, pluginsNode } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
@@ -425,7 +425,7 @@ export class EntrySession extends Context.Service<EntrySession, Effect.Success<t
       Db.node,
       Harness.node,
       Harnesses.node,
-      Plugins.node,
+      pluginsNode,
       Processes.node,
       Runtimes.node,
       SessionLive.node,

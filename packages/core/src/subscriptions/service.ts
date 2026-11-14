@@ -6,7 +6,7 @@ import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Se
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import type { HarnessDefinition, SubscriptionsShape } from "../plugin/host.ts"
+import type { HarnessDefinition, SubscriptionsShape } from "../plugin/domains.ts"
 import { logFailure } from "../reactor.ts"
 
 const MINUTE = "1 minute"

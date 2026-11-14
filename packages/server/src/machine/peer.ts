@@ -7,6 +7,7 @@ import { Identity } from "@vibest/core/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { defaultSessionName, Session } from "@vibest/core/session"
 import type { PayloadOf } from "@vibest/protocol/rpc"
+import { OutboxAcked, OutboxQueued, SessionEnded } from "@vibest/schema/event"
 import {
   NoCommit,
   NoProject,
@@ -102,7 +103,7 @@ const make = Effect.gen(function* () {
     outbox: (peer: string): Stream.Stream<OutboxItem> =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const subscription = yield* bus.subscribe
+          const subscription = yield* bus.subscribe([SessionEnded, OutboxQueued, OutboxAcked])
           const sent = new Set<string>()
           const batch = Effect.gen(function* () {
             const rows = yield* db.outboxOf(peer)
@@ -113,11 +114,7 @@ const make = Effect.gen(function* () {
             return fresh.map(outboxItem)
           })
           const wake = Stream.fromSubscription(subscription).pipe(
-            Stream.filter(
-              (event) =>
-                event.type === "session.ended" ||
-                ((event.type === "outbox.queued" || event.type === "outbox.acked") && event.data.peer === peer),
-            ),
+            Stream.filter((event) => event.type === "session.ended" || event.data.peer === peer),
           )
           return Stream.concat(Stream.make(undefined), wake).pipe(
             Stream.mapEffect((event) => {

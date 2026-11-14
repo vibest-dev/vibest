@@ -191,7 +191,7 @@ export const make = (
                         Effect.fail(new NoSuchSession({ id: session, message: e.message })),
                       ),
                     )
-            return db.facts({ session: id, after, follow: follow === true }).pipe(
+            return bus.log({ aggregate: id, after, follow: follow === true }).pipe(
               Stream.map(({ aggregate, seq, at, type, data }) => ({
                 aggregate,
                 seq,
@@ -207,7 +207,7 @@ export const make = (
         Stream.unwrap(
           Effect.gen(function* () {
             yield* cliOnly("Watch")
-            const subscription = yield* bus.subscribe
+            const subscription = yield* bus.subscribe()
             const backlog = yield* Queue.bounded<BusEvent, WatchLagged>(WATCH_BACKLOG)
             yield* Stream.fromSubscription(subscription).pipe(
               Stream.runForEach((event) =>

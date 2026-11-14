@@ -5,7 +5,7 @@ import { Effect, FileSystem } from "effect"
 import { Agents, unknownAgent } from "./agents.ts"
 import { encodeCommand, Harness } from "./harness.ts"
 import { Harnesses } from "./harnesses.ts"
-import type { AgentsShape } from "./plugin/host.ts"
+import type { AgentsShape } from "./plugin/domains.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
 import {
   projectText,

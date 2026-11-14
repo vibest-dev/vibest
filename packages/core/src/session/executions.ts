@@ -6,7 +6,7 @@ import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harnesses.ts"
-import type { HarnessDefinition } from "../plugin/host.ts"
+import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
   type AgentState,
@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
     const missed = db.closeExecution(session.id, execution, "not_started")
-    const subscription = yield* bus.subscribe
+    const subscription = yield* bus.subscribe()
     const delivered = yield* send.pipe(
       Effect.as(false),
       Effect.catchTag("RuntimeError", (error) =>

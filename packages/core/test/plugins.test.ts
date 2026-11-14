@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf } from "@vibest/core/database/db-rows"
-import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Builtins, makePlugins, PluginLoader, Plugins, pluginsLayer } from "@vibest/core/plugin"
+import * as Hooks from "@vibest/core/plugin/hooks"
 import { Session } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin } from "@vibest/plugin"
@@ -19,6 +19,7 @@ import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
 import { until, yieldToIo } from "./lib/observe.ts"
 import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
+import { memoryBus } from "./platform/bun.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
@@ -252,7 +253,7 @@ describe("plugins: spawn hook", () => {
   it.effect("P10: a setup that never returns times out without blocking the others", () =>
     Effect.gen(function* () {
       const building = yield* Effect.forkChild(
-        Plugins.make([
+        makePlugins([
           {
             source: "hang",
             revision: "-",
@@ -277,14 +278,14 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(Bus.layer),
+      Effect.provide(memoryBus),
     ),
   )
 
   it.effect("a Promise setup that never resolves is torn down within the one setup timeout", () =>
     Effect.gen(function* () {
       const building = yield* Effect.forkChild(
-        Plugins.make([
+        makePlugins([
           {
             source: "pro",
             revision: "-",
@@ -308,7 +309,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(Bus.layer),
+      Effect.provide(memoryBus),
     ),
   )
 
@@ -326,7 +327,7 @@ describe("plugins: spawn hook", () => {
                 .hook("start.before", () => Effect.sync(() => calls.push(id)).pipe(Effect.andThen(after())))
                 .pipe(Effect.map((registration) => void (registrations[id] = registration))),
           })
-        const plugins = yield* Plugins.make([
+        const plugins = yield* makePlugins([
           { source: "a", revision: "-", options: {}, plugin: recorder("a", () => registrations.b!.dispose) },
           { source: "b", revision: "-", options: {}, plugin: recorder("b") },
         ])
@@ -352,7 +353,7 @@ describe("plugins: spawn hook", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
       ),
   )
 })
@@ -371,7 +372,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.a
 `
 
 const loaded = (dir: string) =>
-  Plugins.layer.pipe(
+  pluginsLayer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, { ...Platform.makePluginLoader(), prepare: Effect.void })),
     Layer.provide(Layer.succeed(Builtins, [])),
     Layer.provide(subscriptionsLayer),
@@ -379,7 +380,8 @@ const loaded = (dir: string) =>
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(Bus.layer),
+    Layer.provide(memoryBus),
+    Layer.provide(Hooks.Service.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
   )

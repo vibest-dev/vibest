@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
 import { Harness } from "@vibest/core/harness"
-import { Plugins } from "@vibest/core/plugin"
+import { makePlugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
@@ -28,6 +27,7 @@ import {
   runVibest,
   testLayer,
 } from "./fakes.ts"
+import { memoryBus } from "./unit-helpers.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const PI_SECRET = "pi-key-do-not-log"
@@ -435,7 +435,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const listed = yield* Effect.gen(function* () {
         const subs = yield* Subscriptions
-        const plugins = yield* Plugins.make([{ source: "see", revision: "-", options: {}, plugin }])
+        const plugins = yield* makePlugins([{ source: "see", revision: "-", options: {}, plugin }])
         yield* plugins.start({
           project: "/r",
           agent: "general",
@@ -457,7 +457,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(agentsLayer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
         Effect.scoped,
       )
       assert.deepStrictEqual(listed.seen, listed.list)

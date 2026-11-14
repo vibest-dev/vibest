@@ -2,7 +2,7 @@ import { UnknownAgent } from "@vibest/schema/session"
 import { Context, Effect, Layer } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import type { AgentDefinition, AgentsShape } from "./plugin/host.ts"
+import type { AgentDefinition, AgentsShape } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 
 export * as Agents from "./agents.ts"

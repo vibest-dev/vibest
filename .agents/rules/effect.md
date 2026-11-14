@@ -18,7 +18,7 @@
 
 Status: rules 1, 7 and 8 hold on main. Exceptions today:
 
-- Rules 2 and 6: these service modules still have the `Context.Service` class with `static readonly layer`/`node` (core `bus.ts`, `database/db.ts`, `plugin.ts`, `plugin/sources.ts`, `session/archive.ts`, `delivery.ts`, `entry.ts`, `executions.ts`, `exits.ts`, `live.ts`, `locks.ts`, `move.ts`, `placement.ts`, `reconcile.ts`, `restart.ts`, `spawn.ts`, `subscriptions/service.ts`).
+- Rules 2 and 6: these service modules still export a bare `Context.Service` class instead of a namespace (core `bus.ts`, `database/db.ts`, `plugin/service.ts` with `pluginsNode` in `plugin.ts`, `plugin/sources.ts`, `session/archive.ts`, `delivery.ts`, `entry.ts`, `executions.ts`, `exits.ts`, `live.ts`, `locks.ts`, `move.ts`, `placement.ts`, `reconcile.ts`, `restart.ts`, `spawn.ts`, `subscriptions/service.ts`).
 - Rule 3: `Builtins` (`plugin.ts`) and `UserPlatform` (`system-prompt.ts`) are `Context.Reference`s whose default is right only in tests.
 - Rule 4: `MachineTransport` (`server/src/machine/machines.ts`) and `ShutdownHost.onSignals` (`server/src/shutdown-deadline.ts`) require `Scope` in their type; `plugin/sources.ts` captures `Effect.context` for `Effect.runFork` in watch callbacks, and `server/src/shutdown-deadline.ts` does the same with `Effect.runForkWith`.
 - Rule 5: `MachineTransport` fails with a plain `Error`, which `platform-bun/src/bun.ts` builds in its transport; `SystemPromptDirUnsafe` (`system-prompt.ts`) and `AgentOwnLimit` (`session/placement.ts`) are `Data.TaggedError`s, not `Schema.TaggedError`s.

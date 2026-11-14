@@ -1,7 +1,7 @@
 import { Harness } from "@vibest/core/harness"
 import { Harnesses } from "@vibest/core/harnesses"
 import { normalizeModels } from "@vibest/core/models"
-import type { HarnessDefinition, HarnessesShape } from "@vibest/core/plugin/host"
+import type { HarnessDefinition, HarnessesShape } from "@vibest/core/plugin/domains"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { HarnessUnavailable } from "@vibest/schema/session"

@@ -3,9 +3,9 @@ import { Effect } from "effect"
 
 import { harnessDefaultPlugin } from "../../builtins/src/harness-default.ts"
 import { Agents } from "../src/agents.ts"
-import { Bus } from "../src/bus.ts"
-import { Plugins } from "../src/plugin.ts"
+import { makePlugins } from "../src/plugin.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
+import { memoryBus } from "./platform/bun.ts"
 
 const event = (harness: string | undefined, claude: boolean) => ({
   project: "/r",
@@ -28,16 +28,14 @@ const event = (harness: string | undefined, claude: boolean) => ({
 })
 
 const chosen = (harness: string | undefined, claude: boolean) =>
-  Plugins.make([
-    { source: "builtin:harness-default", revision: "1", options: {}, plugin: harnessDefaultPlugin() },
-  ]).pipe(
+  makePlugins([{ source: "builtin:harness-default", revision: "1", options: {}, plugin: harnessDefaultPlugin() }]).pipe(
     Effect.flatMap((plugins) => plugins.start(event(harness, claude))),
     Effect.map((decision) => decision.harness),
     Effect.provide(subscriptionsLayer),
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
-    Effect.provide(Bus.layer),
+    Effect.provide(memoryBus),
     Effect.provide(Agents.layer),
     Effect.scoped,
   )
