@@ -19,7 +19,7 @@ const MACHINE = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 const ITEM = "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f"
 const ITEM_2 = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
 
-const memory = () => Projectors.replay.pipe(Layer.provideMerge(Layer.fresh(memorySqlite)))
+const memory = () => Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))
 
 const ledger = Effect.gen(function* () {
   yield* installLedger
@@ -805,7 +805,7 @@ describe("rebuild", () => {
       yield* sql`UPDATE meta SET value = '0' WHERE key = 'projection'`
       yield* sql`CREATE TABLE answer (execution INTEGER PRIMARY KEY)`
       yield* sql`DELETE FROM inbox`
-      yield* (yield* Bus).rebuild(sql)
+      yield* (yield* Bus).rebuild
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT value FROM meta WHERE key = 'projection'"), [
         { value: String(PROJECTION_VERSION) },
       ])
@@ -820,7 +820,7 @@ describe("rebuild", () => {
     Effect.gen(function* () {
       const { sql } = yield* story
       yield* sql`INSERT INTO event (aggregate, seq, at, type, data) VALUES (${SUB}, 99, 1, 'session.purged', '{}')`
-      const error = yield* (yield* Bus).rebuild(sql).pipe(Effect.flip)
+      const error = yield* (yield* Bus).rebuild.pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
       assert.include(error.message, `event ${SUB} 99`)
       const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
@@ -836,10 +836,38 @@ describe("project", () => {
       const sql = yield* SqlClient.SqlClient
       yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
         VALUES (${PEER}, 1, 1, 'peer.seen', '{"id":"p","name":"a"}')`
-      const error = yield* (yield* Bus).rebuild(sql).pipe(Effect.flip)
+      const error = yield* (yield* Bus).rebuild.pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
       assert.include(error.message, `event ${PEER} 1: peer.seen has no projector`)
     }).pipe(Effect.provide(Bus.layer.pipe(Layer.provideMerge(Layer.fresh(memorySqlite))))),
+  )
+})
+
+describe("delivery order", () => {
+  it.effect("a subscriber publishing a follow-up fact does not overtake the rest of the batch", () =>
+    Effect.gen(function* () {
+      yield* installLedger
+      const bus = yield* Bus
+      const first = yield* bus.subscribe([Catalog["peer.seen"]])
+      const second = yield* bus.subscribe([Catalog["peer.seen"], Catalog["machine.connected"]])
+      yield* Stream.fromSubscription(first).pipe(
+        Stream.take(1),
+        Stream.runForEach(() => bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })),
+        Effect.forkScoped,
+      )
+      yield* Effect.yieldNow
+      yield* bus.transaction(
+        Effect.gen(function* () {
+          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
+          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "b" } })
+        }),
+      )
+      const seen = yield* Effect.forEach([1, 2, 3], () => PubSub.take(second))
+      assert.deepStrictEqual(
+        seen.map((event) => (event as Fact).seq),
+        [1, 2, 3],
+      )
+    }).pipe(Effect.provide(memory()), Effect.scoped),
   )
 })
 
@@ -875,6 +903,7 @@ describe("log", () => {
       )
       const all = yield* read({})
       assert.strictEqual(all.length, 1103)
+      assert.deepStrictEqual(Object.keys(all[0]!).sort(), ["aggregate", "at", "data", "seq", "type"])
       for (const aggregate of [P, MAIN, SUB]) {
         const mine = all.filter((r) => r.aggregate === aggregate)
         assert.deepStrictEqual(

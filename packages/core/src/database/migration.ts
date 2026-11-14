@@ -74,7 +74,7 @@ const openLedger = (sql: SqlClient.SqlClient) =>
     const bus = yield* Bus
     yield* sql.withTransaction(
       Effect.gen(function* () {
-        if ((yield* projectionVersion(sql)) !== PROJECTION_VERSION) yield* bus.rebuild(sql)
+        if ((yield* projectionVersion(sql)) !== PROJECTION_VERSION) yield* bus.rebuild
         yield* sql`UPDATE meta SET value = ${String(CATALOG_VERSION)} WHERE key = 'catalog'`
       }),
     )

@@ -40,7 +40,7 @@ const replayChecked = Layer.effectDiscard(
       Effect.gen(function* () {
         if (!(yield* hasLedger(sql))) return
         const difference = yield* equalToReplay(sql).pipe(
-          Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Layer.fresh(memorySqlite)))),
+          Effect.provide(Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))),
         )
         if (difference !== undefined)
           return yield* Effect.die(new Error(`the projections differ from a replay of the log: ${difference}`))

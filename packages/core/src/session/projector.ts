@@ -17,25 +17,25 @@ import {
   SessionRenamed,
 } from "@vibest/schema/event"
 import { Effect, Layer } from "effect"
-import type { SqlClient } from "effect/sql"
+import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
 
 const sessionIdOf = (fact: Fact) => fact.sessionId!
 
-const touchActivity = (fact: Fact, sql: SqlClient.SqlClient) =>
-  sql`UPDATE session SET active_at = max(coalesce(active_at, 0), ${fact.at}) WHERE id = ${sessionIdOf(fact)}`
-
-const active =
-  <D extends Definition>(projector: Projector<D>): Projector<D> =>
-  (fact, sql) =>
-    Effect.andThen(projector(fact, sql), touchActivity(fact, sql))
-
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const bus = yield* Bus
+    const sql = yield* SqlClient.SqlClient
+    const active =
+      <D extends Definition>(projector: Projector<D>): Projector<D> =>
+      (fact) =>
+        Effect.andThen(
+          projector(fact),
+          sql`UPDATE session SET active_at = max(coalesce(active_at, 0), ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
+        )
 
-    yield* bus.project(SessionCreated, (fact, sql) => {
+    yield* bus.project(SessionCreated, (fact) => {
       const { data } = fact
       const origin = data.origin
       return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_peer,
@@ -46,13 +46,13 @@ export const layer = Layer.effectDiscard(
     })
     yield* bus.project(
       SessionRenamed,
-      (fact, sql) => sql`UPDATE session SET name = ${fact.data.name} WHERE id = ${sessionIdOf(fact)}`,
+      (fact) => sql`UPDATE session SET name = ${fact.data.name} WHERE id = ${sessionIdOf(fact)}`,
     )
     yield* bus.project(
       SessionDirectoryChanged,
-      (fact, sql) => sql`UPDATE session SET directory = ${fact.data.directory} WHERE id = ${sessionIdOf(fact)}`,
+      (fact) => sql`UPDATE session SET directory = ${fact.data.directory} WHERE id = ${sessionIdOf(fact)}`,
     )
-    yield* bus.project(SessionEnded, (fact, sql) =>
+    yield* bus.project(SessionEnded, (fact) =>
       Effect.andThen(
         sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
         sql`DELETE FROM outbox WHERE session_id = ${sessionIdOf(fact)}`,
@@ -61,7 +61,7 @@ export const layer = Layer.effectDiscard(
 
     yield* bus.project(
       ProcessStarted,
-      active((fact, sql) => {
+      active((fact) => {
         const { data } = fact
         return Effect.andThen(
           sql`INSERT INTO process (id, session_id, harness, provider, model, routing, conversation, runtime, terminal,
@@ -76,7 +76,7 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(
       ProcessPlaced,
       active(
-        (fact, sql) =>
+        (fact) =>
           sql`UPDATE process SET terminal = ${fact.data.terminal}, placed_at = ${fact.at},
               pid = coalesce(${fact.data.pid ?? null}, pid)
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
@@ -84,7 +84,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* bus.project(
       ProcessReady,
-      active((fact, sql) => {
+      active((fact) => {
         const { integration } = fact.data
         return sql`UPDATE process SET ready_at = ${fact.at}, pid = coalesce(${fact.data.pid ?? null}, pid),
             integration_version = ${integration === undefined ? sql`integration_version` : integration.version},
@@ -95,21 +95,21 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(
       ProcessPid,
       active(
-        (fact, sql) =>
+        (fact) =>
           sql`UPDATE process SET pid = ${fact.data.pid} WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
       ),
     )
     yield* bus.project(
       ProcessConversation,
       active(
-        (fact, sql) =>
+        (fact) =>
           sql`UPDATE process SET conversation = ${fact.data.conversation}
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
       ),
     )
     yield* bus.project(
       ProcessEnded,
-      active((fact, sql) =>
+      active((fact) =>
         Effect.gen(function* () {
           const { process, reason } = fact.data
           const session = sessionIdOf(fact)
@@ -127,7 +127,7 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(
       ExecutionStarted,
       active(
-        (fact, sql) =>
+        (fact) =>
           sql`INSERT INTO execution (session_id, id, process_id, typed, started_at)
             VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${fact.data.process ?? null}, ${fact.data.typed ?? null},
               ${fact.at})`,
@@ -136,7 +136,7 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(
       ExecutionAccepted,
       active(
-        (fact, sql) =>
+        (fact) =>
           sql`UPDATE execution SET accepted_at = ${fact.at}
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.execution} AND outcome IS NULL
               AND accepted_at IS NULL`,
@@ -144,7 +144,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* bus.project(
       ExecutionEnded,
-      active((fact, sql) =>
+      active((fact) =>
         Effect.andThen(
           sql`UPDATE execution SET outcome = ${fact.data.outcome}, reply = ${fact.data.reply ?? null},
               failure = ${fact.data.failure?.message ?? null}, failure_kind = ${fact.data.failure?.kind ?? null},
@@ -161,7 +161,7 @@ export const layer = Layer.effectDiscard(
 
     yield* bus.project(
       InboxQueued,
-      active((fact, sql) => {
+      active((fact) => {
         const { data } = fact
         return sql`INSERT INTO inbox (session_id, id, sender_session_id, kind, content, request, peer_item, status)
           VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${data.sender ?? null}, ${data.kind}, ${data.content},
@@ -171,7 +171,7 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(
       InboxMoved,
       active(
-        (fact, sql) =>
+        (fact) =>
           sql`UPDATE inbox SET status = ${fact.data.to},
               execution_id = coalesce(${fact.data.execution ?? null}, execution_id)
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.inbox}`,

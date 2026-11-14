@@ -6,7 +6,7 @@ import {
   ProjectRepositoriesChanged,
 } from "@vibest/schema/event"
 import { Effect, Layer } from "effect"
-import type { SqlClient } from "effect/sql"
+import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 
@@ -24,13 +24,14 @@ const putRepositories = (sql: SqlClient.SqlClient, projectId: string, repositori
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const bus = yield* Bus
-    yield* bus.project(ProjectCreated, (fact, sql) =>
+    const sql = yield* SqlClient.SqlClient
+    yield* bus.project(ProjectCreated, (fact) =>
       Effect.andThen(
         sql`INSERT INTO project (id, directory) VALUES (${fact.projectId!}, ${fact.data.directory ?? null})`,
         putRepositories(sql, fact.projectId!, fact.data.repositories),
       ),
     )
-    yield* bus.project(ProjectMoved, (fact, sql) =>
+    yield* bus.project(ProjectMoved, (fact) =>
       Effect.gen(function* () {
         const id = fact.projectId!
         const { from, to } = fact.data
@@ -41,13 +42,12 @@ export const layer = Layer.effectDiscard(
           WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, ${from.length + 1}) = ${`${from}/`})`
       }),
     )
-    yield* bus.project(ProjectRepositoriesChanged, (fact, sql) =>
+    yield* bus.project(ProjectRepositoriesChanged, (fact) =>
       putRepositories(sql, fact.projectId!, fact.data.repositories),
     )
     yield* bus.project(
       ProjectEntryChanged,
-      (fact, sql) =>
-        sql`UPDATE project SET entry_session_id = ${fact.data.session ?? null} WHERE id = ${fact.projectId!}`,
+      (fact) => sql`UPDATE project SET entry_session_id = ${fact.data.session ?? null} WHERE id = ${fact.projectId!}`,
     )
   }),
 )
