@@ -219,9 +219,9 @@ describe("Watch", () => {
       const second = yield* watching(repo)
       yield* first.next(isSnapshot)
       yield* second.next(isSnapshot)
-      const briefs = db.sessionBriefs
+      const briefs = db.session.sessionBriefs
       let reads = 0
-      Object.assign(db, {
+      Object.assign(db.session, {
         sessionBriefs: (ids: Parameters<typeof briefs>[0]) => {
           reads++
           return briefs(ids)
@@ -229,11 +229,11 @@ describe("Watch", () => {
       })
       const inStatus = (status: string) => (e: WatchEvent) =>
         e._tag === "Session" && e.session.id === entryId && e.session.status === status
-      yield* db.setStatus(entryId, "working")
+      yield* db.session.setStatus(entryId, "working")
       yield* first.next((e): e is WatchEvent => inStatus("working")(e))
       yield* second.next((e): e is WatchEvent => inStatus("working")(e))
       reads = 0
-      yield* db.setStatus(entryId, "idle")
+      yield* db.session.setStatus(entryId, "idle")
       yield* first.next((e): e is WatchEvent => inStatus("idle")(e))
       yield* second.next((e): e is WatchEvent => inStatus("idle")(e))
       assert.strictEqual(reads, 1)
@@ -248,9 +248,9 @@ describe("Watch", () => {
       const { project } = yield* withEntry
       const feed = yield* WatchFeed.Service
       const before = yield* feed.subscribe
-      const read = db.watchProjects
+      const read = db.project.watchProjects
       let failing = true
-      Object.assign(db, {
+      Object.assign(db.project, {
         watchProjects: (id?: string) => (failing ? Effect.die("unreadable") : read(id)),
       })
       yield* bus.observe({ type: "project.changed", projectId: project })
