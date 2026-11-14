@@ -149,8 +149,9 @@ started, an entry session) cannot answer results with results (rule 4), and that
 
 ## 2. Layers
 
-**Packages.** Each workspace package exports `./*` → `./src/*.ts`; an import names the module
-(`@vibest/core/database/db`), and a module imports a name from the module that defines it (no re-exports of other
+**Packages.** Most workspace packages export `./*` → `./src/*.ts`, so an import names the module
+(`@vibest/core/database/db`); `plugin`, `builtins`, the herdr SDKs and `integration/cursor` export named entries
+(`@vibest/plugin/effect`, `@vibest/plugin/testing`). A module imports a name from the module that defines it (no re-exports of other
 modules' names, except a domain facade re-exporting its own domain, see below).
 
 | Package                 | Role                                                                                                                                                                                              |
@@ -188,16 +189,19 @@ server               schema, plugin, core, protocol, client
 platform-bun         schema, plugin, core, client, server, builtins (and effect-herdr-sdk)
 builtins             plugin, plugin-harnesses, runtime-herdr, runtime-herdr-core
 cli                  schema, protocol, client, builtins, server/daemon (and HANDOFF_ENV of server/server), #platform
-plugin-harnesses,    plugin, schema, protocol, client
-runtime-herdr(-core),
-integration/*
+plugin-harnesses     plugin, schema
+runtime-herdr-core   plugin, schema, effect-herdr-core-sdk
+runtime-herdr        plugin, schema, protocol, client, effect-herdr-sdk
+integration/claude   schema, protocol
+integration/pi       schema, protocol, client
+integration/cursor   nothing
 effect-herdr-*-sdk   nothing
 ```
 
-The herdr SDKs are imported only by the runtime packages and `platform-bun`. oxlint enforces the vibest-package list: one scoped
-`no-restricted-imports` allow-list per package in `.oxlintrc.json` (also in its `bun.ts` and `platform/` files), and
-`vibest/package-relative-imports` (`tools/oxlint/package-relative-imports.mjs`) refuses a relative import that leaves
-its package. Bun stays behind `platform/` directories, `bun.ts` adapters and `packages/platform-bun`
+oxlint enforces the list with `vibest/package-imports` (`tools/oxlint/package-imports.mjs`, one map): it checks static
+imports, re-exports, dynamic `import()` and type queries (`import("…").T`) in each package's `src`, refuses a relative
+path that leaves the package, and lets only `commands/handlers/daemon/default.ts` take `HANDOFF_ENV` from
+`@vibest/server/server`. Bun stays behind `platform/` directories, `bun.ts` adapters and `packages/platform-bun`
 (`.agents/rules/bun-runtime-boundary.md`).
 
 **Core layout.** As OpenCode lays out `packages/core/src`: a domain with several files has a root facade beside a
@@ -210,7 +214,7 @@ folder of the same name, and the facade re-exports its own domain's names; a one
 | `project.ts` + `project/`                                                                                                                                                                                                                                                                                                   | Projects: create, identity, activity                                                                                 |
 | `database/`                                                                                                                                                                                                                                                                                                                 | `db.ts` and its `db-*.ts` modules, the journal, projectors, ledger reads, migrations                                 |
 | `effect/`                                                                                                                                                                                                                                                                                                                   | `LayerNode`, the platform tokens, `bounded.ts`, `keyed-mutex.ts`                                                     |
-| `subscriptions/`                                                                                                                                                                                                                                                                                                            | Harness subscription usage (not wired in)                                                                            |
+| `subscriptions/`                                                                                                                                                                                                                                                                                                            | Harness subscription usage (`Subscriptions`, served by `vibest subscriptions`)                                       |
 | `bus.ts`, `reactor.ts`, `inbox.ts`, `batch.ts`, `harness.ts`, `models.ts`, `agents.ts`, `runtimes.ts`, `caller.ts`, `launch.ts`, `remove.ts`, `replies.ts`, `system-prompt.ts`, `integration.ts`, `guard.ts`, `git.ts`, `worktree.ts`, `repository-url.ts`, `processes.ts`, `identity.ts`, `paths.ts`, `drain.ts`, `app.ts` | One-file domains                                                                                                     |
 
 ## 3. Core domain
@@ -610,11 +614,13 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 - Services are assembled from a **service graph**: each entry is `{ service, layer, dependencies }` with a scope.
   A narrower scope may depend on a wider one, never the reverse, checked at type level. The graph compiles to
   one `Layer`.
-- Configuration replaces entries at the composition root (`Database.entry.replace(Database.configured(...))`).
+- Configuration replaces entries at the composition root (`PlatformNode.sqlClientLayer.replace(…)` in
+  `packages/platform-bun/src/bun.ts`).
   Product identity and runtime are replacements, which is how one core yields several isolated products.
 - Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
-  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
-  left out, and `unbound` is infallible). Each service has a `node` listing its `deps`; what the host supplies
+  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; `unbound` is infallible).
+  Its release tracking is kept: `LayerNode.Releases` records each node whose layer is still releasing, and when
+  shutdown passes its deadline the daemon prints them (`server/src/daemon.ts`, `server/src/shutdown-deadline.ts`). Each service has a `node` listing its `deps`; what the host supplies
   (the platform services, the daemon's identity) is an unbound node. The SQL client, the socket server and the HTTP
   server can fail to open, so the host supplies each as an infallible layer token (`SqlClientLayer`,
   `SocketServerLayer`, `HttpServerLayer`: an unbound node whose value is a `Layer`), and a real provider node
@@ -630,10 +636,10 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 - Today there is only the daemon scope: plugins and catalogs are the same for every Project. Tags exist in
   `LayerNode` and are not declared until a project scope is built.
 
-| Scope                   | Lives                                                               | Holds                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **daemon**              | once per daemon                                                     | Product, Database, Event bus, Project registry, Machine registry, Run and Agent execution, Scheduler queue, event stream |
-| **project** (not built) | one compiled graph per Project, in a `LayerMap` keyed by Project id | Configuration, catalogs (definitions, harnesses, skills, Workspace types, commands), plugin registry and supervisor      |
+| Scope                   | Lives                                                               | Holds                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **daemon**              | once per daemon                                                     | the database and its ledger, the Bus, projects, machines, sessions and their executions, the inbox, the plugin host, the harness, runtime and agent catalogs |
+| **project** (not built) | one compiled graph per Project, in a `LayerMap` keyed by Project id | the plugin registry and supervisor, the agent, harness and runtime catalogs, for that project's sessions                                                     |
 
 ## 6. Persistence and events
 
