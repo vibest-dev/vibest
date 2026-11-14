@@ -17,7 +17,7 @@ import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { IdleArchive } from "@vibest/core/session/archive"
+import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -124,15 +124,8 @@ export const pluginsHost = (
     layer: Layer.effectContext(
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
-        const idle = yield* IdleArchive
-        const live = yield* SessionLive
-        const archiveOnIdle = yield* archiveOnIdlePlugin.pipe(
-          Effect.provideService(ArchiveOnIdle, {
-            optedIn: live.archivesOnIdle,
-            consider: idle.consider,
-            parties: idle.parties,
-            localCreator: idle.localCreator,
-          }),
+        const archivePlugin = yield* archiveOnIdlePlugin.pipe(
+          Effect.provideService(ArchiveOnIdle, yield* archiveOnIdle),
         )
         const loaded = [
           ...candidates,
@@ -140,7 +133,7 @@ export const pluginsHost = (
             source: "builtin:archive-on-idle",
             revision: "archive-on-idle",
             options: {},
-            plugin: archiveOnIdle,
+            plugin: archivePlugin,
           },
         ]
         if (options.activateLate) {
@@ -156,9 +149,10 @@ export const pluginsHost = (
     ),
     deps: [
       Agents.node,
+      Archive.node,
       Bus.node,
+      Db.node,
       Harnesses.node,
-      IdleArchive.node,
       Hooks.Service.node,
       Runtimes.node,
       SessionLive.node,

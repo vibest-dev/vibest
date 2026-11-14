@@ -11,7 +11,7 @@ import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
 import { checkReplay } from "@vibest/core/bus"
-import { SQL_NAMES } from "@vibest/core/database/db"
+import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
 import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -20,7 +20,7 @@ import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugin"
 import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
 import { Runtimes } from "@vibest/core/runtimes"
-import { IdleArchive } from "@vibest/core/session/archive"
+import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
@@ -355,28 +355,13 @@ export const replacements: LayerNode.Replacements = [
   builtinsNode.replace(
     LayerNode.make({
       name: "vibest/Builtins",
-      layer: Layer.effect(Builtins, pre).pipe(
-        Layer.provide(
-          Layer.effect(
-            ArchiveOnIdle,
-            Effect.gen(function* () {
-              const idle = yield* IdleArchive
-              const live = yield* SessionLive
-              return {
-                optedIn: live.archivesOnIdle,
-                consider: idle.consider,
-                parties: idle.parties,
-                localCreator: idle.localCreator,
-              }
-            }),
-          ),
-        ),
-      ),
+      layer: Layer.effect(Builtins, pre).pipe(Layer.provide(Layer.effect(ArchiveOnIdle, archiveOnIdle))),
       deps: [
         PlatformNode.fileSystem,
         PlatformNode.path,
         PlatformNode.childProcessSpawner,
-        IdleArchive.node,
+        Archive.node,
+        Db.node,
         SessionLive.node,
       ],
     }),

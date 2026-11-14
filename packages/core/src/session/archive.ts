@@ -26,39 +26,6 @@ import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
-interface IdleArchiveOps {
-  readonly consider: (ids: ReadonlyArray<string>) => Effect.Effect<void>
-  readonly parties: (sessionId: string, inbox: number) => Effect.Effect<ReadonlyArray<string>>
-  readonly localCreator: (sessionId: string) => Effect.Effect<string | undefined>
-}
-
-const unbound: IdleArchiveOps = {
-  consider: () => Effect.void,
-  parties: () => Effect.succeed([]),
-  localCreator: () => Effect.succeed(undefined),
-}
-
-export class IdleArchive extends Context.Service<
-  IdleArchive,
-  IdleArchiveOps & { readonly bind: (ops: IdleArchiveOps) => Effect.Effect<void> }
->()("vibest/IdleArchive") {
-  static readonly layer = Layer.effect(
-    IdleArchive,
-    Effect.gen(function* () {
-      const slot = yield* Ref.make(unbound)
-      const current = Ref.get(slot)
-      return {
-        consider: (ids) => current.pipe(Effect.flatMap((ops) => ops.consider(ids))),
-        parties: (sessionId, inbox) => current.pipe(Effect.flatMap((ops) => ops.parties(sessionId, inbox))),
-        localCreator: (sessionId) => current.pipe(Effect.flatMap((ops) => ops.localCreator(sessionId))),
-        bind: (ops) => Ref.set(slot, ops),
-      }
-    }),
-  )
-
-  static readonly node = LayerNode.make({ service: IdleArchive, layer: IdleArchive.layer, deps: [] })
-}
-
 const make = Effect.gen(function* () {
   const db = yield* Db
   const fs = yield* FileSystem.FileSystem
@@ -254,15 +221,6 @@ const make = Effect.gen(function* () {
     ),
   )
 
-  yield* (yield* IdleArchive).bind({
-    consider: archiveSoon,
-    parties: (sessionId, inbox) => db.inbox.inboxParties(sessionId, inbox),
-    localCreator: (sessionId) =>
-      db.session
-        .creatorOf(sessionId)
-        .pipe(Effect.map((creator) => (creator !== undefined && "local" in creator ? creator.local : undefined))),
-  })
-
   return { undoCutOffStart, remove, finishArchive, archiveSoon }
 })
 
@@ -276,7 +234,6 @@ export class Archive extends Context.Service<Archive, Effect.Success<typeof make
     layer: Archive.layer,
     deps: [
       Db.node,
-      IdleArchive.node,
       Drain.node,
       Executions.node,
       Inbox.node,
@@ -292,3 +249,18 @@ export class Archive extends Context.Service<Archive, Effect.Success<typeof make
     ],
   })
 }
+
+export const archiveOnIdle = Effect.gen(function* () {
+  const archive = yield* Archive
+  const db = yield* Db
+  const live = yield* SessionLive
+  return {
+    optedIn: live.archivesOnIdle,
+    consider: archive.archiveSoon,
+    parties: (sessionId: string, inbox: number) => db.inbox.inboxParties(sessionId, inbox),
+    localCreator: (sessionId: string) =>
+      db.session
+        .creatorOf(sessionId)
+        .pipe(Effect.map((creator) => (creator !== undefined && "local" in creator ? creator.local : undefined))),
+  }
+})
