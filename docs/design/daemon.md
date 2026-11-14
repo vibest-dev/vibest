@@ -34,7 +34,7 @@ proof it exited, so the new vibestd waits for the lock, boundedly. With `--versi
 replacement ends in about two minutes whatever the other side does, not counting the wait for the yes.
 
 Every start of vibestd (`vibest daemon`, the auto-start of a CLI or a harness plugin, the new vibestd of a handoff)
-goes through `spawnDaemon`: a shell that starts vibestd in the background, discards that process's own output, and exits, and that the caller waits for. vibestd opens its log itself (`captureDaemonLog`).
+goes through `spawnDaemon`: a shell that starts vibestd in the background, appends that process's output to `vibestd.log` until the process captures the file itself, and exits, and that the caller waits for.
 vibestd is then adopted by launchd on macOS, and on Linux by the nearest subreaper (such as `systemd --user`) or
 init, so a long-lived caller such as a Pi process or an old vibestd never leaves it a zombie. A process is exited for vibest (`liveness`) when `kill(pid, 0)` fails or it is a
 zombie (`sysctl` `KERN_PROC_PID` on macOS, `/proc/<pid>/stat` on Linux); every wait for an old vibestd or harness to
@@ -57,9 +57,9 @@ than vibestd is told to run `vibest update` again, or how to stop vibestd by han
 
 ## Log file
 
-`vibestd.log` in the vibest home is vibestd's own log. The foreground process opens it at startup and points its standard output and error at it, so the file fills whether or not the starter redirected anything. A line another process appends, such as a Cursor hook, lands in the same file.
+`vibestd.log` in the vibest home is vibestd's own log. A foreground vibestd prints that path, then points its standard output and error at the file. The shell that starts one in the background also appends to the file, so a failure before the process captures it (an import error, an early crash) is kept. A line another process appends, such as a Cursor hook, lands in the same file.
 
-At that startup, and not again until the next one, a file larger than 10 MiB is compacted in place to the last 5 MiB, beginning at the next line (a tail with no newline is kept as the raw last 5 MiB). Bytes appended during that rewrite can be dropped. The same inode stays, so a descriptor already open on the file keeps appending to what remains.
+Only the process that holds the start lock and is going to serve trims, once, before it opens the socket: a file larger than 10 MiB is compacted in place to the last 5 MiB, beginning at the next line (a tail with no newline is kept as the raw last 5 MiB). A second start that finds vibestd already running does not trim. It does not trim again until the next start. Bytes appended during that rewrite can be dropped. The same inode stays, so a descriptor already open on the file keeps appending to what remains.
 
 ## Daemon start
 

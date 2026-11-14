@@ -246,20 +246,20 @@ const LOCK_EX_NB = 2 | 4
 export const captureDaemonLog = (file: string) =>
   Effect.sync(() => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    let failed: unknown
-    try {
-      trimLog(file)
-    } catch (e) {
-      failed = e
-    }
     const fd = fs.openSync(file, "a")
     try {
       if (libc.symbols.dup2(fd, 1) === -1 || libc.symbols.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
     } finally {
       fs.closeSync(fd)
     }
-    if (failed !== undefined) {
-      const message = failed instanceof Error ? failed.message : String(failed)
+  })
+
+export const trimDaemonLog: Host["trimLog"] = (file) =>
+  Effect.sync(() => {
+    try {
+      trimLog(file)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
       fs.writeSync(2, `log trim failed: ${message}\n`)
     }
   })
@@ -437,7 +437,13 @@ const onSignals: Host["onSignals"] = (onSignal) =>
     (off) => Effect.sync(off),
   ).pipe(Effect.asVoid)
 
-export const daemon: Host = { lock, checkDatabase, onSignals, exit: (code) => Effect.sync(() => process.exit(code)) }
+export const daemon: Host = {
+  lock,
+  checkDatabase,
+  trimLog: trimDaemonLog,
+  onSignals,
+  exit: (code) => Effect.sync(() => process.exit(code)),
+}
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")

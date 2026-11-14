@@ -56,7 +56,7 @@ const daemon = Spec.make("daemon", {
   description: "Start vibestd (in the background unless --foreground); exits 0 if it is already running",
   params: {
     foreground: Flag.Boolean("foreground").pipe(
-      Flag.withDescription("Run vibestd in this process"),
+      Flag.withDescription("Run vibestd in this process; its output goes to vibestd.log in the vibest home"),
       Flag.withDefault(false),
     ),
     handoff: Flag.Boolean("import").pipe(Flag.withHidden, Flag.withDefault(false)),

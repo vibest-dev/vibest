@@ -64,4 +64,4 @@ than the deadline.
 
 ## D12. Log file
 
-vibestd writes `vibestd.log` in the vibest home itself. A start over a log larger than 10 MiB leaves at most the last 5 MiB, from a line boundary, and later lines follow that tail. It does not trim again until the next start.
+vibestd writes `vibestd.log` in the vibest home itself. `vibest daemon --foreground` prints that path before its output goes there. A start that takes the daemon lock over a log larger than 10 MiB leaves at most the last 5 MiB, from a line boundary, and later lines follow that tail. A second start, while one is already running, does not trim. It does not trim again until the next start.

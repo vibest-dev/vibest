@@ -290,9 +290,10 @@ export const spawnDaemon = (
           "sh",
           [
             "-c",
-            'mkdir -p "$1" && shift && { "$@" >/dev/null 2>&1 & }',
+            'mkdir -p "$1" && log=$2 && shift 2 && { "$@" >>"$log" 2>&1 & }',
             "sh",
             layout.home,
+            layout.log,
             ...command,
             "daemon",
             "--foreground",
