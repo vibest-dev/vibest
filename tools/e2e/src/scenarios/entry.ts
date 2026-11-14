@@ -6,7 +6,8 @@ import { ask, entryRun, heldModel, type Message, piDir, reply, sseHeaders, text,
 import { replyOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
-type Proc = { name: string; argv?: Array<string> | null }
+type Proc = { name: string; argv0?: string | null; argv?: Array<string> | null }
+type Pane = { pane_id: string; agent?: string | null }
 type EntryRow = { id: string; directory: string; conversation: string | null; runtime: string | null }
 
 const needs = (...bins: Array<string>) => {
@@ -16,24 +17,20 @@ const needs = (...bins: Array<string>) => {
 const socketOf = (w: World, session: string) => path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
 
 const panes = async (socket: string) =>
-  ((await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as { panes: Array<{ pane_id: string }> }).panes
+  ((await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as { panes: Array<Pane> }).panes
 
-const piArgv = async (socket: string, pane: string) => {
-  const info = (await herdr(socket, "pane.process_info", { pane_id: pane }).catch(() => ({}))) as {
+const runsPi = async (socket: string, pane: Pane) => {
+  if (pane.agent === "pi") return true
+  const info = (await herdr(socket, "pane.process_info", { pane_id: pane.pane_id }).catch(() => ({}))) as {
     process_info?: { foreground_processes?: Array<Proc> }
   }
-  for (const p of info.process_info?.foreground_processes ?? []) {
-    const argv = p.argv ?? []
-    if ([p.name, ...argv.slice(0, 2)].some((n) => path.basename(n) === "pi")) return argv
-  }
-  return undefined
+  return (info.process_info?.foreground_processes ?? []).some((p) =>
+    [p.name, p.argv0, ...(p.argv ?? []).slice(0, 2)].some((n) => n != null && path.basename(n) === "pi"),
+  )
 }
 
 const piPane = async (socket: string) => {
-  for (const p of await panes(socket)) {
-    const argv = await piArgv(socket, p.pane_id)
-    if (argv) return { pane: p.pane_id, argv }
-  }
+  for (const p of await panes(socket)) if (await runsPi(socket, p)) return p.pane_id
   return undefined
 }
 
@@ -46,11 +43,6 @@ const screen = async (socket: string, pane: string) =>
 
 const status = async (socket: string, pane: string) =>
   ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
-
-const flag = (argv: ReadonlyArray<string>, name: string) => {
-  const at = argv.indexOf(name)
-  return at === -1 ? undefined : argv[at + 1]
-}
 
 const liveEntry = (w: World) =>
   row<EntryRow>(
@@ -65,18 +57,37 @@ const processStarts = (w: World) =>
     "SELECT count(*) AS n FROM process p JOIN session s ON s.id = p.session_id WHERE s.agent = 'coordinator'",
   )?.n ?? 0
 
+const latestProcess = (w: World) =>
+  row<{ ready: number | null; conversation: string | null }>(
+    w,
+    `SELECT p.ready_at AS ready, p.conversation FROM process p JOIN session s ON s.id = p.session_id
+     WHERE s.agent = 'coordinator' ORDER BY p.started_at DESC, p.id DESC LIMIT 1`,
+  )
+
 const piReady = async (socket: string, what: string) => {
-  let found: { pane: string; argv: Array<string> } | undefined
+  let pane: string | undefined
   await until(
     `${what}: pi running`,
     async () => {
-      found = await piPane(socket)
-      return found !== undefined
+      pane = await piPane(socket)
+      return pane !== undefined
     },
     60_000,
   )
-  await until(`${what}: pi idle`, async () => ["idle", "done"].includes(await status(socket, found!.pane)), 60_000)
-  return found!
+  await until(`${what}: pi idle`, async () => ["idle", "done"].includes(await status(socket, pane!)), 60_000)
+  return { pane: pane! }
+}
+
+const readyConversation = async (w: World, what: string) => {
+  await until(
+    `${what}: the process ready with its conversation`,
+    () => {
+      const p = latestProcess(w)
+      return p?.ready != null && p.conversation !== null
+    },
+    30_000,
+  )
+  return latestProcess(w)!.conversation
 }
 
 const execution = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
@@ -140,7 +151,7 @@ const checks: ReadonlyArray<Check> = [
         const out = await w.ok(["--harness", "pi", "--headless"], { cwd: sub, env, timeoutMs: 60_000 })
         expect(out.includes("the entry session is starting in"), `vibest printed: ${out}`)
         const socket = socketOf(w, w.herdrSession)
-        const { argv } = await piReady(socket, "the launched entry session")
+        const { pane } = await piReady(socket, "the launched entry session")
         await until("the entry session's row", () => liveEntry(w) !== undefined, 30_000)
         const entry = liveEntry(w)!
         const root = await fs.realpath(w.repository)
@@ -148,7 +159,11 @@ const checks: ReadonlyArray<Check> = [
         const terminal = (JSON.parse(entry.runtime ?? "{}") as { id?: string }).id ?? ""
         expect(terminal.startsWith(`${w.herdrSession}/`), `entry session terminal ${terminal}`)
         const file = path.join(w.root, "tmp", "vibest", entry.id, "system-prompt.md")
-        expect(flag(argv, "--append-system-prompt") === file, `pi argv: ${JSON.stringify(argv)}`)
+        await until(
+          "Pi lists the system prompt file in its loaded context",
+          async () => (await screen(socket, pane)).replace(/\s+/g, "").includes(file),
+          30_000,
+        ).catch(async (e: Error) => fail(`${e.message}: ${file}; screen:\n${await screen(socket, pane)}`))
         const info = await w.json<{ directory: string }>(["project", "info"])
         expect((await Bun.file(file).text()).includes(info.directory), `${file} does not name ${info.directory}`)
       } finally {
@@ -159,7 +174,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-resume",
     title:
-      "a Pi entry session whose execution shows in `vibest ls` and `vibest result` and whose pane closed after it: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
+      "a Pi entry session whose execution shows in `vibest ls` and `vibest result` and whose pane closed after it: `vibest` reopens the same session and conversation (its new process reports that conversation, the earlier prompt on screen); `vibest --new` starts a new session and conversation (another conversation reported, the earlier prompt not on screen)",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -202,10 +217,8 @@ const checks: ReadonlyArray<Check> = [
 
         const again = await start([], "the reopened entry session")
         expect(liveEntry(w)?.id === one.id, `reopened ${liveEntry(w)?.id}, not ${one.id}`)
-        expect(
-          flag(again.argv, "--session-id") === one.conversation,
-          `pi argv: ${JSON.stringify(again.argv)}, conversation ${one.conversation}`,
-        )
+        const resumed = await readyConversation(w, "the reopened entry session")
+        expect(resumed === one.conversation, `reopened conversation ${resumed}, not ${one.conversation}`)
         await until(
           "the earlier prompt on the reopened screen",
           async () => (await screen(socket, again.pane)).includes("done-first"),
@@ -216,10 +229,8 @@ const checks: ReadonlyArray<Check> = [
         const fresh = await start(["--new"], "the --new entry session")
         const two = liveEntry(w)!
         expect(two.id !== one.id, `--new kept session ${one.id}`)
-        expect(
-          two.conversation !== one.conversation && !fresh.argv.includes("--session-id"),
-          `--new resumed ${two.conversation}: ${JSON.stringify(fresh.argv)}`,
-        )
+        const started = await readyConversation(w, "the --new entry session")
+        expect(started !== one.conversation, `--new resumed conversation ${started}`)
         const shown = await screen(socket, fresh.pane)
         if (shown.includes("done-first")) fail(`--new shows the old conversation:\n${shown}`)
       } finally {
