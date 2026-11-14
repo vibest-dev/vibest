@@ -23,6 +23,7 @@ export type PeerStart = {
 
 export type OutboxRow = {
   readonly id: string
+  readonly seq: number
   readonly sessionId: string
   readonly content: string
   readonly kind: "send" | "notice"
@@ -153,7 +154,7 @@ export const remoteQueries = ({
           FROM project p JOIN project_repository r ON r.project_id = p.id
           WHERE r.remote_url IS NOT NULL ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
 
-      outboxOf: (peer: string) => reads.outboxOf(peer).pipe(Effect.orDie),
+      outboxOf: (peer: string, after = 0, limit = -1) => reads.outboxOf(peer, after, limit).pipe(Effect.orDie),
 
       ackOutbox: (peer: string, ids: ReadonlyArray<string>) =>
         (ids.length === 0
