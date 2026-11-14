@@ -1,4 +1,4 @@
-import { Bus, type BusEvent } from "@vibest/core/bus"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
@@ -6,26 +6,26 @@ import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
-import { Caller, Forbidden, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
+import { Caller, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
-import { Effect, Queue, Stream } from "effect"
+import { Effect, Stream } from "effect"
 
 import { integrationOf, processOf, reader } from "../gates.ts"
 import { type Listing, toInfo } from "../listing.ts"
+import { WatchFeed } from "../watch-feed.ts"
 import type { Checks, Handlers, MethodOf } from "./caller.ts"
 import type { RemoteHandlers } from "./remote.ts"
-
-export const WATCH_BACKLOG = 10_000
 
 export const make = (
   { projectOf, machineFromCaller, cliOnly, self }: Checks,
   { reach, routed, spawnOn }: RemoteHandlers,
-  { listed, watched, snapshotProjects, watchDeltas }: Listing,
+  { listed, watched, snapshotProjects }: Listing,
 ) =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
     const db = yield* Db
     const runtimes = yield* Runtimes.Service
+    const watchFeed = yield* WatchFeed.Service
     const bus = yield* Bus
     const integration = yield* Integration.Service
     const seenLocked = yield* KeyedMutex.make<string>()
@@ -207,33 +207,14 @@ export const make = (
         Stream.unwrap(
           Effect.gen(function* () {
             yield* cliOnly("Watch")
-            const subscription = yield* bus.subscribe()
-            const backlog = yield* Queue.bounded<BusEvent, WatchLagged>(WATCH_BACKLOG)
-            yield* Stream.fromSubscription(subscription).pipe(
-              Stream.runForEach((event) =>
-                Queue.offerUnsafe(backlog, event)
-                  ? Effect.void
-                  : Queue.fail(
-                      backlog,
-                      new WatchLagged({
-                        message: `Watch fell ${WATCH_BACKLOG} events behind; reconnect for a new Snapshot`,
-                      }),
-                    ),
-              ),
-              Effect.forkScoped,
-            )
+            const changes = yield* watchFeed.subscribe
             const sessionRows = yield* watched(yield* listed({ _tag: "All" }, false))
             const snapshot: WatchEvent = {
               _tag: "Snapshot",
               projects: yield* snapshotProjects(sessionRows),
               sessions: sessionRows,
             }
-            return Stream.concat(
-              Stream.make(snapshot),
-              Stream.fromEffectRepeat(Queue.takeAll(backlog).pipe(Effect.flatMap(watchDeltas))).pipe(
-                Stream.flattenIterable,
-              ),
-            )
+            return Stream.concat(Stream.make(snapshot), changes)
           }),
         ),
 

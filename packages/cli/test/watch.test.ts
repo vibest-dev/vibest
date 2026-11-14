@@ -8,8 +8,8 @@ import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import type { WatchEvent } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
-import { WATCH_BACKLOG } from "@vibest/server/handlers/session"
 import * as Server from "@vibest/server/server"
+import { WATCH_BACKLOG } from "@vibest/server/watch-feed"
 import { Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
@@ -207,6 +207,36 @@ describe("Watch", () => {
       yield* Fiber.join(five)
       yield* Fiber.join(six)
       assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 6, seen: 6 })
+    }),
+  )
+
+  test(
+    "two watchers share one change: its session row is read once",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const { repo, entryId } = yield* withEntry
+      const first = yield* watching(repo)
+      const second = yield* watching(repo)
+      yield* first.next(isSnapshot)
+      yield* second.next(isSnapshot)
+      const briefs = db.sessionBriefs
+      let reads = 0
+      Object.assign(db, {
+        sessionBriefs: (ids: Parameters<typeof briefs>[0]) => {
+          reads++
+          return briefs(ids)
+        },
+      })
+      const inStatus = (status: string) => (e: WatchEvent) =>
+        e._tag === "Session" && e.session.id === entryId && e.session.status === status
+      yield* db.setStatus(entryId, "working")
+      yield* first.next((e): e is WatchEvent => inStatus("working")(e))
+      yield* second.next((e): e is WatchEvent => inStatus("working")(e))
+      reads = 0
+      yield* db.setStatus(entryId, "idle")
+      yield* first.next((e): e is WatchEvent => inStatus("idle")(e))
+      yield* second.next((e): e is WatchEvent => inStatus("idle")(e))
+      assert.strictEqual(reads, 1)
     }),
   )
 
