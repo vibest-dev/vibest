@@ -14,7 +14,14 @@ import * as Hooks from "./plugin/hooks.ts"
 import { errorMessage } from "./plugin/hooks.ts"
 import * as PluginHost from "./plugin/host.ts"
 import * as Registry from "./plugin/registry.ts"
-import type { FailInput, Interface, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugin/service.ts"
+import {
+  type FailInput,
+  Plugins,
+  type StartInput,
+  type MachineHook,
+  type PluginNote,
+  type SpawnDecision,
+} from "./plugin/service.ts"
 import { type AnyPlugin, type Candidate, keyOf, makeSources, PluginLoader } from "./plugin/sources.ts"
 import { supervise } from "./plugin/supervisor.ts"
 import { logFailure } from "./reactor.ts"
@@ -33,7 +40,8 @@ export {
 export { type Candidate, pluginEntries, PluginLoader } from "./plugin/sources.ts"
 export { DEBOUNCE, RECHECK } from "./plugin/supervisor.ts"
 export { errorMessage }
-export type { FailInput, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugin/service.ts"
+export type { FailInput, Interface, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugin/service.ts"
+export { Plugins } from "./plugin/service.ts"
 
 export const DEFAULT_TIMEOUT = Duration.seconds(5)
 export const MACHINE_TIMEOUT = Duration.seconds(30)
@@ -169,8 +177,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 
     const subscriptions = yield* Subscriptions
     const runtimes = yield* Runtimes
-    const hooks = Hooks.make()
-    const contextFor = yield* PluginHost.make(hooks)
+    const hooks = yield* Hooks.Service
+    const contextFor = yield* PluginHost.make
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
       const scope = yield* Scope.fork(root)
@@ -181,7 +189,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       }
       const exit = yield* timeoutWithoutWaiting(
         Effect.suspend(() =>
-          effectOf(plugin)(contextFor({ plugin: plugin.id, options: candidate.options, stats })),
+          effectOf(plugin)(contextFor({ plugin: plugin.id, activation: running, options: candidate.options, stats })),
         ).pipe(Scope.provide(scope), Registry.group(report)),
         scope,
         timeout,
@@ -328,11 +336,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const failure = (stopped: Hooks.Stopped) => new HookFailed({ message: stopped.reason })
 
     const hooksOf = <N extends Hooks.Name>(name: N, runtime?: string): ReadonlyArray<Hooks.Entry<N>> =>
-      hooks
-        .get(name, runtime)
-        .filter((entry) =>
-          slots.some((s) => s.running?.broken === undefined && s.running?.candidate.plugin.id === entry.plugin),
-        )
+      slots.flatMap((s) => (s.running && s.running.broken === undefined ? hooks.get(name, runtime, s.running) : []))
 
     const withHooks = <A, E>(name: string, f: (trace: Array<TraceEntry>) => Effect.Effect<A, E>) =>
       Effect.gen(function* () {
@@ -432,40 +436,43 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     return { service: Plugins.of({ start, fail, list, settled, machine }), activate, holdNow, importing }
   })
 
-export class Plugins extends Context.Service<Plugins, Interface>()("vibest/Plugins") {
-  static readonly make = (candidates: ReadonlyArray<Candidate>, options: { readonly timeout?: Duration.Input } = {}) =>
-    makeHost(options).pipe(
-      Effect.tap((host) => host.activate(candidates)),
-      Effect.map((host) => host.service),
-    )
-
-  static readonly layer = Layer.effect(
-    Plugins,
-    Effect.gen(function* () {
-      yield* (yield* PluginLoader).prepare
-      const host = yield* makeHost()
-      const sources = yield* makeSources(DEFAULT_TIMEOUT)
-      const builtins = yield* Builtins
-      yield* supervise(host, builtins, sources)
-      return host.service
-    }),
+export const makePlugins = (
+  candidates: ReadonlyArray<Candidate>,
+  options: { readonly timeout?: Duration.Input } = {},
+) =>
+  makeHost(options).pipe(
+    Effect.tap((host) => host.activate(candidates)),
+    Effect.map((host) => host.service),
+    Effect.provide(Hooks.Service.layer),
   )
 
-  static readonly node = LayerNode.make({
-    service: Plugins,
-    layer: Plugins.layer,
-    deps: [
-      builtinsNode,
-      Agents.node,
-      Bus.node,
-      Harnesses.node,
-      PluginLoader.node,
-      Runtimes.node,
-      Subscriptions.node,
-      PlatformNode.crypto,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
-  })
-}
+export const pluginsLayer = Layer.effect(
+  Plugins,
+  Effect.gen(function* () {
+    yield* (yield* PluginLoader).prepare
+    const host = yield* makeHost()
+    const sources = yield* makeSources(DEFAULT_TIMEOUT)
+    const builtins = yield* Builtins
+    yield* supervise(host, builtins, sources)
+    return host.service
+  }),
+)
+
+export const pluginsNode = LayerNode.make({
+  service: Plugins,
+  layer: pluginsLayer,
+  deps: [
+    builtinsNode,
+    Agents.node,
+    Bus.node,
+    Harnesses.node,
+    Hooks.Service.node,
+    PluginLoader.node,
+    Runtimes.node,
+    Subscriptions.node,
+    PlatformNode.crypto,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

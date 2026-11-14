@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Harness, HarnessUnavailable } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
-import { Plugins } from "@vibest/core/plugin"
+import { makePlugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
@@ -434,7 +434,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const listed = yield* Effect.gen(function* () {
         const subs = yield* Subscriptions
-        const plugins = yield* Plugins.make([{ source: "see", revision: "-", options: {}, plugin }])
+        const plugins = yield* makePlugins([{ source: "see", revision: "-", options: {}, plugin }])
         yield* plugins.start({
           project: "/r",
           agent: "general",

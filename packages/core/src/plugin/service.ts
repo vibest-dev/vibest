@@ -1,7 +1,7 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import type { AgentMove, MachineEvent } from "@vibest/plugin/effect"
 import type { AgentRefused, HookFailed, PluginInfo, PluginsNotActive, Routing, TraceEntry } from "@vibest/schema/plugin"
-import type { Effect } from "effect"
+import { Context, type Effect } from "effect"
 
 export type MachineHook = keyof VibestPlugin.MachineHooks
 
@@ -38,3 +38,5 @@ export interface Interface {
     runtime?: string,
   ) => Effect.Effect<{ readonly plugins: ReadonlyArray<string>; readonly notes: ReadonlyArray<PluginNote> }>
 }
+
+export class Plugins extends Context.Service<Plugins, Interface>()("vibest/Plugins") {}

@@ -40,7 +40,7 @@ import {
   unprovided,
 } from "../harness.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, safeRepositoryDirectory } from "../paths.ts"
-import { Plugins, type Routing } from "../plugin.ts"
+import { Plugins, type Routing, pluginsNode } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
@@ -447,7 +447,7 @@ export class Spawn extends Context.Service<Spawn, Effect.Success<ReturnType<type
     Harnesses.node,
     Move.node,
     Placement.node,
-    Plugins.node,
+    pluginsNode,
     Runtimes.node,
     SessionLocks.node,
     PlatformNode.crypto,

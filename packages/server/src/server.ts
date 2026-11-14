@@ -9,7 +9,7 @@ import { Harness, Harnesses } from "@vibest/core/harness"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
-import { Plugins } from "@vibest/core/plugin"
+import { pluginsNode } from "@vibest/core/plugin"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { SshHosts } from "@vibest/core/repository-url"
@@ -101,7 +101,7 @@ export const node = LayerNode.make({
     EntrySession.node,
     Machines.node,
     Peers.node,
-    Plugins.node,
+    pluginsNode,
     Processes.node,
     Project.node,
     Remote.node,

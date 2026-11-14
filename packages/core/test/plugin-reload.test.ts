@@ -13,7 +13,9 @@ import {
   Plugins,
   PluginsNotActive,
   RECHECK,
+  pluginsLayer,
 } from "@vibest/core/plugin"
+import * as Hooks from "@vibest/core/plugin/hooks"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
 import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"
@@ -78,6 +80,7 @@ const host = <A, E>(
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
     Effect.provide(Bus.layer),
+    Effect.provide(Hooks.Service.layer),
   )
 
 describe("plugins: activation", () => {
@@ -329,7 +332,7 @@ const packageHome = Effect.gen(function* () {
 })
 
 const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
-  Plugins.layer.pipe(
+  pluginsLayer.pipe(
     Layer.provide(Layer.sync(PluginLoader, makeLoader)),
     Layer.provide(Layer.succeed(Builtins, builtins)),
     Layer.provide(subscriptionsLayer),
@@ -338,6 +341,7 @@ const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
     Layer.provide(Bus.layer),
+    Layer.provide(Hooks.Service.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
   )
@@ -709,6 +713,7 @@ describe("plugins: supervisor", () => {
         ),
         Effect.scoped,
         Effect.provide(blockedSubscriptions(entered, release)),
+        Effect.provide(Hooks.Service.layer),
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
@@ -752,6 +757,7 @@ describe("plugins: supervisor", () => {
         ),
         Effect.scoped,
         Effect.provide(blockedSubscriptions(entered, release)),
+        Effect.provide(Hooks.Service.layer),
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
@@ -903,6 +909,67 @@ describe("plugins: hook events are detached copies", () => {
         assert.deepStrictEqual(result.trace[1]!.changes, [
           { field: "move", from: { harness: "pi" }, overwrote: "sets" },
         ])
+      }),
+    ),
+  )
+})
+
+describe("plugins: one registry across activations", () => {
+  const modelOf = (id: string, model: string, setup: Effect.Effect<void, never, never> = Effect.void) =>
+    Plugin.define({
+      id,
+      effect: (ctx) =>
+        setup.pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = model))))),
+    })
+
+  it.effect("a retired revision whose teardown overran its deadline leaves no hook beside its replacement", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>()
+        const stuck = Plugin.define({
+          id: "g",
+          effect: (ctx) =>
+            ctx.agent
+              .hook("start.before", (e) => Effect.sync(() => void (e.model = "retired")))
+              .pipe(Effect.andThen(Effect.addFinalizer(() => Deferred.await(gate)))),
+        })
+        yield* h.activate([candidate("g", "1", stuck)])
+        const reloading = yield* Effect.forkChild(h.activate([candidate("g", "2", modelOf("g", "current"))]))
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(reloading)
+        const decision = yield* h.service.start(event)
+        assert.deepStrictEqual(
+          decision.trace.map((t) => t.plugin),
+          ["g"],
+        )
+        assert.strictEqual(decision.model, "current")
+        yield* Deferred.succeed(gate, undefined)
+      }),
+    ),
+  )
+
+  it.effect("a hook registered late runs in its plugin's load order, not in registration order", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>()
+        const late = Plugin.define({
+          id: "a",
+          effect: (ctx) =>
+            Deferred.await(gate).pipe(
+              Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = "a")))),
+              Effect.forkScoped,
+              Effect.asVoid,
+            ),
+        })
+        yield* h.activate([candidate("a", "1", late), candidate("b", "1", modelOf("b", "b"))])
+        yield* Deferred.succeed(gate, undefined)
+        yield* Effect.yieldNow
+        const decision = yield* h.service.start(event)
+        assert.deepStrictEqual(
+          decision.trace.map((t) => t.plugin),
+          ["a", "b"],
+        )
+        assert.strictEqual(decision.model, "b")
       }),
     ),
   )
