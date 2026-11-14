@@ -2,19 +2,7 @@ import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { NoSuchSession, type HarnessUnavailable } from "@vibest/schema/session"
-import {
-  Cause,
-  Context,
-  Data,
-  Effect,
-  Exit,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  type PlatformError,
-  type Scope,
-} from "effect"
+import { Cause, Context, Data, Effect, Exit, FileSystem, Layer, Path, type PlatformError, type Scope } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { Agents } from "../agents.ts"
@@ -47,7 +35,6 @@ import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "
 import { projectText, removeSystemPrompt, systemPrompt, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
-import type { LimitMove } from "./move.ts"
 
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
@@ -58,8 +45,12 @@ export type LaunchOptions = {
   readonly splitFrom?: string | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
   readonly commit?: string | undefined
-  readonly onOwnLimit: LimitMove["rerun"]
 }
+
+export type LaunchOutcome =
+  | { readonly _tag: "Started" }
+  | { readonly _tag: "Limited"; readonly input: string; readonly error: string }
+  | { readonly _tag: "Failed" }
 
 const make = Effect.gen(function* () {
   const db = yield* Db
@@ -277,7 +268,7 @@ const make = Effect.gen(function* () {
     session: SessionRow,
     root: string,
     firstPrompt: string,
-    { splitFrom, env, commit, onOwnLimit }: LaunchOptions,
+    { splitFrom, env, commit }: LaunchOptions,
   ) {
     const folders = yield* listProjectRepositories(root)
     const sharedFrom = splitFrom !== undefined ? yield* shareRow(session, splitFrom) : undefined
@@ -300,12 +291,8 @@ const make = Effect.gen(function* () {
         ),
         (terminal) => h.close(terminal).pipe(Effect.ignore),
       ).pipe(
-        Effect.catchTag("AgentOwnLimit", (e) =>
-          onOwnLimit(h, session, undefined, firstPrompt, false, e.message, 0).pipe(
-            Effect.map((): Option.Option<Terminal> => Option.none<Terminal>()),
-          ),
-        ),
-        Effect.map((outcome) => (Option.isOption(outcome) ? outcome : Option.some<Terminal>(outcome))),
+        Effect.map((terminal) => ({ terminal })),
+        Effect.catchTag("AgentOwnLimit", (e) => Effect.succeed({ limited: e.message })),
       )
     const worktree = yield* worktreeOf(session)
     if (sharedFrom === undefined) {
@@ -335,9 +322,22 @@ const make = Effect.gen(function* () {
         ...(sharedFrom !== undefined ? { split: true } : {}),
       }),
     )
-    if (Option.isNone(terminal)) return
-    return yield* afterOpen(h, session, terminal.value, root, firstPrompt)
+    if ("limited" in terminal)
+      return { _tag: "Limited", input: firstPrompt, error: terminal.limited } satisfies LaunchOutcome
+    yield* afterOpen(h, session, terminal.terminal, root, firstPrompt)
+    return { _tag: "Started" } satisfies LaunchOutcome
   }, Effect.scoped)
+  const launchFailed = Effect.fn("Placement.launchFailed")(function* (
+    session: SessionRow,
+    cause: Cause.Cause<unknown>,
+  ) {
+    const execution = yield* db.session.openExecution(session.id)
+    if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "failed")
+    yield* db.session.endProcess(session.id, "launch_failed")
+    yield* db.session.setStatus(session.id, "unknown")
+    yield* notice(session, `${session.id} failed to start ${harnessIdOf(session)}: ${messageOf(Cause.squash(cause))}`)
+  })
+
   const launch = Effect.fn("Placement.launch")(
     (
       h: Runtime,
@@ -348,16 +348,7 @@ const make = Effect.gen(function* () {
       options: LaunchOptions,
     ) =>
       launchRaw(h, target, session, root, firstPrompt, options).pipe(
-        Effect.catchCause((cause) =>
-          Effect.gen(function* () {
-            const e = Cause.squash(cause)
-            const execution = yield* db.session.openExecution(session.id)
-            if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "failed")
-            yield* db.session.endProcess(session.id, "launch_failed")
-            yield* db.session.setStatus(session.id, "unknown")
-            yield* notice(session, `${session.id} failed to start ${harnessIdOf(session)}: ${messageOf(e)}`)
-          }),
-        ),
+        Effect.catchCause((cause) => launchFailed(session, cause).pipe(Effect.as<LaunchOutcome>({ _tag: "Failed" }))),
       ),
     provided,
   )
@@ -442,6 +433,7 @@ const make = Effect.gen(function* () {
     launchArgv,
     handTask,
     launch,
+    launchFailed,
     resume,
     republish,
     recount,
