@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
+import { Peer } from "@vibest/server/machine/peer"
 import { Effect, Queue, Stream } from "effect"
 import { RpcClient } from "effect/rpc"
-import { SqlClient } from "effect/sql"
+import { SqlClient, Statement } from "effect/sql"
 
 import * as Platform from "#platform"
 
@@ -83,18 +84,33 @@ describe("a Send retried with the same request across machines", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("items queued while the peer was away are all sent, in pages, after it connects", () =>
+  it.effect("items queued while the peer was away are all sent, read in pages of 100, after it connects", () =>
     Effect.gen(function* () {
       const b = yield* repoStack()
       const peer = randomId()
-      const a1 = yield* b.as(peer, "p1")
       const ids = Array.from({ length: 2500 }, () => randomId())
+      yield* b.as(peer, "p1")
       for (const id of ids) yield* b.db.sendToPeer(randomId(), peer, randomId(), "x", id)
-      const sent = yield* a1.outbox.pipe(Stream.take(ids.length), Stream.runCollect)
+      const peers = yield* b.run(Peer.Service)
+      const reads: Array<ReadonlyArray<unknown>> = []
+      const countReads: Statement.Transformer = (statement) => {
+        const [text, params] = statement.compile()
+        if (text.includes("FROM outbox o")) reads.push(params)
+        return Effect.succeed(statement)
+      }
+      const sent = yield* peers
+        .outbox(peer)
+        .pipe(
+          Stream.take(ids.length),
+          Stream.runCollect,
+          Effect.provideService(Statement.CurrentTransformer, countReads),
+        )
       assert.deepStrictEqual(
         sent.map((row) => row.id),
         ids,
       )
+      assert.strictEqual(reads.length, 25)
+      assert.isTrue(reads.every((params) => params.includes(100)))
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

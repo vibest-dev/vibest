@@ -17,7 +17,7 @@ import {
   PromptTooLarge,
 } from "@vibest/schema/machine"
 import { NoRuntime } from "@vibest/schema/session"
-import { Context, Effect, Layer, Option, Stream } from "effect"
+import { Context, Effect, Layer, Option, Queue, Stream } from "effect"
 
 export * as Peer from "./peer.ts"
 
@@ -106,9 +106,11 @@ const make = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           const subscription = yield* bus.subscribe([OutboxQueued])
-          const wake = Stream.fromSubscription(subscription).pipe(
+          const slot = yield* Queue.sliding<void>(1)
+          yield* Stream.fromSubscription(subscription).pipe(
             Stream.filter((event) => event.data.peer === peer),
-            Stream.buffer({ capacity: 1, strategy: "sliding" }),
+            Stream.runForEach(() => Queue.offer(slot, undefined)),
+            Effect.forkScoped,
           )
           let cursor = 0
           const pages = Stream.paginate(undefined, () =>
@@ -122,7 +124,9 @@ const make = Effect.gen(function* () {
               }),
             ),
           )
-          return Stream.concat(Stream.make(undefined), wake).pipe(Stream.flatMap(() => pages, { concurrency: 1 }))
+          return Stream.concat(Stream.make(undefined), Stream.fromQueue(slot)).pipe(
+            Stream.flatMap(() => pages, { concurrency: 1 }),
+          )
         }),
       ),
 
