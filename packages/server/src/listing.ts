@@ -13,7 +13,7 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import type { RuntimeAddress } from "@vibest/schema/session"
-import { Effect } from "effect"
+import { Context, Effect, Layer } from "effect"
 
 import type { ListScope } from "./machine/remote.ts"
 
@@ -179,4 +179,17 @@ export const sessionListing = (deps: {
   return { listed, watched, snapshotProjects, watchDeltas }
 }
 
-export type Listing = ReturnType<typeof sessionListing>
+export type Interface = ReturnType<typeof sessionListing>
+
+export class Service extends Context.Service<Service, Interface>()("vibest/Listing") {}
+
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    return sessionListing({
+      db: yield* Db.Service,
+      sessions: yield* Session.Service,
+      runtimes: yield* Runtimes.Service,
+    })
+  }),
+)
