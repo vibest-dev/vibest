@@ -27,9 +27,13 @@ describe("a Send retried with the same request across machines", () => {
       const spawned = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} }))
       const middle = onB(spawned.id)
       const child = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-      yield* b.db.insertSession({ ...peerSession, id: child, name: "child", createdAt: 1, lastActive: 1 }, b.project, {
-        parentSessionId: middle,
-      })
+      yield* b.db.session.insertSession(
+        { ...peerSession, id: child, name: "child", createdAt: 1, lastActive: 1 },
+        b.project,
+        {
+          parentSessionId: middle,
+        },
+      )
       const asB =
         (sessionId: string) =>
         <A, E>(effect: Effect.Effect<A, E>) =>
@@ -55,7 +59,7 @@ describe("a Send retried with the same request across machines", () => {
       yield* sendTwice(middle, entryId.slice(0, 8), toCreator)
       yield* arrived(1)
 
-      yield* b.db.archive(middle)
+      yield* b.db.session.archive(middle)
       const pastEnded = randomId()
       yield* sendTwice(child, middle, pastEnded)
       yield* arrived(2)
@@ -75,10 +79,10 @@ describe("a Send retried with the same request across machines", () => {
         Stream.runForEach((row) => Queue.offer(sent, row.id)),
         Effect.forkScoped,
       )
-      const queue = b.db.sendToPeer(randomId(), peer, randomId(), "x", item)
+      const queue = b.db.remote.sendToPeer(randomId(), peer, randomId(), "x", item)
       yield* queue
       assert.strictEqual(yield* Queue.take(sent), item)
-      yield* b.db.ackOutbox(peer, [item])
+      yield* b.db.remote.ackOutbox(peer, [item])
       yield* queue
       assert.strictEqual(yield* Queue.take(sent), item)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -90,7 +94,7 @@ describe("a Send retried with the same request across machines", () => {
       const peer = randomId()
       const ids = Array.from({ length: 2500 }, () => randomId())
       yield* b.as(peer, "p1")
-      for (const id of ids) yield* b.db.sendToPeer(randomId(), peer, randomId(), "x", id)
+      for (const id of ids) yield* b.db.remote.sendToPeer(randomId(), peer, randomId(), "x", id)
       const peers = yield* b.run(Peer.Service)
       const reads: Array<ReadonlyArray<unknown>> = []
       const countReads: Statement.Transformer = (statement) => {

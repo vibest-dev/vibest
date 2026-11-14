@@ -153,7 +153,7 @@ const readyOnStart = LayerNode.make({
       const db = yield* Db
       let pid = 50_000
       yield* Ref.set(fake.onStarted, (session) =>
-        Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.patchLive(session, { ready: at, pid: ++pid }))),
+        Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.session.patchLive(session, { ready: at, pid: ++pid }))),
       )
     }),
   ),

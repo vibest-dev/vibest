@@ -53,14 +53,14 @@ export const resolveProject = Effect.fn("resolveProject")(function* (
   located: Located,
   move?: boolean,
 ) {
-  const found = yield* db.projectAt(located.root)
+  const found = yield* db.project.projectAt(located.root)
   if (found !== undefined) {
-    yield* db.refreshRepositories(found.id, located.repositories)
+    yield* db.project.refreshRepositories(found.id, located.repositories)
     return { id: found.id, directory: found.directory ?? located.root }
   }
   const fs = yield* FileSystem.FileSystem
   const remotes = located.repositories.flatMap((r) => (r.remote === undefined ? [] : [r.remote]))
-  const candidates = yield* Effect.filter(yield* db.moveCandidates(remotes), (c) =>
+  const candidates = yield* Effect.filter(yield* db.project.moveCandidates(remotes), (c) =>
     fs.exists(c.directory).pipe(
       Effect.map((exists) => !exists),
       Effect.orElseSucceed(() => false),
@@ -70,10 +70,10 @@ export const resolveProject = Effect.fn("resolveProject")(function* (
   if (candidates.length === 1 && only !== undefined && move !== false) {
     if (move !== true) return yield* new ProjectMoved({ projectId: only.id, from: only.directory, to: located.root })
     const fixed = yield* repairWorktrees(located.repositories.map((r) => r.path))
-    const from = yield* db.moveProject(only.id, located.root, located.repositories)
+    const from = yield* db.project.moveProject(only.id, located.root, located.repositories)
     return { id: only.id, directory: located.root, moved: { from, ...fixed } satisfies Moved }
   }
-  const id = yield* db.createProject(located.root, located.repositories)
+  const id = yield* db.project.createProject(located.root, located.repositories)
   return {
     id,
     directory: located.root,

@@ -95,7 +95,7 @@ const make = Effect.gen(function* () {
   )
 
   const worktreeOf = Effect.fn("Placement.worktreeOf")((session: SessionRow) =>
-    db.sessionDirectory(session.id).pipe(
+    db.session.sessionDirectory(session.id).pipe(
       Effect.flatMap((directory) =>
         directory
           ? Effect.succeed(directory)
@@ -124,9 +124,9 @@ const make = Effect.gen(function* () {
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
-      checkout: (yield* db.sessionIdentity(session.id))?.entry,
-      sharer: yield* db.earlierSharer(session.id),
-      creator: yield* db.creatorLabel(session.id),
+      checkout: (yield* db.session.sessionIdentity(session.id))?.entry,
+      sharer: yield* db.session.earlierSharer(session.id),
+      creator: yield* db.session.creatorLabel(session.id),
       projectDir: layout.project(session.projectId),
       vibest,
       ...(yield* projectText(layout.project(session.projectId))),
@@ -138,7 +138,7 @@ const make = Effect.gen(function* () {
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const pluginDir = yield* harness.plugin(adapter.id)
     const id = session.process?.conversation ?? null
-    const resumeThis = resume && id !== null && (yield* db.canResumeConversation(session.id, id))
+    const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
     return [
       adapter.binary,
       ...adapter.launchArgs({
@@ -165,7 +165,7 @@ const make = Effect.gen(function* () {
     const first = (yield* harnesses.get(harnessIdOf(session))).systemPromptInPrompt
       ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
       : task
-    const notStarted = yield* prompt(h, session, terminal, first, db.linkTask(session.id))
+    const notStarted = yield* prompt(h, session, terminal, first, db.inbox.linkTask(session.id))
     if (notStarted) yield* notice(session, notStarted)
   }, provided)
 
@@ -181,7 +181,9 @@ const make = Effect.gen(function* () {
     )
 
   const liveCount = (projectId: string) =>
-    db.listSessions({ projectId }).pipe(Effect.map((rows) => rows.filter((row) => !row.entry && !archived(row)).length))
+    db.session
+      .listSessions({ projectId })
+      .pipe(Effect.map((rows) => rows.filter((row) => !row.entry && !archived(row)).length))
 
   const show = Effect.fn("Placement.show")(
     function* (h: Runtime, session: SessionRow, terminal: Terminal, root: string) {
@@ -207,8 +209,9 @@ const make = Effect.gen(function* () {
 
   const nearCreator = (session: SessionRow, kind: string) =>
     Effect.gen(function* () {
-      const creator = yield* db.creatorOf(session.id)
-      const parent = creator !== undefined && "local" in creator ? yield* db.getSession(creator.local) : undefined
+      const creator = yield* db.session.creatorOf(session.id)
+      const parent =
+        creator !== undefined && "local" in creator ? yield* db.session.getSession(creator.local) : undefined
       return parent !== undefined &&
         runtimeOf(parent) === kind &&
         exitedAt(parent) === null &&
@@ -232,9 +235,9 @@ const make = Effect.gen(function* () {
     },
   ) {
     const near = input.near !== undefined ? input.near : yield* nearCreator(session, h.id)
-    const remote = yield* db.startedByPeer(session.id)
-    yield* db.startProcess(session.id, startOf(session))
-    const started = yield* db.currentProcessId(session.id)
+    const remote = yield* db.session.startedByPeer(session.id)
+    yield* db.session.startProcess(session.id, startOf(session))
+    const started = yield* db.session.currentProcessId(session.id)
     const opened = yield* h
       .open({
         project: input.project,
@@ -247,15 +250,17 @@ const make = Effect.gen(function* () {
         ...(remote ? { remote: true } : {}),
         ...(target !== undefined ? { target } : {}),
       })
-      .pipe(Effect.onError(() => (input.endedByCaller ? Effect.void : db.endProcess(session.id, "launch_failed"))))
+      .pipe(
+        Effect.onError(() => (input.endedByCaller ? Effect.void : db.session.endProcess(session.id, "launch_failed"))),
+      )
     const terminal = addressOf(opened)
-    yield* db.placeProcess(session.id, terminal.id)
+    yield* db.session.placeProcess(session.id, terminal.id)
     return terminal
   }, provided)
 
   const shareRow = (session: SessionRow, splitFrom: string) =>
     Effect.gen(function* () {
-      const sharedFrom = yield* db.getSession(splitFrom)
+      const sharedFrom = yield* db.session.getSession(splitFrom)
       if (sharedFrom === undefined)
         return yield* new NoSuchSession({ id: splitFrom, message: `--share ${splitFrom}: no session ${splitFrom}` })
       if (terminalOf(sharedFrom).id === "")
@@ -346,10 +351,10 @@ const make = Effect.gen(function* () {
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             const e = Cause.squash(cause)
-            const execution = yield* db.openExecution(session.id)
-            if (execution !== undefined) yield* db.closeExecution(session.id, execution, "failed")
-            yield* db.endProcess(session.id, "launch_failed")
-            yield* db.setStatus(session.id, "unknown")
+            const execution = yield* db.session.openExecution(session.id)
+            if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "failed")
+            yield* db.session.endProcess(session.id, "launch_failed")
+            yield* db.session.setStatus(session.id, "unknown")
             yield* notice(session, `${session.id} failed to start ${harnessIdOf(session)}: ${messageOf(e)}`)
           }),
         ),
@@ -358,12 +363,12 @@ const make = Effect.gen(function* () {
   )
 
   const storedDirectory = (projectId: string) =>
-    db.projectDirectory(projectId).pipe(Effect.map((directory) => directory || undefined))
+    db.project.projectDirectory(projectId).pipe(Effect.map((directory) => directory || undefined))
 
   const recount = Effect.fn("Placement.recount")(function* (kind: string, projectId: string) {
     const h = runtimes.find(kind)
     if (h === undefined) return
-    const rows = (yield* db.listSessions({ projectId })).filter(
+    const rows = (yield* db.session.listSessions({ projectId })).filter(
       (row) => !row.entry && runtimeOf(row) === kind && !archived(row),
     )
     const stored = yield* storedDirectory(projectId)
@@ -374,7 +379,7 @@ const make = Effect.gen(function* () {
       shown = true
     }
     if (shown) return
-    const entry = yield* db.entryOf(projectId)
+    const entry = yield* db.session.entryOf(projectId)
     const place = entry === undefined ? undefined : placedTerminal(entry)
     if (place?.runtime !== kind || stored === undefined) return
     if (h.present === undefined) return
@@ -414,7 +419,9 @@ const make = Effect.gen(function* () {
   )
 
   const republish = Effect.fn("Placement.republish")(function* () {
-    const rows = (yield* db.listSessions()).filter((row) => !row.entry && !archived(row) && terminalOf(row).id !== "")
+    const rows = (yield* db.session.listSessions()).filter(
+      (row) => !row.entry && !archived(row) && terminalOf(row).id !== "",
+    )
     const labelled = yield* Effect.forEach(rows, (session) =>
       Effect.gen(function* () {
         const h = runtimes.find(runtimeOf(session))

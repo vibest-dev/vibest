@@ -3,7 +3,6 @@ import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/sql"
 
 import { unwrapped } from "../replies.ts"
-import type { MachineRow, OutboxRow } from "./db-remote.ts"
 import {
   MESSAGE_STATUSES,
   type MessageStatusName,
@@ -13,6 +12,7 @@ import {
   type SpawnedBefore,
   toInbox,
 } from "./db-rows.ts"
+import type { MachineRow, OutboxRow } from "./remote.ts"
 
 export const LOCAL_MACHINE = "local"
 

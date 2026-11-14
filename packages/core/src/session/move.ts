@@ -57,7 +57,7 @@ const make = Effect.gen(function* () {
   const { openTerminal, show, locate, launchArgv, systemPromptOf } = yield* Placement
 
   const exited = (id: string, reason: ProcessEndReason) =>
-    Effect.andThen(db.setStatus(id, "unknown"), db.endProcess(id, reason))
+    Effect.andThen(db.session.setStatus(id, "unknown"), db.session.endProcess(id, reason))
 
   const rerunBody = Effect.fn("Move.rerun")(function* (
     h: Runtime,
@@ -68,8 +68,8 @@ const make = Effect.gen(function* () {
     error: string,
     limited: number,
   ) {
-    const newerExecution = Effect.map(db.limitSource(session.id, limited), (fresh) => fresh === undefined)
-    const source = yield* db.limitSource(session.id, limited)
+    const newerExecution = Effect.map(db.session.limitSource(session.id, limited), (fresh) => fresh === undefined)
+    const source = yield* db.session.limitSource(session.id, limited)
     if (source === undefined) return true
     const task = source.working || fallbackTask || source.delivered
     let row = session
@@ -80,24 +80,24 @@ const make = Effect.gen(function* () {
     let running: "old" | "mine" | "none" = "old"
     const endRunning = Effect.gen(function* () {
       if (running === "none") return "sent" as const
-      const pid = pidOf((yield* db.getSession(row.id)) ?? row)
+      const pid = pidOf((yield* db.session.getSession(row.id)) ?? row)
       const sent = pid === undefined ? "gone" : yield* processes.terminate(pid)
       if (sent !== "denied") {
-        yield* db.endProcess(row.id, limitedEnded ? "move" : "limited")
+        yield* db.session.endProcess(row.id, limitedEnded ? "move" : "limited")
         limitedEnded = true
         running = "none"
       }
       return sent
     })
     const at = yield* Clock.currentTimeMillis
-    const stored = yield* db.attempts(session.id)
+    const stored = yield* db.session.attempts(session.id)
     const provider = session.process?.provider ?? null ?? undefined
     const recorded = stored.some((a) => a.harness === harnessIdOf(session) && a.provider === provider)
       ? stored
       : [...stored, { harness: harnessIdOf(session), provider, outcome: "limited" as const, at }]
     let limitedEnded = false
     const endLeft = Effect.gen(function* () {
-      yield* db.endProcess(row.id, limitedEnded ? "move" : "limited")
+      yield* db.session.endProcess(row.id, limitedEnded ? "move" : "limited")
       limitedEnded = true
     })
     const skipped: Array<VibestPlugin.Attempt> = []
@@ -121,7 +121,7 @@ const make = Effect.gen(function* () {
       })
     const giveUp = (why: string) =>
       Effect.gen(function* () {
-        const fresh = (yield* db.getSession(row.id)) ?? row
+        const fresh = (yield* db.session.getSession(row.id)) ?? row
         if (inPlace) {
           if (running === "mine") yield* endRunning
           yield* finish(fresh, "failed", why)
@@ -150,7 +150,7 @@ const make = Effect.gen(function* () {
       Effect.provideService(Harnesses.Service, harnesses),
     )
     const thisExecution = [
-      ...(yield* db.limitedSince(session.id, source.since)).map((l) => ({
+      ...(yield* db.session.limitedSince(session.id, source.since)).map((l) => ({
         harness: l.harness,
         provider: l.provider ?? "",
       })),
@@ -274,7 +274,7 @@ const make = Effect.gen(function* () {
               },
       }
       const argv = yield* launchArgv(nextRow, false)
-      if (inPlace) yield* db.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
+      if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
       const placed = inPlace
         ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
         : yield* openTerminal(h, undefined, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
@@ -296,11 +296,11 @@ const make = Effect.gen(function* () {
       terminal = placed.value
       if (inPlace) running = "mine"
       else owns = true
-      row = (yield* db.getSession(row.id))!
+      row = (yield* db.session.getSession(row.id))!
       const text = (yield* harnesses.get(harnessIdOf(row))).systemPromptInPrompt
         ? `${yield* systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
-      const prompted = yield* prompt(h, row, terminal, text, db.linkTask(row.id)).pipe(Effect.exit)
+      const prompted = yield* prompt(h, row, terminal, text, db.inbox.linkTask(row.id)).pipe(Effect.exit)
       if (Exit.isFailure(prompted) || prompted.value !== undefined) {
         skip(next.harness, "not_confirmed")
         continue
