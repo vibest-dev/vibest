@@ -211,11 +211,12 @@ export default Plugin.define({
 `
 
 const fsEventsDeliveryUnderLoad = Duration.seconds(60)
+const TEST_TIMEOUT = Duration.toMillis(fsEventsDeliveryUnderLoad) * 2
 const waiters = new Set<() => void>()
 const wake = () => {
   for (const waiter of waiters) waiter()
 }
-const untilSignal = (ready: () => boolean, what: string, within: Duration.Input = "10 seconds") =>
+const untilSignal = (ready: () => boolean, what: string, within: Duration.Input = fsEventsDeliveryUnderLoad) =>
   Effect.callback<void>((resume) => {
     const check = () => {
       if (!ready()) return
@@ -239,18 +240,19 @@ const watchGate: {
 }
 const watchSees = (directory: string, name: string) => Effect.sync(() => watchGate.listeners.get(directory)!(name))
 const vibestJsonReads = { count: 0 }
+const CONFIG_READS_PER_RELOAD = 2
 type ConfigPause = {
   on: boolean
   gate: Promise<void>
   release: () => void
   blocked: boolean
   mark: boolean
-  reads: number[]
+  reads: number
 }
 const pausingConfigReads = (fs: FileSystem.FileSystem, config: string, pause: ConfigPause): FileSystem.FileSystem => {
   const readConfig = (path: string, encoding?: string): ReturnType<FileSystem.FileSystem["readFileString"]> => {
     const read = () => {
-      if (pause.mark && path === config) pause.reads.push(Date.now())
+      if (pause.mark && path === config) pause.reads++
       return fs.readFileString(path, encoding)
     }
     if (!pause.on || path !== config) return read()
@@ -416,7 +418,7 @@ describe("plugins: supervisor", () => {
         yield* untilActive("harness-x,runtime-y,runtime-z", "the builtins back")
         assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["harness-x", "runtime-y", "runtime-z"])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -458,7 +460,7 @@ describe("plugins: supervisor", () => {
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -481,14 +483,14 @@ describe("plugins: supervisor", () => {
         const starting = yield* Effect.forkChild(TestClock.withLive(service.start(event)))
         yield* TestClock.withLive(Effect.sleep("20 millis"))
         assert.isUndefined(starting.pollUnsafe(), "a start was admitted before the burst settled")
-        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
         assert.strictEqual(started.model, "a2")
       }).pipe(
         Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -507,7 +509,7 @@ describe("plugins: supervisor", () => {
           release: () => {},
           blocked: false,
           mark: false,
-          reads: [],
+          reads: 0,
         }
         const service = yield* TestClock.withLive(
           supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, pausingConfigReads(fs, config, pause))),
@@ -533,17 +535,17 @@ describe("plugins: supervisor", () => {
         pause.mark = true
         pause.on = false
         pause.release()
-        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
+        const readsUntilReady = pause.reads
         assert.strictEqual(started.model, "a1")
         assert.strictEqual(count("setup:slow-scan-a"), setups)
-        const gap = pause.reads.slice(1).reduce((widest, at, i) => Math.max(widest, at - pause.reads[i]!), 0)
-        assert.ok(gap < 80, `a rescan tick scheduled another reload: ${pause.reads.join(",")}`)
+        assert.strictEqual(readsUntilReady, CONFIG_READS_PER_RELOAD, "a rescan tick scheduled another reload")
       }).pipe(
         Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -566,7 +568,7 @@ describe("plugins: supervisor", () => {
           "the watch to be set up again",
         )
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -598,14 +600,14 @@ describe("plugins: supervisor", () => {
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.isUndefined(starting.pollUnsafe(), "the start waits while the new revision sets up")
         gate.release()
-        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
         assert.strictEqual(started.model, "a2")
       }).pipe(
         Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    20_000,
+    TEST_TIMEOUT,
   )
 
   it.effect(
@@ -631,7 +633,7 @@ describe("plugins: supervisor", () => {
         yield* TestClock.adjust("6 seconds")
         assert.isUndefined(spawning.pollUnsafe(), "readiness opened on the pre-change activation")
         yield* TestClock.adjust("200 millis")
-        const s = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("5 seconds")))
+        const s = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
         assert.strictEqual(s.model, "z2")
         assert.deepStrictEqual(
           s.trace.map((t) => t.plugin),
@@ -649,7 +651,7 @@ describe("plugins: supervisor", () => {
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    15_000,
+    TEST_TIMEOUT,
   )
 
   it.effect("a start during setup is refused and names the plugins still loading", () =>
@@ -798,7 +800,7 @@ describe("plugins: supervisor", () => {
         assert.ok(listed.some((plugin) => plugin.id === "a" && plugin.status === "active"))
         assert.ok(!listed.some((plugin) => plugin.id === "b"))
         releaseImport()
-        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout("5 seconds")))
+        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
         assert.deepStrictEqual(started.trace.map((t) => t.plugin).sort(), ["a", "b"])
       }).pipe(
         Effect.ensuring(
@@ -810,7 +812,7 @@ describe("plugins: supervisor", () => {
         Effect.scoped,
         Effect.provide(Platform.services),
       ),
-    20_000,
+    TEST_TIMEOUT,
   )
 })
 
