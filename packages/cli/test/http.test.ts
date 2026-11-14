@@ -35,7 +35,7 @@ const project = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
-  const entry = yield* db.startEntry(
+  const entry = yield* db.session.startEntry(
     key,
     "claude",
     false,
@@ -85,21 +85,21 @@ describe("vibestd's HTTP API", () => {
     "a late Ready from the process a restart replaced changes nothing; the restarted harness's Ready is taken",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
-      yield* until(db.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
-      const first = (yield* db.currentProcessId(worker))!
+      yield* until(db.session.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
+      const first = (yield* db.session.currentProcessId(worker))!
       const ready = (process: number, pid: number, pluginVersion = VERSION) =>
         call("/session/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
       assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
-      yield* db.restartProcess(worker)
-      const second = (yield* db.currentProcessId(worker))!
+      yield* db.session.restartProcess(worker)
+      const second = (yield* db.session.currentProcessId(worker))!
       assert.notStrictEqual(second, first)
       const late = yield* ready(first, 111)
       assert.strictEqual(late.status, 204)
-      assert.isUndefined(yield* db.readyAt(worker))
-      assert.isUndefined(pidOf((yield* db.getSession(worker))!))
+      assert.isUndefined(yield* db.session.readyAt(worker))
+      assert.isUndefined(pidOf((yield* db.session.getSession(worker))!))
       assert.deepStrictEqual((yield* ready(first, 222, "0.0.2-next")).body, { process: second })
-      assert.isNumber(yield* db.readyAt(worker))
-      assert.deepInclude((yield* db.getSession(worker))!.process, {
+      assert.isNumber(yield* db.session.readyAt(worker))
+      assert.deepInclude((yield* db.session.getSession(worker))!.process, {
         pid: 222,
         integration: { version: "0.0.2-next", protocol: PROTOCOL },
       })
@@ -110,11 +110,11 @@ describe("vibestd's HTTP API", () => {
     "Ready takes {} and a numeric pid; a malformed body or a wrong pid type is 400 with the decode message and changes nothing",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
-      yield* until(db.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
-      const process = (yield* db.currentProcessId(worker))!
+      yield* until(db.session.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
+      const process = (yield* db.session.currentProcessId(worker))!
       const ready = (body: string) => call("/session/ready", { sessionId: worker, process: String(process) }, body)
-      const pid = () => Effect.map(db.getSession(worker), (session) => pidOf(session!))
-      const readyAt = yield* db.readyAt(worker)
+      const pid = () => Effect.map(db.session.getSession(worker), (session) => pidOf(session!))
+      const readyAt = yield* db.session.readyAt(worker)
       const reportedPid = yield* pid()
       yield* TestClock.adjust("1 second")
       const now = yield* Clock.currentTimeMillis
@@ -143,18 +143,18 @@ describe("vibestd's HTTP API", () => {
             level: "Warn",
             annotations: { kind: "Payload", reason: message },
           })
-          assert.strictEqual(yield* db.readyAt(worker), readyAt)
+          assert.strictEqual(yield* db.session.readyAt(worker), readyAt)
           assert.strictEqual(yield* pid(), reportedPid)
         })
       yield* rejected("{", "Expected a valid JSON string")
       yield* rejected(JSON.stringify({ pid: "x" }), 'Expected number | undefined\n  at ["pid"]')
       const empty = yield* ready("{}")
       assert.deepStrictEqual(empty, { status: 200, body: { process } })
-      assert.strictEqual(yield* db.readyAt(worker), now)
+      assert.strictEqual(yield* db.session.readyAt(worker), now)
       assert.strictEqual(yield* pid(), reportedPid)
       const numbered = yield* ready(JSON.stringify({ pid: 1 }))
       assert.deepStrictEqual(numbered, { status: 200, body: { process } })
-      assert.strictEqual(pidOf((yield* db.getSession(worker))!), 1)
+      assert.strictEqual(pidOf((yield* db.session.getSession(worker))!), 1)
     }),
   )
 })

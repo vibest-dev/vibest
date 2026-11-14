@@ -25,6 +25,6 @@ Status: rules 1, 7 and 8 hold on main. Exceptions today:
 - Rule 9: `server/src/listing.ts` (`sessionListing`) takes a dependency bag (`{ db, sessions, runtimes }`).
 - Rule 10: `effect/bounded.ts` detaches the interrupt of a late fiber (`Effect.forkDetach`).
 - Rule 11: `server/src/handlers/session.ts` keeps a per-session lock (`seenLocked`).
-- Rule 12: `database/db-store.ts` runs after-commit effects with `Effect.runSync`; `plugin/sources.ts` and `server/src/shutdown-deadline.ts` fork from callbacks (rule 4).
+- Rule 12: `database/session-statements.ts` runs after-commit effects with `Effect.runSync`; `plugin/sources.ts` and `server/src/shutdown-deadline.ts` fork from callbacks (rule 4).
 - Rule 13: `session/restart.ts`, `session/placement.ts` (`launch`), `runtimes.ts` (`runtimesHere`) and `server/src/machine/machines.ts` (`ensure`) catch every cause, pure interrupts included, outside a supervision point; the supervision wrappers `reactor.ts` (`logFailure`) and `plugin/supervisor.ts` (the first activation) end a pure interrupt quietly instead of passing it on, and `session/delivery.ts` (`failed`) returns on one.
 - Rule 14: `core/test/lib/session.ts` composes server's `services` root with server's `Identity`, `Shutdown`, `MachineTransport` and `UpdateCheck`, and server behaviour (handlers, machines, the daemon) is tested under `packages/cli/test`.

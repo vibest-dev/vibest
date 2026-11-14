@@ -67,10 +67,10 @@ const make = Effect.gen(function* () {
     session: SessionRow,
     terminal: Terminal,
   ) {
-    const task = yield* db.untakenTask(session.id)
+    const task = yield* db.inbox.untakenTask(session.id)
     if (task !== undefined) return yield* handTask(h, session, terminal, task)
     if (inbox.pulls(harnessIdOf(session))) return
-    const pending = yield* db.pendingInbox(session.id)
+    const pending = yield* db.inbox.pendingInbox(session.id)
     if (pending.length === 0) return
     const batch = nextBatch(pending)
     const ids = batch.map((r) => r.id)
@@ -81,8 +81,8 @@ const make = Effect.gen(function* () {
       session,
       terminal,
       batch.map((r) => r.message).join("\n\n"),
-      Effect.flatMap(db.openExecution(session.id), (execution) =>
-        db.claim(session.id, ids).pipe(
+      Effect.flatMap(db.session.openExecution(session.id), (execution) =>
+        db.inbox.claim(session.id, ids).pipe(
           Effect.tap((got) =>
             Effect.sync(() => {
               claimed.push(...got)
@@ -97,17 +97,17 @@ const make = Effect.gen(function* () {
         if (rows.length === 0) return Effect.void
         return notStarted
           ? undelivered(session, rows, notStarted)
-          : db.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
+          : db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
       }),
       Effect.onExit((exit) =>
         Exit.isSuccess(exit) || claimed.length === 0
           ? Effect.void
-          : db.setInboxStatus(session.id, claimed, "failed", "delivering"),
+          : db.inbox.setInboxStatus(session.id, claimed, "failed", "delivering"),
       ),
       Effect.catchTags({
         RuntimeError: (e) =>
           e.code === "unreachable"
-            ? db.pendingInbox(session.id).pipe(
+            ? db.inbox.pendingInbox(session.id).pipe(
                 Effect.flatMap((pending) =>
                   pending.some((r) => claimed.includes(r.id))
                     ? Effect.fail(e)
@@ -126,7 +126,7 @@ const make = Effect.gen(function* () {
         NotReady: (e) => {
           const rows = batch.filter((r) => claimed.includes(r.id))
           if (rows.length > 0) return undelivered(session, rows, e.message)
-          return db
+          return db.inbox
             .pendingInbox(session.id)
             .pipe(
               Effect.flatMap((pending) =>
@@ -139,7 +139,7 @@ const make = Effect.gen(function* () {
   })
 
   const getRow = (id: string) =>
-    db
+    db.session
       .getSession(id)
       .pipe(
         Effect.flatMap((session) =>
@@ -165,7 +165,7 @@ const make = Effect.gen(function* () {
     if (state !== undefined && busy(state)) return
     if (state === undefined && !(yield* alive(h, terminal))) {
       if (exitedAt(session) === null) return yield* exits.settle(h, id)
-      if ((yield* db.pendingInbox(id)).length === 0) return
+      if ((yield* db.inbox.pendingInbox(id)).length === 0) return
       if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && !(session.process?.conversation ?? null))
         return yield* new NoSuchSession({
           id,
@@ -173,23 +173,23 @@ const make = Effect.gen(function* () {
         })
       yield* resume(h, session)
     }
-    const fresh = (yield* db.getSession(id)) ?? session
+    const fresh = (yield* db.session.getSession(id)) ?? session
     yield* deliverQueued(h, fresh, terminalOf(fresh))
   })
 
   const send = Effect.fn("Delivery.send")(function* (id: string, message: string, request?: string, sender?: string) {
     const session = yield* getRow(id)
-    if (request !== undefined && (yield* db.queuedBy(id, request))) return
+    if (request !== undefined && (yield* db.inbox.queuedBy(id, request))) return
     const worktree = yield* worktreeOf(session)
     if (archived(session) || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
       return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-    const row = yield* db.insertSend(id, message, request, sender)
+    const row = yield* db.inbox.insertSend(id, message, request, sender)
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
 
   const toEntry = (id: string, message: string, request?: string, sender?: string) =>
     Effect.gen(function* () {
-      if (!(yield* db.insertSend(id, message, request, sender)))
+      if (!(yield* db.inbox.insertSend(id, message, request, sender)))
         return yield* new NoSuchSession({
           id,
           message: `${id} is the entry session of this project and is not running`,
@@ -202,7 +202,7 @@ const make = Effect.gen(function* () {
     request?: string,
     sender?: string,
   ) {
-    if (!(yield* db.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender)
+    if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender)
     return yield* toEntry(id, message, request)
   })
 
@@ -212,26 +212,26 @@ const make = Effect.gen(function* () {
     message: string,
     request?: string,
   ) {
-    const toOrigin = yield* db.sendToOrigin(sender.sessionId, input, message, request)
+    const toOrigin = yield* db.remote.sendToOrigin(sender.sessionId, input, message, request)
     if (toOrigin === false)
       return yield* new NoSuchSession({
         id: input,
         message: `${input} is on another machine that vibestd does not know; nothing was sent`,
       })
     if (toOrigin === true) return { id: input }
-    const id = yield* db.resolveSession(input)
-    const target = yield* db.sessionIdentity(id)
+    const id = yield* db.session.resolveSession(input)
+    const target = yield* db.session.sessionIdentity(id)
     if (target?.projectId !== sender.projectId)
       return yield* new SendRefused({
         message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
       })
-    const creator = (yield* db.creatorOf(sender.sessionId)) ?? undefined
+    const creator = (yield* db.session.creatorOf(sender.sessionId)) ?? undefined
     const mine = creator !== undefined && "local" in creator ? creator.local : undefined
-    if (!(yield* db.maySend(sender.sessionId, id)))
+    if (!(yield* db.inbox.maySend(sender.sessionId, id)))
       return yield* new SendRefused({
         message: `${id} is not the agent that started you, and you did not start it${mine === undefined ? "" : `; you may send to ${mine}`}`,
       })
-    const session = yield* db.getSession(id)
+    const session = yield* db.session.getSession(id)
     const stopped = !session || archived(session)
     if (!(stopped && mine === id)) {
       if (stopped && !target.entry) return yield* new NoSuchSession({ id, message: `${id} was archived` })
@@ -239,28 +239,29 @@ const make = Effect.gen(function* () {
       else yield* send(id, message, request, sender.sessionId)
       return { id }
     }
-    const heir = yield* db.nearestAlive(sender.sessionId)
+    const heir = yield* db.session.nearestAlive(sender.sessionId)
     if (heir === undefined)
       return yield* new NoSuchSession({
         id,
         message: `${id} has ended and no session above it is running; the user reads your last reply with vibest result`,
       })
     if ("peer" in heir) {
-      if (!(yield* db.sendToPeer(sender.sessionId, heir.peer, heir.session, message, request)))
+      if (!(yield* db.remote.sendToPeer(sender.sessionId, heir.peer, heir.session, message, request)))
         return yield* new NoSuchSession({
           id,
           message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,
         })
       return { id: heir.session }
     }
-    if ((yield* db.sessionIdentity(heir.local))?.entry) yield* toEntry(heir.local, message, request, sender.sessionId)
+    if ((yield* db.session.sessionIdentity(heir.local))?.entry)
+      yield* toEntry(heir.local, message, request, sender.sessionId)
     else yield* send(heir.local, message, request, sender.sessionId)
     return { id: heir.local }
   })
 
   const queued = (id: string, inboxId: number | undefined) =>
     Effect.gen(function* () {
-      const row = (yield* db.pendingInbox(id)).find((r) => r.id === inboxId)
+      const row = (yield* db.inbox.pendingInbox(id)).find((r) => r.id === inboxId)
       if (row === undefined) return
       const failed = (cause: Cause.Cause<unknown>) =>
         Effect.gen(function* () {
@@ -271,16 +272,20 @@ const make = Effect.gen(function* () {
                 (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
             ),
           )
-          if (Cause.hasInterruptsOnly(cause) || transient || !(yield* db.pendingInbox(id)).some((r) => r.id === row.id))
+          if (
+            Cause.hasInterruptsOnly(cause) ||
+            transient ||
+            !(yield* db.inbox.pendingInbox(id)).some((r) => r.id === row.id)
+          )
             return
-          const session = yield* db.getSession(id)
+          const session = yield* db.session.getSession(id)
           if (session !== undefined) yield* inbox.undelivered(session, [row], errorMessage(cause))
         })
       yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
     })
 
   const deliverNext = (id: string) =>
-    locked(id)(db.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe()
+    locked(id)(db.inbox.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe()
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
@@ -289,23 +294,23 @@ const make = Effect.gen(function* () {
         const session = yield* getRow(id)
         const h = yield* runtimes.route(runtimeOf(session))
         const terminal = terminalOf(session)
-        const execution = yield* db.openExecution(id)
+        const execution = yield* db.session.openExecution(id)
         if (execution === undefined)
           return {
             message: `${id} is not working; its execution had already finished and its reply is recorded`,
           }
         const state = stateOf(yield* agentState(h, terminal))
         const runtimeKnows = state !== undefined && state !== "unknown"
-        const started = yield* db.executionAccepted(id)
+        const started = yield* db.session.executionAccepted(id)
         if (!started && runtimeKnows && !busy(state)) return { message: `${id} is not working; nothing to interrupt` }
         if (!(yield* interruptAgent(h, session, terminal)))
           return yield* new SessionBusy({
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
-        const closed = yield* db.closeExecution(id, execution, "interrupted")
-        if (closed && !runtimeKnows) yield* db.setStatus(id, "idle")
-        const last = closed ? undefined : yield* db.latestReply(id)
+        const closed = yield* db.session.closeExecution(id, execution, "interrupted")
+        if (closed && !runtimeKnows) yield* db.session.setStatus(id, "idle")
+        const last = closed ? undefined : yield* db.session.latestReply(id)
         if (!closed && !(last?.execution === execution && last.status === "interrupted"))
           return {
             message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
@@ -323,16 +328,16 @@ const make = Effect.gen(function* () {
   ) {
     const now = at ?? (yield* Clock.currentTimeMillis)
     const prompting = yield* Ref.get((yield* sessionLive.track(id)).prompting)
-    yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
+    yield* db.session.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
   })
 
   const typeTaken = Effect.fn("Delivery.typeTaken")(function* (id: string, execution: number) {
     yield* locks.withLock(id)(
       Effect.gen(function* () {
-        const session = yield* db.getSession(id)
+        const session = yield* db.session.getSession(id)
         if (session === undefined) return
         const r = yield* sessionLive.track(id)
-        const rows = yield* db.unacceptedBatch(id, execution)
+        const rows = yield* db.inbox.unacceptedBatch(id, execution)
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
         const h = yield* runtimes.route(runtimeOf(session))
         yield* Ref.set(r.prompting, true).pipe(
@@ -349,7 +354,7 @@ const make = Effect.gen(function* () {
   )
   yield* reactor.on([InboxQueued], (event) => queued(event.sessionId!, event.seq))
 
-  yield* db.recoverDelivering(
+  yield* db.inbox.recoverDelivering(
     (sessionId, messages) =>
       `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
