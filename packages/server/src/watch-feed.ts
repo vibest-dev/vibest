@@ -1,4 +1,4 @@
-import { Bus } from "@vibest/core/bus"
+import { Bus, type BusEvent } from "@vibest/core/bus"
 import { WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
 import { Cause, Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from "effect"
 
@@ -30,6 +30,13 @@ export const layer = Layer.effect(
     const listing = yield* Listing.Service
     const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()
 
+    const failWatchers = (message: string) =>
+      Effect.sync(() => {
+        const failed = Array.from(watchers)
+        watchers.clear()
+        for (const watcher of failed) Queue.failCauseUnsafe(watcher, Cause.fail(new WatchLagged({ message })))
+      })
+
     const publish = (event: WatchEvent) =>
       Effect.sync(() => {
         for (const watcher of watchers) {
@@ -46,10 +53,25 @@ export const layer = Layer.effect(
         }
       })
 
+    const publishBatch = (batch: ReadonlyArray<BusEvent>) =>
+      Effect.suspend(() =>
+        watchers.size === 0
+          ? Effect.void
+          : listing.watchDeltas(batch).pipe(
+              Effect.flatMap(Effect.forEach(publish, { discard: true })),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause)
+                  : Effect.logError("Watch could not read a change", cause).pipe(
+                      Effect.andThen(failWatchers("Watch could not read a change; reconnect for a new Snapshot")),
+                    ),
+              ),
+            ),
+      )
+
     const subscription = yield* bus.subscribe(watched)
     yield* Stream.fromEffectRepeat(PubSub.takeAll(subscription)).pipe(
-      Stream.mapEffect(listing.watchDeltas),
-      Stream.runForEach(Effect.forEach(publish, { discard: true })),
+      Stream.runForEach(publishBatch),
       Effect.forkScoped,
     )
 

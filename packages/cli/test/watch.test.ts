@@ -8,8 +8,9 @@ import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import type { WatchEvent } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
+import * as Listing from "@vibest/server/listing"
 import * as Server from "@vibest/server/server"
-import { WATCH_BACKLOG } from "@vibest/server/watch-feed"
+import { WATCH_BACKLOG, WatchFeed } from "@vibest/server/watch-feed"
 import { Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
@@ -238,6 +239,31 @@ describe("Watch", () => {
       yield* second.next((e): e is WatchEvent => inStatus("idle")(e))
       assert.strictEqual(reads, 1)
     }),
+  )
+
+  test(
+    "a change that cannot be read ends the watchers it was for with an error; the feed serves later watchers",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const bus = yield* Bus
+      const { project } = yield* withEntry
+      const feed = yield* WatchFeed.Service
+      const before = yield* feed.subscribe
+      const read = db.watchProjects
+      let failing = true
+      Object.assign(db, {
+        watchProjects: (id?: string) => (failing ? Effect.die("unreadable") : read(id)),
+      })
+      yield* bus.observe({ type: "project.changed", projectId: project })
+      const ended = yield* Effect.flip(Stream.runDrain(before))
+      assert.strictEqual(ended._tag, "WatchLagged")
+      failing = false
+      const after = yield* feed.subscribe
+      const next = yield* Effect.forkScoped(Stream.runHead(after))
+      yield* bus.observe({ type: "project.changed", projectId: project })
+      const event = yield* Fiber.join(next)
+      assert.strictEqual(event._tag === "Some" && event.value._tag, "Project")
+    }).pipe(Effect.provide(WatchFeed.layer.pipe(Layer.provide(Listing.layer)))),
   )
 
   test(
