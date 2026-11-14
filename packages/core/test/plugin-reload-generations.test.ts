@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Bus } from "@vibest/core/bus"
 import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugin"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
@@ -9,6 +8,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "../../platform-bun/src/bun.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
+import { memoryBus } from "./platform/bun.ts"
 
 const events: Array<string> = []
 const builtin: Candidate = {
@@ -93,7 +93,7 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(Layer.effect(Layout, Layout.make(dir))),
           Layer.provide(runtimesLayer),
           Layer.provide(Agents.layer),
-          Layer.provide(Bus.layer),
+          Layer.provide(memoryBus),
           Layer.build,
           Effect.map(Context.get(Plugins)),
         )

@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
 import { Harness } from "@vibest/core/harness"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
@@ -28,6 +27,7 @@ import {
   runVibest,
   testLayer,
 } from "./fakes.ts"
+import { memoryBus } from "./unit-helpers.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const PI_SECRET = "pi-key-do-not-log"
@@ -457,7 +457,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(agentsLayer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
         Effect.scoped,
       )
       assert.deepStrictEqual(listed.seen, listed.list)

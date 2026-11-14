@@ -27,13 +27,13 @@ const approvedOperations = (file, operations) => {
 
 const eventTable = /\b(FROM|JOIN) event\b/
 const position = /\bposition\b/
-const ledgerFiles = ["/packages/core/src/database/journal.ts", "/packages/core/src/database/db-schema.ts"]
+const ledgerFiles = ["/packages/core/src/bus.ts", "/packages/core/src/database/db-schema.ts"]
 
 const eventReads = {
   create(context) {
     const file = normalized(context)
     if (!isSource(file) || ledgerFiles.some((part) => file.endsWith(part))) return {}
-    const message = "Only the journal reads the event table and its local position."
+    const message = "Only the bus reads the event table and its local position."
     const check = (node, text) => {
       if (typeof text === "string" && (eventTable.test(text) || position.test(text))) context.report({ node, message })
     }
@@ -53,8 +53,10 @@ const noPayloadSql = textRule({
 
 const writeStatement = /INSERT INTO|UPDATE |DELETE FROM/
 const writers = [
-  "/packages/core/src/database/journal.ts",
-  "/packages/core/src/database/projectors.ts",
+  "/packages/core/src/bus.ts",
+  "/packages/core/src/project/projector.ts",
+  "/packages/core/src/session/projector.ts",
+  "/packages/core/src/remote/projector.ts",
   "/packages/core/src/database/db-schema.ts",
   "/packages/core/src/import/",
   "/packages/core/src/database/migration",
@@ -64,7 +66,7 @@ const openingWrite = {
   count: 1,
   accepts: (text) => text.trim() === "UPDATE meta SET value = value WHERE key = ''",
 }
-const writeMessage = "Only the journal, the projectors, the schema, migrations and the import write tables."
+const writeMessage = "Only the bus, the projectors, the schema, migrations and the import write tables."
 const isSqlBuilder = (node) => node?.name === "sql" || node?.property?.name === "sql"
 
 const projectorWrites = {

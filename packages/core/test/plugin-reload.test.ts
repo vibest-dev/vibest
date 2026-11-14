@@ -2,7 +2,6 @@ import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Bus } from "@vibest/core/bus"
 import {
   Builtins,
   type Candidate,
@@ -21,6 +20,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "../../platform-bun/src/bun.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
+import { memoryBus } from "./platform/bun.ts"
 
 const events: Array<string> = []
 const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.void) =>
@@ -77,7 +77,7 @@ const host = <A, E>(
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
-    Effect.provide(Bus.layer),
+    Effect.provide(memoryBus),
   )
 
 describe("plugins: activation", () => {
@@ -339,7 +339,7 @@ const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(Bus.layer),
+    Layer.provide(memoryBus),
     Layer.build,
     Effect.map(Context.get(Plugins)),
   )
@@ -714,7 +714,7 @@ describe("plugins: supervisor", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
       )
     }),
   )
@@ -757,7 +757,7 @@ describe("plugins: supervisor", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
       )
     }),
   )

@@ -4,6 +4,7 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
@@ -14,9 +15,10 @@ import { projectOf, tempDirectory } from "./fakes.ts"
 
 const database = (filename: string) =>
   Db.layer.pipe(
-    Layer.provideMerge(Platform.sqlite(filename)),
+    Layer.provide(Projectors.layer),
     Layer.provide(Bus.layer),
     Layer.provide(SessionLive.layer),
+    Layer.provideMerge(Platform.sqlite(filename)),
   )
 
 const modeOf = (path: string) => Effect.promise(async () => (await fs.stat(path)).mode & 0o777)
