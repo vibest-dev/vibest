@@ -3,7 +3,7 @@ import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/database/db"
 import { check, shellBlock, splitCommand } from "@vibest/core/guard"
-import type { RuntimesShape } from "@vibest/core/plugin/host"
+import type { RuntimesShape } from "@vibest/core/plugin/domains"
 import { Project } from "@vibest/core/project"
 import { type Runtime, Runtimes } from "@vibest/core/runtimes"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"

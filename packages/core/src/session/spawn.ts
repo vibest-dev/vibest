@@ -26,7 +26,7 @@ import * as PlatformNode from "../effect/platform.ts"
 import { Git } from "../git.ts"
 import { harnessCatalog, harnessOptions, Harness, Harnesses, preflight, unprovided } from "../harness.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
-import { Plugins, type Routing } from "../plugin.ts"
+import { Plugins, pluginsNode, type Routing } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
@@ -382,7 +382,7 @@ export class Spawn extends Context.Service<Spawn, Effect.Success<ReturnType<type
     Harnesses.node,
     Move.node,
     Placement.node,
-    Plugins.node,
+    pluginsNode,
     Runtimes.node,
     SessionLocks.node,
     PlatformNode.crypto,
