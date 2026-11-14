@@ -13,12 +13,12 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import { Clock, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Ref } from "effect"
+import { Clock, Config, Context, Crypto, Deferred, Effect, Exit, FileSystem, Layer, Option, Path, Ref } from "effect"
 import { Hex } from "effect/encoding"
 
 import { Agents, unknownAgent } from "../agents.ts"
 import type { PeerStart } from "../database/db-remote.ts"
-import { type NewSession, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
+import { type NewSession, type SessionRow, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -31,11 +31,11 @@ import { Plugins, pluginsNode, type Routing } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
-import { machinesListing as machines, Runtimes } from "../runtimes.ts"
+import { machinesListing as machines, type Runtime, Runtimes } from "../runtimes.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Move } from "./move.ts"
-import { Placement } from "./placement.ts"
+import { type LaunchOptions, Placement } from "./placement.ts"
 
 export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
@@ -83,14 +83,31 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
     const git = yield* Git.Service
     const scope = yield* Effect.scope
     const locks = yield* SessionLocks
-    const { worktreeOf, launch } = yield* Placement
-    const onOwnLimit = (yield* Move).rerun
+    const { worktreeOf, launch, abandon } = yield* Placement
+    const { rerun } = yield* Move
     const logged = Reactor.logFailure
     const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
       effect.pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
         Effect.provideService(Git.Service, git),
+      )
+    const launchOwned = (
+      h: Runtime,
+      target: string | undefined,
+      row: SessionRow,
+      root: string,
+      task: string,
+      options: LaunchOptions,
+    ) =>
+      launch(h, target, row, root, task, options).pipe(
+        Effect.flatMap((outcome) =>
+          outcome._tag === "Limited"
+            ? rerun(h, row, undefined, outcome.input, false, outcome.error, 0).pipe(
+                Effect.onExit((exit) => (Exit.isFailure(exit) ? abandon(row, root, options, exit.cause) : Effect.void)),
+              )
+            : Effect.void,
+        ),
       )
     const machinesListing = machines(
       runtimes,
@@ -316,11 +333,10 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
                     .withLock(id)(
                       Deferred.succeed(held, undefined).pipe(
                         Effect.andThen(
-                          launch(rt, target, row, root, task, {
+                          launchOwned(rt, target, row, root, task, {
                             splitFrom: input.share,
                             env: input.env,
                             commit: input.commit,
-                            onOwnLimit,
                           }),
                         ),
                       ),
