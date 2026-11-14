@@ -252,6 +252,26 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
     },
   },
   {
+    id: "G16",
+    title:
+      "a plugin folder moved to another path and named there in vibest.json is listed at the new path and set up once",
+    run: async (w) => {
+      const seen = path.join(w.root, "mover.log")
+      const before = path.join(w.root, "before", "mover")
+      const after = path.join(w.root, "after", "mover")
+      await write(path.join(before, "index.ts"), counting("mover", seen))
+      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: [before] }))
+      await until("mover active", async () => (await list(w)).some((p) => p.id === "mover" && p.status === "active"))
+      await fs.mkdir(path.dirname(after), { recursive: true })
+      await fs.rename(before, after)
+      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: [after] }))
+      await until("mover listed at the new path", async () =>
+        (await list(w)).some((p) => p.id === "mover" && p.status === "active" && p.source.startsWith(after)),
+      )
+      expect((await setups(seen)).length === 1, `mover was set up ${(await setups(seen)).length} times`)
+    },
+  },
+  {
     id: "G9",
     title: "a plugin folder found in plugins and named in vibest.json is one plugin, with the configured options",
     run: async (w) => {

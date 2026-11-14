@@ -102,7 +102,7 @@ const info = (slot: Slot): PluginInfo => {
   const shown = slot.running?.candidate ?? candidate
   return {
     id: slot.running?.candidate.plugin.id ?? ("error" in candidate.plugin ? candidate.source : candidate.plugin.id),
-    source: shown.source,
+    source: candidate.source,
     revision: shown.revision,
     loadedAt: slot.loadedAt,
     status: running ? "active" : "failed",
@@ -361,6 +361,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             keyOf(slots[prefix]!.candidate) === keyOf(candidates[prefix]!)
           )
             prefix++
+          slots = slots.map((slot, i) => (i < prefix ? { ...slot, candidate: candidates[i]! } : slot))
           if (prefix === candidates.length && prefix === slots.length) return
           const retired = slots.slice(prefix)
           slots = slots.slice(0, prefix)
@@ -370,7 +371,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           for (const candidate of candidates.slice(prefix)) {
             const slot = yield* build(
               candidate,
-              retired.find((s) => s.candidate.source === candidate.source),
+              retired.find((s) => idOf(s.candidate) === idOf(candidate)),
               ids,
             )
             if (slot.running) ids.add(slot.running.candidate.plugin.id)

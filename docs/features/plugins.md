@@ -94,3 +94,9 @@ are active, `vibest plugins` shows the builtin gone, and deleting the line bring
 While user plugins are still setting up, `vibest run` is refused with `PluginsNotActive` and the names of the plugins
 still loading, and no session starts. Once they are active, the same run starts, and a routing plugin's decision is
 what `vibest ls` records.
+
+## G16. Moving a plugin keeps it running
+
+A plugin is identified by its declared id and the content of its files, not by where the folder is. Moving an unchanged
+plugin folder and updating `vibest.json` to the new path does not set it up again; `vibest plugins` lists it under the
+new path. Changing its declared id makes it a new plugin.
