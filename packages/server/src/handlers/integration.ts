@@ -12,6 +12,7 @@ import type * as Headers from "effect/http/Headers"
 import { noteOpen, processOf, reader } from "../gates.ts"
 import { Remote } from "../machine/remote.ts"
 import type { Handlers } from "./caller.ts"
+import { group } from "./group.ts"
 
 export const make = Effect.gen(function* () {
   const db = yield* Db
@@ -72,3 +73,5 @@ export const make = Effect.gen(function* () {
       hook(sessionId, harness, headers, (who) => integration.prompt(who, event)),
   } satisfies Handlers
 })
+
+export const layer = group(["Harnesses.List", "Integration.Guard", "ExecutionEnd", "Prompt"]).toLayer(make)

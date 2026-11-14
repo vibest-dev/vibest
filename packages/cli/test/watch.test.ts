@@ -8,6 +8,7 @@ import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import type { WatchEvent } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
+import * as Listing from "@vibest/server/listing"
 import * as Server from "@vibest/server/server"
 import { WATCH_BACKLOG, WatchFeed } from "@vibest/server/watch-feed"
 import { Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
@@ -262,7 +263,7 @@ describe("Watch", () => {
       yield* bus.observe({ type: "project.changed", projectId: project })
       const event = yield* Fiber.join(next)
       assert.strictEqual(event._tag === "Some" && event.value._tag, "Project")
-    }).pipe(Effect.provide(WatchFeed.layer)),
+    }).pipe(Effect.provide(WatchFeed.layer.pipe(Layer.provide(Listing.layer)))),
   )
 
   test(
