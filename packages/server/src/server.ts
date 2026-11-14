@@ -39,6 +39,7 @@ import { Peer } from "./machine/peer.ts"
 import { Remote } from "./machine/remote.ts"
 import { services } from "./services.ts"
 import { UpdateCheck } from "./update-check.ts"
+import { WatchFeed } from "./watch-feed.ts"
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
@@ -64,7 +65,7 @@ export const handlers = VibestRpcs.toLayer(
 )
 
 export const layer = RpcServer.layer(VibestRpcs).pipe(
-  Layer.provide(Layer.mergeAll(handlers, AdmissionLive)),
+  Layer.provide(Layer.mergeAll(handlers.pipe(Layer.provide(WatchFeed.layer)), AdmissionLive)),
   Layer.provide(CallerGateLive),
   Layer.provide(ProtocolGateLive),
   Layer.provide(RpcServer.layerProtocolSocketServer),

@@ -8,8 +8,8 @@ import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import type { WatchEvent } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
-import { WATCH_BACKLOG } from "@vibest/server/handlers/session"
 import * as Server from "@vibest/server/server"
+import { WATCH_BACKLOG, WatchFeed } from "@vibest/server/watch-feed"
 import { Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
@@ -208,6 +208,61 @@ describe("Watch", () => {
       yield* Fiber.join(six)
       assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 6, seen: 6 })
     }),
+  )
+
+  test(
+    "two watchers share one change: its session row is read once",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const { repo, entryId } = yield* withEntry
+      const first = yield* watching(repo)
+      const second = yield* watching(repo)
+      yield* first.next(isSnapshot)
+      yield* second.next(isSnapshot)
+      const briefs = db.session.sessionBriefs
+      let reads = 0
+      Object.assign(db.session, {
+        sessionBriefs: (ids: Parameters<typeof briefs>[0]) => {
+          reads++
+          return briefs(ids)
+        },
+      })
+      const inStatus = (status: string) => (e: WatchEvent) =>
+        e._tag === "Session" && e.session.id === entryId && e.session.status === status
+      yield* db.session.setStatus(entryId, "working")
+      yield* first.next((e): e is WatchEvent => inStatus("working")(e))
+      yield* second.next((e): e is WatchEvent => inStatus("working")(e))
+      reads = 0
+      yield* db.session.setStatus(entryId, "idle")
+      yield* first.next((e): e is WatchEvent => inStatus("idle")(e))
+      yield* second.next((e): e is WatchEvent => inStatus("idle")(e))
+      assert.strictEqual(reads, 1)
+    }),
+  )
+
+  test(
+    "a change that cannot be read ends the watchers it was for with an error; the feed serves later watchers",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const bus = yield* Bus
+      const { project } = yield* withEntry
+      const feed = yield* WatchFeed.Service
+      const before = yield* feed.subscribe
+      const read = db.project.watchProjects
+      let failing = true
+      Object.assign(db.project, {
+        watchProjects: (id?: string) => (failing ? Effect.die("unreadable") : read(id)),
+      })
+      yield* bus.observe({ type: "project.changed", projectId: project })
+      const ended = yield* Effect.flip(Stream.runDrain(before))
+      assert.strictEqual(ended._tag, "WatchLagged")
+      failing = false
+      const after = yield* feed.subscribe
+      const next = yield* Effect.forkScoped(Stream.runHead(after))
+      yield* bus.observe({ type: "project.changed", projectId: project })
+      const event = yield* Fiber.join(next)
+      assert.strictEqual(event._tag === "Some" && event.value._tag, "Project")
+    }).pipe(Effect.provide(WatchFeed.layer)),
   )
 
   test(
