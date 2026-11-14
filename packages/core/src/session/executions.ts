@@ -50,7 +50,7 @@ const make = Effect.gen(function* () {
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
           const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-          const ready = (yield* db.readyAt(id)) !== undefined || (!reports && settled(seen))
+          const ready = (yield* db.session.readyAt(id)) !== undefined || (!reports && settled(seen))
           return { seen, ready }
         })
         return yield* look.pipe(
@@ -84,8 +84,8 @@ const make = Effect.gen(function* () {
 
   const pickedUp = (session: SessionRow, execution: number, state: "working" | "blocked") =>
     Effect.gen(function* () {
-      yield* db.acceptExecution(session.id, execution)
-      yield* db.setStatus(session.id, state)
+      yield* db.session.acceptExecution(session.id, execution)
+      yield* db.session.setStatus(session.id, state)
       return true
     })
 
@@ -93,7 +93,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const state = stateOf(yield* agentState(h, terminal))
       if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
-      return yield* db.executionAccepted(session.id)
+      return yield* db.session.executionAccepted(session.id)
     })
 
   const confirmed = (
@@ -173,30 +173,30 @@ const make = Effect.gen(function* () {
     text: string,
     onHandover: Effect.Effect<void> = Effect.void,
   ) {
-    const kept = yield* db.openExecution(session.id)
+    const kept = yield* db.session.openExecution(session.id)
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const state = yield* awaitReady(h, terminal, adapter, session.id)
-    const open = yield* db.openExecution(session.id)
+    const open = yield* db.session.openExecution(session.id)
     if (open !== undefined && open !== kept) return undefined
     const begun =
       open === undefined
-        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.startExecution(session.id, at))
+        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(session.id, at))
         : { execution: open, opened: true }
     if (!begun.opened) return undefined
     const execution = begun.execution
-    const standing = Effect.map(db.openExecution(session.id), (now) =>
+    const standing = Effect.map(db.session.openExecution(session.id), (now) =>
       now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
     )
     yield* onHandover
     const r = yield* track(session.id)
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
-    yield* db.setStatus(session.id, state)
+    yield* db.session.setStatus(session.id, state)
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
-    const missed = db.closeExecution(session.id, execution, "not_started")
+    const missed = db.session.closeExecution(session.id, execution, "not_started")
     const subscription = yield* bus.subscribe()
     const delivered = yield* send.pipe(
       Effect.as(false),
@@ -212,8 +212,8 @@ const make = Effect.gen(function* () {
     )
     if (delivered) return undefined
     if (state === "unknown" && adapter.ready === "runtime") {
-      yield* db.acceptExecution(session.id, execution)
-      yield* db.setStatus(session.id, "working")
+      yield* db.session.acceptExecution(session.id, execution)
+      yield* db.session.setStatus(session.id, "working")
       return undefined
     }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
@@ -232,7 +232,7 @@ const make = Effect.gen(function* () {
   }, Effect.scoped)
 
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
-    yield* db.endExecution(
+    yield* db.session.endExecution(
       session.id,
       { outcome: end, failure: { message: error } },
       `${session.id}'s execution ended with an error: ${error}`,

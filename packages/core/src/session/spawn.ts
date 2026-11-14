@@ -17,9 +17,9 @@ import { Clock, Config, Context, Crypto, Deferred, Effect, Exit, FileSystem, Lay
 import { Hex } from "effect/encoding"
 
 import { Agents, unknownAgent } from "../agents.ts"
-import type { PeerStart } from "../database/db-remote.ts"
 import { type NewSession, type SessionRow, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
+import type { PeerStart } from "../database/remote.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
@@ -145,7 +145,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
     const shareOf = (input: SpawnInput, id: string, runtime: string, machineId: string) =>
       Effect.gen(function* () {
         const refuse = (why: string) => new NoSuchSession({ id, message: `--share ${id}: ${why}` })
-        const p = yield* db.getSession(id)
+        const p = yield* db.session.getSession(id)
         if (!p) return yield* refuse(`no session ${id}`)
         if (p.projectId !== input.projectId) return yield* refuse("it belongs to another project")
         if (archived(p)) return yield* refuse("it was archived")
@@ -170,11 +170,12 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
       const root = input.root
       const agent = input.agent
       if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
-      const parent = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
+      const parent =
+        input.parentSessionId === undefined ? undefined : yield* db.session.getSession(input.parentSessionId)
       const parentRuntime = parent === undefined ? undefined : runtimeOf(parent) || undefined
       const from = input.harness !== undefined ? undefined : parent
       const namedShare =
-        input.runtime === undefined && input.share !== undefined ? yield* db.getSession(input.share) : undefined
+        input.runtime === undefined && input.share !== undefined ? yield* db.session.getSession(input.share) : undefined
       const followedShare =
         namedShare !== undefined && namedShare.projectId === input.projectId && !archived(namedShare)
           ? namedShare
@@ -240,7 +241,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
             : { id: input.origin.reportTo }
       const task = sender === undefined ? decision.prompt : sessionEnvelope(sender, decision.prompt)
       const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
-      const id = yield* db.newSessionId
+      const id = yield* db.session.newSessionId
       const now = yield* Clock.currentTimeMillis
       const held = yield* Deferred.make<void>()
       const reserveWorktree = (folders: boolean) =>
@@ -318,7 +319,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
             }
             return yield* Effect.uninterruptible(
               Effect.gen(function* () {
-                const inserted = yield* db.insertSession(draft, input.projectId, {
+                const inserted = yield* db.session.insertSession(draft, input.projectId, {
                   max: options.maxSessions,
                   cwd,
                   task,
@@ -335,7 +336,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
                   })
                 if (inserted !== true) return { before: inserted }
                 yield* Ref.set(handedOver, true)
-                const row = (yield* db.getSession(id))!
+                const row = (yield* db.session.getSession(id))!
                 const leave = drain.track(`spawn ${id}`)
                 yield* Effect.forkIn(
                   locks
@@ -361,7 +362,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
       const admitted =
         input.share === undefined
           ? yield* admit(undefined)
-          : yield* locks.withLock(directoryLock((yield* db.sessionDirectory(input.share)) ?? ""))(
+          : yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(input.share)) ?? ""))(
               Effect.gen(function* () {
                 const shared = yield* shareOf(input, input.share!, runtimeKind, decision.machine.id)
                 return yield* admit(shared)

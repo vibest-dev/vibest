@@ -127,7 +127,7 @@ export const fakeSpawns =
         spawns.push(input)
         const id = randomId()
         const at = yield* Clock.currentTimeMillis
-        const inserted = yield* db.insertSession(
+        const inserted = yield* db.session.insertSession(
           {
             ...peerSession,
             id,
@@ -176,7 +176,7 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
     const db = yield* run(Db)
     const directory = yield* tempDirectory("vibest-b-checkout-")
     yield* (yield* run(FakeGit)).repository(directory, { ...REPOSITORY, origin: remote })
-    const project = yield* db.createProject(directory, [{ path: directory, remote }])
+    const project = yield* db.project.createProject(directory, [{ path: directory, remote }])
     const raw = yield* connect(layout.socket)
     const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
     const as = (peer: string, aProject: string, by = A_ENTRY) =>
@@ -198,7 +198,7 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
 
 export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
   Effect.gen(function* () {
-    const started = yield* stack.db.startEntry(
+    const started = yield* stack.db.session.startEntry(
       stack.project,
       "pi",
       false,
