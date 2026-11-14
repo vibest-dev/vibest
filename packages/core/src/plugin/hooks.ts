@@ -1,5 +1,6 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
+import type { Change, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Duration, Effect, Exit, Option, type Scope } from "effect"
 
 import { timeoutWithoutWaiting } from "../effect/bounded.ts"
@@ -112,4 +113,47 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
   stats.crashed++
   stats.lastError = error
   return { ms, outcome: "crashed", error, cause } satisfies Outcome<N>
+})
+
+export type Stopped = { readonly plugin: string; readonly reason: string }
+
+type AgentName = "agent.start.before" | "agent.fail"
+
+export const dispatch = Effect.fnUntraced(function* <N extends AgentName>(
+  name: N,
+  hooks: ReadonlyArray<Entry<N>>,
+  event: Events[N],
+  commit: (draft: Events[N], plugin: string) => ReadonlyArray<typeof Change.Type>,
+  trace: Array<TraceEntry>,
+  scope: Scope.Scope,
+  timeout: Duration.Input,
+) {
+  for (const hook of hooks) {
+    const draft: Events[N] = structuredClone(event)
+    const ran = yield* run(name, hook, draft, scope, timeout)
+    const entry = { plugin: hook.plugin, hook: name, ms: ran.ms, changes: [] }
+    if (ran.outcome === "timeout") {
+      trace.push({ ...entry, outcome: "timeout", error: ran.error })
+      yield* Effect.logWarning(`plugin ${hook.plugin} ${name}: ${ran.error}`)
+      return { plugin: hook.plugin, reason: ran.error } satisfies Stopped
+    }
+    if (ran.outcome === "refused") {
+      trace.push({ ...entry, outcome: "refused", reason: ran.reason })
+      yield* Effect.log(`plugin ${hook.plugin} ${name}: refused (${ran.reason})`)
+      return { plugin: hook.plugin, reason: ran.reason } satisfies Stopped
+    }
+    if (ran.outcome === "crashed") {
+      trace.push({ ...entry, outcome: "crashed", error: ran.error })
+      yield* Effect.logWarning(`plugin ${hook.plugin} ${name} crashed`, ran.cause)
+      return { plugin: hook.plugin, reason: `plugin ${hook.plugin} crashed: ${ran.error}` } satisfies Stopped
+    }
+    const changes = commit(draft, hook.plugin)
+    if (changes.length > 0) hook.stats.changed++
+    trace.push({ ...entry, outcome: "ok", changes })
+    const summary =
+      changes.map((c) => `${c.field} ${JSON.stringify(c.from) ?? "-"} → ${JSON.stringify(c.to) ?? "-"}`).join(", ") ||
+      "no change"
+    yield* Effect.log(`plugin ${hook.plugin} ${name}: ${summary} (${ran.ms} ms)`)
+  }
+  return undefined
 })

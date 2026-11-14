@@ -5,7 +5,7 @@ import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { Db, type SessionRow, harnessIdOf } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harness.ts"
-import type { HarnessDefinition } from "../plugin/host.ts"
+import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
   type AgentState,
