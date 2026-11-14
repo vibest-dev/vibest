@@ -43,7 +43,7 @@ export const make = Effect.gen(function* () {
   const drain = yield* Drain.Service
   const bus = yield* Bus
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.deliveringInbox, shutdown })
+  const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.inbox.deliveringInbox, shutdown })
   return {
     Ping: () =>
       machinesListing(runtimes, []).pipe(

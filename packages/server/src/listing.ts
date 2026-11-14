@@ -52,7 +52,7 @@ export const sessionListing = (deps: {
 }) => {
   const { db, sessions, runtimes } = deps
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
-    Effect.map(db.sessionBriefs(rows.map((row) => row.id)), (briefs) =>
+    Effect.map(db.session.sessionBriefs(rows.map((row) => row.id)), (briefs) =>
       rows.map((row) => {
         const brief = briefs.get(row.id)
         return { ...toInfo(row, brief), task: taskForLs(brief?.task ?? null) }
@@ -77,7 +77,7 @@ export const sessionListing = (deps: {
 
   const watched = (infos: ReadonlyArray<SessionInfo>) =>
     Effect.gen(function* () {
-      const parents = yield* db.sessionParents(infos.map((info) => info.id))
+      const parents = yield* db.session.sessionParents(infos.map((info) => info.id))
       return yield* Effect.forEach(
         infos,
         (info) =>
@@ -92,7 +92,7 @@ export const sessionListing = (deps: {
     })
 
   const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
-    Effect.map(db.watchProjects(), (rows) =>
+    Effect.map(db.project.watchProjects(), (rows) =>
       rows.map((row): ProjectRow => ({
         ...row,
         activity: projectActivity(sessions.filter((s) => s.projectId === row.id).map((s) => s.status)),
@@ -102,7 +102,7 @@ export const sessionListing = (deps: {
   const projectStatuses = (id: string) =>
     Effect.gen(function* () {
       return yield* Effect.forEach(
-        yield* db.listSessions({ projectId: id, stopped: false }),
+        yield* db.session.listSessions({ projectId: id, stopped: false }),
         (s) => Effect.map(seenAt(runtimeOf(s), terminalOf(s)), (seen) => unseenDone(s.status, seen)),
         { concurrency: "unbounded" },
       )
@@ -110,10 +110,10 @@ export const sessionListing = (deps: {
 
   const watchSession = (id: string) =>
     Effect.gen(function* () {
-      const identity = yield* db.sessionIdentity(id)
+      const identity = yield* db.session.sessionIdentity(id)
       if (identity === undefined) return []
       const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
-      const row = yield* db.getSession(id)
+      const row = yield* db.session.getSession(id)
       if (row === undefined || exitedAt(row) !== null) return [ended]
       const view = yield* sessions
         .get(id)
@@ -130,7 +130,7 @@ export const sessionListing = (deps: {
 
   const watchProject = (id: string) =>
     Effect.gen(function* () {
-      const rows = yield* db.watchProjects(id)
+      const rows = yield* db.project.watchProjects(id)
       if (rows.length === 0) return []
       const activity = projectActivity(yield* projectStatuses(id))
       return rows.map((row): WatchEvent => ({ _tag: "Project", project: { ...row, activity } }))
@@ -138,7 +138,7 @@ export const sessionListing = (deps: {
 
   const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
     Effect.gen(function* () {
-      const rows = yield* db.listSessions()
+      const rows = yield* db.session.listSessions()
       return rows
         .filter(
           (row) =>
@@ -157,8 +157,8 @@ export const sessionListing = (deps: {
         if (event.type === "session.changed") sessionIds.add(event.sessionId)
         else if (event.type === "project.changed") projectIds.add(event.projectId)
         else if (event.type === "terminal.state" || event.type === "terminal.exited") {
-          const project = yield* db.entryAt(event.runtime, event.terminal)
-          const entry = project === undefined ? undefined : yield* db.entryOf(project)
+          const project = yield* db.session.entryAt(event.runtime, event.terminal)
+          const entry = project === undefined ? undefined : yield* db.session.entryOf(project)
           if (entry !== undefined) sessionIds.add(entry.id)
         } else if (event.type === "terminal.seen")
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
@@ -167,7 +167,7 @@ export const sessionListing = (deps: {
             if (info.runtime === event.runtime) sessionIds.add(info.id)
       }
       for (const id of sessionIds) {
-        const identity = yield* db.sessionIdentity(id)
+        const identity = yield* db.session.sessionIdentity(id)
         if (identity !== undefined) projectIds.add(identity.projectId)
       }
       return [

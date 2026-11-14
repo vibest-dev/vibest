@@ -44,7 +44,7 @@ const withEntry = Effect.gen(function* () {
   const project = yield* projectOf(repo)
   yield* herdr.addPane("w1:p8", "ws", repo)
   yield* herdr.seedAgent("w1:p8")
-  const started = yield* db.startEntry(
+  const started = yield* db.session.startEntry(
     project,
     "pi",
     false,
@@ -128,7 +128,7 @@ describe("Watch", () => {
       yield* next(isSnapshot)
       const moved = `${yield* tempDirectory("vibest-moved-")}/repo`
       yield* Effect.promise(() => fs.cp(repo, moved, { recursive: true }))
-      yield* db.moveProject(project, moved, [])
+      yield* db.project.moveProject(project, moved, [])
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
           e._tag === "Session" && e.session.id === entryId && e.session.worktree === moved,
@@ -165,7 +165,7 @@ describe("Watch", () => {
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
       const terminal = (yield* herdr.terminalOf(id))!
       yield* herdr.endExecution(id)
-      yield* db.setStatus(id, "idle")
+      yield* db.session.setStatus(id, "idle")
       const isProject = (activity: string) => (e: WatchEvent) =>
         e._tag === "Project" && e.project.id === project && e.project.activity === activity
       yield* next((e): e is WatchEvent => isSession("idle", 0)(e))

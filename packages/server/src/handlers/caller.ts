@@ -39,12 +39,12 @@ export const make = Effect.gen(function* () {
       ),
     )
   const resolveAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => resolveProject(db, at)))
-  const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.projectAt(at.root)))
+  const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.project.projectAt(at.root)))
 
   const projectOf = (c: Agent, method: string) =>
     Effect.gen(function* () {
       if (c._tag === "Cli") return yield* resolveAt(c.repositoryRoot)
-      const directory = yield* db.projectDirectory(c.projectId)
+      const directory = yield* db.project.projectDirectory(c.projectId)
       if (directory !== undefined) return { id: c.projectId, directory }
       if (c.repositoryRoot === undefined) return yield* new NotInRepository({ path: `project ${c.projectId}` })
       const here = yield* resolveAt(c.repositoryRoot)

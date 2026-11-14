@@ -37,13 +37,13 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const event = definition.conversationOf === undefined ? undefined : jsonObject(raw)
       const conversation = event && definition.conversationOf?.(event)
-      if (conversation && (yield* db.noteConversation(who.id, conversation, who.process)))
+      if (conversation && (yield* db.session.noteConversation(who.id, conversation, who.process)))
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
 
   const terminalClosed = (id: string) =>
     Effect.gen(function* () {
-      const session = yield* db.getSession(id)
+      const session = yield* db.session.getSession(id)
       if (session === undefined || terminalOf(session).id === "") return false
       const runtime = yield* runtimes.route(runtimeOf(session)).pipe(Effect.option)
       return Option.isSome(runtime) && !(yield* alive(runtime.value, terminalOf(session)))
@@ -58,7 +58,7 @@ const make = Effect.gen(function* () {
       yield* Effect.log(`execution end ${who.id} (${end.harness}, interrupted as its terminal closed: an exit)`)
       return yield* sessions.check(who.id)
     }
-    const written = yield* db.endObserved(who.id, end, who.process)
+    const written = yield* db.session.endObserved(who.id, end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })
 
@@ -70,7 +70,7 @@ const make = Effect.gen(function* () {
     if (prompt === undefined) return
     if ("execution" in prompt) {
       if (prompt.refused) return yield* sessions.typeTaken(who.id, prompt.execution)
-      if (yield* db.acceptExecution(who.id, prompt.execution)) yield* db.setStatus(who.id, "working")
+      if (yield* db.session.acceptExecution(who.id, prompt.execution)) yield* db.session.setStatus(who.id, "working")
       return
     }
     yield* sessions.userPrompt(who.id, prompt.text, yield* Clock.currentTimeMillis, who.process)
@@ -82,7 +82,7 @@ const make = Effect.gen(function* () {
     reported?: { readonly version: string; readonly protocol: number },
     reporter?: number,
   ) {
-    return yield* db.patchLive(id, {
+    return yield* db.session.patchLive(id, {
       ready: yield* Clock.currentTimeMillis,
       reporter,
       ...(pid === undefined ? {} : { pid }),
@@ -92,7 +92,7 @@ const make = Effect.gen(function* () {
 
   const guard = Effect.fn("Integration.guard")(
     function* (sessionId: string, raw: string) {
-      const row = yield* db.sessionIdentity(sessionId)
+      const row = yield* db.session.sessionIdentity(sessionId)
       if (row === undefined) return `no session ${sessionId}; the tool call is refused.`
       return yield* Guard.check({ id: row.id, agent: row.agent, projectDir: layout.project(row.projectId) }, raw)
     },
@@ -106,7 +106,8 @@ const make = Effect.gen(function* () {
   )
 
   const conversation = Effect.fn("Integration.conversation")(
-    (id: string, conversation: string, process: number | undefined) => db.noteConversation(id, conversation, process),
+    (id: string, conversation: string, process: number | undefined) =>
+      db.session.noteConversation(id, conversation, process),
   )
 
   return { executionEnd, prompt, ready, conversation, guard }

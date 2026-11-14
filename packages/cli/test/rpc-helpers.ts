@@ -30,7 +30,7 @@ export const asCli = (raw: Effect.Success<typeof client>, repositoryRoot: string
   authed(raw, cliHeaders(repositoryRoot))
 export const asSession = (raw: Effect.Success<typeof client>, sessionId: string, repositoryRoot?: string) =>
   Effect.gen(function* () {
-    const row = yield* (yield* Db).sessionIdentity(sessionId)
+    const row = yield* (yield* Db).session.sessionIdentity(sessionId)
     return authed(raw, sessionHeaders({ sessionId, repositoryRoot, projectId: row && String(row.projectId) }))
   })
 
@@ -39,8 +39,8 @@ export const asEntry = (raw: Effect.Success<typeof client>, repositoryRoot: stri
     const db = yield* Db
     const projectId = yield* projectOf(repositoryRoot)
     const entry =
-      (yield* db.entryOf(projectId))?.id ??
-      (yield* db.startEntry(
+      (yield* db.session.entryOf(projectId))?.id ??
+      (yield* db.session.startEntry(
         projectId,
         "pi",
         false,

@@ -87,11 +87,11 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
       fresh: true,
       terminal: "wC:p1",
     })
-    if (harness === "claude") yield* db.noteConversation(sessionId, "claude-session")
+    if (harness === "claude") yield* db.session.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
-    yield* until(db.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "open")
-    return { db, herdr, c, sessionId, worker, projectId: (yield* db.projectOfSession(sessionId))! }
+    yield* until(db.session.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "open")
+    return { db, herdr, c, sessionId, worker, projectId: (yield* db.session.projectOfSession(sessionId))! }
   })
 
 describe("Daemon.Stop over a real unix socket: only vibestd's own operations block it; agents keep running and queued messages stay for the next vibestd", () => {
@@ -149,16 +149,16 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* herdr.updateAgent("wC:p1", (a) => ({ ...a, status: "working" }))
       const user = yield* cli(repo)
       yield* user.Send({ id: worker, message: "keep the exact task" })
-      const pending = yield* db.pendingInbox(worker)
-      const session = yield* db.getSession(worker)
+      const pending = yield* db.inbox.pendingInbox(worker)
+      const session = yield* db.session.getSession(worker)
       const closed = yield* herdr.callsTo("close")
       const sub = yield* Effect.forkScoped(Stream.runDrain(c["Inbox.Subscribe"](undefined)))
       assert.strictEqual(yield* stopOnceIdle(repo), "accepted")
       yield* Fiber.interrupt(sub)
       assert.lengthOf(pending, 1)
       assert.strictEqual(pending[0]!.message, "keep the exact task")
-      assert.deepStrictEqual(yield* db.pendingInbox(worker), pending)
-      assert.deepStrictEqual(yield* db.getSession(worker), session)
+      assert.deepStrictEqual(yield* db.inbox.pendingInbox(worker), pending)
+      assert.deepStrictEqual(yield* db.session.getSession(worker), session)
       assert.deepStrictEqual(yield* herdr.callsTo("close"), closed)
     }),
   )
@@ -185,7 +185,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       assert.strictEqual(yield* (yield* Drain.Service).phase, "open")
       assert.isFalse(yield* shutdownDone)
       yield* held.release()
-      yield* until(db.getSession(id), (s) => (s ? executionStateOf(s) : undefined) === "open")
+      yield* until(db.session.getSession(id), (s) => (s ? executionStateOf(s) : undefined) === "open")
       assert.strictEqual(yield* stopOnceIdle(repo), "accepted")
     }),
   )
@@ -234,7 +234,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const prompted = yield* piExtensionHook("Prompt", { type: "input", text: "work", source: "interactive" })
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
       assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
-      assert.isTrue(yield* (yield* Db).executionAccepted(id))
+      assert.isTrue(yield* (yield* Db).session.executionAccepted(id))
     }),
     { promptsIgnored: true },
   )
@@ -249,15 +249,17 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* herdr.endExecution(worker)
       yield* writeEnd(worker, "pi", { text: "status: completed" })
       yield* sessions.check(worker)
-      yield* until(db.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "completed")
+      yield* until(db.session.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "completed")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* sessions.send(worker, "after reopen")
       assert.isArray(yield* joinAdvancingClock(stopping))
       yield* leave
-      yield* until(db.inboxWithStatus(worker, "delivered"), (rows) => rows.some((r) => r.message === "after reopen"))
-      assert.deepStrictEqual(yield* db.inboxWithStatus(worker, "failed"), [])
+      yield* until(db.inbox.inboxWithStatus(worker, "delivered"), (rows) =>
+        rows.some((r) => r.message === "after reopen"),
+      )
+      assert.deepStrictEqual(yield* db.inbox.inboxWithStatus(worker, "failed"), [])
     }),
   )
 
@@ -274,7 +276,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         harness: "pi",
         prompt: "work",
       })
-      yield* until(db.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
@@ -298,7 +300,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const { sessionId } = yield* idleMainWithWorker(repo, "claude")
       const inbox = yield* Inbox.Service
       const drain = yield* Drain.Service
-      yield* (yield* Db).insertNoticeTo(sessionId, "wait")
+      yield* (yield* Db).inbox.insertNoticeTo(sessionId, "wait")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining

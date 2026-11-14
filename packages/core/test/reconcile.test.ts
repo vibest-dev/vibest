@@ -29,7 +29,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
       const id = "cccccccc-cccc-4ccc-8ccc-000000000001"
       yield* herdr.addPane("w8:pending", "w8", repo)
       yield* startupSettled(yield* Session.Service)
-      yield* db.insertSession(
+      yield* db.session.insertSession(
         {
           id,
           agent: "general",
@@ -53,12 +53,12 @@ describe("reconcile: a terminal whose agent has not started", () => {
       )
       const sessions = yield* restartSessions
       yield* startupSettled(sessions)
-      assert.isNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
       yield* herdr.seedAgent("w8:pending")
       yield* herdr.updateAgent("w8:pending", (agent) => ({ ...agent, alive: false }))
-      assert.isNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* until(db.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
+      yield* until(db.session.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
     }),
   )
 })

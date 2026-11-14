@@ -3,7 +3,6 @@ import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/sql"
 
 import { unwrapped } from "../replies.ts"
-import type { MachineRow, OutboxRow } from "./db-remote.ts"
 import {
   MESSAGE_STATUSES,
   type MessageStatusName,
@@ -13,6 +12,7 @@ import {
   type SpawnedBefore,
   toInbox,
 } from "./db-rows.ts"
+import type { MachineRow, OutboxRow } from "./remote.ts"
 
 export const LOCAL_MACHINE = "local"
 
@@ -253,12 +253,12 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       }),
     )
 
-  const outboxOf = (peer: string) =>
-    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
+  const outboxOf = (peer: string, after: number, limit: number) =>
+    sql<OutboxRow>`SELECT o.id, o.seq, o.session_id, o.kind, o.content, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
-      FROM outbox o LEFT JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
-      Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),
-    )
+      FROM outbox o LEFT JOIN session s ON s.id = o.session_id
+      WHERE o.peer_id = ${peer} AND o.seq > ${after} AND coalesce(o.recipient, s.origin_session) IS NOT NULL
+      ORDER BY o.seq LIMIT ${limit}`
 
   const rescheduleSource = (id: string) =>
     Effect.gen(function* () {
