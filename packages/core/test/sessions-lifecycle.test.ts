@@ -20,7 +20,7 @@ import {
   sqlNotices,
 } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "a resume whose start fails closes the pane it placed; the next resume on the same harness starts a process whose terminal report is accepted",
     Effect.gen(function* () {

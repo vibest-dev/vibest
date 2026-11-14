@@ -164,38 +164,42 @@ export type AgentSeen = AgentState | "absent"
 
 export const stateOf = (seen: AgentSeen): AgentState | undefined => (seen === "absent" ? undefined : seen)
 
-export const agentState = (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
-  h.state === undefined
-    ? Effect.succeed("unknown")
-    : h
-        .state(terminal)
-        .pipe(
-          Effect.catchTag("RuntimeError", (error) =>
-            error.code === "not_found"
-              ? Effect.succeed("absent" as AgentSeen)
-              : error.code === "unreachable"
-                ? Effect.fail(error)
-                : Effect.succeed("unknown" as AgentSeen),
+export const agentState = Effect.fn("Runtimes.agentState")(
+  (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
+    h.state === undefined
+      ? Effect.succeed("unknown")
+      : h
+          .state(terminal)
+          .pipe(
+            Effect.catchTag("RuntimeError", (error) =>
+              error.code === "not_found"
+                ? Effect.succeed("absent" as AgentSeen)
+                : error.code === "unreachable"
+                  ? Effect.fail(error)
+                  : Effect.succeed("unknown" as AgentSeen),
+            ),
           ),
-        )
+)
 
-export const alive = (h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
+export const alive = Effect.fn("Runtimes.alive")((h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
   h.process(terminal).pipe(
     Effect.map((p) => p.running),
     Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.code !== "not_found")),
-  )
+  ),
+)
 
 export const peekHint = (id: string) => `to see its terminal, run: vibest peek ${id}`
 
-export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30) =>
+export const paneTail = Effect.fn("Runtimes.paneTail")((h: Runtime, terminal: Terminal | undefined, lines = 30) =>
   terminal
     ? h.read(terminal, lines).pipe(
         Effect.map((text) => text.trim()),
         Effect.orElseSucceed(() => ""),
       )
-    : Effect.succeed("")
+    : Effect.succeed(""),
+)
 
-export const runtimesHere = (runtimes: RuntimesShape) =>
+export const runtimesHere = Effect.fn("Runtimes.runtimesHere")((runtimes: RuntimesShape) =>
   Effect.flatMap(runtimes.statuses, (rows) =>
     Effect.forEach(
       rows,
@@ -211,22 +215,22 @@ export const runtimesHere = (runtimes: RuntimesShape) =>
         ),
       { concurrency: "unbounded" },
     ),
-  )
+  ),
+)
 
-export const machinesListing = (
-  runtimes: RuntimesShape,
-  harnesses: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
-  runtimes.statuses.pipe(
-    Effect.map((rows) => [
-      {
-        machine: "local",
-        runtimes: rows.map(({ runtime, status }) => ({
-          kind: runtime.id,
-          status: status.status,
-          ...("reason" in status ? { reason: status.reason } : {}),
-        })),
-        harnesses,
-      },
-    ]),
-  )
+export const machinesListing = Effect.fn("Runtimes.machinesListing")(
+  (runtimes: RuntimesShape, harnesses: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
+    runtimes.statuses.pipe(
+      Effect.map((rows) => [
+        {
+          machine: "local",
+          runtimes: rows.map(({ runtime, status }) => ({
+            kind: runtime.id,
+            status: status.status,
+            ...("reason" in status ? { reason: status.reason } : {}),
+          })),
+          harnesses,
+        },
+      ]),
+    ),
+)

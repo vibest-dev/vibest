@@ -12,7 +12,7 @@ import { until } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   const sharersOfDirectory = (ownerId: string) =>
     Effect.gen(function* () {
       const db = yield* Db

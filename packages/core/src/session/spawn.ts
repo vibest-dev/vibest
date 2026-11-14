@@ -166,7 +166,7 @@ const sessionSpawn = (deps: {
       return worktree
     })
 
-  const spawn = Effect.fn("Sessions.spawn")(function* (input: SpawnInput) {
+  const spawn = Effect.fn("Session.spawn")(function* (input: SpawnInput) {
     if (input.parentSessionId === undefined && input.origin?.reportTo === undefined)
       return yield* new NoCallingSession()
     const root = input.root

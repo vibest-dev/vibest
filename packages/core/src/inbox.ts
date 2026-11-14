@@ -17,12 +17,14 @@ export * as Inbox from "./inbox.ts"
 
 export type Presence = "idle" | "busy" | "gone" | "unknown"
 
-export const entryIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Effect<Presence, RuntimeError> =>
-  Effect.gen(function* () {
-    const seen = yield* agentState(h, terminal)
-    if (seen === "unknown" || seen === "absent") return (yield* alive(h, terminal)) ? "busy" : "gone"
-    return seen === "idle" ? "idle" : "busy"
-  })
+export const entryIdle = Effect.fn("Inbox.entryIdle")(function* (
+  h: Runtime,
+  terminal: RuntimeAddress,
+): Effect.fn.Return<Presence, RuntimeError> {
+  const seen = yield* agentState(h, terminal)
+  if (seen === "unknown" || seen === "absent") return (yield* alive(h, terminal)) ? "busy" : "gone"
+  return seen === "idle" ? "idle" : "busy"
+})
 
 export const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
 

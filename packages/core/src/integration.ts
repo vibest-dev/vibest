@@ -90,21 +90,20 @@ const make = Effect.gen(function* () {
     })
   })
 
-  const guard = (sessionId: string, raw: string) =>
-    Effect.gen(function* () {
+  const guard = Effect.fn("Integration.guard")(
+    function* (sessionId: string, raw: string) {
       const row = yield* db.sessionIdentity(sessionId)
       if (row === undefined) return `no session ${sessionId}; the tool call is refused.`
       return yield* Guard.check({ id: row.id, agent: row.agent, projectDir: layout.project(row.projectId) }, raw)
-    }).pipe(
-      Effect.provideService(Agents.Service, agents),
-      Effect.provideService(Harnesses.Service, harnesses),
-      Effect.provideService(Layout, layout),
-      Effect.provideService(Runtimes.Service, runtimes),
-      Effect.provideService(VibestCommand, vibest),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-      Effect.withSpan("Integration.guard"),
-    )
+    },
+    Effect.provideService(Agents.Service, agents),
+    Effect.provideService(Harnesses.Service, harnesses),
+    Effect.provideService(Layout, layout),
+    Effect.provideService(Runtimes.Service, runtimes),
+    Effect.provideService(VibestCommand, vibest),
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+  )
 
   const conversation = Effect.fn("Integration.conversation")(
     (id: string, conversation: string, process: number | undefined) => db.noteConversation(id, conversation, process),

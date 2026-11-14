@@ -98,7 +98,7 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a refusal reported again types the batch no second time, also through a rebuilt Sessions",
+    "a refusal reported again types the batch no second time, also through a rebuilt Session service",
     Effect.gen(function* () {
       const { sessions, inbox, entryId } = yield* entryAsked
       const herdr = yield* FakeRuntime

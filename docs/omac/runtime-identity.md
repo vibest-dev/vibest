@@ -610,7 +610,7 @@ What omac asks of a runtime today, by caller:
 | coordinator delivery        | `agent.get(pane)` (idle / gone?), `agent.prompt(pane)`; new: `pane.process_info` when no agent (§1.2)                                 | `Inbox.toPane`                                                                                  |
 | stop a coordinator (new)    | signal 0 and SIGTERM to the recorded harness PID (local machine only); `agent.get` sees the agent first                               | `Project.StopCoordinator`                                                                       |
 | coordinator launch          | `worktree.list`, `pane.get`, `tab.create`/`workspace.create`, `pane.wait_for_output`, `pane.send_text`, `pane.send_keys`, `tab.close` | `launch.ts`, `cli.ts launch`                                                                    |
-| events                      | `pane.updated`, `pane.closed`, `pane.moved`, `workspace.closed`                                                                       | `Sessions.onEvent`, `Inbox` trigger                                                             |
+| events                      | `pane.updated`, `pane.closed`, `pane.moved`, `workspace.closed`                                                                       | `Session.onEvent`, `Inbox` trigger                                                              |
 
 (herdr calls a running harness an "agent"; that word stays inside `runtime/herdr.ts`.)
 
@@ -690,7 +690,7 @@ Envelopes: `<agent-result …>` and `<agent-message …>` keep their names — a
 gain `agent="general"`; `id` is the session id. Nothing that reads them changes.
 
 Internal names (`workers.ts` / `Workers` service, `WorkerRow`, `WorkerView`, `WorkerInfo`, `getWorker`, …) are renamed
-to `sessions.ts` / `Sessions`, `SessionRow`, `SessionView`, `SessionInfo`, `getSession` in PR 2, which rewrites them
+to `sessions.ts` / `Session`, `SessionRow`, `SessionView`, `SessionInfo`, `getSession` in PR 2, which rewrites them
 anyway.
 
 ## 6. Environment variables (PR 1, identity values in PR 2)

@@ -94,7 +94,7 @@ notifies nobody.
 `remote_url` equals `repository` or has the same repository identity as `identity` (a multi-repository project is
 refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
-and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
+and fetch it there"), and runs `Session.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
 `origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in

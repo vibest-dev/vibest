@@ -24,7 +24,7 @@ import {
   entryOfProject,
 } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "a usage-limit failure of a running session reports the limit and starts nothing else",
     Effect.gen(function* () {

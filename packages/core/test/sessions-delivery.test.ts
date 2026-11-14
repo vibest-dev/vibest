@@ -17,7 +17,7 @@ import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd } from "./l
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "send while an execution runs is queued, then delivered merged once the session is idle",
     Effect.gen(function* () {

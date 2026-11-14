@@ -69,10 +69,9 @@ export const node = LayerNode.make({
   deps: [PlatformNode.childProcessSpawner],
 })
 
-export const repositoryIdentity = (url: string) =>
-  Effect.gen(function* () {
-    const remote = parseRemote(url)
-    if (remote === undefined) return undefined
-    const host = remote.ssh ? yield* (yield* Service).hostName(remote.host) : remote.host
-    return `${host.toLowerCase()}/${remote.path}`
-  })
+export const repositoryIdentity = Effect.fn("RepositoryUrl.repositoryIdentity")(function* (url: string) {
+  const remote = parseRemote(url)
+  if (remote === undefined) return undefined
+  const host = remote.ssh ? yield* (yield* Service).hostName(remote.host) : remote.host
+  return `${host.toLowerCase()}/${remote.path}`
+})

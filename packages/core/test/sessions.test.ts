@@ -11,7 +11,7 @@ import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual,
 import { makeRepository } from "./lib/session.ts"
 import { entryOfProject, sessionWorktree, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "a session's in-memory flags, lock and live status go once it ends; resumed, its next execution ends as any execution does; archived, they go again with no check of its own",
     Effect.gen(function* () {

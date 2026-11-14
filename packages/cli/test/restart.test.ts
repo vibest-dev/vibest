@@ -304,7 +304,7 @@ describe("restart in place", () => {
   )
 
   test(
-    "the old harness's report after the new process.start is not its answer, even for a fresh Sessions",
+    "the old harness's report after the new process.start is not its answer, even for a fresh Session service",
     Effect.gen(function* () {
       const { db, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime

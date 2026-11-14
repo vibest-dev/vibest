@@ -103,8 +103,10 @@ export const node = LayerNode.make({
   deps: [processPlatformNode, PlatformNode.childProcessSpawner],
 })
 
-export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>
-  capture(command, args, { timeout, forceKillAfter: LSOF_KILL_AFTER }).pipe(Effect.orElseSucceed(() => undefined))
+export const runFor = Effect.fn("Processes.runFor")(
+  (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>
+    capture(command, args, { timeout, forceKillAfter: LSOF_KILL_AFTER }).pipe(Effect.orElseSucceed(() => undefined)),
+)
 
 export type ProcessRow = { readonly pid: number; readonly ppid: number; readonly command: string }
 

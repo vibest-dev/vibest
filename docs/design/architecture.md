@@ -360,7 +360,7 @@ below it and subscribing to the events it handles itself:
 | `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                          |
 | `entry.ts` (`EntrySession`)    | starting and resuming the entry session                                                          |
 
-`packages/core/src/session.ts` (`Sessions`) is the facade the server and the CLI call: it delegates to these modules and
+`packages/core/src/session.ts` (`Session`) is the facade the server and the CLI call: it delegates to these modules and
 itself only reads (`get`, `list`, `peek`, and `view`, which adds a session's directory and git state).
 
 How these modules keep the rules:

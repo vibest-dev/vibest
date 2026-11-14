@@ -63,11 +63,11 @@ export const ioregUuid = (text: string) => /"IOPlatformUUID" = "([^"]+)"/.exec(t
 
 export const shortHostName = (hostname: string) => hostname.split(".")[0] || hostname
 
-export const readHostId = (source: {
-  readonly ioreg?: Effect.Effect<string, unknown> | undefined
-  readonly files: ReadonlyArray<string>
-}) =>
-  Effect.gen(function* () {
+export const readHostId = Effect.fn("Identity.readHostId")(
+  function* (source: {
+    readonly ioreg?: Effect.Effect<string, unknown> | undefined
+    readonly files: ReadonlyArray<string>
+  }) {
     if (source.ioreg !== undefined) return ioregUuid(yield* source.ioreg)
     const fs = yield* FileSystem.FileSystem
     for (const file of source.files) {
@@ -76,10 +76,10 @@ export const readHostId = (source: {
       if (line) return line
     }
     return undefined
-  }).pipe(
-    Effect.timeoutOrElse({ duration: HOST_ID_TIMEOUT, orElse: () => Effect.succeed(undefined) }),
-    Effect.orElseSucceed(() => undefined),
-  )
+  },
+  Effect.timeoutOrElse({ duration: HOST_ID_TIMEOUT, orElse: () => Effect.succeed(undefined) }),
+  Effect.orElseSucceed(() => undefined),
+)
 
 const writeIdentity = (file: string, pid: number, identity: IdentityFile) =>
   Effect.gen(function* () {
@@ -95,29 +95,28 @@ const writeIdentity = (file: string, pid: number, identity: IdentityFile) =>
     yield* fs.rename(tmp, file)
   })
 
-export const loadIdentity = (file: string, host: HostFacts["Service"]) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const hostId = yield* host.id
-    const fresh = (): IdentityFile => ({ id: randomId(), name: shortHostName(host.name), machine_id: hostId ?? null })
-    if (!(yield* fs.exists(file))) {
-      const made = fresh()
-      yield* writeIdentity(file, host.pid, made)
-      return { identity: made, warning: undefined }
-    }
-    const stored = yield* fs.readFileString(file).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(IdentityJson)),
-      Effect.mapError(() => new IdentityUnreadable({ file })),
-    )
-    if (!ID.test(stored.id)) return yield* new IdentityUnreadable({ file })
-    if (hostId === undefined) return { identity: stored, warning: "host id unreadable: identity kept" }
-    if (stored.machine_id === hostId) return { identity: stored, warning: undefined }
-    if (stored.machine_id === null) {
-      const filled = { ...stored, machine_id: hostId }
-      yield* writeIdentity(file, host.pid, filled)
-      return { identity: filled, warning: undefined }
-    }
-    const renewed = fresh()
-    yield* writeIdentity(file, host.pid, renewed)
-    return { identity: renewed, warning: "this home came from another machine: a new identity" }
-  })
+export const loadIdentity = Effect.fn("Identity.loadIdentity")(function* (file: string, host: HostFacts["Service"]) {
+  const fs = yield* FileSystem.FileSystem
+  const hostId = yield* host.id
+  const fresh = (): IdentityFile => ({ id: randomId(), name: shortHostName(host.name), machine_id: hostId ?? null })
+  if (!(yield* fs.exists(file))) {
+    const made = fresh()
+    yield* writeIdentity(file, host.pid, made)
+    return { identity: made, warning: undefined }
+  }
+  const stored = yield* fs.readFileString(file).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(IdentityJson)),
+    Effect.mapError(() => new IdentityUnreadable({ file })),
+  )
+  if (!ID.test(stored.id)) return yield* new IdentityUnreadable({ file })
+  if (hostId === undefined) return { identity: stored, warning: "host id unreadable: identity kept" }
+  if (stored.machine_id === hostId) return { identity: stored, warning: undefined }
+  if (stored.machine_id === null) {
+    const filled = { ...stored, machine_id: hostId }
+    yield* writeIdentity(file, host.pid, filled)
+    return { identity: filled, warning: undefined }
+  }
+  const renewed = fresh()
+  yield* writeIdentity(file, host.pid, renewed)
+  return { identity: renewed, warning: "this home came from another machine: a new identity" }
+})
