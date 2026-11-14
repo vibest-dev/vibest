@@ -19,7 +19,7 @@ export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-a
 
 export const entryOfProject = (repo: string) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const projectId = yield* projectOf(repo)
     const found = yield* db.session.entryOf(projectId)
     if (found !== undefined) return found.id
@@ -69,7 +69,7 @@ export const claudeEnd = (reason: string) =>
 export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
-    const db = yield* Db
+    const db = yield* Db.Service
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
@@ -98,7 +98,7 @@ export const idleSession = (repo: string, extra: { readonly archive?: boolean } 
 
 export const sessionWorktree = (id: string) =>
   Effect.gen(function* () {
-    const located = yield* (yield* Db).session.sessionDirectory(id)
+    const located = yield* (yield* Db.Service).session.sessionDirectory(id)
     if (!located) return yield* Effect.die(`no worktree for ${id}`)
     return located
   })

@@ -53,7 +53,7 @@ export type LaunchOutcome =
   | { readonly _tag: "Failed" }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service

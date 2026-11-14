@@ -74,7 +74,7 @@ export const AdmissionLive = Layer.effect(
   }),
 )
 
-const noteConversation = (db: Db["Service"], read: Read, row: { id: string; harness: string }) =>
+const noteConversation = (db: Db.Interface, read: Read, row: { id: string; harness: string }) =>
   Effect.gen(function* () {
     const conversation = read(HARNESS_SESSION_HEADER)
     if (!conversation || read(HARNESS_HEADER) !== row.harness) return
@@ -82,7 +82,7 @@ const noteConversation = (db: Db["Service"], read: Read, row: { id: string; harn
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
-export const identify = (db: Db["Service"], read: Read) =>
+export const identify = (db: Db.Interface, read: Read) =>
   Effect.gen(function* () {
     const id = read(SESSION_HEADER)
     const row = id ? yield* db.session.sessionIdentity(id) : undefined
@@ -94,10 +94,10 @@ export const identify = (db: Db["Service"], read: Read) =>
     return { _tag: "Known", row } as const
   })
 
-export const noteOpen = (db: Db["Service"], read: Read, sessionId: string) =>
+export const noteOpen = (db: Db.Interface, read: Read, sessionId: string) =>
   read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(db, read)) : Effect.void
 
-export const checkProtocol = (db: Db["Service"], read: Read, version: string) =>
+export const checkProtocol = (db: Db.Interface, read: Read, version: string) =>
   Effect.gen(function* () {
     yield* noteIntegration(db, read)
     const sent = read(PROTOCOL_HEADER)
@@ -113,7 +113,7 @@ export const checkProtocol = (db: Db["Service"], read: Read, version: string) =>
     }
   })
 
-export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
+export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method: string) =>
   Effect.gen(function* () {
     const read = reader(headers)
     const kind = Headers.get(headers, CALLER_HEADER)
@@ -181,7 +181,7 @@ export const integrationOf = (read: Read) => {
   return { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
 }
 
-const noteIntegration = (db: Db["Service"], read: Read): Effect.Effect<void> =>
+const noteIntegration = (db: Db.Interface, read: Read): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
     const integration = integrationOf(read)
@@ -201,7 +201,7 @@ const noteIntegration = (db: Db["Service"], read: Read): Effect.Effect<void> =>
 export const ProtocolGateLive = Layer.effect(
   ProtocolGate,
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const { version } = yield* App.Service
     return ProtocolGate.of((effect, { headers, rpc }) =>
       Effect.gen(function* () {
@@ -217,7 +217,7 @@ export const ProtocolGateLive = Layer.effect(
 export const CallerGateLive = Layer.effect(
   CallerGate,
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     return CallerGate.of((effect, { headers, rpc }) =>
       resolveCaller(db, headers, rpc._tag).pipe(
         Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),

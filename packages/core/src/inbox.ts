@@ -75,7 +75,7 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Inbox
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const drain = yield* Drain.Service
     const harnesses = yield* Harnesses.Service
     const reactor = yield* Reactor.make

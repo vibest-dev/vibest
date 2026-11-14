@@ -30,7 +30,7 @@ export const shutdownNode = LayerNode.unbound(Shutdown)
 
 export const make = ({ cliOnly }: Checks) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const runtimes = yield* Runtimes.Service
     const plugins = yield* Plugins
     const subscriptions = yield* Subscriptions

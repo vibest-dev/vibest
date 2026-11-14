@@ -60,7 +60,10 @@ export const writeEnd = (id: string, harness: string, payload: object, offsetMs 
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses.Service).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* Db).session.endObserved(id, executionEndFrom(adapter, payload as Record<string, unknown>, at))
+    yield* (yield* Db.Service).session.endObserved(
+      id,
+      executionEndFrom(adapter, payload as Record<string, unknown>, at),
+    )
   })
 
 export const eventsOf = (sessionId: string, type?: string) =>

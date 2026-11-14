@@ -47,7 +47,7 @@ const limitFailure = (
 }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const plugins = yield* Plugins
   const subscriptions = yield* Subscriptions
   const harness = yield* Harness.Service

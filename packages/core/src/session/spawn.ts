@@ -70,7 +70,7 @@ export interface Spawned extends Routing {
 
 const make = (options: { readonly maxSessions: number | undefined }) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const runtimes = yield* Runtimes.Service
     const harness = yield* Harness.Service
     const harnesses = yield* Harnesses.Service

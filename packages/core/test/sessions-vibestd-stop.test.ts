@@ -47,7 +47,7 @@ const heldAtOpen = <A, E, R, R2>(
 describe.concurrent("after a vibestd stop", () => {
   const cutOffSpawn = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       yield* db.session.startEntry(
         yield* projectOf(repo),
@@ -78,7 +78,7 @@ describe.concurrent("after a vibestd stop", () => {
     cutOffSpawn((id) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
-        const db = yield* Db
+        const db = yield* Db.Service
         const worktree = yield* sessionWorktree(id)
         assert.isTrue(yield* fs.exists(worktree))
         yield* nextVibestd(Effect.map(sqlNotices(id), (n) => n.length > 0))
@@ -146,7 +146,7 @@ describe.concurrent("after a vibestd stop", () => {
   const waitingForReady = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       yield* db.session.startEntry(
         yield* projectOf(repo),
@@ -201,7 +201,7 @@ describe.concurrent("after a vibestd stop", () => {
     "vibestd stopped after the task is linked but before the runtime got it ends that execution not_started, not lost",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       yield* db.session.startEntry(
         yield* projectOf(repo),
@@ -246,7 +246,7 @@ describe.concurrent("after a vibestd stop", () => {
     limitedMidMove((id) =>
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
-        const db = yield* Db
+        const db = yield* Db.Service
         const row = (yield* db.session.getSession(id))!
         yield* db.session.startProcess(id, {
           harness: "claude",
@@ -277,7 +277,7 @@ describe.concurrent("after a vibestd stop", () => {
     limitedMidMove((id) =>
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
-        const db = yield* Db
+        const db = yield* Db.Service
         yield* db.session.endProcess(id, "limited")
         assert.notStrictEqual(exitedAt((yield* db.session.getSession(id))!), null)
         yield* nextVibestd(Effect.map(herdr.callsTo("open"), (calls) => calls.length === 2))

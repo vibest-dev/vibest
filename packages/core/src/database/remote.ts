@@ -112,25 +112,28 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
     return {
       machines: reads.machines.pipe(Effect.orDie),
 
-      machineNamed: (name: string) => machineNamed(name).pipe(Effect.orDie),
+      machineNamed: Effect.fn("Db.remote.machineNamed")((name: string) => machineNamed(name).pipe(Effect.orDie)),
 
-      machineWithVibestd: (id: string) =>
+      machineWithVibestd: Effect.fn("Db.remote.machineWithVibestd")((id: string) =>
         sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE vibestd_id = ${id}`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.orDie,
         ),
+      ),
 
-      addMachine: (row: { readonly name: string; readonly target: string; readonly vibestdId: string }) =>
-        tx(
-          Effect.gen(function* () {
-            const taken = yield* sql`SELECT 1 FROM machine WHERE name = ${row.name} OR vibestd_id = ${row.vibestdId}`
-            if (taken.length > 0) return undefined
-            yield* publish(MachineAdded, { data: { name: row.name, target: row.target, vibestd: row.vibestdId } })
-            return yield* machineNamed(row.name)
-          }),
-        ).pipe(Effect.orDie),
+      addMachine: Effect.fn("Db.remote.addMachine")(
+        (row: { readonly name: string; readonly target: string; readonly vibestdId: string }) =>
+          tx(
+            Effect.gen(function* () {
+              const taken = yield* sql`SELECT 1 FROM machine WHERE name = ${row.name} OR vibestd_id = ${row.vibestdId}`
+              if (taken.length > 0) return undefined
+              yield* publish(MachineAdded, { data: { name: row.name, target: row.target, vibestd: row.vibestdId } })
+              return yield* machineNamed(row.name)
+            }),
+          ).pipe(Effect.orDie),
+      ),
 
-      removeMachine: (name: string) =>
+      removeMachine: Effect.fn("Db.remote.removeMachine")((name: string) =>
         tx(
           Effect.gen(function* () {
             if ((yield* machineNamed(name)) === undefined) return false
@@ -138,64 +141,68 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             return true
           }),
         ).pipe(Effect.orDie),
+      ),
 
-      machineConnected: (name: string) =>
+      machineConnected: Effect.fn("Db.remote.machineConnected")((name: string) =>
         tx(
           Effect.gen(function* () {
             if ((yield* machineNamed(name)) !== undefined) yield* publish(MachineConnected, { data: { name } })
           }),
         ).pipe(Effect.orDie),
+      ),
 
-      receivePeerItem: (item: {
-        readonly id: string
-        readonly recipient: string
-        readonly kind: "send" | "notice"
-        readonly sender: string
-        readonly content: string
-      }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
-        tx(
-          Effect.gen(function* () {
-            const [route] = yield* sql<{ project: string; entry: string | null; alive: number }>`SELECT
+      receivePeerItem: Effect.fn("Db.remote.receivePeerItem")(
+        (item: {
+          readonly id: string
+          readonly recipient: string
+          readonly kind: "send" | "notice"
+          readonly sender: string
+          readonly content: string
+        }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
+          tx(
+            Effect.gen(function* () {
+              const [route] = yield* sql<{ project: string; entry: string | null; alive: number }>`SELECT
                 s.project_id AS project, p.entry_session_id AS entry, s.ended_at IS NULL AS alive
               FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${item.recipient}`
-            if (route === undefined) return "unknown" as const
-            if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
-            const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
-            const content =
-              item.kind === "send"
-                ? sessionEnvelope({ id: item.sender }, item.content)
-                : noticeEnvelope(`${item.sender}: ${item.content}`)
-            if (heir !== undefined && "peer" in heir) {
+              if (route === undefined) return "unknown" as const
+              if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
+              const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
+              const content =
+                item.kind === "send"
+                  ? sessionEnvelope({ id: item.sender }, item.content)
+                  : noticeEnvelope(`${item.sender}: ${item.content}`)
+              if (heir !== undefined && "peer" in heir) {
+                yield* inbox.queueInbox({
+                  recipient: item.recipient,
+                  kind: item.kind,
+                  sender: null,
+                  content,
+                  status: "dropped",
+                  peerItem: item.id,
+                })
+                yield* queueForPeer(heir.peer, heir.session, {
+                  sessionId: item.recipient,
+                  kind: item.kind,
+                  content: `${item.sender}: ${item.content}`,
+                })
+                return "queued" as const
+              }
+              const target = heir !== undefined && "local" in heir ? heir.local : undefined
+              const here =
+                target !== undefined &&
+                (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
               yield* inbox.queueInbox({
-                recipient: item.recipient,
+                recipient: target ?? item.recipient,
                 kind: item.kind,
                 sender: null,
                 content,
-                status: "dropped",
+                status: here ? "pending" : "dropped",
                 peerItem: item.id,
               })
-              yield* queueForPeer(heir.peer, heir.session, {
-                sessionId: item.recipient,
-                kind: item.kind,
-                content: `${item.sender}: ${item.content}`,
-              })
               return "queued" as const
-            }
-            const target = heir !== undefined && "local" in heir ? heir.local : undefined
-            const here =
-              target !== undefined &&
-              (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
-            yield* inbox.queueInbox({
-              recipient: target ?? item.recipient,
-              kind: item.kind,
-              sender: null,
-              content,
-              status: here ? "pending" : "dropped",
-              peerItem: item.id,
-            })
-            return "queued" as const
-          }),
-        ).pipe(Effect.orDie),
+            }),
+          ).pipe(Effect.orDie),
+      ),
 
       remoteProjects: sql<{ id: string; directory: string | null; repositories: number; remote: string }>`SELECT
             p.id, p.directory, r.remote_url AS remote,
@@ -203,9 +210,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           FROM project p JOIN project_repository r ON r.project_id = p.id
           WHERE r.remote_url IS NOT NULL ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
 
-      outboxOf: (peer: string, after = 0, limit = -1) => reads.outboxOf(peer, after, limit).pipe(Effect.orDie),
+      outboxOf: Effect.fn("Db.remote.outboxOf")((peer: string, after = 0, limit = -1) =>
+        reads.outboxOf(peer, after, limit).pipe(Effect.orDie),
+      ),
 
-      ackOutbox: (peer: string, ids: ReadonlyArray<string>) =>
+      ackOutbox: Effect.fn("Db.remote.ackOutbox")((peer: string, ids: ReadonlyArray<string>) =>
         (ids.length === 0
           ? Effect.void
           : tx(
@@ -217,35 +226,42 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               }),
             )
         ).pipe(Effect.orDie),
+      ),
 
-      notePeer: (peer: { readonly id: string; readonly name: string }) =>
+      notePeer: Effect.fn("Db.remote.notePeer")((peer: { readonly id: string; readonly name: string }) =>
         tx(publish(PeerSeen, { data: { id: peer.id, name: peer.name } })).pipe(Effect.asVoid, Effect.orDie),
+      ),
 
-      peerKnown: (id: string) =>
+      peerKnown: Effect.fn("Db.remote.peerKnown")((id: string) =>
         sql`SELECT 1 FROM peer WHERE id = ${id}`.pipe(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
+      ),
 
-      sendToOrigin: (sessionId: string, target: string, message: string, request?: string) =>
-        tx(
-          Effect.gen(function* () {
-            const origin = yield* origins(sessionId)
-            const creator = origin?.session
-            if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
-            return yield* queueForPeer(origin.peer, creator, {
-              sessionId,
-              kind: "send",
-              content: message,
-              request,
-            })
-          }),
-        ).pipe(Effect.orDie),
+      sendToOrigin: Effect.fn("Db.remote.sendToOrigin")(
+        (sessionId: string, target: string, message: string, request?: string) =>
+          tx(
+            Effect.gen(function* () {
+              const origin = yield* origins(sessionId)
+              const creator = origin?.session
+              if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
+              return yield* queueForPeer(origin.peer, creator, {
+                sessionId,
+                kind: "send",
+                content: message,
+                request,
+              })
+            }),
+          ).pipe(Effect.orDie),
+      ),
 
-      sendToPeer: (sender: string, peer: string, session: string, message: string, request?: string) =>
-        tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message, request })).pipe(
-          Effect.orDie,
-        ),
+      sendToPeer: Effect.fn("Db.remote.sendToPeer")(
+        (sender: string, peer: string, session: string, message: string, request?: string) =>
+          tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message, request })).pipe(
+            Effect.orDie,
+          ),
+      ),
     }
   })
 

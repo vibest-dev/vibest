@@ -54,7 +54,7 @@ const firstStart = new LaunchFailed({
 })
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const bus = yield* Bus.Service
   const runtimes = yield* Runtimes.Service
   const restarting = (yield* SessionLive).restarting

@@ -192,7 +192,7 @@ describe("pi-vibest", () => {
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const layout = yield* Layout
         const fs = yield* FileSystem.FileSystem
         const runtime = yield* FakeRuntime
@@ -247,7 +247,7 @@ describe("pi-vibest", () => {
     "Subagent: a ready report made while no vibestd answers reaches the next vibestd",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const layout = yield* Layout
         const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const project = yield* projectOf("r")
@@ -273,7 +273,7 @@ describe("pi-vibest", () => {
     "Coordinator: a vibestd that stops ends the subscription on its side; the next vibestd's rows still arrive until the session shuts down, and none once vibestd sees the closed connection",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const layout = yield* Layout
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
@@ -406,7 +406,7 @@ describe("pi-vibest", () => {
     "Coordinator: no MCP server, its tool rules allow vibest, and inbox rows arrive as hidden custom messages, never through agent.prompt",
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       yield* runtime.addPane("w1:p7", "ws", "/")
       const row = idleRow("pi")
       yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
@@ -487,7 +487,7 @@ describe("pi-vibest", () => {
   test(
     "an input event records what the user typed, in any session; an extension delivery does not",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const sql = yield* SqlClient.SqlClient
       const row = idleRow("pi")
       yield* db.session.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
@@ -539,7 +539,7 @@ describe("pi-vibest", () => {
   test(
     "Coordinator: a TUI startup execution reports its session id once; /new, /resume and /fork report before the next execution",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const c = yield* cli
       const launched = yield* c["Project.EntrySession"]({
         agent: "coordinator",

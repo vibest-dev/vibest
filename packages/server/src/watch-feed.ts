@@ -31,7 +31,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const listing = sessionListing({
-      db: yield* Db,
+      db: yield* Db.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
     })

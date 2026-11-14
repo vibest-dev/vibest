@@ -27,7 +27,7 @@ import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const fs = yield* FileSystem.FileSystem
   const runtimes = yield* Runtimes.Service
   const inbox = yield* Inbox.Service
@@ -260,7 +260,7 @@ export class Archive extends Context.Service<Archive, Effect.Success<typeof make
 
 export const archiveOnIdle = Effect.gen(function* () {
   const archive = yield* Archive
-  const db = yield* Db
+  const db = yield* Db.Service
   const live = yield* SessionLive
   return {
     optedIn: live.archivesOnIdle,

@@ -13,6 +13,8 @@ import * as Remote from "./remote.ts"
 import * as SessionStatements from "./session-statements.ts"
 import * as Session from "./session.ts"
 
+export * as Db from "./db.ts"
+
 export type { SessionFilter } from "./session.ts"
 
 export interface Interface {
@@ -36,23 +38,23 @@ const make = Effect.gen(function* () {
 
 export const SQL_NAMES = { transformQueryNames: Str.camelToSnake, transformResultNames: Str.snakeToCamel } as const
 
-export class Db extends Context.Service<Db, Interface>()("vibest/Db") {
-  static readonly layer = Layer.effect(
-    Db,
-    SqlClient.SqlClient.pipe(
-      Effect.andThen(apply),
-      Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
-      Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
-      Effect.andThen(
-        SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE meta SET value = value WHERE key = ''`)),
-      ),
-      Effect.andThen(make),
-    ),
-  )
+export class Service extends Context.Service<Service, Interface>()("vibest/Db") {}
 
-  static readonly node = LayerNode.make({
-    service: Db,
-    layer: Db.layer,
-    deps: [Bus.node, Projectors.node, SessionLive.node, PlatformNode.sqlClient],
-  })
-}
+export const layer = Layer.effect(
+  Service,
+  SqlClient.SqlClient.pipe(
+    Effect.andThen(apply),
+    Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
+    Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
+    Effect.andThen(
+      SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE meta SET value = value WHERE key = ''`)),
+    ),
+    Effect.andThen(make),
+  ),
+)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Bus.node, Projectors.node, SessionLive.node, PlatformNode.sqlClient],
+})

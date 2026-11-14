@@ -31,7 +31,7 @@ describe.concurrent("Session", () => {
     "a usage limit when the first terminal opens moves the session; when the move dies the new worktree is removed",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const fs = yield* FileSystem.FileSystem
       const opening = yield* herdr.hold("open")
       const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
@@ -53,7 +53,7 @@ describe.concurrent("Session", () => {
       "a move that dies after it opened the replacement terminal closes that terminal before removing the worktree",
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
-        const db = yield* Db
+        const db = yield* Db.Service
         const fs = yield* FileSystem.FileSystem
         const opening = yield* herdr.hold("open")
         const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
@@ -97,7 +97,7 @@ describe.concurrent("Session", () => {
       "a move that dies after another session joined its worktree with --share keeps the worktree for that session",
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
-        const db = yield* Db
+        const db = yield* Db.Service
         const fs = yield* FileSystem.FileSystem
         const sessions = yield* Session.Service
         const repo = yield* makeRepository

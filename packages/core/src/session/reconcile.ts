@@ -34,7 +34,7 @@ export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const inbox = yield* Inbox.Service

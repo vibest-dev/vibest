@@ -77,7 +77,7 @@ const joinAdvancingClock = <A, E>(stopping: Fiber.Fiber<A, E>) =>
 
 const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const herdr = yield* FakeRuntime
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
@@ -167,7 +167,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "a spawn still opening its terminal blocks until the drain times out; reopening does not cancel it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const user = yield* cli(repo)
       const spawner = yield* asEntry(yield* client, repo)
@@ -234,7 +234,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const prompted = yield* piExtensionHook("Prompt", { type: "input", text: "work", source: "interactive" })
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
       assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
-      assert.isTrue(yield* (yield* Db).session.executionAccepted(id))
+      assert.isTrue(yield* (yield* Db.Service).session.executionAccepted(id))
     }),
     { promptsIgnored: true },
   )
@@ -267,7 +267,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "an archive running inside vibestd is counted past its terminal's close; a refusal leaves it running",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
@@ -300,7 +300,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const { sessionId } = yield* idleMainWithWorker(repo, "claude")
       const inbox = yield* Inbox.Service
       const drain = yield* Drain.Service
-      yield* (yield* Db).inbox.insertNoticeTo(sessionId, "wait")
+      yield* (yield* Db.Service).inbox.insertNoticeTo(sessionId, "wait")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining

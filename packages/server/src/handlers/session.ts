@@ -23,7 +23,7 @@ export const make = (
 ) =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
-    const db = yield* Db
+    const db = yield* Db.Service
     const runtimes = yield* Runtimes.Service
     const watchFeed = yield* WatchFeed.Service
     const bus = yield* Bus.Service

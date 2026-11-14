@@ -36,7 +36,7 @@ const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const harnesses = yield* Harnesses.Service
   const bus = yield* Bus.Service
   const { track } = yield* SessionLive

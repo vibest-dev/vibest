@@ -31,7 +31,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   )
 
 const project = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)

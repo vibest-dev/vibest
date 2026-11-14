@@ -69,7 +69,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
-      const db = yield* Db
+      const db = yield* Db.Service
       const entry = yield* db.session.startEntry(
         yield* projectOf(repo),
         entryHarness,
@@ -98,7 +98,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       }
     })
 
-  const askEntry = (w: { readonly id: string; readonly entryId: string; readonly db: Db["Service"] }) =>
+  const askEntry = (w: { readonly id: string; readonly entryId: string; readonly db: Db.Interface }) =>
     w.db.inbox.insertSend(w.entryId, "a question", undefined, w.id)
 
   const finishExecution = (
@@ -118,7 +118,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       return yield* until(inbox.take(w.entryId, undefined), (taken) => taken !== undefined)
     })
 
-  const archivedRow = (db: Db["Service"], id: string) =>
+  const archivedRow = (db: Db.Interface, id: string) =>
     db.session.getSession(id).pipe(Effect.map((w) => w !== undefined && archived(w)))
   const letForkedArchiveRun = TestClock.withLive(Effect.sleep("100 millis"))
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))

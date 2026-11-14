@@ -18,7 +18,7 @@ export type Handlers = Partial<RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof Vibest
 export type Agent = Extract<CallerShape, { _tag: "Cli" | "Session" }>
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
 
   const agent = (method: MethodOf<"agent" | "owner">) =>

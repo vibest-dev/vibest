@@ -53,7 +53,7 @@ describe("vibest update's plan for vibestd", () => {
 })
 
 const busyPiSubagent = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const sessions = yield* Session.Service
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
@@ -166,7 +166,7 @@ describe("restart in place", () => {
 
   const workingEntry = (harness: "cursor" | "pi") =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
       yield* db.session.startEntry(
@@ -276,7 +276,7 @@ describe("restart in place", () => {
   test(
     "an entry session the runtime calls idle still continues when the update command is running in its process tree",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const sessions = yield* Session.Service
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
@@ -313,7 +313,7 @@ describe("restart in place", () => {
   test(
     "a ready report records the integration it names, not whatever an older report left noted",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const projectId = yield* projectOf(yield* makeRepository)
       yield* db.session.startEntry(
         projectId,

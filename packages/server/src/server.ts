@@ -47,7 +47,7 @@ export const handlers = VibestRpcs.toLayer(
   Effect.gen(function* () {
     const checks = yield* CallerChecks.make
     const listing = sessionListing({
-      db: yield* Db,
+      db: yield* Db.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
     })

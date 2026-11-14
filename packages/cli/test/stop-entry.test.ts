@@ -73,7 +73,7 @@ const HARNESS = 4242
 
 const workingPiEntry = Effect.gen(function* () {
   yield* refuseRealKills
-  const db = yield* Db
+  const db = yield* Db.Service
   const herdr = yield* FakeRuntime
   const processes = yield* FakeProcesses
   const repo = yield* makeRepository

@@ -20,7 +20,7 @@ const test: typeof plainTest = (name, program, options) =>
 const entryAsked = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const sessions = yield* Session.Service
-  const db = yield* Db
+  const db = yield* Db.Service
   const repo = yield* makeRepository
   const entry = yield* db.session.startEntry(
     yield* projectOf(repo),

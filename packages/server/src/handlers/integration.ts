@@ -14,7 +14,7 @@ import { Remote } from "../machine/remote.ts"
 import type { Handlers } from "./caller.ts"
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const harnesses = yield* Harnesses.Service
   const integration = yield* Integration.Service
   const remote = yield* Remote.Service

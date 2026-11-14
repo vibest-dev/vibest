@@ -83,7 +83,7 @@ export interface ReleaseInput {
 }
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const layout = yield* Layout
   const processes = yield* Processes.Service
   const fs = yield* FileSystem.FileSystem

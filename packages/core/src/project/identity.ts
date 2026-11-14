@@ -49,7 +49,7 @@ const repairWorktrees = Effect.fn("repairWorktrees")(function* (repositories: Re
 })
 
 export const resolveProject = Effect.fn("resolveProject")(function* (
-  db: Db["Service"],
+  db: Db.Interface,
   located: Located,
   move?: boolean,
 ) {

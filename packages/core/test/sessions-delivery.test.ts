@@ -58,7 +58,7 @@ describe.concurrent("Session", () => {
       const second = yield* herdr.hold("state", id)
       yield* first.release()
       yield* second.reached
-      assert.notStrictEqual(executionStateOf((yield* (yield* Db).session.getSession(id))!), "open")
+      assert.notStrictEqual(executionStateOf((yield* (yield* Db.Service).session.getSession(id))!), "open")
       yield* sessions.userPrompt(id, "typed during the ready wait")
       const working = sql<{
         input: string
@@ -82,7 +82,7 @@ describe.concurrent("Session", () => {
   const typedBeforeTheTask = Effect.gen(function* () {
     const herdr = yield* FakeRuntime
     const sessions = yield* Session.Service
-    const db = yield* Db
+    const db = yield* Db.Service
     const repo = yield* makeRepository
     const held = yield* herdr.hold("state")
     const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
@@ -197,7 +197,7 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Session.Service
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       yield* db.session.startEntry(
         yield* projectOf(repo),
@@ -429,7 +429,7 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       yield* Ref.set(herdr.onStarted, (session) =>
         herdr.updateAgent(session, (a) => ({ ...a, status: "unknown", registerPrompt: false })),

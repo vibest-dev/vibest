@@ -42,7 +42,7 @@ export const remoteHandlers = (
   deps: Pick<Checks, "agent" | "projectOf" | "findAt" | "cliOnly"> & { readonly listed: Listing["listed"] },
 ) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const self = yield* Identity.Service
     const { version } = yield* App.Service
     const machines = yield* Machines.Service

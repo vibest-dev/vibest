@@ -46,7 +46,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
 })
 
 export const sessionListing = (deps: {
-  readonly db: Db["Service"]
+  readonly db: Db.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
 }) => {

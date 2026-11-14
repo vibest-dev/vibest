@@ -49,7 +49,7 @@ export const unreachable = (session: SessionRow) => (e: { readonly message: stri
   Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const inbox = yield* Inbox.Service

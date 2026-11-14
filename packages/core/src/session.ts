@@ -148,7 +148,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("vibest/Sessions") {}
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const sessionLive = yield* SessionLive
   const locks = yield* SessionLocks

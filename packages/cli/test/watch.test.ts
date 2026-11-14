@@ -37,7 +37,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 
 const withEntry = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const project = yield* projectOf(repo)
@@ -121,7 +121,7 @@ describe("Watch", () => {
   test(
     "a project move sends the sessions it moved again, with their new directories",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const { repo, project, entryId } = yield* withEntry
       const { next } = yield* watching(repo)
       yield* next(isSnapshot)
@@ -154,7 +154,7 @@ describe("Watch", () => {
     "an execution that ends unwatched is done, for the session and its project, until Session.Seen raises the mark to it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const { repo, project, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
@@ -213,7 +213,7 @@ describe("Watch", () => {
   test(
     "two watchers share one change: its session row is read once",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const { repo, entryId } = yield* withEntry
       const first = yield* watching(repo)
       const second = yield* watching(repo)
@@ -243,7 +243,7 @@ describe("Watch", () => {
   test(
     "a change that cannot be read ends the watchers it was for with an error; the feed serves later watchers",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const bus = yield* Bus.Service
       const { project } = yield* withEntry
       const feed = yield* WatchFeed.Service

@@ -45,7 +45,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const herdr = yield* FakeRuntime
   return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
@@ -55,7 +55,7 @@ describe("plugins: spawn hook", () => {
     "P5/P8: the event has the resolved root; writes reach the row and the launch args",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)

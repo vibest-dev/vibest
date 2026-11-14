@@ -164,7 +164,7 @@ type Entry = {
 }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const self = yield* Identity.Service
   const transport = yield* MachineTransport
   const scope = yield* Effect.scope

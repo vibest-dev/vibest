@@ -33,7 +33,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 const workingSession = Effect.gen(function* () {
   const sessions = yield* Session.Service
-  const db = yield* Db
+  const db = yield* Db.Service
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const { id } = yield* sessions.spawn({
