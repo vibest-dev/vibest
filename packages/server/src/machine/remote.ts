@@ -1,7 +1,7 @@
 import type { PipeClient } from "@vibest/client/pipe"
 import { callerKind } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
-import type { PeerScope } from "@vibest/core/database/db-remote"
+import type { PeerScope } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
@@ -179,7 +179,7 @@ const make = Effect.gen(function* () {
       )
       if (refused.length > 0)
         return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })
-      const repositories = yield* db.projectRemote(from.project)
+      const repositories = yield* db.project.projectRemote(from.project)
       const repository = repositories[0]
       if (repositories.length !== 1 || repository === undefined)
         return yield* new MachineFailed({

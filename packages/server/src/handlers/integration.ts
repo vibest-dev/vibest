@@ -28,7 +28,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const read = reader(headers)
       yield* noteOpen(db, read, sessionId)
-      const row = yield* db.sessionIdentity(sessionId)
+      const row = yield* db.session.sessionIdentity(sessionId)
       if (!row || row.harness !== harness) return
       yield* run({ id: row.id, entry: row.entry, harness, process: processOf(read) })
     }).pipe(Effect.orDie)

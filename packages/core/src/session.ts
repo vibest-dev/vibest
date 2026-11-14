@@ -164,7 +164,7 @@ export const make = Effect.gen(function* () {
   const { outdated, restart, restartLater } = yield* Restart
 
   const getRow = (id: string) =>
-    db
+    db.session
       .getSession(id)
       .pipe(
         Effect.flatMap((session) =>
@@ -238,7 +238,7 @@ export const make = Effect.gen(function* () {
 
   const get = Effect.fn("Session.get")((id: string) => getRow(id).pipe(Effect.flatMap(view)))
   const list = Effect.fn("Session.list")((filter: SessionFilter = {}) =>
-    db
+    db.session
       .listSessions(filter)
       .pipe(
         Effect.flatMap((rows) =>

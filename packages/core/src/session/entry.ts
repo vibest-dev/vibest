@@ -118,7 +118,7 @@ const make = Effect.gen(function* () {
     })
 
   const running = Effect.fn("EntrySession.running")(function* (projectId: string, terminal: string) {
-    const entry = yield* db.entryOf(projectId)
+    const entry = yield* db.session.entryOf(projectId)
     const place = entry === undefined ? undefined : placedTerminal(entry)
     if (entry === undefined || place === undefined || place.address.id === terminal) return null
     const found = runtimes.find(place.runtime)
@@ -152,7 +152,7 @@ const make = Effect.gen(function* () {
     readonly agent: string
   }) {
     const { projectId: id, root, at, argv } = input
-    const current = yield* db.entryOf(id)
+    const current = yield* db.session.entryOf(id)
     const fresh = argv.includes("--new")
     const agent = agentOf(current, fresh, input.agent)
     yield* known(agent)
@@ -192,7 +192,7 @@ const make = Effect.gen(function* () {
             .close(opened)
             .pipe(
               Effect.ignore,
-              Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
+              Effect.andThen(claimedId === undefined ? Effect.void : db.session.endProcess(claimedId, "launch_failed")),
             ),
     )
     return yield* Effect.gen(function* () {
@@ -206,9 +206,9 @@ const make = Effect.gen(function* () {
           session: projectLocked.withLock(id)(
             Effect.gen(function* () {
               yield* notRunning(id, "")
-              const existing = yield* db.entryOf(id)
+              const existing = yield* db.session.entryOf(id)
               const sessionId =
-                existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
+                existing === undefined || fresh ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
               const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
                 root,
                 label: "vibest",
@@ -222,7 +222,7 @@ const make = Effect.gen(function* () {
                 ),
                 Effect.uninterruptible,
               )
-              const claimed = yield* db
+              const claimed = yield* db.session
                 .startEntry(
                   id,
                   chosen,
@@ -287,7 +287,7 @@ const make = Effect.gen(function* () {
     readonly runtime: string | undefined
     readonly agent: string
   }) {
-    const current = yield* db.entryOf(input.projectId)
+    const current = yield* db.session.entryOf(input.projectId)
     const agent = agentOf(current, false, input.agent)
     yield* known(agent)
     const decision = yield* decide({ ...input, agent, current, machine: "local" })
@@ -318,7 +318,7 @@ const make = Effect.gen(function* () {
     readonly agent: string
   }) {
     const { projectId, directory, terminal } = input
-    const agent = agentOf(yield* db.entryOf(projectId), input.fresh, input.agent)
+    const agent = agentOf(yield* db.session.entryOf(projectId), input.fresh, input.agent)
     yield* known(agent)
     const kind = input.runtime ?? (yield* onlyRuntime)
     if (kind === undefined) return yield* new NoRuntime({ message: "the entry session's runtime is not named" })
@@ -342,7 +342,7 @@ const make = Effect.gen(function* () {
             provider: input.provider ?? null,
             model: input.model ?? null,
             session: Effect.gen(function* () {
-              const saved = yield* db.startEntry(
+              const saved = yield* db.session.startEntry(
                 projectId,
                 input.harness,
                 input.fresh,
@@ -396,7 +396,7 @@ const make = Effect.gen(function* () {
   const stop = Effect.fn("EntrySession.stop")(function* (projectId: string, runtime: string, address: string) {
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
-        const entry = yield* db.entryOf(projectId)
+        const entry = yield* db.session.entryOf(projectId)
         const place = entry === undefined ? undefined : placedTerminal(entry)
         if (entry === undefined || place === undefined || !sameEntry(entry, runtime, address))
           return { result: "moved" as const }
@@ -408,8 +408,8 @@ const make = Effect.gen(function* () {
         const h = yield* runtimes.route(runtime)
         return yield* stopAgent(h, place.address, {
           pid: pidOf(entry),
-          detach: db.detachEntry(projectId, runtime, place.address),
-          reattach: db.reattachEntry(projectId, runtime, place.address),
+          detach: db.session.detachEntry(projectId, runtime, place.address),
+          reattach: db.session.reattachEntry(projectId, runtime, place.address),
           wait: HARNESS_EXIT_WAIT,
         }).pipe(Effect.provideService(Bus, bus), Effect.provideService(Processes.Service, processes))
       }),

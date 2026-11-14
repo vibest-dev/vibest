@@ -1,6 +1,6 @@
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
-import type { PeerScope } from "@vibest/core/database/db-remote"
+import type { PeerScope } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
@@ -132,7 +132,7 @@ export const remoteHandlers = (
                 method: "Peer.Hello",
                 message: "Peer.Hello names the vibestd that calls it",
               })
-            if (id !== self.id) yield* db.notePeer({ id, name })
+            if (id !== self.id) yield* db.remote.notePeer({ id, name })
             return { id: self.id, name: self.name, version, runtimes: yield* runtimesHere(runtimes) }
           }),
 

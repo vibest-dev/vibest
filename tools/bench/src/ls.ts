@@ -82,10 +82,10 @@ const stop = async (home: string) => {
 const seed = (file: string, directory: string, n: number) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const project = yield* db.createProject(directory, [])
+    const project = yield* db.project.createProject(directory, [])
     const now = Date.now()
     for (let i = 0; i < n; i++) {
-      const inserted = yield* db.insertSession(
+      const inserted = yield* db.session.insertSession(
         {
           id: `${i.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`,
           agent: "general",

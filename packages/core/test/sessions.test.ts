@@ -24,23 +24,23 @@ describe.concurrent("Session", () => {
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
       assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
       yield* until(sessions.inMemory, atMostEntryTracked)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       yield* sessions.check(id)
-      const open = (yield* db.getSession(id))!
+      const open = (yield* db.session.getSession(id))!
       assert.strictEqual(executionStateOf(open), "open")
       assert.isNull(exitedAt(open))
       yield* writeEnd(id, "pi", { text: "done again" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.include(yield* replyOf(id), "done again")
       yield* TestClock.adjust("10 seconds")
       assert.strictEqual((yield* sessions.inMemory).tracked, 2)
-      assert.deepInclude(yield* db.getSession(id), { status: "idle" })
+      assert.deepInclude(yield* db.session.getSession(id), { status: "idle" })
       yield* sessions.remove(id)
       assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
       yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
@@ -64,15 +64,15 @@ describe.concurrent("Session", () => {
       yield* processHeld.reached
       yield* sessions.send(id, "queued")
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
-      assert.lengthOf(yield* db.pendingInbox(id), 1)
+      assert.lengthOf(yield* db.inbox.pendingInbox(id), 1)
       yield* processHeld.release()
       yield* Fiber.join(checking)
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       yield* settled
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
-      assert.isNotNull(exitedAt((yield* db.getSession(id))!))
-      assert.lengthOf(yield* db.pendingInbox(id), 0)
-      assert.lengthOf(yield* db.inboxWithStatus(id, "failed"), 1)
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.lengthOf(yield* db.inbox.pendingInbox(id), 0)
+      assert.lengthOf(yield* db.inbox.inboxWithStatus(id, "failed"), 1)
       assert.strictEqual(yield* opens(), before)
       const notices = yield* sqlNotices(id)
       assert.lengthOf(notices, 1)

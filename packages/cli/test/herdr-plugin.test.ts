@@ -369,7 +369,7 @@ describe("herdr open-entry", () => {
         assert.match(never.stderr, /no harness to inherit/)
         assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
         const projectId = yield* projectOf(repo)
-        yield* db.startEntry(
+        yield* db.session.startEntry(
           projectId,
           "pi",
           false,
@@ -383,7 +383,7 @@ describe("herdr open-entry", () => {
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.match(stopped.stdout, /^opened /)
         assert.ok((yield* herdr.callsTo("open")).length > 0)
-        const entryId = terminalOf((yield* db.entryOf(projectId))!)!.id
+        const entryId = terminalOf((yield* db.session.entryOf(projectId))!)!.id
         yield* herdr.seedAgent(entryId)
         const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(again.code, 0, again.stderr)

@@ -1,9 +1,20 @@
-import { MachineAdded, MachineConnected, MachineRemoved, OutboxAcked, PeerSeen } from "@vibest/schema/event"
+import {
+  MachineAdded,
+  MachineConnected,
+  MachineRemoved,
+  OutboxAcked,
+  OutboxQueued,
+  PeerSeen,
+} from "@vibest/schema/event"
+import { randomId } from "@vibest/schema/id"
 import { Effect } from "effect"
-import type { Statement } from "effect/sql"
+import { SqlClient, type Statement } from "effect/sql"
 
+import { Bus } from "../bus.ts"
 import { noticeEnvelope, sessionEnvelope } from "../replies.ts"
-import type { Store } from "./db-store.ts"
+import type * as Inbox from "./inbox.ts"
+import { ledgerReads } from "./ledger-read.ts"
+import type * as Session from "./session-statements.ts"
 
 export type PeerScope = { readonly peer: string; readonly project: string; readonly session?: string }
 
@@ -30,33 +41,74 @@ export type OutboxRow = {
   readonly reportTo: string
 }
 
-export const remoteQueries = ({
-  sql,
-  reads,
-  tx,
-  publish,
-  queueInbox,
-  queueForPeer,
-  placed,
-  currentProcess,
-  nearestAlive,
-}: Store) => {
-  const machineColumns = sql`name, target, vibestd_id, connected_at, created_at`
-  const machineNamed = (name: string) =>
-    sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(Effect.map((rows) => rows[0]))
+export const statements = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const { publish } = yield* Bus
 
-  return {
-    ofPeer: (session: Statement.Fragment, scope: PeerScope) =>
-      scope.session === undefined
-        ? sql`EXISTS (SELECT 1 FROM session o WHERE o.id = ${session} AND o.origin_peer = ${scope.peer}
-            AND o.origin_project = ${scope.project})`
-        : sql`EXISTS (WITH RECURSIVE line(id) AS (
-            SELECT ${session} UNION SELECT a.parent_session_id FROM session a JOIN line ON a.id = line.id
-              WHERE a.parent_session_id IS NOT NULL)
-          SELECT 1 FROM session o WHERE o.id IN (SELECT id FROM line) AND o.origin_peer = ${scope.peer}
-            AND o.origin_project = ${scope.project} AND o.origin_session = ${scope.session})`,
+  const ofPeer = (session: Statement.Fragment, scope: PeerScope) =>
+    scope.session === undefined
+      ? sql`EXISTS (SELECT 1 FROM session o WHERE o.id = ${session} AND o.origin_peer = ${scope.peer}
+          AND o.origin_project = ${scope.project})`
+      : sql`EXISTS (WITH RECURSIVE line(id) AS (
+          SELECT ${session} UNION SELECT a.parent_session_id FROM session a JOIN line ON a.id = line.id
+            WHERE a.parent_session_id IS NOT NULL)
+        SELECT 1 FROM session o WHERE o.id IN (SELECT id FROM line) AND o.origin_peer = ${scope.peer}
+          AND o.origin_project = ${scope.project} AND o.origin_session = ${scope.session})`
 
-    queries: {
+  const origins = (sessionId: string) =>
+    sql<{
+      peer: string | null
+      project: string | null
+      session: string | null
+    }>`SELECT origin_peer AS peer, origin_project AS project, origin_session AS session
+      FROM session WHERE id = ${sessionId}`.pipe(Effect.map((rows) => rows[0]))
+
+  const queueForPeer = (
+    peer: string,
+    recipientSession: string | null,
+    row: {
+      readonly sessionId: string
+      readonly content: string
+      readonly kind: "send" | "notice"
+      readonly at?: number
+      readonly request?: string | undefined
+    },
+  ) =>
+    Effect.gen(function* () {
+      if (recipientSession === null) return false
+      if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
+      const id = row.request ?? randomId()
+      if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
+      yield* publish(OutboxQueued, {
+        ...(row.at === undefined ? {} : { at: row.at }),
+        data: {
+          id,
+          peer,
+          session: row.sessionId,
+          recipient: recipientSession,
+          kind: row.kind,
+          content: row.content,
+        },
+      })
+      return true
+    })
+
+  return { ofPeer, origins, queueForPeer }
+})
+
+export type Statements = Effect.Success<typeof statements>
+
+export const make = (session: Session.Statements, inbox: Inbox.Statements, remote: Statements) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const { publish, transaction: tx } = yield* Bus
+    const reads = ledgerReads(sql)
+    const { queueForPeer, origins } = remote
+    const machineColumns = sql`name, target, vibestd_id, connected_at, created_at`
+    const machineNamed = (name: string) =>
+      sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(Effect.map((rows) => rows[0]))
+
+    return {
       machines: reads.machines.pipe(Effect.orDie),
 
       machineNamed: (name: string) => machineNamed(name).pipe(Effect.orDie),
@@ -93,10 +145,6 @@ export const remoteQueries = ({
           }),
         ).pipe(Effect.orDie),
 
-      projectRemote: (projectId: string) =>
-        sql<{ path: string; remote: string | null }>`SELECT path, remote_url AS remote FROM project_repository
-          WHERE project_id = ${projectId} ORDER BY rowid`.pipe(Effect.orDie),
-
       receivePeerItem: (item: {
         readonly id: string
         readonly recipient: string
@@ -111,13 +159,13 @@ export const remoteQueries = ({
               FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${item.recipient}`
             if (route === undefined) return "unknown" as const
             if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
-            const heir = route.alive === 1 ? { local: item.recipient } : yield* nearestAlive(item.recipient)
+            const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
             const content =
               item.kind === "send"
                 ? sessionEnvelope({ id: item.sender }, item.content)
                 : noticeEnvelope(`${item.sender}: ${item.content}`)
             if (heir !== undefined && "peer" in heir) {
-              yield* queueInbox({
+              yield* inbox.queueInbox({
                 recipient: item.recipient,
                 kind: item.kind,
                 sender: null,
@@ -134,8 +182,9 @@ export const remoteQueries = ({
             }
             const target = heir !== undefined && "local" in heir ? heir.local : undefined
             const here =
-              target !== undefined && (target !== route.entry || placed(route.project, yield* currentProcess(target)))
-            yield* queueInbox({
+              target !== undefined &&
+              (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
+            yield* inbox.queueInbox({
               recipient: target ?? item.recipient,
               kind: item.kind,
               sender: null,
@@ -176,6 +225,27 @@ export const remoteQueries = ({
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
-    },
-  }
-}
+
+      sendToOrigin: (sessionId: string, target: string, message: string, request?: string) =>
+        tx(
+          Effect.gen(function* () {
+            const origin = yield* origins(sessionId)
+            const creator = origin?.session
+            if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
+            return yield* queueForPeer(origin.peer, creator, {
+              sessionId,
+              kind: "send",
+              content: message,
+              request,
+            })
+          }),
+        ).pipe(Effect.orDie),
+
+      sendToPeer: (sender: string, peer: string, session: string, message: string, request?: string) =>
+        tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message, request })).pipe(
+          Effect.orDie,
+        ),
+    }
+  })
+
+export type Interface = Effect.Success<ReturnType<typeof make>>
