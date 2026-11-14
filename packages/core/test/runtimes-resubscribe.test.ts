@@ -12,7 +12,7 @@ const layer = Runtimes.layer.pipe(Layer.provideMerge(memoryBus), Layer.provide(n
 
 const follow = (events: Stream.Stream<RuntimeApi.RuntimeEvent>) =>
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     const runtimes = yield* Runtimes.Service
     const seen = yield* Queue.unbounded<BusEvent>()
     yield* bus.subscribe().pipe(

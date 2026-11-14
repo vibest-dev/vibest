@@ -14,7 +14,7 @@ type AgentHook = `agent.${Short}`
 const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
 
 const factsFor =
-  (bus: Bus["Service"], plugin: string): VibestPlugin.EventDomain["subscribe"] =>
+  (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] =>
   <T extends FactType>(input?: { readonly types?: ReadonlyArray<T> }) => {
     const asked: ReadonlyArray<string> = input?.types ?? []
     const known = new Set(asked.filter((type) => Object.hasOwn(Catalog, type)))
@@ -43,7 +43,7 @@ export const make = Effect.gen(function* () {
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const agents = yield* Agents.Service
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   return ({ plugin, activation, options, stats }: Input): VibestPlugin.Context => {
     const register = <N extends Hooks.Name>(
       name: N,

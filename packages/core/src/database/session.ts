@@ -45,7 +45,7 @@ export type SessionFilter = {
 export const make = (session: Session.Statements, inbox: Inbox.Statements, remote: Remote.Statements) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const { publish, afterCommit, transaction: tx } = yield* Bus
+    const { publish, afterCommit, transaction: tx } = yield* Bus.Service
     const sessionLive = yield* SessionLive
     const now = Clock.currentTimeMillis
     const {

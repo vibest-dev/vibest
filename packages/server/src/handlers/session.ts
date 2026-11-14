@@ -26,7 +26,7 @@ export const make = (
     const db = yield* Db
     const runtimes = yield* Runtimes.Service
     const watchFeed = yield* WatchFeed.Service
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     const integration = yield* Integration.Service
     const seenLocked = yield* KeyedMutex.make<string>()
 

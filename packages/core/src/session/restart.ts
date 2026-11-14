@@ -92,7 +92,7 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path
   const processes = yield* Processes.Service
   const { restarting } = yield* SessionLive
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const scope = yield* Effect.scope
   const { locked } = yield* SessionLocks
   const version = (yield* App.Service).version
@@ -181,7 +181,7 @@ const make = Effect.gen(function* () {
             : Effect.succeed(Option.none()),
       RESTART_TIMEOUT,
       again,
-    ).pipe(Effect.provideService(Bus, bus))
+    ).pipe(Effect.provideService(Bus.Service, bus))
   }
 
   const inPlace = (t: Target): Effect.Effect<Restarted> => {

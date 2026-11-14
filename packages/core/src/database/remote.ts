@@ -44,7 +44,7 @@ export type OutboxRow = {
 
 export const statements = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const { publish } = yield* Bus
+  const { publish } = yield* Bus.Service
 
   const ofPeer = (session: Statement.Fragment, scope: PeerScope) =>
     scope.session === undefined
@@ -102,7 +102,7 @@ export type Statements = Effect.Success<typeof statements>
 export const make = (session: Session.Statements, inbox: Inbox.Statements, remote: Statements) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const { publish, transaction: tx } = yield* Bus
+    const { publish, transaction: tx } = yield* Bus.Service
     const reads = ledgerReads(sql)
     const { queueForPeer, origins } = remote
     const machineColumns = sql`name, target, vibestd_id, connected_at, created_at`

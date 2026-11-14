@@ -8,7 +8,7 @@ import { type RepositoryRow } from "./db-rows.ts"
 
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const { publish, observe, transaction: tx } = yield* Bus
+  const { publish, observe, transaction: tx } = yield* Bus.Service
 
   const projectPrefixTaken = (short: string) =>
     sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(

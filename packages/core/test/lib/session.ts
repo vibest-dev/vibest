@@ -374,7 +374,7 @@ export { sessionFrom as testLayer }
 export const restartSessions = Effect.gen(function* () {
   const held = [
     Agents.node.replace(Layer.succeed(Agents.Service, yield* Agents.Service)),
-    Bus.node.replace(Layer.succeed(Bus, yield* Bus)),
+    Bus.node.replace(Layer.succeed(Bus.Service, yield* Bus.Service)),
     Db.node.replace(Layer.succeed(Db, yield* Db)),
     Drain.node.replace(Layer.succeed(Drain.Service, yield* Drain.Service)),
     Git.node.replace(Layer.succeed(Git.Service, yield* Git.Service)),

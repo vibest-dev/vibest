@@ -71,7 +71,7 @@ const projectionVersion = (sql: SqlClient.SqlClient) =>
 
 const openLedger = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     yield* sql.withTransaction(
       Effect.gen(function* () {
         if ((yield* projectionVersion(sql)) !== PROJECTION_VERSION) yield* bus.rebuild

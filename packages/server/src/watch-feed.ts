@@ -29,7 +29,7 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Watch
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     const listing = sessionListing({
       db: yield* Db,
       sessions: yield* Session.Service,

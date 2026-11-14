@@ -39,7 +39,7 @@ export const make = ({ cliOnly }: Checks) =>
     const { version } = yield* App.Service
     const shutdown = yield* Shutdown
     const drain = yield* Drain.Service
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.inbox.deliveringInbox, shutdown })
     return {

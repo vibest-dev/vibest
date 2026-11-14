@@ -25,7 +25,7 @@ const sessionIdOf = (fact: Fact) => fact.sessionId!
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     const sql = yield* SqlClient.SqlClient
     const active =
       <D extends Definition>(projector: Projector<D>): Projector<D> =>

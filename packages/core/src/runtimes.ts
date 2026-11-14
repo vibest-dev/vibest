@@ -50,8 +50,8 @@ const sameMembers = (a: Runtime, b: Runtime) => {
 
 const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
 
-export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Scope> = Effect.gen(function* () {
-  const bus = yield* Bus
+export const make: Effect.Effect<RuntimesShape, never, Bus.Service | HostEnv | Scope.Scope> = Effect.gen(function* () {
+  const bus = yield* Bus.Service
   const env = yield* HostEnv
   const followers = yield* FiberMap.make<string>()
   const defined = new Map<string, Runtime>()

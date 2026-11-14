@@ -33,7 +33,7 @@ const outboxItem = (row: OutboxRow): OutboxItem => {
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const sessions = yield* Session.Service
   const self = yield* Identity.Service
   const git = yield* Git.Service

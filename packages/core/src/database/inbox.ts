@@ -15,7 +15,7 @@ type InboxKey = { readonly session: string; readonly id: number }
 export const statements = (session: Session.Statements, remote: Remote.Statements) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const { publish, transaction: tx } = yield* Bus
+    const { publish, transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
     const { reads, openExecution, currentProcess, placed, findSession, nearestAlive } = session
 
@@ -226,7 +226,7 @@ export type Statements = Effect.Success<ReturnType<typeof statements>>
 export const make = (session: Session.Statements, inbox: Statements) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const { transaction: tx } = yield* Bus
+    const { transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
     const { reads, openExecution, acceptedAt, observable, fromOldProcess, startExecution, creatorOf } = session
     const {

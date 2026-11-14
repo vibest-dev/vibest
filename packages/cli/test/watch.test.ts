@@ -244,7 +244,7 @@ describe("Watch", () => {
     "a change that cannot be read ends the watchers it was for with an error; the feed serves later watchers",
     Effect.gen(function* () {
       const db = yield* Db
-      const bus = yield* Bus
+      const bus = yield* Bus.Service
       const { project } = yield* withEntry
       const feed = yield* WatchFeed.Service
       const before = yield* feed.subscribe
@@ -278,7 +278,7 @@ describe("Watch", () => {
     "a client that stops acknowledging falls behind, and the stream fails with WatchLagged instead of growing",
     Effect.gen(function* () {
       const { repo, project } = yield* withEntry
-      const bus = yield* Bus
+      const bus = yield* Bus.Service
       const w = yield* wire
       yield* w.send({ jsonrpc: "2.0", id: 1, method: "Watch", params: null, headers: Object.entries(cliHeaders(repo)) })
       const first = yield* w.recv

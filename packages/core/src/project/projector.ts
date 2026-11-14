@@ -23,7 +23,7 @@ const putRepositories = (sql: SqlClient.SqlClient, projectId: string, repositori
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     const sql = yield* SqlClient.SqlClient
     yield* bus.project(ProjectCreated, (fact) =>
       Effect.andThen(

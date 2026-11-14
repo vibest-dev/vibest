@@ -38,7 +38,7 @@ const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.
 const make = Effect.gen(function* () {
   const db = yield* Db
   const harnesses = yield* Harnesses.Service
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const { track } = yield* SessionLive
 
   const awaitReady = Effect.fn("Executions.awaitReady")(
@@ -149,7 +149,7 @@ const make = Effect.gen(function* () {
         ),
       STOP_WAIT,
       settledNow,
-    ).pipe(Effect.provideService(Bus, bus))
+    ).pipe(Effect.provideService(Bus.Service, bus))
   })
 
   const interruptAgent = Effect.fn("Executions.interruptAgent")((

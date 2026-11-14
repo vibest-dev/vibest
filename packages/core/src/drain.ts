@@ -6,7 +6,7 @@ import { LayerNode } from "./effect/layer-node.ts"
 export * as Drain from "./drain.ts"
 
 const make = Effect.gen(function* () {
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   let phase: "open" | "draining" | "accepted" = "open"
   let reopened = yield* Deferred.make<void>()
   const active = new Map<object, string>()

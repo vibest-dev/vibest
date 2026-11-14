@@ -55,7 +55,7 @@ const firstStart = new LaunchFailed({
 
 const make = Effect.gen(function* () {
   const db = yield* Db
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const runtimes = yield* Runtimes.Service
   const restarting = (yield* SessionLive).restarting
   const plugins = yield* Plugins
@@ -411,7 +411,7 @@ const make = Effect.gen(function* () {
           detach: db.session.detachEntry(projectId, runtime, place.address),
           reattach: db.session.reattachEntry(projectId, runtime, place.address),
           wait: HARNESS_EXIT_WAIT,
-        }).pipe(Effect.provideService(Bus, bus), Effect.provideService(Processes.Service, processes))
+        }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
       }),
     )
   })

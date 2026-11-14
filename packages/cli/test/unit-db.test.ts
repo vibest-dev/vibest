@@ -26,7 +26,7 @@ const fact = (
   input: { readonly sessionId?: string; readonly projectId?: string; readonly at?: number; readonly data: object },
 ) =>
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     return yield* bus.publish(Catalog[type] as never, input as never)
   }).pipe(Effect.orDie)
 
@@ -99,7 +99,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(memoryDb())),
   )
 
-  const memory = <A, E>(program: Effect.Effect<A, E, Bus | Db | SqlClient.SqlClient>) =>
+  const memory = <A, E>(program: Effect.Effect<A, E, Bus.Service | Db | SqlClient.SqlClient>) =>
     program.pipe(Effect.provide(memoryDb()))
 
   it.effect(
