@@ -489,6 +489,11 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
       await Bun.sleep(1_000)
       await c.pressKeys(entry, ["enter"])
       await onScreen("Working", 60_000)
+      await until(
+        "the typed prompt's execution open",
+        async () => (await c.listed(entry))?.executionState === "open",
+        60_000,
+      )
       const working = c.executions(entry).length
       await w.ok(["send", entry, "--", "Reply with exactly: i14-three"], { cwd: c.repo })
       await Bun.sleep(5_000)
@@ -500,6 +505,10 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
       const after = await c.screen(entry)
       keep("after the typed prompt and the message sent meanwhile", after)
       const three = c.executions(entry).at(-1)!
+      expect(
+        (c.executions(entry)[working - 1]?.reply ?? "").includes("i14-slept"),
+        `the typed prompt's reply is not on its own execution: ${JSON.stringify(c.executions(entry))}`,
+      )
       expect(
         !(three.reply ?? "").includes("i14-slept") && after.indexOf("i14-slept") < after.lastIndexOf("i14-three"),
         `the replies crossed: ${JSON.stringify(three)}`,
