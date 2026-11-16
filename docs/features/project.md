@@ -14,8 +14,11 @@ text.
 
 ## P7. A moved checkout
 
-When a Project's checkout has moved, `vibest` there asks whether to move the Project; answering yes keeps the same
-Project, with its new path, its memories, and worktrees that still work.
+`vibest project move <old-directory>`, run inside the repository at its new place, moves the Project recorded at the
+old directory there: the same Project, with its new path, its memories, its sessions and the worktrees vibest made
+still working. vibest never detects a move itself: `vibest` at an unknown place is a new Project. The command is
+refused, changing nothing, when no Project is recorded at the old directory, when a Project is already recorded here,
+or when the old directory still exists. An agent may not run it.
 
 ## P8. Agents use the Project folder with their file tools
 

@@ -59,16 +59,16 @@ A Project is found by realpath, never by a remote or a key. `projectRoot` of the
 or the parent directory of a multi-repository project (a plain directory whose direct children are repositories). The
 project is the one whose `directory` is that realpath, else the one with a repository at that path (a repository of
 a multi-repository project belongs to it). Not found: a new project, with an id that never changes. Two clones of one
-remote are two projects. `remote_url` is `remote.origin.url` as git prints it, refreshed on every resolve; it only
-recognizes a moved checkout: a directory with no project, whose origins are exactly those of one project whose
-directory no longer exists, is that project moved (`ProjectMoved`). `vibest` asks `[Y/n]`: yes moves the project there
-(its id kept, its session directories rewritten, vibest's own worktrees repaired; for the user's worktrees it prints
-`git worktree repair`), no makes a new project. Several such projects: a new project, the candidates printed. Its
+remote are two projects. `remote_url` is `remote.origin.url` as git prints it, refreshed on every resolve; nothing matches by it. A directory
+with no project is a new project, always. A checkout that moved is moved only by the user's command
+`vibest project move <old-directory>`, run inside it: the project recorded at the old directory (which must no longer
+exist, with no project recorded here) continues here (`ProjectMoved`: its id kept, its session directories rewritten,
+vibest's own worktrees repaired; for the user's worktrees it prints `git worktree repair`). Its
 folder is `projects/<project id>/` under `VIBEST_HOME` (preferences.md, docs/, memories/, artifacts/). `vibest ls` and the other
 read-only lookups never create one.
 
 vibest's own worktrees are repaired before the move is recorded: a stop in between leaves the project where it was, so
-the next `vibest` asks again and repairs again (nothing left to do) before it records the move. Only worktrees under
+running `vibest project move` again repairs again (nothing left to do) before it records the move. Only worktrees under
 vibest's worktrees root are repaired (their `.git` file pointed at the new place, as `git worktree repair` would);
 git's own repair would rewrite every worktree of the repository, the user's included.
 

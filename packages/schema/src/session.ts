@@ -86,15 +86,9 @@ export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("Am
     return `${this.prefix} matches ${this.matches.join(", ")}; give more characters of the session id`
   }
 }
-export class ProjectMoved extends Schema.TaggedError<ProjectMoved>()("ProjectMoved", {
-  projectId: Schema.String,
-  from: Schema.String,
-  to: Schema.String,
-}) {
-  override get message() {
-    return `the project moved from ${this.from} to ${this.to}; run vibest here to move it`
-  }
-}
+export class MoveRefused extends Schema.TaggedError<MoveRefused>()("MoveRefused", {
+  message: Schema.String,
+}) {}
 export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()("AllocationFailed", {
   message: Schema.String,
 }) {}

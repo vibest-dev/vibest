@@ -527,6 +527,7 @@ describe("vibest.sock", () => {
         ["Launch", c.Launch({ agent: "coordinator", callerEnv: {}, argv: [], focus: false })],
         ["Project.StartEntry", c["Project.StartEntry"]({ agent: "general", runtime: "herdr" })],
         ["Project.Open", c["Project.Open"]({})],
+        ["Project.Move", c["Project.Move"]({ from: "x" })],
         ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],

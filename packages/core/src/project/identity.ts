@@ -1,5 +1,5 @@
 import { Layout } from "@vibest/schema/layout"
-import { ProjectMoved } from "@vibest/schema/session"
+import { MoveRefused } from "@vibest/schema/session"
 import { Effect, FileSystem, Path } from "effect"
 
 import type { Db } from "../database/db.ts"
@@ -11,12 +11,6 @@ export const locateProject = Effect.fn("Project.locateProject")(function* (direc
   return { root, repositories: yield* projectRepositories(root) }
 })
 export type Located = Effect.Success<ReturnType<typeof locateProject>>
-
-export interface Moved {
-  readonly from: string
-  readonly repaired: ReadonlyArray<string>
-  readonly manual: ReadonlyArray<string>
-}
 
 const repairWorktrees = Effect.fn("Project.repairWorktrees")(function* (repositories: ReadonlyArray<string>) {
   const fs = yield* FileSystem.FileSystem
@@ -48,35 +42,33 @@ const repairWorktrees = Effect.fn("Project.repairWorktrees")(function* (reposito
   return { repaired, manual }
 })
 
-export const resolveProject = Effect.fn("Project.resolveProject")(function* (
-  db: Db.Interface,
-  located: Located,
-  move?: boolean,
-) {
+export const resolveProject = Effect.fn("Project.resolveProject")(function* (db: Db.Interface, located: Located) {
   const found = yield* db.project.projectAt(located.root)
   if (found !== undefined) {
     yield* db.project.refreshRepositories(found.id, located.repositories)
     return { id: found.id, directory: found.directory ?? located.root }
   }
-  const fs = yield* FileSystem.FileSystem
-  const remotes = located.repositories.flatMap((r) => (r.remote === undefined ? [] : [r.remote]))
-  const candidates = yield* Effect.filter(yield* db.project.moveCandidates(remotes), (c) =>
-    fs.exists(c.directory).pipe(
-      Effect.map((exists) => !exists),
-      Effect.orElseSucceed(() => false),
-    ),
-  )
-  const [only] = candidates
-  if (candidates.length === 1 && only !== undefined && move !== false) {
-    if (move !== true) return yield* new ProjectMoved({ projectId: only.id, from: only.directory, to: located.root })
-    const fixed = yield* repairWorktrees(located.repositories.map((r) => r.path))
-    const from = yield* db.project.moveProject(only.id, located.root, located.repositories)
-    return { id: only.id, directory: located.root, moved: { from, ...fixed } satisfies Moved }
-  }
   const id = yield* db.project.createProject(located.root, located.repositories)
-  return {
-    id,
-    directory: located.root,
-    ...(candidates.length > 1 ? { candidates: candidates.map((c) => c.directory) } : {}),
-  }
+  return { id, directory: located.root }
+})
+
+export const moveProjectHere = Effect.fn("Project.moveProjectHere")(function* (
+  db: Db.Interface,
+  located: Located,
+  from: string,
+) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const parent = yield* fs.realPath(path.dirname(from)).pipe(Effect.orElseSucceed(() => path.dirname(from)))
+  const old = path.join(parent, path.basename(from))
+  const recorded = yield* db.project.projectAt(old)
+  if (recorded === undefined || recorded.directory !== old)
+    return yield* new MoveRefused({ message: `no project is recorded at ${old}` })
+  if ((yield* db.project.projectAt(located.root)) !== undefined)
+    return yield* new MoveRefused({ message: `a project is already recorded at ${located.root}` })
+  if (yield* fs.exists(old).pipe(Effect.orElseSucceed(() => false)))
+    return yield* new MoveRefused({ message: `${old} still exists; the project has not moved` })
+  const fixed = yield* repairWorktrees(located.repositories.map((r) => r.path))
+  yield* db.project.moveProject(recorded.id, located.root, located.repositories)
+  return { id: recorded.id, directory: located.root, from: old, ...fixed }
 })

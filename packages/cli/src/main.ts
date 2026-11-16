@@ -39,6 +39,7 @@ const Handlers = Runtime.handlers(Commands, {
   project: {
     create: () => import("./commands/handlers/project/create.ts"),
     add: () => import("./commands/handlers/project/add.ts"),
+    move: () => import("./commands/handlers/project/move.ts"),
     info: () => import("./commands/handlers/project/info.ts"),
     search: () => import("./commands/handlers/project/search.ts"),
   },

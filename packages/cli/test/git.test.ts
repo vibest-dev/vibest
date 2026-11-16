@@ -10,7 +10,7 @@ import {
   listProjectRepositories,
   projectRoot,
 } from "@vibest/core/project/create"
-import { locateProject, resolveProject } from "@vibest/core/project/identity"
+import { locateProject, moveProjectHere, resolveProject } from "@vibest/core/project/identity"
 import { SessionLive } from "@vibest/core/session/live"
 import { copyIncluded, gitState, mainCheckout } from "@vibest/core/worktree"
 import { tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
@@ -413,7 +413,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
     })
 
   it.effect(
-    "a moved checkout: ProjectMoved; move keeps the id and repairs vibest's worktrees, not the user's; no move, or the old directory still there, is another project",
+    "project move keeps the id and repairs vibest's worktrees, not the user's; an unknown old directory, an old directory that still exists and a project already at the new place are refused; an unknown root is a new project",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -424,8 +424,12 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         yield* Effect.gen(function* () {
           const db = yield* Db.Service
           const layout = yield* Layout
-          const resolve = (directory: string, move?: boolean) =>
-            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located, move))
+          const resolve = (directory: string) =>
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located))
+          const move = (directory: string, from: string) =>
+            Effect.flatMap(locateProject(directory), (located) => moveProjectHere(db, located, from))
+          const refusal = (directory: string, from: string) =>
+            Effect.map(Effect.flip(move(directory, from)), (e) => (e._tag === "MoveRefused" ? e.message : e._tag))
           const repo = path.join(dir, "a", "repo")
           yield* fs.makeDirectory(repo, { recursive: true })
           yield* sh(repo, "init", "-q", "-b", "main")
@@ -460,21 +464,20 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           yield* sh(dir, "clone", "-q", repo, copy)
           yield* sh(copy, "remote", "set-url", "origin", "git@github.com:O/R.git")
           assert.notStrictEqual((yield* resolve(copy)).id, first.id)
+          assert.include(yield* refusal(copy, path.join(dir, "nowhere")), "no project is recorded at")
+          assert.include(yield* refusal(copy, repo), "already recorded")
+          const plain = path.join(dir, "plain")
+          yield* fs.makeDirectory(plain)
+          yield* sh(plain, "init", "-q", "-b", "main")
+          assert.include(yield* refusal(plain, copy), "still exists")
           const moved = path.join(dir, "b", "repo")
           yield* fs.makeDirectory(path.dirname(moved))
           yield* fs.rename(repo, moved)
-          const asked = yield* Effect.flip(resolve(moved))
-          assert.strictEqual(asked._tag, "ProjectMoved")
-          assert.deepStrictEqual(asked._tag === "ProjectMoved" ? [asked.projectId, asked.from, asked.to] : [], [
-            first.id,
-            repo,
-            moved,
-          ])
           assert.isUndefined(yield* db.project.projectAt(moved))
-          const done = yield* resolve(moved, true)
-          assert.strictEqual(done.id, first.id)
-          assert.strictEqual(done.directory, moved)
-          assert.deepStrictEqual("moved" in done && done.moved, {
+          const done = yield* move(moved, repo)
+          assert.deepStrictEqual(done, {
+            id: first.id,
+            directory: moved,
             from: repo,
             repaired: [ours],
             manual: [`git -C ${moved} worktree repair ${theirs}`],
@@ -490,16 +493,15 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           assert.strictEqual(yield* fs.readFileString(path.join(theirs, ".git")), theirsGit)
           const again = path.join(dir, "c")
           yield* fs.rename(moved, again)
-          const other = yield* resolve(again, false)
+          const other = yield* resolve(again)
           assert.notStrictEqual(other.id, first.id)
-          assert.deepStrictEqual(yield* db.project.projectAt(again), { id: other.id, directory: again })
           assert.strictEqual(yield* db.project.projectDirectory(first.id), moved)
         }).pipe(Effect.provide(database(file)), Effect.provide(Layer.effect(Layout, Layout.make(home))))
       }),
   )
 
   it.effect(
-    "a move cut off before it is recorded leaves vibest's worktrees repaired and the project where it was; the next answer moves it",
+    "a move cut off before it is recorded leaves vibest's worktrees repaired and the project where it was; running it again moves it",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -508,8 +510,10 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         yield* Effect.gen(function* () {
           const db = yield* Db.Service
           const layout = yield* Layout
-          const resolve = (directory: string, move?: boolean, through = db) =>
-            Effect.flatMap(locateProject(directory), (located) => resolveProject(through, located, move))
+          const resolve = (directory: string) =>
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located))
+          const move = (directory: string, from: string, through = db) =>
+            Effect.flatMap(locateProject(directory), (located) => moveProjectHere(through, located, from))
           const repo = path.join(dir, "a", "repo")
           yield* fs.makeDirectory(repo, { recursive: true })
           yield* sh(repo, "init", "-q", "-b", "main")
@@ -534,12 +538,11 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           yield* fs.makeDirectory(path.dirname(moved))
           yield* fs.rename(repo, moved)
           const dyingDb = { ...db, project: { ...db.project, moveProject: () => Effect.die("vibestd stopped") } }
-          assert.isTrue(Exit.isFailure(yield* Effect.exit(resolve(moved, true, dyingDb))))
+          assert.isTrue(Exit.isFailure(yield* Effect.exit(move(moved, repo, dyingDb))))
           assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
           assert.strictEqual(yield* db.project.projectDirectory(first.id), repo)
-          assert.strictEqual((yield* Effect.flip(resolve(moved)))._tag, "ProjectMoved")
-          const done = yield* resolve(moved, true)
-          assert.deepStrictEqual("moved" in done && done.moved, { from: repo, repaired: [], manual: [] })
+          const done = yield* move(moved, repo)
+          assert.deepStrictEqual([done.from, done.repaired, done.manual], [repo, [], []])
           assert.deepStrictEqual(yield* db.project.projectAt(moved), { id: first.id, directory: moved })
         }).pipe(
           Effect.provide(database(path.join(dir, "vibest.db"))),
