@@ -138,6 +138,11 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - Core follows each Agent with `events` and `state` when present; it never polls `process`. When an execution ends (state
   idle after working, or the process exited), core takes the reported execution end and delivers the result. An execution end
   vibestd had not written when it stopped is lost; reconciliation records that execution lost.
+- One state read for every harness: a session's state is the runtime's (`state`) when the runtime knows it, else the
+  `status` the harness's reports wrote (`working` at an execution start or activity, `idle` at its end). Readiness, the
+  pickup check after typing, reconciliation and interrupt all read it the same way (`Runtimes.sessionState`), so a
+  runtime with no status for a harness (herdr-core) needs no harness-specific branch: a typed message is accepted by
+  the harness's report of it, never by the runtime not knowing.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). `readyOnStart: "integration"` makes a process
   that starts a new conversation wait for the ready report even when the runtime already shows it idle: a runtime can

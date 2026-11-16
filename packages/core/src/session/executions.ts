@@ -9,6 +9,7 @@ import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
+  sessionState,
   type AgentState,
   paneTail,
   peekHint,
@@ -43,6 +44,9 @@ export const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const { track } = yield* SessionLive.Service
 
+  const reportedStatus = (id: string) =>
+    Effect.map(db.session.getSession(id), (session) => session?.status ?? "unknown")
+
   const startsNewConversation = (id: string) =>
     Effect.map(db.session.getSession(id), (session) => (session?.process?.conversation ?? null) === null)
 
@@ -51,11 +55,10 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const reports = adapter.ready === "integration"
         const waitsForReport = reports || (adapter.readyOnStart === "integration" && (yield* startsNewConversation(id)))
-        if (h.state === undefined && !waitsForReport) return "unknown" as AgentState
         const step = adapter.startup ? yield* adapter.startup : undefined
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
-          const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
+          const seen = yield* sessionState(h, terminal, reportedStatus(id))
           const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && seen === "idle")
           return { seen, ready }
         })
@@ -97,7 +100,7 @@ export const make = Effect.gen(function* () {
 
   const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
     Effect.gen(function* () {
-      const state = stateOf(yield* agentState(h, terminal))
+      const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
       if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
       return yield* db.session.executionAccepted(session.id)
     })
@@ -220,11 +223,6 @@ export const make = Effect.gen(function* () {
       ),
     )
     if (delivered) return undefined
-    if (state === "unknown" && adapter.ready === "runtime") {
-      yield* db.session.acceptExecution(session.id, execution)
-      yield* db.session.setStatus(session.id, "working")
-      return undefined
-    }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
     const confirm = confirmed(h, session, terminal, execution, subscription)
     if (yield* confirm) return undefined

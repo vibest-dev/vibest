@@ -33,7 +33,16 @@ import { Harnesses } from "../harnesses.ts"
 import { Inbox, text as inboxText } from "../inbox.ts"
 import { errorMessage } from "../plugin.ts"
 import * as Reactor from "../reactor.ts"
-import { alive, agentState, type Runtime, Runtimes, RuntimeError, stateOf, type Terminal } from "../runtimes.ts"
+import {
+  alive,
+  agentState,
+  type Runtime,
+  Runtimes,
+  RuntimeError,
+  sessionState,
+  stateOf,
+  type Terminal,
+} from "../runtimes.ts"
 import { busy, Executions, STOP_WAIT } from "./executions.ts"
 import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
@@ -311,17 +320,16 @@ export const make = Effect.gen(function* () {
           return {
             message: `${id} is not working; its execution had already finished and its reply is recorded`,
           }
-        const state = stateOf(yield* agentState(h, terminal))
-        const runtimeKnows = state !== undefined && state !== "unknown"
-        const started = yield* db.session.executionAccepted(id)
-        if (!started && runtimeKnows && !busy(state)) return { message: `${id} is not working; nothing to interrupt` }
+        const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
+        if (!(yield* db.session.executionAccepted(id)) && !busy(state))
+          return { message: `${id} is not working; nothing to interrupt` }
         if (!(yield* interruptAgent(h, session, terminal)))
           return yield* new SessionBusy({
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
         const closed = yield* db.session.closeExecution(id, execution, "interrupted")
-        if (closed && !runtimeKnows) yield* db.session.setStatus(id, "idle")
+        if (closed) yield* db.session.setStatus(id, "idle")
         const last = closed ? undefined : yield* db.session.latestReply(id)
         if (!closed && !(last?.execution === execution && last.status === "interrupted"))
           return {

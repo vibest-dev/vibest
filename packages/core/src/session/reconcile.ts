@@ -20,7 +20,16 @@ import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
-import { agentState, alive, paneTail, peekHint, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
+import {
+  agentState,
+  alive,
+  paneTail,
+  peekHint,
+  reportedWhenUnknown,
+  Runtimes,
+  stateOf,
+  type Terminal,
+} from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
 import { CONFIRM_TIMEOUT } from "./executions.ts"
@@ -106,7 +115,7 @@ export const make = Effect.gen(function* () {
         yield* db.session.noteConversation(id, sessionId)
     }
 
-    const s = state ?? "unknown"
+    const s = stateOf(reportedWhenUnknown(state ?? "unknown", session.status)) ?? "unknown"
     if (!open) {
       if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
       return

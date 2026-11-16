@@ -486,7 +486,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "Cursor on a runtime with no status for it: the task waits for its ready report and, typed, shows it working without a resend; its execution end shows it idle, and an interrupt goes by its open execution",
+    "Cursor on a runtime with no status for it: the task waits for its ready report; typed, its first activity report accepts it and shows it working, with no resend; its execution end shows it idle, and an interrupt goes by its open execution",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -499,19 +499,22 @@ describe.concurrent("Session", () => {
       yield* until(db.session.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
       for (let i = 0; i < 20; i++) yield* untilVirtual(Effect.succeed(0), () => true)
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
+      const integration = yield* Integration.Service
+      const who = { id, entry: false, harness: CURSOR.id }
+      const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
       yield* db.session.patchLive(id, { ready: yield* Clock.currentTimeMillis })
-      yield* untilVirtual(db.session.getSession(id), (w) => w?.status === "working")
-      assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.text?.includes("do it")))
+      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("do it") === true))
+      assert.notStrictEqual((yield* db.session.getSession(id))!.status, "working")
+      yield* integration.prompt(who, thought)
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "working")
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
       yield* TestClock.adjust("40 seconds")
       yield* settled
       assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
-      const integration = yield* Integration.Service
-      const who = { id, entry: false, harness: CURSOR.id }
       yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
       yield* untilVirtual(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
       const typedTasks = (yield* herdr.callsTo("send")).filter((c) => c.text !== undefined).length
-      yield* integration.prompt(who, JSON.stringify({ hook_event_name: "afterAgentThought" }))
+      yield* integration.prompt(who, thought)
       const byUser = (yield* db.session.getSession(id))!
       assert.strictEqual(byUser.status, "working")
       assert.strictEqual(executionStateOf(byUser), "open")
@@ -528,12 +531,15 @@ describe.concurrent("Session", () => {
       assert.strictEqual(userEnd.execution, userExecution)
       assert.strictEqual(userEnd.text, "user done")
       assert.notStrictEqual(yield* db.session.openExecution(id), userExecution)
+      yield* integration.prompt(who, thought)
       yield* integration.executionEnd(
         who,
         JSON.stringify({ hook_event_name: "afterAgentResponse", text: "queued done" }),
       )
       yield* untilVirtual(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
       yield* sessions.send(id, "next")
+      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
+      yield* integration.prompt(who, thought)
       yield* untilVirtual(
         db.session.getSession(id),
         (w) => w !== undefined && executionStateOf(w) === "open" && w.status === "working",
