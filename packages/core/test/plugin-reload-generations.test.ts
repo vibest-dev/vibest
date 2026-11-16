@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Builtins, type Candidate, PluginLoader, Plugins, pluginsLayer } from "@vibest/core/plugin"
-import * as Hooks from "@vibest/core/plugin/hooks"
+import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Hooks } from "@vibest/core/plugin/hooks"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
@@ -86,7 +86,7 @@ describe("plugins: builtins follow the latest config", () => {
           },
         }
         yield* fs.writeFileString(config, `{ "plugins": ["-harness-x"] }`)
-        const plugins = yield* pluginsLayer.pipe(
+        const plugins = yield* Plugins.layer.pipe(
           Layer.provide(Layer.succeed(PluginLoader, loader)),
           Layer.provide(Layer.succeed(Builtins, [builtin])),
           Layer.provide(subscriptionsLayer),
@@ -95,9 +95,9 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(runtimesLayer),
           Layer.provide(Agents.layer),
           Layer.provide(memoryBus),
-          Layer.provide(Hooks.Service.layer),
+          Layer.provide(Hooks.layer),
           Layer.build,
-          Effect.map(Context.get(Plugins)),
+          Effect.map(Context.get(Plugins.Service)),
         )
         assert.deepStrictEqual(events, [])
 

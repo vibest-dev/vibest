@@ -4,6 +4,8 @@ import { Context, Deferred, Effect, HashMap, Layer, Option, Ref, SynchronizedRef
 import type { Integration } from "../database/db-rows.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 
+export * as SessionLive from "./live.ts"
+
 export interface Restarted {
   readonly id: string
   readonly projectId: string
@@ -31,7 +33,7 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   forgetOnRelease: Ref.make(false),
 })
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
   const statuses = new Map<string, AgentStatus>()
   const integrations = new Map<string, Integration>()
@@ -182,10 +184,10 @@ const make = Effect.gen(function* () {
   }
 })
 
-export class SessionLive extends Context.Service<SessionLive, Effect.Success<typeof make>>()("vibest/SessionLive") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(SessionLive, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/SessionLive") {}
 
-  static readonly node = LayerNode.make({ service: SessionLive, layer: SessionLive.layer, deps: [] })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [] })

@@ -10,9 +10,9 @@ import { Harness } from "@vibest/core/harness"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { type Candidate, makeHost, Plugins, pluginsNode } from "@vibest/core/plugin"
+import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/domains"
-import * as Hooks from "@vibest/core/plugin/hooks"
+import { Hooks } from "@vibest/core/plugin/hooks"
 import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
@@ -90,7 +90,7 @@ const runtimes = LayerNode.make({
 })
 
 const subscriptions = LayerNode.make({
-  service: Subscriptions,
+  service: Subscriptions.Service,
   layer: Subscriptions.testLayer,
   deps: [Harness.node, Harnesses.node],
 })
@@ -140,7 +140,7 @@ export const pluginsHost = (
           const release = host.holdNow()
           yield* host.activate(loaded).pipe(Effect.andThen(release), Effect.forkScoped)
         } else yield* host.activate(loaded)
-        return Context.make(Plugins, host.service).pipe(
+        return Context.make(Plugins.Service, host.service).pipe(
           Context.add(PluginHost, {
             load: (added) => host.activate([...loaded, ...added.map(candidateOf)]),
           }),
@@ -153,7 +153,7 @@ export const pluginsHost = (
       Bus.node,
       Db.node,
       Harnesses.node,
-      Hooks.Service.node,
+      Hooks.node,
       Runtimes.node,
       SessionLive.node,
       Subscriptions.node,
@@ -168,7 +168,7 @@ const readyOnStart = LayerNode.make({
   layer: Layer.effectDiscard(
     Effect.gen(function* () {
       const fake = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       let pid = 50_000
       yield* Ref.set(fake.onStarted, (session) =>
         Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.session.patchLive(session, { ready: at, pid: ++pid }))),
@@ -187,22 +187,24 @@ const defaultTransport = Layer.succeed(Machines.MachineTransport, noTransport)
 
 const defaultSpawn = Spawn.configured({ maxSessions: undefined })
 
-const sessionsDecorated = (decorate: (sessions: Session.Interface, db: Db["Service"]) => Session.Interface) =>
+const sessionsDecorated = (decorate: (sessions: Session.Interface, db: Db.Interface) => Session.Interface) =>
   Session.node.replace(
     LayerNode.make({
       service: Session.Service,
       layer: Layer.effect(
         Session.Service,
         Effect.gen(function* () {
-          return decorate(yield* Session.make, yield* Db)
+          return decorate(yield* Session.make, yield* Db.Service)
         }),
       ),
       deps: Session.deps,
     }),
   )
 
-export const dbReplacement = (decorate: (db: Db["Service"]) => Db["Service"]) =>
-  Db.node.replace(Db.node.mapLayer((layer) => Layer.effect(Db, Effect.map(Db, decorate)).pipe(Layer.provide(layer))))
+export const dbReplacement = (decorate: (db: Db.Interface) => Db.Interface) =>
+  Db.node.replace(
+    Db.node.mapLayer((layer) => Layer.effect(Db.Service, Effect.map(Db.Service, decorate)).pipe(Layer.provide(layer))),
+  )
 
 export const cryptoReplacement = (decorate: (crypto: Crypto.Crypto) => Crypto.Crypto) =>
   platform.replace(
@@ -269,7 +271,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harness.node.replace(harnessLayer()),
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
-      pluginsNode.replace(plugins),
+      Plugins.node.replace(plugins),
       Spawn.node.replace(defaultSpawn),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),
@@ -298,13 +300,13 @@ export interface TestOptions extends FakeRuntimeOptions {
   >
   readonly pluginTimeout?: Duration.Input
   readonly activateLate?: boolean
-  readonly db?: (db: Db["Service"]) => Db["Service"]
+  readonly db?: (db: Db.Interface) => Db.Interface
   readonly crypto?: (crypto: Crypto.Crypto) => Crypto.Crypto
   readonly missingBinary?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
   readonly sshHosts?: Readonly<Record<string, string>>
   readonly transport?: Machines.MachineTransport["Service"]
-  readonly sessions?: (sessions: Session.Interface, db: Db["Service"]) => Session.Interface
+  readonly sessions?: (sessions: Session.Interface, db: Db.Interface) => Session.Interface
   readonly identity?: DaemonIdentity
   readonly version?: string
 }
@@ -374,17 +376,17 @@ export { sessionFrom as testLayer }
 export const restartSessions = Effect.gen(function* () {
   const held = [
     Agents.node.replace(Layer.succeed(Agents.Service, yield* Agents.Service)),
-    Bus.node.replace(Layer.succeed(Bus, yield* Bus)),
-    Db.node.replace(Layer.succeed(Db, yield* Db)),
+    Bus.node.replace(Layer.succeed(Bus.Service, yield* Bus.Service)),
+    Db.node.replace(Layer.succeed(Db.Service, yield* Db.Service)),
     Drain.node.replace(Layer.succeed(Drain.Service, yield* Drain.Service)),
     Git.node.replace(Layer.succeed(Git.Service, yield* Git.Service)),
     Harness.node.replace(Layer.succeed(Harness.Service, yield* Harness.Service)),
     Harnesses.node.replace(Layer.succeed(Harnesses.Service, yield* Harnesses.Service)),
     Inbox.node.replace(Layer.succeed(Inbox.Service, yield* Inbox.Service)),
-    pluginsNode.replace(Layer.succeed(Plugins, yield* Plugins)),
+    Plugins.node.replace(Layer.succeed(Plugins.Service, yield* Plugins.Service)),
     Processes.node.replace(Layer.succeed(Processes.Service, yield* Processes.Service)),
     Runtimes.node.replace(Layer.succeed(Runtimes.Service, yield* Runtimes.Service)),
-    Subscriptions.node.replace(Layer.succeed(Subscriptions, yield* Subscriptions)),
+    Subscriptions.node.replace(Layer.succeed(Subscriptions.Service, yield* Subscriptions.Service)),
     PlatformNode.childProcessSpawner.replace(
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, yield* ChildProcessSpawner.ChildProcessSpawner),
     ),

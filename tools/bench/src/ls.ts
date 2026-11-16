@@ -81,7 +81,7 @@ const stop = async (home: string) => {
 
 const seed = (file: string, directory: string, n: number) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const project = yield* db.project.createProject(directory, [])
     const now = Date.now()
     for (let i = 0; i < n; i++) {

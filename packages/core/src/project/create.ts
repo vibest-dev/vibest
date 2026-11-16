@@ -62,7 +62,7 @@ const copy = (folder: ProjectFolder) =>
     ),
   )
 
-export const createProject = Effect.fn("createProject")(function* (
+export const createProject = Effect.fn("Project.createProject")(function* (
   directory: string,
   sources: ReadonlyArray<string>,
   base?: string,
@@ -132,7 +132,7 @@ const ownGitCheckout = (dir: string) =>
     return (yield* fs.realPath(top.value)) === (yield* fs.realPath(dir))
   })
 
-export const listProjectRepositories = Effect.fn("listProjectRepositories")(function* (directory: string) {
+export const listProjectRepositories = Effect.fn("Project.listProjectRepositories")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const goneIsUndefined = <A>(read: Effect.Effect<A, PlatformError.PlatformError>) =>
@@ -167,7 +167,7 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
 
 const isMainCheckout = (dir: string) => Git.Service.use((git) => git.isMainCheckout(dir))
 
-export const projectRoot = Effect.fn("projectRoot")(function* (directory: string) {
+export const projectRoot = Effect.fn("Project.projectRoot")(function* (directory: string) {
   const children = yield* listProjectRepositories(directory)
   if (children) {
     const path = yield* Path.Path
@@ -205,7 +205,7 @@ export interface RepositoryPlace {
   readonly remote: string | undefined
 }
 
-export const projectRepositories = Effect.fn("projectRepositories")(function* (root: string) {
+export const projectRepositories = Effect.fn("Project.projectRepositories")(function* (root: string) {
   const fs = yield* FileSystem.FileSystem
   const children = yield* listProjectRepositories(root)
   const checkouts = children
@@ -232,7 +232,7 @@ const removeWorktrees = (
     if (left.length === 0) yield* fs.remove(workspace, { recursive: true }).pipe(Effect.ignore)
   })
 
-export const createIsolatedWorktrees = Effect.fn("createIsolatedWorktrees")(function* (
+export const createIsolatedWorktrees = Effect.fn("Project.createIsolatedWorktrees")(function* (
   folders: ReadonlyArray<Pick<ProjectFolder, "name" | "path">>,
   workspace: string,
 ) {
@@ -255,7 +255,7 @@ export const createIsolatedWorktrees = Effect.fn("createIsolatedWorktrees")(func
   return made.map((entry) => entry.worktree)
 })
 
-export const discardIsolatedWorktrees = Effect.fn("discardIsolatedWorktrees")(function* (workspace: string) {
+export const discardIsolatedWorktrees = Effect.fn("Project.discardIsolatedWorktrees")(function* (workspace: string) {
   const folders = (yield* listProjectRepositories(workspace)) ?? []
   const entries = yield* Effect.forEach(folders, (folder) =>
     mainCheckout(folder.path).pipe(
@@ -270,7 +270,7 @@ export interface RepositoryGit extends GitState {
   readonly name: string
 }
 
-export const workspaceGit = Effect.fn("workspaceGit")(function* (workspace: string) {
+export const workspaceGit = Effect.fn("Project.workspaceGit")(function* (workspace: string) {
   const folders = yield* listProjectRepositories(workspace)
   if (!folders) return undefined
   const lines: RepositoryGit[] = []

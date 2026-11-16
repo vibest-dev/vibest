@@ -120,7 +120,7 @@ export const peerSession = {
 
 export const fakeSpawns =
   (spawns: Array<SpawnInput>, terminal: (input: SpawnInput, id: string) => string = () => "") =>
-  (sessions: Session.Interface, db: Db["Service"]) => ({
+  (sessions: Session.Interface, db: Db.Interface) => ({
     ...sessions,
     spawn: (input: SpawnInput) =>
       Effect.gen(function* () {
@@ -173,7 +173,7 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
     )
     const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
     const layout = yield* run(Layout)
-    const db = yield* run(Db)
+    const db = yield* run(Db.Service)
     const directory = yield* tempDirectory("vibest-b-checkout-")
     yield* (yield* run(FakeGit)).repository(directory, { ...REPOSITORY, origin: remote })
     const project = yield* db.project.createProject(directory, [{ path: directory, remote }])

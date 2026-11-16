@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf } from "@vibest/core/database/db-rows"
-import { Builtins, makePlugins, PluginLoader, Plugins, pluginsLayer } from "@vibest/core/plugin"
-import * as Hooks from "@vibest/core/plugin/hooks"
+import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Hooks } from "@vibest/core/plugin/hooks"
 import { Session } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin } from "@vibest/plugin"
@@ -45,7 +45,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const herdr = yield* FakeRuntime
   return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
@@ -55,7 +55,7 @@ describe("plugins: spawn hook", () => {
     "P5/P8: the event has the resolved root; writes reach the row and the launch args",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
@@ -172,7 +172,7 @@ describe("plugins: spawn hook", () => {
   test(
     "P10/P12: setup failures are isolated; counters follow the runs",
     Effect.gen(function* () {
-      const plugins = yield* Plugins
+      const plugins = yield* Plugins.Service
       const listed = yield* plugins.list
       const byId = (id: string) => listed.filter((q) => q.id === id)
       assert.deepInclude(byId("runtime-choice")[0], { status: "active" })
@@ -220,7 +220,7 @@ describe("plugins: spawn hook", () => {
         ],
       )
       assert.strictEqual(s.model, "m")
-      const listed = yield* (yield* Plugins).list
+      const listed = yield* (yield* Plugins.Service).list
       assert.deepStrictEqual(
         listed.map((p) => [p.id, p.status]),
         [
@@ -373,7 +373,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.a
 `
 
 const loaded = (dir: string) =>
-  pluginsLayer.pipe(
+  Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, { ...Platform.makePluginLoader(), prepare: Effect.void })),
     Layer.provide(Layer.succeed(Builtins, [])),
     Layer.provide(subscriptionsLayer),
@@ -382,9 +382,9 @@ const loaded = (dir: string) =>
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
     Layer.provide(memoryBus),
-    Layer.provide(Hooks.Service.layer),
+    Layer.provide(Hooks.layer),
     Layer.build,
-    Effect.map(Context.get(Plugins)),
+    Effect.map(Context.get(Plugins.Service)),
   )
 
 const settledAfterLoad = (dir: string) =>

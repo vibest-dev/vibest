@@ -12,7 +12,7 @@ import * as Platform from "#platform"
 import { entryPending, projectOf } from "./fakes.ts"
 import { place, session } from "./unit-helpers.ts"
 
-const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
+const memory = <A, E>(program: Effect.Effect<A, E, Db.Service | SqlClient.SqlClient>) =>
   program.pipe(
     Effect.provide(
       Db.layer.pipe(
@@ -29,7 +29,7 @@ const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const X = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 
 const setup = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const project = yield* projectOf("r")
   const entry = yield* db.session.startEntry(project, "pi", false, place, { agent: "coordinator" })
   yield* db.session.insertSession(session(A), project, { cwd: "/w", task: "a", parentSessionId: entry.sessionId })

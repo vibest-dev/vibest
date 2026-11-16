@@ -854,7 +854,7 @@ describe("vibest integration guard through vibestd", () => {
         const layout = yield* Layout
         const repo = yield* makeRepository
         const { id } = yield* spawnWorking(repo)
-        const identity = (yield* (yield* Db).session.sessionIdentity(id))!
+        const identity = (yield* (yield* Db.Service).session.sessionIdentity(id))!
         const guard = (command: string) =>
           runVibest(
             repo,

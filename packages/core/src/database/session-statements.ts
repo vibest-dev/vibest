@@ -79,8 +79,8 @@ const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, termina
 
 export const statements = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const bus = yield* Bus
-  const sessionLive = yield* SessionLive
+  const bus = yield* Bus.Service
+  const sessionLive = yield* SessionLive.Service
   const { publish, observe } = bus
   const afterCommitLive = (effect: Effect.Effect<void>) => bus.afterCommit(() => Effect.runSync(effect))
   const reads = ledgerReads(sql)

@@ -127,7 +127,9 @@ describe("SQLite", () => {
       yield* createFileFirst
       const dir = `${file}-repo`
       const create = Effect.gen(function* () {
-        return yield* (yield* Db).project.createProject(dir, [{ path: `${dir}/app`, remote: "git@example.com:a.git" }])
+        return yield* (yield* Db.Service).project.createProject(dir, [
+          { path: `${dir}/app`, remote: "git@example.com:a.git" },
+        ])
       }).pipe(Effect.provide(open))
       const [a, b] = yield* Effect.all([create, create], { concurrency: 2 })
       assert.strictEqual(a, b)
@@ -147,7 +149,7 @@ describe("a vibestd restart", () => {
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
       const id = yield* Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const place = { runtime: "fake", address: { machine: "local", id: "a" } }
         const { sessionId } = yield* db.session.startEntry(yield* projectOf("a"), "claude", false, place, {
           agent: "coordinator",
@@ -160,7 +162,7 @@ describe("a vibestd restart", () => {
         return row!.id
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
-        yield* (yield* Db).inbox.recoverDelivering(() => "")
+        yield* (yield* Db.Service).inbox.recoverDelivering(() => "")
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox WHERE id = ${id}`
       }).pipe(Effect.provide(database(file)))

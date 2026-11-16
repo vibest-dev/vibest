@@ -22,7 +22,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
   test(
     "a pending launch is checked again after the start timeout, and ended once the runtime says it is gone",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)

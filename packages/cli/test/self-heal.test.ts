@@ -239,7 +239,7 @@ layer(Platform.services)(
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           const pending = yield* Effect.gen(function* () {
-            const db = yield* Db
+            const db = yield* Db.Service
             yield* db.session.insertSession(
               {
                 id: "b0050001-b005-4b00-8b00-b0050001b005",
@@ -298,7 +298,7 @@ layer(Platform.services)(
             assert.deepStrictEqual(yield* stop(old.instance!, cliHeaders(layout.home)), { instance: old.instance! })
             assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
             assert.isFalse(yield* probe(layout.socket))
-            const rows = yield* Effect.flatMap(Db, (db) =>
+            const rows = yield* Effect.flatMap(Db.Service, (db) =>
               db.inbox.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
             ).pipe(
               Effect.provide(

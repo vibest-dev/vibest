@@ -42,7 +42,7 @@ describe.concurrent("Session", () => {
       yield* sessions.send(id, "once more")
       const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 2)
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
-      const db = yield* Db
+      const db = yield* Db.Service
       assert.strictEqual(yield* db.session.currentProcessId(id), reporter)
       yield* until(
         db.session.getSession(id),

@@ -317,7 +317,7 @@ const outboxRows = Effect.flatMap(
     }>`SELECT peer_id, session_id FROM outbox ORDER BY created_at`,
 )
 
-const finish = (db: Db["Service"], session: string, message: string) =>
+const finish = (db: Db.Interface, session: string, message: string) =>
   db.inbox.insertInbox({ sessionId: session, message })
 
 describe("another machine's vibestd runs agents here", () => {

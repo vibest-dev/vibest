@@ -46,7 +46,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
 })
 
 export const sessionListing = (deps: {
-  readonly db: Db["Service"]
+  readonly db: Db.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
 }) => {
@@ -187,7 +187,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     return sessionListing({
-      db: yield* Db,
+      db: yield* Db.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
     })

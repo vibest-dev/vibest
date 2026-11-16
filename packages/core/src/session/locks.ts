@@ -4,9 +4,11 @@ import { Drain } from "../drain.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 
+export * as SessionLocks from "./locks.ts"
+
 export const directoryLock = (directory: string) => `directory:${directory}`
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const drain = yield* Drain.Service
   const locks = yield* KeyedMutex.make<string>()
   return {
@@ -18,14 +20,14 @@ const make = Effect.gen(function* () {
   }
 })
 
-export class SessionLocks extends Context.Service<SessionLocks, Effect.Success<typeof make>>()("vibest/SessionLocks") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(SessionLocks, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/SessionLocks") {}
 
-  static readonly node = LayerNode.make({
-    service: SessionLocks,
-    layer: SessionLocks.layer,
-    deps: [Drain.node],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Drain.node],
+})

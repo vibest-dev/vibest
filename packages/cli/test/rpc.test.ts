@@ -75,7 +75,7 @@ describe("vibest.sock", () => {
   test(
     "a session is named by its full id or a unique prefix of 8 or more characters; the answers name the full id",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
@@ -112,7 +112,7 @@ describe("vibest.sock", () => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const sql = yield* SqlClient.SqlClient
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
@@ -164,7 +164,7 @@ describe("vibest.sock", () => {
     "a Cursor afterAgentResponse stop ends the execution with its text as execution.reply and as Get's reply",
     Effect.gen(function* () {
       const raw = yield* client
-      const db = yield* Db
+      const db = yield* Db.Service
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -200,7 +200,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
@@ -238,7 +238,7 @@ describe("vibest.sock", () => {
   test(
     "Peek returns the runtime's terminal text and asks for at most 500 lines; an exited session has no terminal to read",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const raw = yield* client
@@ -285,7 +285,7 @@ describe("vibest.sock", () => {
   test(
     "a session sends only as itself; an unknown session is refused",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const raw = yield* client
       const c = asCli(raw, repo)
@@ -430,7 +430,7 @@ describe("vibest.sock", () => {
   test(
     "an entry session manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
@@ -495,7 +495,7 @@ describe("vibest.sock", () => {
   test(
     "every protected method: no protocol and a session are refused; notifications need protocol only",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
@@ -618,7 +618,7 @@ describe("vibest.sock", () => {
   test(
     "one socket does not keep a caller: sequential and concurrent requests stay on their own headers",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const raw = yield* client
       const cli = asCli(raw, repo)
@@ -825,7 +825,7 @@ describe("vibest.sock", () => {
   test(
     "Remove names the resolved session when the runtime is unreachable, not the prefix typed",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
@@ -842,7 +842,7 @@ describe("vibest.sock", () => {
   test(
     "archive refuses an entry session and names its project",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const path = yield* Path.Path
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
@@ -869,7 +869,7 @@ describe("vibest.sock", () => {
   test(
     "FocusEntry reports a runtime that cannot focus",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
@@ -894,7 +894,7 @@ describe("vibest.sock", () => {
   test(
     "--new with a missing harness does not archive the current entry session",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
       yield* db.session.startEntry(

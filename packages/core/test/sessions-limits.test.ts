@@ -31,7 +31,7 @@ describe.concurrent("Session", () => {
     "a usage limit when the first terminal opens moves the session; when the move dies the new worktree is removed",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const fs = yield* FileSystem.FileSystem
       const opening = yield* herdr.hold("open")
       const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
@@ -53,7 +53,7 @@ describe.concurrent("Session", () => {
       "a move that dies after it opened the replacement terminal closes that terminal before removing the worktree",
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
-        const db = yield* Db
+        const db = yield* Db.Service
         const fs = yield* FileSystem.FileSystem
         const opening = yield* herdr.hold("open")
         const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
@@ -97,7 +97,7 @@ describe.concurrent("Session", () => {
       "a move that dies after another session joined its worktree with --share keeps the worktree for that session",
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
-        const db = yield* Db
+        const db = yield* Db.Service
         const fs = yield* FileSystem.FileSystem
         const sessions = yield* Session.Service
         const repo = yield* makeRepository
@@ -149,7 +149,7 @@ describe.concurrent("Session", () => {
       const herdr = yield* FakeRuntime
       const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* (yield* Subscriptions).report({
+      yield* (yield* Subscriptions.Service).report({
         harness: "pi",
         limits: [{ window: "5h", percent: 100, status: "limited", resetTime }],
       })
@@ -260,7 +260,7 @@ describe.concurrent("Session", () => {
       const aborted = yield* spawnWorking(repo)
       const missing = yield* spawnWorking(repo)
       const lost = yield* spawnWorking(repo)
-      yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
+      yield* (yield* Subscriptions.Service).report({ harness: "pi", limits: [limited] })
       const fail = (
         id: string,
         sessions: typeof aborted.sessions,

@@ -23,7 +23,7 @@ const memory = () => Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memor
 
 const ledger = Effect.gen(function* () {
   yield* installLedger
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const subscription = yield* bus.subscribe()
   const published = PubSub.takeUpTo(subscription, Number.MAX_SAFE_INTEGER)
   const sql = yield* SqlClient.SqlClient
@@ -805,7 +805,7 @@ describe("rebuild", () => {
       yield* sql`UPDATE meta SET value = '0' WHERE key = 'projection'`
       yield* sql`CREATE TABLE answer (execution INTEGER PRIMARY KEY)`
       yield* sql`DELETE FROM inbox`
-      yield* (yield* Bus).rebuild
+      yield* (yield* Bus.Service).rebuild
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT value FROM meta WHERE key = 'projection'"), [
         { value: String(PROJECTION_VERSION) },
       ])
@@ -820,7 +820,7 @@ describe("rebuild", () => {
     Effect.gen(function* () {
       const { sql } = yield* story
       yield* sql`INSERT INTO event (aggregate, seq, at, type, data) VALUES (${SUB}, 99, 1, 'session.purged', '{}')`
-      const error = yield* (yield* Bus).rebuild.pipe(Effect.flip)
+      const error = yield* (yield* Bus.Service).rebuild.pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
       assert.include(error.message, `event ${SUB} 99`)
       const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
@@ -836,7 +836,7 @@ describe("project", () => {
       const sql = yield* SqlClient.SqlClient
       yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
         VALUES (${PEER}, 1, 1, 'peer.seen', '{"id":"p","name":"a"}')`
-      const error = yield* (yield* Bus).rebuild.pipe(Effect.flip)
+      const error = yield* (yield* Bus.Service).rebuild.pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
       assert.include(error.message, `event ${PEER} 1: peer.seen has no projector`)
     }).pipe(Effect.provide(Bus.layer.pipe(Layer.provideMerge(Layer.fresh(memorySqlite))))),
@@ -847,7 +847,7 @@ describe("delivery order", () => {
   it.effect("a subscriber publishing a follow-up fact does not overtake the rest of the batch", () =>
     Effect.gen(function* () {
       yield* installLedger
-      const bus = yield* Bus
+      const bus = yield* Bus.Service
       const first = yield* bus.subscribe([Catalog["peer.seen"]])
       const second = yield* bus.subscribe([Catalog["peer.seen"], Catalog["machine.connected"]])
       yield* Stream.fromSubscription(first).pipe(
@@ -976,7 +976,7 @@ const released = { type: "runtime.reset", runtime: "r", machine: "local" } as co
 describe("subscribe", () => {
   it.effect("a subscriber of one type retains no other type, and several types keep publish order", () =>
     Effect.gen(function* () {
-      const bus = yield* Bus
+      const bus = yield* Bus.Service
       const one = yield* bus.subscribe([TerminalExited])
       const both = yield* bus.subscribe([TerminalExited, RuntimeReset])
       const all = yield* bus.subscribe()

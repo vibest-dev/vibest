@@ -8,7 +8,7 @@ import { memoryBus } from "./platform/bun.ts"
 describe("Reactor", () => {
   it.live("a handler that throws while being built does not end the subscription", () =>
     Effect.gen(function* () {
-      const bus = yield* Bus
+      const bus = yield* Bus.Service
       const reactor = yield* Reactor.make
       let calls = 0
       const seen: Array<number> = []

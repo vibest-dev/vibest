@@ -44,7 +44,7 @@ const schemaRejection = (reason: string) =>
 const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const inbox = yield* Inbox.Service
   const integration = yield* Integration.Service
   const drain = yield* Drain.Service

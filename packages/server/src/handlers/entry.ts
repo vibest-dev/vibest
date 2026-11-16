@@ -8,7 +8,7 @@ import { group } from "./group.ts"
 
 export const make = Effect.gen(function* () {
   const { scope, machineFromCaller, cliOnly, resolveAt } = yield* CallerChecks.Service
-  const entrySession = yield* EntrySession
+  const entrySession = yield* EntrySession.Service
   return {
     Launch: ({ argv, agent, focus, runtime, callerEnv, runtimeSession }) =>
       Effect.gen(function* () {

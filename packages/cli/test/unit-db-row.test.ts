@@ -8,7 +8,7 @@ import { database, place, session } from "./unit-helpers.ts"
 
 it.effect("a session row's open execution is the newest one and its last execution the one that ended before", () =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const project = yield* projectOf("r")
     const child = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     const parent = (yield* db.session.startEntry(project, "pi", false, place, { agent: "coordinator" })).sessionId
@@ -32,7 +32,7 @@ it.effect("a session row's open execution is the newest one and its last executi
 
 it.effect("sessionAt finds the one live session at that runtime and terminal", () =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const project = yield* projectOf("r")
     const here = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     const terminal = { machine: "local", id: "pane-a" }

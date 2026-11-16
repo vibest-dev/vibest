@@ -25,6 +25,8 @@ import {
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 
+export * as Bus from "./bus.ts"
+
 export type Signal =
   | {
       readonly type: "terminal.state"
@@ -154,8 +156,9 @@ const make = Effect.gen(function* () {
   const typed = new Map<string, Set<PubSub.PubSub<BusEvent>>>()
   const projectors = new Map<string, (fact: never) => ReturnType<Projector<Definition>>>()
 
-  const project = <D extends Definition>(definition: D, projector: Projector<D>) =>
-    Effect.sync(() => void projectors.set(definition.type, projector))
+  const project = Effect.fn("Bus.project")(<D extends Definition>(definition: D, projector: Projector<D>) =>
+    Effect.sync(() => void projectors.set(definition.type, projector)),
+  )
 
   const projectFact = (fact: Fact) => {
     const projector = projectors.get(fact.type)
@@ -218,26 +221,25 @@ const make = Effect.gen(function* () {
   const subscribe = ((definitions?: ReadonlyArray<{ readonly type: string }>) =>
     definitions === undefined ? PubSub.subscribe(pubsub) : subscribeTyped(definitions)) as Subscribe
 
-  const transaction = <A, E, R>(body: Effect.Effect<A, E, R>) =>
-    Effect.gen(function* () {
-      if ((yield* Buffer) !== undefined) return yield* body
-      return yield* Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const buffer = {
-            events: [] as Array<BusEvent>,
-            after: [] as Array<() => void>,
-            fiberId: yield* Effect.fiberId,
-            closed: false,
-          }
-          const result = yield* sql
-            .withTransaction(restore(Effect.provideService(body, Buffer, buffer)))
-            .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
-          for (const apply of buffer.after) apply()
-          yield* deliver(buffer.events)
-          return result
-        }),
-      )
-    })
+  const transaction = Effect.fn("Bus.transaction")(function* <A, E, R>(body: Effect.Effect<A, E, R>) {
+    if ((yield* Buffer) !== undefined) return yield* body
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const buffer = {
+          events: [] as Array<BusEvent>,
+          after: [] as Array<() => void>,
+          fiberId: yield* Effect.fiberId,
+          closed: false,
+        }
+        const result = yield* sql
+          .withTransaction(restore(Effect.provideService(body, Buffer, buffer)))
+          .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
+        for (const apply of buffer.after) apply()
+        yield* deliver(buffer.events)
+        return result
+      }),
+    )
+  })
 
   let ledger: string | undefined
   const ledgerId = Effect.gen(function* () {
@@ -266,8 +268,8 @@ const make = Effect.gen(function* () {
       return fact
     })
 
-  const publish = <D extends Definition>(definition: D, input: PublishInput<D>) =>
-    transaction(
+  const publish = Effect.fn("Bus.publish")(function* <D extends Definition>(definition: D, input: PublishInput<D>) {
+    return yield* transaction(
       Effect.gen(function* () {
         const buffer = yield* Buffer
         if (buffer === undefined || buffer.closed || (yield* Effect.fiberId) !== buffer.fiberId)
@@ -280,20 +282,19 @@ const make = Effect.gen(function* () {
         return fact.seq
       }),
     )
+  })
 
-  const observe = (signal: Signal) =>
-    Effect.gen(function* () {
-      const buffer = yield* Buffer
-      if (buffer !== undefined && !buffer.closed) buffer.events.push(signal)
-      else yield* deliver([signal])
-    })
+  const observe = Effect.fn("Bus.observe")(function* (signal: Signal) {
+    const buffer = yield* Buffer
+    if (buffer !== undefined && !buffer.closed) buffer.events.push(signal)
+    else yield* deliver([signal])
+  })
 
-  const afterCommit = (apply: () => void) =>
-    Effect.gen(function* () {
-      const buffer = yield* Buffer
-      if (buffer !== undefined && !buffer.closed) buffer.after.push(apply)
-      else apply()
-    })
+  const afterCommit = Effect.fn("Bus.afterCommit")(function* (apply: () => void) {
+    const buffer = yield* Buffer
+    if (buffer !== undefined && !buffer.closed) buffer.after.push(apply)
+    else apply()
+  })
 
   const log = (input: {
     readonly aggregate?: string | undefined
@@ -341,11 +342,13 @@ const make = Effect.gen(function* () {
   return { observe, subscribe, publish, transaction, afterCommit, log, project, rebuild }
 })
 
-export class Bus extends Context.Service<Bus, Effect.Success<typeof make>>()("vibest/Bus") {
-  static readonly layer = Layer.effect(Bus, make)
+export type Interface = Effect.Success<typeof make>
 
-  static readonly node = LayerNode.make({ service: Bus, layer: Bus.layer, deps: [PlatformNode.sqlClient] })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Bus") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [PlatformNode.sqlClient] })
 
 const dump = (sql: SqlClient.SqlClient, table: keyof typeof PROJECTION_TABLES) =>
   sql.unsafe<Record<string, unknown>>(`SELECT * FROM ${table} ORDER BY ${PROJECTION_TABLES[table]}`)
@@ -391,7 +394,7 @@ const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient)
 export const equalToReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const scratch = yield* SqlClient.SqlClient
-    const bus = yield* Bus
+    const bus = yield* Service
     const tables = Object.keys(PROJECTION_TABLES) as Array<keyof typeof PROJECTION_TABLES>
     const storedTables = yield* stored.withTransaction(
       Effect.gen(function* () {
@@ -417,7 +420,7 @@ export const checkReplay = (stored: SqlClient.SqlClient) =>
     if (Number(projection?.value) !== PROJECTION_VERSION) {
       const scratch = yield* SqlClient.SqlClient
       yield* copyWholeLog(stored, scratch)
-      return yield* (yield* Bus).rebuild
+      return yield* (yield* Service).rebuild
     }
     const difference = yield* equalToReplay(stored)
     if (difference !== undefined)
@@ -446,10 +449,10 @@ export const awaitEvent = <A, E, R>(
   match: (event: BusEvent) => Effect.Effect<Option.Option<A>, E, R>,
   deadline: Duration.Duration,
   onDeadline: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, Exclude<R, Scope.Scope> | Bus> =>
+): Effect.Effect<A, E, Exclude<R, Scope.Scope> | Service> =>
   Effect.scoped(
     Effect.gen(function* () {
-      const subscription = yield* (yield* Bus).subscribe()
+      const subscription = yield* (yield* Service).subscribe()
       return yield* awaitOn(subscription, look, match, deadline, onDeadline)
     }),
   )

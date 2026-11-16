@@ -13,7 +13,7 @@ import { group } from "./group.ts"
 
 export const make = Effect.gen(function* () {
   const { scope, cliOnly, atProject, resolveAt } = yield* CallerChecks.Service
-  const db = yield* Db
+  const db = yield* Db.Service
   const project = yield* Project.Service
   const runtimes = yield* Runtimes.Service
   return {

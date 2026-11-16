@@ -6,6 +6,8 @@ import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, type Scop
 import { Bounded } from "../effect/bounded.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 
+export * as Hooks from "./hooks.ts"
+
 export interface Events {
   readonly "agent.start.before": VibestPlugin.AgentStartBefore
   readonly "agent.fail": VibestPlugin.AgentFail
@@ -70,30 +72,29 @@ export interface Interface {
   readonly get: <N extends Name>(name: N, runtime: string | undefined, activation: object) => ReadonlyArray<Entry<N>>
 }
 
-export class Service extends Context.Service<Service, Interface>()("vibest/PluginHooks") {
-  static readonly layer = Layer.sync(Service, () => {
-    let table: Table = { "agent.start.before": [], "agent.fail": [], "machine.connect": [], "machine.remove": [] }
-    const register: Interface["register"] = (name, entry) =>
-      Effect.gen(function* () {
-        const list: ReadonlyArray<Entry<typeof name>> = table[name]
-        table = { ...table, [name]: [...list, entry] }
-        const dispose = Effect.sync(() => {
-          const current: ReadonlyArray<Entry<typeof name>> = table[name]
-          table = { ...table, [name]: current.filter((e) => e !== entry) }
-        })
-        yield* Effect.addFinalizer(() => dispose)
-        return { dispose } satisfies VibestPlugin.Registration
-      })
-    const get: Interface["get"] = (name, runtime, activation) =>
-      table[name].filter(
-        (e) =>
-          e.activation === activation && (runtime === undefined || e.runtime === undefined || e.runtime === runtime),
-      )
-    return Service.of({ register, get })
-  })
+export class Service extends Context.Service<Service, Interface>()("vibest/PluginHooks") {}
 
-  static readonly node = LayerNode.make({ service: Service, layer: Service.layer, deps: [] })
-}
+export const layer = Layer.sync(Service, () => {
+  let table: Table = { "agent.start.before": [], "agent.fail": [], "machine.connect": [], "machine.remove": [] }
+  const register: Interface["register"] = (name, entry) =>
+    Effect.gen(function* () {
+      const list: ReadonlyArray<Entry<typeof name>> = table[name]
+      table = { ...table, [name]: [...list, entry] }
+      const dispose = Effect.sync(() => {
+        const current: ReadonlyArray<Entry<typeof name>> = table[name]
+        table = { ...table, [name]: current.filter((e) => e !== entry) }
+      })
+      yield* Effect.addFinalizer(() => dispose)
+      return { dispose } satisfies VibestPlugin.Registration
+    })
+  const get: Interface["get"] = (name, runtime, activation) =>
+    table[name].filter(
+      (e) => e.activation === activation && (runtime === undefined || e.runtime === undefined || e.runtime === runtime),
+    )
+  return Service.of({ register, get })
+})
+
+export const node = LayerNode.make({ service: Service, layer, deps: [] })
 
 export const run = Effect.fnUntraced(function* <N extends Name>(
   name: N,

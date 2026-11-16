@@ -275,7 +275,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Db.Service
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -357,7 +357,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Db.Service
       const layout = yield* Layout
       const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
       const root = path.join(parent, "combo")
@@ -392,7 +392,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
       const parent = yield* scopedRealPathTempDirectory("vibest-multi-")

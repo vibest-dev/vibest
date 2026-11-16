@@ -356,7 +356,7 @@ describe("herdr open-entry", () => {
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout
-        const db = yield* Db
+        const db = yield* Db.Service
         const herdr = yield* FakeRuntime
         const repo = yield* makeRepository
         const env = {
