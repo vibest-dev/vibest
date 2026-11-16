@@ -11,6 +11,8 @@ loads from the install's `harnesses/agy` folder, which vibest adds to each sessi
   agy's `error`. agy's `Stop` carries no answer, so there is no reply text: `vibest peek` shows it.
 - **the tool guard**: `PreToolUse` goes to `vibest integration guard --harness agy`; vibestd answers in agy's shape and
   a refused call does not run. When `vibest` fails, `hook.sh` answers `deny` itself.
+- **typed messages**: vibestd types messages into agy, and empties the input box first (`ctrl+e`, then `ctrl+u` 40
+  times): a draft you left there unsent is cleared.
 - **agy's own subagents** run their own conversations in the same process and fire the same hooks; only the first
   conversation the process reports goes to vibestd.
 

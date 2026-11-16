@@ -229,48 +229,57 @@ const checks: ReadonlyArray<Check> = [
     id: "H12",
     tier: "agent",
     title:
-      "agy (real) as the entry session: a message sent to it while it is idle is typed into agy and completes as an execution of the entry session",
+      "agy (real) as the entry session on herdr: a message sent while it is idle is typed into agy and completes as its execution; a draft left in its input box is cleared and a message sent then arrives alone; a prompt typed in the pane opens an execution, and a message sent while it works waits for its Stop",
     run: async (w) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
       await addAgyPlugin(w, harnesses, binary)
-      const session = `${w.herdrSession}-agy-entry`
-      const repo = await project(w, "agy-entry")
-      await w.startEntry({ harness: "agy", session, cwd: repo, timeoutMs: 240_000 })
+      const a = await agyWorld(w, "herdr", "agy-entry", "agy")
       try {
-        const entry = (await w.entryOf(repo))!
-        const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-        const pane = async () =>
-          (await w.json<{ sessions: Array<{ id: string; address?: { id: string } }> }>(["ls"], { cwd: repo })).sessions
-            .find((s) => s.id === entry)
-            ?.address?.id.split("/")[1] ?? ""
-        await until(
-          "agy idle in the entry pane",
-          async () => {
-            const read = await herdr(socket, "pane.read", { pane_id: await pane(), source: "visible" })
-            const text = JSON.stringify(read)
-            if (text.includes("Yes, I trust this folder"))
-              await herdr(socket, "pane.send_keys", { pane_id: await pane(), keys: ["enter"] })
-            const listed = await w.json<{ sessions: Array<{ id: string; status: string }> }>(["ls"], { cwd: repo })
-            return listed.sessions.find((x) => x.id === entry)?.status === "idle"
-          },
-          180_000,
+        const entry = await a.entryIdle()
+        const answered = async (send: () => Promise<unknown>) => {
+          const done = completed(w, entry)
+          await send()
+          await until("the message's execution completed", () => completed(w, entry) > done, 300_000)
+        }
+        await answered(() => w.ok(["send", entry, "--", PONG(1)], { cwd: a.repo }))
+
+        await a.typeText(entry, "a draft the user left H12-DRAFT")
+        await Bun.sleep(1_500)
+        const before = a.executions(entry).length
+        await answered(() => w.ok(["send", entry, "--", PONG(2)], { cwd: a.repo }))
+        const afterDraft = await a.screen(entry)
+        expect(!afterDraft.includes("H12-DRAFT"), `the draft was not cleared:\n${afterDraft}`)
+        expect(a.executions(entry).length === before + 1, `executions: ${JSON.stringify(a.executions(entry))}`)
+        const handed = rows<{ content: string }>(
+          w,
+          "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+          entry,
+          a.executions(entry).at(-1)!.id,
         )
-        const before = completed(w, entry)
-        await w.ok(["send", entry, "--", PONG(1)], { cwd: repo })
+        expect(handed.length === 1 && handed[0]!.content.includes("PONG-AGY-2"), `handed: ${JSON.stringify(handed)}`)
+
+        await a.typeText(entry, "Run this shell command exactly: sleep 20. Then reply with exactly: H12-SLEPT")
+        await Bun.sleep(1_000)
+        await a.pressKeys(entry, ["enter"])
         await until(
-          "the sent message answered and its execution completed",
-          async () =>
-            completed(w, entry) > before &&
-            JSON.stringify(await herdr(socket, "pane.read", { pane_id: await pane(), source: "recent" })).includes(
-              "PONG-AGY-1",
-            ),
-          300_000,
+          "the typed prompt's execution open",
+          async () => (await a.listed(entry))?.executionState === "open",
+          60_000,
         )
+        const working = a.executions(entry).length
+        const done = completed(w, entry)
+        await w.ok(["send", entry, "--", PONG(3)], { cwd: a.repo })
+        await Bun.sleep(5_000)
+        expect(
+          a.executions(entry).length === working,
+          `a message was typed while the typed prompt ran: ${JSON.stringify(a.executions(entry))}`,
+        )
+        await until("the typed prompt and the message both completed", () => completed(w, entry) >= done + 2, 300_000)
+        const all = a.executions(entry)
+        expect(all[working - 1]?.outcome === "completed", `the typed prompt's execution: ${JSON.stringify(all)}`)
       } finally {
-        await w.stopDaemon()
-        await w.run(w.root, ["herdr", "session", "stop", session])
-        await w.run(w.root, ["herdr", "session", "delete", session])
+        await a.close()
       }
     },
   },

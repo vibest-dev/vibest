@@ -197,7 +197,9 @@ into the guard's shape (`run_command` as `Bash`, `read_file` as `Read`, `write_f
 and the older names agy documents), and `deny` stops the call (agy shows the reason only in the expanded tool row). A
 failed `vibest` answers `deny` from `hook.sh`, but the guard is fail-open where agy is: a hook agy cannot start, or one
 that passes its 30 s timeout, is skipped and the tool runs; and sessions run with `--dangerously-skip-permissions`, so
-nothing else asks first.
+nothing else asks first. agy's `clearKeys` are `ctrl+e` and then `ctrl+u` 40 times: `ctrl+u` empties the line before the
+cursor and, at a line's start, joins it to the line above, so this empties a box of up to 20 lines whose cursor is on its
+last line (a long paste is one `[Pasted text]` line); Esc and Ctrl+C leave agy's box as it is.
 
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,

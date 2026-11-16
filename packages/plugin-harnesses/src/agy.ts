@@ -70,12 +70,15 @@ const agyStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.suc
   }),
 )
 
+const LINE_KILLS = 40
+
 export const agy: Harness.HarnessDefinition = {
   id: "agy",
   binary: "agy",
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "esc",
+  clearKeys: ["ctrl+e", ...Array.from({ length: LINE_KILLS }, () => "ctrl+u")],
   startup: agyStartup,
   replyField: "text",
   ready: "runtime",

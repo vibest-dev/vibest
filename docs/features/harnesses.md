@@ -66,6 +66,13 @@ its `SessionStart`, and the execution completes at agy's `Stop` (no reply text: 
 `vibest send` while it is idle is the next execution. When its pane closes, the next send resumes the same conversation
 with `agy --conversation`.
 
+## H12. An agy entry session takes messages
+
+With agy as the entry session (`vibest --harness agy`) on herdr, a message sent while it is idle is typed into agy and
+completes as an execution of the entry session. A draft the user left in its input box is cleared before a message is
+typed, and the message arrives alone. A prompt the user types in the pane opens an execution at agy's first model call;
+a message sent while it works waits for its `Stop`.
+
 ## H14. vibest's guard checks agy's tool calls
 
 A tool call of an agy session that vibest's guard refuses (a herdr command, another project's folder) does not run, and
