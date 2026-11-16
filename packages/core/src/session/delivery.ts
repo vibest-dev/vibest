@@ -340,7 +340,8 @@ export const make = Effect.gen(function* () {
   ) {
     const now = at ?? (yield* Clock.currentTimeMillis)
     const prompting = yield* Ref.get((yield* sessionLive.track(id)).prompting)
-    yield* db.session.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
+    const activity = text.trim() === ""
+    yield* db.session.startObserved(id, prompting || activity ? undefined : text, now, process, !prompting && activity)
   })
 
   const typeTaken = Effect.fn("Delivery.typeTaken")(function* (id: string, execution: number) {

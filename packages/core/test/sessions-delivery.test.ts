@@ -509,13 +509,30 @@ describe.concurrent("Session", () => {
       const integration = yield* Integration.Service
       const who = { id, entry: false, harness: CURSOR.id }
       yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
-      const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
-      yield* integration.prompt(who, thought)
-      assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
       yield* untilVirtual(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
-      yield* integration.prompt(who, thought)
+      const typedTasks = (yield* herdr.callsTo("send")).filter((c) => c.text !== undefined).length
+      yield* integration.prompt(who, JSON.stringify({ hook_event_name: "afterAgentThought" }))
+      const byUser = (yield* db.session.getSession(id))!
+      assert.strictEqual(byUser.status, "working")
+      assert.strictEqual(executionStateOf(byUser), "open")
+      const userExecution = (yield* db.session.openExecution(id))!
+      yield* sessions.send(id, "queued while the user's prompt runs")
       yield* settled
-      assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
+      assert.strictEqual((yield* herdr.callsTo("send")).filter((c) => c.text !== undefined).length, typedTasks)
+      yield* integration.prompt(who, JSON.stringify({ hook_event_name: "postToolUse" }))
+      yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "user done" }))
+      yield* until(herdr.callsTo("send"), (calls) =>
+        calls.some((c) => c.text?.includes("queued while the user's prompt runs") === true),
+      )
+      const userEnd = (yield* db.session.latestReply(id))!
+      assert.strictEqual(userEnd.execution, userExecution)
+      assert.strictEqual(userEnd.text, "user done")
+      assert.notStrictEqual(yield* db.session.openExecution(id), userExecution)
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({ hook_event_name: "afterAgentResponse", text: "queued done" }),
+      )
+      yield* untilVirtual(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
       yield* sessions.send(id, "next")
       yield* untilVirtual(
         db.session.getSession(id),

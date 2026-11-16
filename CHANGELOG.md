@@ -253,6 +253,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 - Harness definitions take `clearKeys` (plugin authors): vibestd sends them right before each message it types, so the
   input box is empty first, whatever it held. Cursor's are `ctrl+u`: a draft left in a Cursor session's box, or a
   prompt Cursor drew back after an interrupt, is cleared when the next message is typed.
+- A harness report of activity with no prompt text (Cursor's thought and tool reports) opens an execution with no input
+  when none is open, on herdr-core too, so a message sent while a prompt the user typed in a Cursor pane is at work
+  waits for its response instead of being typed in.
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
 - **Antigravity (`agy`) is a harness plugin**: add the folder `harnesses/agy` of the install directory to `plugins` in
   `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an

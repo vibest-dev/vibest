@@ -173,8 +173,10 @@ blocked on herdr-core. What follows from that on herdr-core, which has no state 
   `vibest interrupt`; on herdr the runtime's idle makes it `lost` after 10 s.
 - A resumed Cursor (`--resume` runs no `sessionStart`) has no ready signal: the first message after a resume is typed
   without waiting for one.
-- A prompt a person typed in a Cursor pane opens an execution at its first thought or tool report, so a message sent
-  meanwhile waits for that execution's end; a prompt the person stopped with Ctrl+C gives no end, so the message waits
+- A prompt a person typed in a Cursor pane opens an execution at its first thought or tool report (a report with no
+  prompt text, `userPrompt` giving `{ text: "" }`, opens an execution with no input when none is open, on any runtime),
+  so a message sent meanwhile waits for that execution's end, which the next response closes. A message sent in the
+  short gap between the submit and that first report is still typed into the pane while Cursor works on the prompt; a prompt the person stopped with Ctrl+C gives no end, so the message waits
   until the next response or `vibest interrupt`. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
 Antigravity (`agy`) has no hooks vibest can load for one session, only a session-only `--settings` JSON, so vibest launches it
