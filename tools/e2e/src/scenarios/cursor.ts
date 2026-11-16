@@ -89,7 +89,11 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
   }
   const screen = async (id: string) => {
     if (core) return (await core.hc("read", terminalOf(id))).stdout
-    const read = await herdr(herdrSocket, "pane.read", { pane_id: terminalOf(id), source: "visible", strip_ansi: true })
+    const read = await herdr(herdrSocket, "pane.read", {
+      pane_id: terminalOf(id),
+      source: "visible",
+      strip_ansi: true,
+    }).catch((e: Error) => ({ read: { text: `(no screen: ${e.message})` } }))
     return String((read.read as { text?: string } | undefined)?.text ?? "")
   }
   const typeText = async (id: string, text: string) => {
