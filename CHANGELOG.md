@@ -3,10 +3,19 @@
 Every vibest API is experimental until it is declared stable (`.agents/rules/api-stability.md`): it may change in any
 release. Each release lists what broke, who is affected and how to migrate under "Breaking changes".
 
-## Unreleased
+## 0.0.1-beta.20
 
 ### Breaking changes
 
+- **`vibest run` prints only the new session id** (scripts and skills reading its output): it prints
+  `{"id":"<session id>"}`. What plugins decided about harness and model is in the `routing` field of `vibest ls` and
+  `vibest result`.
+- **`--archive-on-idle` replaces `--archive-on-completion`** (scripts, skills): `--archive-on-completion` is a usage
+  error. The session is archived when its last execution completed, it is idle, and no message it sent or was sent is
+  pending or being delivered; a message that ended dropped or failed no longer blocks it. The check is the builtin
+  plugin `archive-on-idle` (write `"-archive-on-idle"` in `plugins` to turn it off).
+- **Placeholder, to be filled before the release** (breaking changes of the `feat/agy-harness` pull request, for example
+  harness definitions declaring `delivery: typed | pull`): TODO(coordinator).
 - **Moving a project is only an explicit command** (users; RPC clients of `Project.Open`): `vibest` in a checkout with
   no project is always a new project; it no longer looks for a project of the same git remote whose directory is gone,
   and no longer asks `The project moved from X to here, move it? [Y/n]`. `Project.Open` has no `move` payload and no
@@ -199,6 +208,79 @@ release. Each release lists what broke, who is affected and how to migrate under
   it waits on a permission, or a message to it was not delivered. `vibest report`, the RPC `Report`,
   `SessionStatusInfo.result` and the `<agent-result>` message are removed. Migrate: replace `vibest report` with
   `vibest send` and use the renamed reply fields above.
+
+### Added
+
+- Harness definitions take `readyOnStart: "integration"` (plugin authors): a process that starts a new conversation
+  waits for the integration's ready report even when its `ready` is `runtime`. Cursor uses it, so on herdr its first
+  task is no longer typed before cursor-agent has drawn its input box.
+- A Cursor entry session takes queued messages: an entry session is skipped by typed delivery only when its harness
+  pulls its own inbox (Pi, Claude), not when its harness reports its execution ends.
+- Harness definitions take `clearKeys` (plugin authors): vibestd sends them right before each message it types, so the
+  input box is empty first, whatever it held. Cursor's are `ctrl+u`: a draft left in a Cursor session's box, or a
+  prompt Cursor drew back after an interrupt, is cleared when the next message is typed.
+- A harness report of activity with no prompt text (Cursor's thought and tool reports) opens an execution with no input
+  when none is open, on herdr-core too, so a message sent while a prompt the user typed in a Cursor pane is at work
+  waits for its response instead of being typed in.
+- `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
+- **Antigravity (`agy`) is a harness plugin**: add the folder `harnesses/agy` of the install directory to `plugins` in
+  `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an
+  execution when the runtime reports idle, with no reply text) and has no vibest pre-tool guard. For plugin authors,
+  `HarnessDefinition.subscription` is now called with the definition's `binary` as its second argument.
+- `vibest events [--session <id>] [--follow] [--after <seq>]` prints the event log as JSON lines (new RPC `Events`,
+  user only, not forwarded to other machines). Without `--follow` it ends at the end of the log as it was when the
+  command started; `--session <id> --after <seq>` resumes one session's facts after the last `seq` you saw.
+- A plugin folder whose `package.json` has `name` and `exports` loads the file `./server` (else `.`) names. A plugin
+  whose bare import is not installed loads by itself once the package is installed; no edit and no vibestd restart.
+- `ctx.event.subscribe` streams the ledger's facts to plugins; plugins take the Promise form `{ id, setup }` too.
+- `VIBEST_LOG_LEVEL` (`DEBUG`, `INFO`, `WARN`, `ERROR`, any case; `INFO` by default) sets the minimum level of vibestd
+  and CLI logs.
+- **Placeholder, to be filled before the release** (the `feat/agy-harness` pull request: what changes for Antigravity
+  users and harness plugin authors): TODO(coordinator).
+
+### Changed
+
+- Cursor sessions start with `--force`: Cursor no longer asks "Run this command?" before a shell call in a session
+  vibest started, whatever approval mode the user set for Cursor; vibest's guard still refuses what vibest forbids
+  (herdr, another project's folder).
+- vibestd writes `vibestd.log` itself. A foreground vibestd prints that path, then its standard output and error are the file. When the file is over 10 MiB, the process that takes the start lock keeps the last 5 MiB, from the next line, and does not trim again until the next start. A start that finds vibestd already running does not trim.
+- The entry session's row in `vibest ls` (and `--json`) now shows the git state of its directory and the repository
+  root git reports for it, like any session working in that directory; it used to show no git state and its directory
+  as the repository root.
+- vibestd stops within 10 seconds (plus a 1.5 s log flush) when asked to stop by SIGTERM, SIGINT, a terminal hangup or
+  `vibest daemon restart`, even if a layer such as a plugin teardown never finishes: it logs and prints the layers
+  still releasing, with how long each has been, and exits; a second signal exits at once. The start and readiness waits
+  of `vibest daemon` and `vibest daemon restart` grew from 10 s to 21.5 s so a replacement outlasts that deadline.
+- vibestd and CLI logs are logfmt lines (`timestamp level run=<8 hex> <message fields> cause <spans>`), one line per
+  entry with the cause and span durations; scripts matching the old log text must match the new lines.
+- Pi sessions load two extensions: tool grouping and compact user messages moved into their own `presentation.mjs`
+  beside the session reporting, guard and inbox extension.
+- A runtime's `events` stream begins with `Runtime.eventsFrom(pubsub)` (plugin authors writing a runtime): core
+  subscribes again, with a 1 s to 30 s backoff, when the stream fails; terminal state changes of that runtime are no
+  longer lost until vibestd restarts.
+- `POST /session/ready` refuses a malformed body with 400 `InvalidRequestError` (harness integration authors); `{}` and
+  `{ "pid": <number> }` still record readiness.
+
+### Fixed
+
+- An archive that keeps the worktree (a `--share` session or a foreign process still works there) ends the session
+  once its terminal is closed; reconcile no longer posts the same "was being archived when vibestd stopped" notice
+  again and again. `processes` in the result comes from the session's own recorded processes.
+- `vibest project move` moves the sessions' directories of a project whose path has characters outside the Basic
+  Multilingual Plane (for example an emoji).
+- A plugin watch that gets a nameless event rescans the directory and re-arms after a watcher error; a plugin whose new
+  revision fails to import keeps running its previous one; a plugin that throws synchronously in setup or a hook is
+  isolated from the others.
+- A restart of the entry session while `vibest update` runs under load, one restart owner per session, and launches
+  that clean up on every exit.
+- Live session state follows a rolled-back fact, and a throwing Reactor handler no longer stops the others.
+
+## 0.0.1-beta.19
+
+Entries below were released in 0.0.1-beta.19 under an unreleased heading.
+
+### Breaking changes
+
 - **The database** (users, and anyone reading `vibest.db`): vibestd stores an append-only log of facts and a read model
   projected from it, and applies schema migrations recorded in a `migration` table when it opens the file. It refuses
   a database in the pre-ledger shape (`SchemaMismatch`, the file unchanged): there is no automatic conversion; move it
@@ -250,36 +332,3 @@ release. Each release lists what broke, who is affected and how to migrate under
 - **`Harnesses.List`** (RPC clients, scripts reading it): takes an optional `{ provider }` and each row gains `binary`.
   The Ping capability `harnesses` is removed; the method is part of the protocol. New RPC `Integration.Guard`. Harness
   ids in every RPC are plain strings.
-
-### Added
-
-- Harness definitions take `readyOnStart: "integration"` (plugin authors): a process that starts a new conversation
-  waits for the integration's ready report even when its `ready` is `runtime`. Cursor uses it, so on herdr its first
-  task is no longer typed before cursor-agent has drawn its input box.
-- A Cursor entry session takes queued messages: an entry session is skipped by typed delivery only when its harness
-  pulls its own inbox (Pi, Claude), not when its harness reports its execution ends.
-- Harness definitions take `clearKeys` (plugin authors): vibestd sends them right before each message it types, so the
-  input box is empty first, whatever it held. Cursor's are `ctrl+u`: a draft left in a Cursor session's box, or a
-  prompt Cursor drew back after an interrupt, is cleared when the next message is typed.
-- A harness report of activity with no prompt text (Cursor's thought and tool reports) opens an execution with no input
-  when none is open, on herdr-core too, so a message sent while a prompt the user typed in a Cursor pane is at work
-  waits for its response instead of being typed in.
-- `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
-- **Antigravity (`agy`) is a harness plugin**: add the folder `harnesses/agy` of the install directory to `plugins` in
-  `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an
-  execution when the runtime reports idle, with no reply text) and has no vibest pre-tool guard. For plugin authors,
-  `HarnessDefinition.subscription` is now called with the definition's `binary` as its second argument.
-
-### Changed
-
-- Cursor sessions start with `--force`: Cursor no longer asks "Run this command?" before a shell call in a session
-  vibest started, whatever approval mode the user set for Cursor; vibest's guard still refuses what vibest forbids
-  (herdr, another project's folder).
-- vibestd writes `vibestd.log` itself. A foreground vibestd prints that path, then its standard output and error are the file. When the file is over 10 MiB, the process that takes the start lock keeps the last 5 MiB, from the next line, and does not trim again until the next start. A start that finds vibestd already running does not trim.
-- The entry session's row in `vibest ls` (and `--json`) now shows the git state of its directory and the repository
-  root git reports for it, like any session working in that directory; it used to show no git state and its directory
-  as the repository root.
-- vibestd stops within 10 seconds (plus a 1.5 s log flush) when asked to stop by SIGTERM, SIGINT, a terminal hangup or
-  `vibest daemon restart`, even if a layer such as a plugin teardown never finishes: it logs and prints the layers
-  still releasing, with how long each has been, and exits; a second signal exits at once. The start and readiness waits
-  of `vibest daemon` and `vibest daemon restart` grew from 10 s to 21.5 s so a replacement outlasts that deadline.
