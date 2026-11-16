@@ -88,7 +88,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       assert.strictEqual((yield* Effect.flip(c.Get({ id: "nothing!" })))._tag, "NoSuchSession")
       assert.deepStrictEqual(yield* c.Send({ id: id.slice(0, 12), message: "more" }), { id })
       const sharer = yield* spawner.Spawn({
@@ -145,7 +145,7 @@ describe("vibest.sock", () => {
         [path.basename(worktree)],
         "the repeat's reserved worktree directory went again",
       )
-      yield* until(db.session.getSession(first.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(first.id), (accepted) => accepted)
       const queued = (request: string) =>
         sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'inbox.queued'
           AND json_extract(data, '$.request') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
@@ -179,7 +179,7 @@ describe("vibest.sock", () => {
       const c = asCli(raw, yield* makeRepository)
       const spawner = yield* asEntry(raw, yield* makeRepository)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "cursor", prompt: "work" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* TestClock.adjust("2 seconds")
       yield* raw.ExecutionEnd(
         {
@@ -216,8 +216,8 @@ describe("vibest.sock", () => {
       const prompt = "p".repeat(501)
       const fit = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: exact })
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
-      yield* until(db.session.getSession(fit.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
+      yield* until(db.session.executionAccepted(fit.id), (accepted) => accepted)
       const listed = new Map((yield* c.List({})).sessions.map((w) => [w.id, w]))
       const cut = `${"p".repeat(499)}…`
       const open = { status: "working", summary: "", endedAt: null } as const
@@ -253,7 +253,7 @@ describe("vibest.sock", () => {
       const c = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       assert.deepStrictEqual(yield* c.Peek({ id }), { text: "pane tail" })
       yield* c.Peek({ id, lines: 100_000 })
       assert.deepInclude((yield* herdr.callsTo("read")).at(-1), { lines: 500 })
@@ -315,7 +315,7 @@ describe("vibest.sock", () => {
       const c = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* (yield* FakeRuntime).seedAgent("test/p1")
       const launch = yield* c["Project.EntrySession"]({
         agent: "coordinator",
@@ -471,7 +471,7 @@ describe("vibest.sock", () => {
       const a = yield* asEntry(repo, "p1")
       const b = yield* asEntry(yield* makeRepository, "p2")
       const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         b.Send({ id, message: "x" }),
         b.Interrupt({ id }),
@@ -535,7 +535,7 @@ describe("vibest.sock", () => {
         })
       const a = yield* asEntry(repo, "p1")
       const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       type Client = Effect.Success<typeof client>
       const protectedCalls = (
         c: Client,
@@ -650,7 +650,7 @@ describe("vibest.sock", () => {
       const cli = asCli(raw, repo)
       const spawner = yield* asEntry(raw, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       const session = yield* asSession(raw, id)
       yield* (yield* FakeRuntime).seedAgent("test/p1")
       const entry = (yield* cli["Project.EntrySession"]({
@@ -858,7 +858,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* Ref.set(herdr.reachable, false)
       const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
       assert.strictEqual(failed._tag, "RuntimeUnreachable")

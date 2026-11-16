@@ -451,9 +451,17 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     content: start.firstInput,
                     status: "delivered",
                   })
+                if (start.firstInput !== undefined && resume === undefined)
+                  yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
                 yield* afterCommit(() => void moving.delete(project))
                 if (!movingHere || fresh) yield* dropWaiting(project)
-                return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project, process }
+                return {
+                  sessionId: entryId,
+                  harnessSessionId: resume ?? null,
+                  projectId: project,
+                  process,
+                  firstInput: resume === undefined ? start.firstInput : undefined,
+                }
               }),
             )
           }).pipe(Effect.orDie),

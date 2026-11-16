@@ -90,7 +90,6 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     if (harness === "claude") yield* db.session.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
-    yield* until(db.session.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "open")
     yield* until(db.session.executionAccepted(worker), (accepted) => accepted)
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.session.projectOfSession(sessionId))! }
   })
@@ -277,7 +276,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         harness: "pi",
         prompt: "work",
       })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)

@@ -159,8 +159,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   `--allowedTools` would otherwise swallow the message), agy `--prompt-interactive`. A start never waits for a ready
   report first, and messages to a running process keep their own delivery (typed or pulled). An in-place restart
   carries no message. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
-  the system prompt in a prompt) does not go through `Placement.launching`: it is queued and typed, so agy as the entry
-  session on herdr-core waits the ready timeout and fails `NotReady`.
+  the system prompt in a prompt) is in its launch argv the same way: `startEntry` opens its execution with the
+  process, and `entryCommand` builds the line with `Harness.harnessArgv`.
 - Every start in a new terminal names its process: `VIBEST_PROCESS` (the process row id) is in the environment of every
   terminal vibestd opens, entry sessions included, and an entry session restarted in place types it with its other
   identity variables. A plugin that keeps state per process (agy's root conversation) needs no special case. A

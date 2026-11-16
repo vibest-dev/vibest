@@ -45,7 +45,14 @@ import {
 } from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
-import { projectText, removeSystemPrompt, systemPrompt, writeFirstInput, writeSystemPrompt } from "../system-prompt.ts"
+import {
+  projectText,
+  removeSystemPrompt,
+  systemPrompt,
+  withTask,
+  writeFirstInput,
+  writeSystemPrompt,
+} from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
 
@@ -176,7 +183,7 @@ export const make = Effect.gen(function* () {
 
   const firstText = Effect.fn("Placement.firstText")(function* (session: SessionRow, task: string) {
     return (yield* harnesses.get(harnessIdOf(session))).systemPromptInPrompt
-      ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
+      ? withTask(yield* systemPromptOf(session), task)
       : task
   }, provided)
 
