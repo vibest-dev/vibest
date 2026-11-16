@@ -1,10 +1,12 @@
+import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { compiled, expect, harnesses, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { compiled, expect, harnesses, herdr, row, rows, SESSIONS, Skip, until, type World } from "../world.ts"
 import { addAgyPlugin } from "../world/plugins.ts"
-import { addressOf, isolatedCore } from "./hc.ts"
-import { project } from "./inbox.ts"
+import { hcKey } from "./cursor.ts"
+import { isolatedCore } from "./hc.ts"
+import { dropHerdrSession, project } from "./inbox.ts"
 import { executionState, latest, withSession } from "./integration.ts"
 
 const binaryOf = () => process.env.VIBEST_E2E_AGY_BINARY ?? "agy"
@@ -15,9 +17,92 @@ const signedIn = async (w: World) => {
   const models = await w.run(w.repository, [binary, "--output-format", "json", "models"], { timeoutMs: 120_000 })
   if (models.code !== 0)
     throw new Skip(
-      `${binary} is not signed in (set VIBEST_E2E_AGY_BINARY and AGY_PROFILE to use a wrapper): ${models.stderr.trim()}`,
+      `${binary} is not signed in (set AGYX_PROFILE to the agyx profile to use, and VIBEST_E2E_AGY_BINARY to a wrapper): ${models.stderr.trim()}`,
     )
   return binary
+}
+
+const daemonLog = (w: World) => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
+
+type Runtime = "herdr" | "hc"
+
+export const agyWorld = async (w: World, runtime: Runtime, name: string, entry: "pi" | "agy") => {
+  const repo = await project(w, name)
+  const session = `${w.herdrSession}-${name}`
+  const herdrSocket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+  const core = runtime === "hc" ? await isolatedCore(w, w.config.pi, name) : undefined
+  if (core) w.ownRuntimes.add("hc")
+  const placement = core
+    ? { runtime: "hc", extra: ["--runtime", "hc"], hc: { run: core.hc }, name: `${name}-entry` }
+    : { session }
+  if (entry === "pi") await w.entry({ cwd: repo, ...placement })
+  else {
+    await w.ok(["daemon"], { cwd: repo })
+    await w.startEntry({ harness: "agy", cwd: repo, timeoutMs: 240_000, ...placement })
+  }
+  const terminalOf = (id: string) => {
+    const at =
+      (
+        JSON.parse(row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, id)?.r ?? "{}") as {
+          id?: string
+        }
+      ).id ?? ""
+    return core ? at.slice(0, at.indexOf("@")) : (at.split("/")[1] ?? "")
+  }
+  const screen = async (id: string) => {
+    if (core) return (await core.hc("read", terminalOf(id))).stdout
+    const read = await herdr(herdrSocket, "pane.read", {
+      pane_id: terminalOf(id),
+      source: "visible",
+      strip_ansi: true,
+    }).catch((e: Error) => ({ read: { text: `(no screen: ${e.message})` } }))
+    return String((read.read as { text?: string } | undefined)?.text ?? "")
+  }
+  const typeText = async (id: string, text: string) => {
+    if (core) {
+      const r = await core.hc("keys", terminalOf(id), ...[...text].map(hcKey))
+      expect(r.code === 0, `hc keys: ${r.stderr}${r.stdout}`)
+    } else await herdr(herdrSocket, "pane.send_text", { pane_id: terminalOf(id), text })
+  }
+  const pressKeys = async (id: string, keys: ReadonlyArray<string>) => {
+    if (core) {
+      const r = await core.hc("keys", terminalOf(id), ...keys)
+      expect(r.code === 0, `hc keys: ${r.stderr}${r.stdout}`)
+    } else await herdr(herdrSocket, "pane.send_keys", { pane_id: terminalOf(id), keys })
+  }
+  const argv = async (id: string) => {
+    if (core) return (await core.hc("get", terminalOf(id), "--json")).stdout
+    const info = await herdr(herdrSocket, "pane.process_info", { pane_id: terminalOf(id) })
+    return JSON.stringify(info)
+  }
+  const listed = async (id: string) =>
+    (
+      await w.json<{ sessions: Array<{ id: string; status: string; executionState: string }> }>(["ls"], { cwd: repo })
+    ).sessions.find((e) => e.id === id)
+  const entryIdle = async () => {
+    const id = (await w.entryOf(repo))!
+    await until(
+      "agy idle in the entry pane",
+      async () => {
+        if ((await screen(id)).includes("Yes, I trust this folder")) await pressKeys(id, ["enter"])
+        return (await screen(id)).includes("for shortcuts")
+      },
+      180_000,
+    )
+    return id
+  }
+  const executions = (id: string) =>
+    rows<{ id: number; outcome: string | null }>(
+      w,
+      "SELECT id, outcome FROM execution WHERE session_id = ? ORDER BY id",
+      id,
+    )
+  const close = async () => {
+    await w.stopDaemon()
+    if (core) await core.stop()
+    else await dropHerdrSession(w, session)
+  }
+  return { repo, core, session, terminalOf, screen, typeText, pressKeys, argv, listed, entryIdle, executions, close }
 }
 
 const completed = (w: World, id: string) =>
@@ -83,7 +168,7 @@ const checks: ReadonlyArray<Check> = [
     id: "H10",
     tier: "agent",
     title:
-      "agy (real): vibest run agy completes its execution when agy goes idle, with no reply text and the conversation id recorded; a send is the next execution; after its pane closes a send resumes the same conversation (it still knows the word it was given)",
+      "agy (real): vibest run agy completes its execution at agy's Stop hook, with no reply text and the conversation id recorded from its SessionStart; a send is the next execution; after its pane closes a send resumes the same conversation (it still knows the word it was given)",
     run: async (w, evidence) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
@@ -98,6 +183,10 @@ const checks: ReadonlyArray<Check> = [
         )
         const first = await latest(w, id)
         expect(first?.status === "completed" && first.message === "", `the first result: ${JSON.stringify(first)}`)
+        expect(
+          (await daemonLog(w)).includes(`execution end ${id} (agy, completed)`),
+          "the execution did not end at agy's Stop hook",
+        )
         await until(
           "the conversation id",
           () =>
@@ -186,54 +275,35 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "H11",
+    id: "H13",
     tier: "agent",
     title:
-      "agy (real) on herdr-core: its session-only status line reports working while it answers and idle after, as the terminal's status, and the execution completes from those reports",
+      "agy (real) loads vibest's plugin for the session only: its /hooks and /skills name vibest's hooks and skills, the shipped plugin validates, and the launch passes no --settings",
     run: async (w) => {
-      if (!Bun.which("hc")) throw new Skip("hc not on PATH")
       const binary = await signedIn(w)
-      w.ownRuntimes.add("hc")
+      const plugin = path.join(harnesses, "agy", ".agents", "plugins", "vibest")
+      const valid = await w.run(w.repository, [binary, "plugin", "validate", plugin, "--strict", "--json"])
+      expect(valid.code === 0, `agy plugin validate: ${valid.stdout}${valid.stderr}`)
       await w.stopDaemon()
       await addAgyPlugin(w, harnesses, binary)
-      const core = await isolatedCore(w, w.config.pi, "agy-hc")
+      const a = await agyWorld(w, "herdr", "agy-h13", "agy")
       try {
-        const repo = await project(w, "agy-hc")
-        await w.entry({ cwd: repo, runtime: "hc", name: "agy-hc-main", hc: { run: core.hc } })
-        const run = await w.okViaEntry(["run", "agy", "--runtime", "hc", "--", PONG(1)], {
-          cwd: repo,
-          asIs: true,
-          timeoutMs: 120_000,
-        })
-        const id = (JSON.parse(run) as { id: string }).id
-        const terminal = () => {
-          const at = JSON.parse(
-            row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, id)?.runtime ?? "{}",
-          ) as { id?: string }
-          return addressOf(at.id ?? "@")
-        }
-        const statusOf = async () => {
-          const out = (await core.hc("get", terminal(), "--json")).stdout
-          return out.trim() === ""
-            ? "none"
-            : ((JSON.parse(out) as { status?: { state: string } }).status?.state ?? "none")
-        }
-        const seen = new Set<string>()
-        await until(
-          "the execution completed",
-          async () => {
-            seen.add(await statusOf())
-            return completed(w, id) === 1
-          },
-          300_000,
-        ).catch(async (error: Error) => {
-          throw new Error(`${error.message}; terminal states seen: ${[...seen]}\n${await core.screens()}`)
-        })
-        const status = await statusOf()
-        expect(status === "idle" || status === "done", `the terminal ends ${status}`)
-        expect(seen.has("working"), `the terminal was never working: ${[...seen]}`)
+        const entry = await a.entryIdle()
+        const argv = await a.argv(entry)
+        expect(argv.includes("--add-dir") && !argv.includes("--settings"), `agy's argv: ${argv}`)
+        await a.typeText(entry, "/hooks")
+        await a.pressKeys(entry, ["enter"])
+        await until("agy's /hooks", async () => /PreInvocation\s.*1 hook/.test(await a.screen(entry)), 30_000)
+        const hooks = await a.screen(entry)
+        expect(/Stop\s.*1 hook/.test(hooks), `agy's /hooks:\n${hooks}`)
+        await a.pressKeys(entry, ["esc"])
+        await Bun.sleep(1_000)
+        await a.typeText(entry, "/skills")
+        await a.pressKeys(entry, ["enter"])
+        await until("agy's /skills", async () => (await a.screen(entry)).includes("vibest:delegate"), 30_000)
+        expect(completed(w, entry) === 0, "a model turn ran")
       } finally {
-        await core.stop()
+        await a.close()
       }
     },
   },

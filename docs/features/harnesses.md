@@ -59,15 +59,15 @@ config or credential files and never signs in; a CLI that is not signed in is li
 The definition's `binary` can be pointed at a wrapper such as `agyx` by a plugin of the user's own; nothing assumes it is
 named `agy`.
 
-## H10. An agy session runs on the runtime's state
+## H10. An agy session runs on its reports
 
-`vibest run agy -- <task>` starts agy with the task after the system prompt; the execution completes when agy goes idle (no reply
-text: `vibest peek` shows the answer), and the session records agy's conversation id. A `vibest send` while it is idle is the
-next execution. When its pane closes, the next send resumes the same conversation with `agy --conversation`. agy asks its
-own permissions: a tool confirmation shows the session blocked and keeps its execution open.
+`vibest run agy -- <task>` starts agy with the task after the system prompt; the session records agy's conversation id from
+its `SessionStart`, and the execution completes at agy's `Stop` (no reply text: `vibest peek` shows the answer). A
+`vibest send` while it is idle is the next execution. When its pane closes, the next send resumes the same conversation
+with `agy --conversation`.
 
-## H11. agy's state reaches herdr-core
+## H13. agy loads vibest's plugin for the session only
 
-In a terminal on herdr-core, an agy session started by vibest shows working while it works, blocked while a tool confirmation
-or its sign-in shows, and idle after it, as its session-only status line reports them. Nothing is installed in agy and agy's
-settings are not changed.
+An agy session vibest starts loads vibest's hooks and skills from the install's `harnesses/agy` folder (added with
+`--add-dir`); nothing is installed in agy, agy's settings are not read or changed, and vibest sets no status line and no
+title.

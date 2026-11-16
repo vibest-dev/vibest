@@ -1,5 +1,4 @@
 import type { Harness } from "@vibest/plugin/effect"
-import { shellQuote } from "@vibest/schema/layout"
 import { Effect } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
@@ -23,16 +22,13 @@ export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.R
 }
 
 export const agyConversation = (event: Readonly<Record<string, unknown>>): string | undefined =>
-  typeof event.conversation_id === "string" && event.conversation_id !== "" ? event.conversation_id : undefined
+  typeof event.conversationId === "string" && event.conversationId !== "" ? event.conversationId : undefined
 
-const statusLine = (pluginDir: string) =>
-  JSON.stringify({
-    statusLine: {
-      type: "command",
-      command: `sh ${shellQuote(`${pluginDir}/status.sh`)}`,
-      stack_with_default: true,
-    },
-  })
+export const agyExecutionEnd = (event: Readonly<Record<string, unknown>>) => {
+  if (event.hookEventName !== "Stop" || event.continuationActive === true) return undefined
+  const error = typeof event.error === "string" ? event.error : ""
+  return { end: { text: "", conversation_id: agyConversation(event), ...(error !== "" ? { error } : {}) } }
+}
 
 const agyStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.succeed((pane) =>
   Effect.gen(function* () {
@@ -57,8 +53,8 @@ export const agy: Harness.HarnessDefinition = {
     "--dangerously-skip-permissions",
     "--add-dir",
     i.projectDir,
-    "--settings",
-    statusLine(i.pluginDir),
+    "--add-dir",
+    i.pluginDir,
     ...opt("--model", i.model),
   ],
   models: { args: () => ["--output-format", "json", "models"], answer: agyModels },
@@ -68,4 +64,6 @@ export const agy: Harness.HarnessDefinition = {
       Effect.provide(nodePlatform),
     ),
   conversationOf: agyConversation,
+  userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { text: "" } : undefined),
+  executionEnd: agyExecutionEnd,
 }

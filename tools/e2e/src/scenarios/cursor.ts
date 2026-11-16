@@ -55,7 +55,7 @@ export const hookEvents = async (w: World) =>
       }
     })
 
-const hcKey = (c: string) =>
+export const hcKey = (c: string) =>
   c === " " ? "space" : c === ":" ? "shift+;" : /[A-Z]/.test(c) ? `shift+${c.toLowerCase()}` : c
 
 export const cursorWorld = async (w: World, runtime: Runtime, name: string, entry: "pi" | "cursor" = "pi") => {

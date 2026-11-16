@@ -4,44 +4,55 @@ import path from "node:path"
 
 import { afterAll, assert, describe, it } from "vitest"
 
-import { files } from "../src/plugin.ts"
+import { files, PLUGIN } from "../src/plugin.ts"
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-agy-"))
-const script = path.join(dir, "status.sh")
-fs.writeFileSync(script, files["status.sh"]!)
+for (const [name, text] of Object.entries(files)) {
+  fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
+  fs.writeFileSync(path.join(dir, name), text)
+}
+const root = path.join(dir, PLUGIN)
 const bin = path.join(dir, "bin")
 const calls = path.join(dir, "calls.log")
 fs.mkdirSync(bin)
 fs.writeFileSync(path.join(bin, "vibest"), `#!/bin/sh\necho "$* <$(cat)>" >> ${calls}\n`, { mode: 0o755 })
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }))
 
-const callback = (state: string, conversation: string) => {
-  const p = Bun.spawnSync(["sh", script], {
-    env: {
-      PATH: `${bin}:/usr/bin:/bin`,
-      TMPDIR: dir,
-      VIBEST_HOME: dir,
-      VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
-      VIBEST_PROCESS: "3",
-    },
-    stdin: new TextEncoder().encode(JSON.stringify({ agent_state: state, conversation_id: conversation })),
+const agent = { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd", VIBEST_PROCESS: "3" }
+
+const run = (event: string, payload: Record<string, unknown>, env: Record<string, string> = agent) => {
+  fs.rmSync(calls, { force: true })
+  const hooks = JSON.parse(files[`${PLUGIN}/hooks.json`]!).vibest as Record<string, Array<{ command: string }>>
+  const p = Bun.spawnSync(["sh", "-c", hooks[event]![0]!.command], {
+    cwd: root,
+    env: { PATH: `${bin}:/usr/bin:/bin`, TMPDIR: dir, VIBEST_HOME: dir, ...env },
+    stdin: new TextEncoder().encode(JSON.stringify({ hookEventName: event, ...payload }, null, 2)),
   })
-  return { code: p.exitCode, stdout: p.stdout.toString() }
+  return {
+    code: p.exitCode,
+    stdout: p.stdout.toString().trim(),
+    calls: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").split("integration ").length - 1 : 0,
+  }
 }
 
 describe("@vibest/agy", () => {
-  it("the status line prints nothing and reports a conversation id to vibestd once", () => {
-    const first = callback("working", "11111111-1111-4111-8111-111111111111")
-    callback("idle", "11111111-1111-4111-8111-111111111111")
-    assert.deepStrictEqual(first, { code: 0, stdout: "" })
-    assert.deepStrictEqual(fs.readFileSync(calls, "utf8").trim().split("\n"), [
-      `integration prompt --harness agy <{"agent_state":"working","conversation_id":"11111111-1111-4111-8111-111111111111"}>`,
-    ])
+  it("only the process's first conversation reports: a subagent's start and Stop do not", () => {
+    assert.deepStrictEqual(run("SessionStart", { conversationId: "root" }), { code: 0, stdout: "{}", calls: 1 })
+    assert.strictEqual(run("SessionStart", { conversationId: "sub" }).calls, 0)
+    assert.deepStrictEqual(run("Stop", { conversationId: "sub" }), {
+      code: 0,
+      stdout: '{"decision":"allow"}',
+      calls: 0,
+    })
+    assert.strictEqual(run("PreInvocation", { conversationId: "root" }).calls, 1)
+    assert.strictEqual(run("Stop", { conversationId: "root" }).calls, 1)
   })
 
-  it("before a conversation exists nothing is reported", () => {
-    fs.rmSync(calls)
-    callback("authenticating", "")
-    assert.isFalse(fs.existsSync(calls))
+  it("outside a vibest session nothing reaches vibest", () => {
+    assert.deepStrictEqual(run("Stop", { conversationId: "root" }, {}), {
+      code: 0,
+      stdout: '{"decision":"allow"}',
+      calls: 0,
+    })
   })
 })

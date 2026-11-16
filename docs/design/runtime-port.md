@@ -179,16 +179,20 @@ blocked on herdr-core. What follows from that on herdr-core, which has no state 
   short gap between the submit and that first report is still typed into the pane while Cursor works on the prompt; a prompt the person stopped with Ctrl+C gives no end, so the message waits
   until the next response or `vibest interrupt`. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
-Antigravity (`agy`) has no hooks vibest can load for one session, only a session-only `--settings` JSON, so vibest launches it
-with a `statusLine` command (`harnesses/agy/status.sh`, `stack_with_default`). agy runs it on every state change with the state as
-JSON on stdin; it prints nothing, writes OSC 7501 to `/dev/tty` (`working` for working and tool use, `blocked:kind=permission` while
-a tool confirmation shows, `blocked:kind=auth` while signing in, `blocked` while reviewing, `idle`, `error`; `initializing` reports
-nothing) and, once, passes the first non-empty `conversation_id` to `vibest integration prompt --harness agy`, the only way vibestd
-learns what to resume with `--conversation`. Classic herdr recognises the `agy` process and detects its state from the screen, so
-runtime-herdr starts `agy` as herdr's `agy` agent; a wrapper binary such as `agyx` goes through the typed shell path and is still
-recognised by its process name. A session-only status line replaces a status line the user configured, in that process only; vibest
-reads no agy settings to merge it. herdr-core maps `error` to `idle`, so an agy error completes the execution like an answer.
-There is no pre-tool guard in agy: it has no launch-scoped hook loader.
+Antigravity (`agy`) loads a workspace plugin from a folder added with `--add-dir`: vibest adds the install's `harnesses/agy`
+folder, whose `.agents/plugins/vibest/` holds `plugin.json`, `hooks.json`, `hook.sh` and the builtin skills. Its hooks run
+`hook.sh` with the plugin root as working directory: `SessionStart` (agy runs it after the first input, with the
+`conversationId`) and `PreInvocation` (before each model call) go to `vibest integration prompt --harness agy`, which records
+the conversation and opens or accepts the execution as working; `Stop` goes to `vibest integration stop --harness agy`, the
+execution end, `failed` when agy names an `error`, with no reply text (agy's `Stop` carries none; `vibest peek` shows the
+answer). Hooks carry no marker for agy's own subagents, which run their own conversations in the same process: `hook.sh`
+forwards `prompt` and `stop` only for the first conversation the process reports (kept in
+`$TMPDIR/vibest-agy-<session>-<process>`). agy fires no `Stop` when the person presses Esc; on herdr the execution then
+becomes `lost` after 10 s of idle, on herdr-core it stays open until the next `Stop` or `vibest interrupt`. vibest writes
+nothing to the terminal for agy and sets no `--settings`: classic herdr detects agy's state from its screen (as herdr's own
+`agy` agent, or by process name for a wrapper such as `agyx`), and on herdr-core the session's state is the one its hooks
+last reported. The added folder shows in agy's workspace list and the agent can read it, as Claude's `--plugin-dir`
+files.
 
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,

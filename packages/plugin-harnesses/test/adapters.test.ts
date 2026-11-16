@@ -29,16 +29,14 @@ const launchInput: Parameters<Harness.HarnessDefinition["launchArgs"]>[0] = {
 describe("HarnessAdapter", () => {
   const input = launchInput
 
-  it("agy resumes by conversation id and loads its status line for this session only", () => {
-    const args = agy.launchArgs({ ...input, resume: true, sessionId: "conv-1", pluginDir: "/opt/it's" })
-    assert.deepStrictEqual(args.slice(0, 2), ["--conversation", "conv-1"])
-    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!)
-    assert.deepStrictEqual(settings.statusLine, {
-      type: "command",
-      command: "sh '/opt/it'\\''s/status.sh'",
-      stack_with_default: true,
+  it("agy's execution ends at the Stop of a turn that does not continue, failed when agy names an error", () => {
+    const stop = { hookEventName: "Stop", conversationId: "c1", continuationActive: false, error: "" }
+    assert.deepStrictEqual(agy.executionEnd!(stop), { end: { text: "", conversation_id: "c1" } })
+    assert.deepStrictEqual(agy.executionEnd!({ ...stop, error: "quota" }), {
+      end: { text: "", conversation_id: "c1", error: "quota" },
     })
-    assert.notInclude(agy.launchArgs(input), "--conversation")
+    assert.isUndefined(agy.executionEnd!({ ...stop, continuationActive: true }))
+    assert.isUndefined(agy.executionEnd!({ hookEventName: "PreInvocation", conversationId: "c1" }))
   })
 
   it("agy lists models from the JSON the CLI prints after its progress line", () => {

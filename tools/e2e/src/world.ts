@@ -175,7 +175,7 @@ export class World {
         PI_CODING_AGENT_DIR: this.config.pi,
         CLAUDE_CONFIG_DIR: this.config.claude,
         CURSOR_CONFIG_DIR: this.config.cursor,
-        AGY_PROFILE: process.env.AGY_PROFILE,
+        AGYX_PROFILE: process.env.AGYX_PROFILE,
         PATH: [path.dirname(binary), this.login.PATH].join(":"),
         TMPDIR: path.join(this.root, "tmp"),
         HISTFILE: path.join(this.shellDir, ".bash_history"),
