@@ -1,7 +1,7 @@
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { HarnessId } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule } from "effect"
+import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schedule } from "effect"
 
 import { Agents } from "../agents.ts"
 import { App } from "../app.ts"
@@ -28,7 +28,6 @@ import type { HarnessDefinition } from "../plugin/domains.ts"
 import { Processes } from "../processes.ts"
 import { noticeEnvelope } from "../replies.ts"
 import { agentState, type AgentSeen, peekHint, type Runtime, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
-import { Executions } from "./executions.ts"
 import { SessionLive, type Restarted } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement, runtimeEnv } from "./placement.ts"
@@ -98,13 +97,14 @@ export const make = Effect.gen(function* () {
   const scope = yield* Effect.scope
   const { locked } = yield* SessionLocks.Service
   const version = (yield* App.Service).version
-  const { awaitReady, prompt } = yield* Executions.Service
   const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
   const { launching } = yield* Placement.Service
   const reconcile = yield* Reconcile.Service
   const vibestCommand = yield* VibestCommand
 
-  const entryArgv = (entry: SessionRow) =>
+  const continuing = (interrupted: boolean) => (interrupted ? noticeEnvelope(continueText(version)) : undefined)
+
+  const entryArgv = (entry: SessionRow, interrupted: boolean) =>
     Effect.gen(function* () {
       yield* db.session.patchLive(entry.id, { ready: null })
       const root =
@@ -124,6 +124,7 @@ export const make = Effect.gen(function* () {
           projectId: entry.projectId,
           ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
         }),
+        message: continuing(interrupted),
       })
       return (process: number | undefined) =>
         restartArgv(
@@ -154,7 +155,7 @@ export const make = Effect.gen(function* () {
     >
     readonly liveNow: LiveNow
     readonly hint: string
-    readonly onBack: (h: Runtime) => Effect.Effect<Restarted, Effect.Error<ReturnType<typeof prompt>>>
+    readonly interrupted: boolean
   }
 
   const current = (integration: Integration | undefined) =>
@@ -196,7 +197,6 @@ export const make = Effect.gen(function* () {
       const blocked = blockedOf(t.adapter, t.h, t.pid, t.harnessSessionId)
       if (blocked !== undefined) return failed(`not restarted: ${blocked}`)
       const h = t.h!
-      const adapter = t.adapter!
       const pid = t.pid!
       const argv = yield* t.argv
       const signalled = yield* locked(id)(
@@ -212,34 +212,37 @@ export const make = Effect.gen(function* () {
       )
       if (signalled.sent === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
       const ran = yield* h.run!(t.terminal, argv(signalled.process)).pipe(Effect.exit)
-      const cameBack = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const started = yield* startedAgain(id, t.liveNow).pipe(Effect.forkScoped)
-          const ready = yield* awaitReady(h, t.terminal, adapter, id).pipe(Effect.option, Effect.forkScoped)
-          return (yield* Fiber.join(started)) && Option.isSome(yield* Fiber.join(ready))
-        }),
-      )
-      const back = Exit.isSuccess(ran) && cameBack
-      return yield* locked(id)(
-        Effect.gen(function* () {
-          yield* restarting.clear(id)
-          if (!back)
-            return failed(
-              Exit.isFailure(ran)
-                ? `did not start again: ${errorMessage(ran.cause)}${t.hint}`
-                : `did not start again on this vibest within ${Duration.format(RESTART_TIMEOUT)}${t.hint}`,
-            )
-          return yield* t.onBack(h)
-        }),
-      )
+      const back = Exit.isSuccess(ran) && (yield* startedAgain(id, t.liveNow))
+      yield* restarting.clear(id)
+      if (!back)
+        return failed(
+          Exit.isFailure(ran)
+            ? `did not start again: ${errorMessage(ran.cause)}${t.hint}`
+            : `did not start again on this vibest within ${Duration.format(RESTART_TIMEOUT)}${t.hint}`,
+        )
+      return {
+        id,
+        projectId,
+        ok: true,
+        message: `${label} restarted${t.interrupted ? "; its interrupted execution continues" : ""}`,
+      }
     }).pipe(
       Effect.ensuring(restarting.clear(id).pipe(Effect.andThen(checkLater(id)))),
       Effect.catchCause((cause) => Effect.succeed(failed(`not restarted: ${errorMessage(cause)}`))),
     )
   }
 
-  const againArgv = (session: SessionRow) =>
-    Effect.map(launching(session, (session.process?.conversation ?? null) !== null), (plan) => () => plan.argv)
+  const againArgv = (session: SessionRow, interrupted: boolean) => {
+    const message = continuing(interrupted)
+    return Effect.map(
+      launching(
+        session,
+        (session.process?.conversation ?? null) !== null,
+        message === undefined ? undefined : { text: message, onHandover: Effect.void },
+      ),
+      (plan) => () => plan.argv,
+    )
+  }
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
@@ -256,23 +259,10 @@ export const make = Effect.gen(function* () {
         terminal: terminalOf(session),
         pid: pidOf(session),
         harnessSessionId: session.process?.conversation ?? null,
-        argv: againArgv(session),
+        argv: againArgv(session, interrupted),
         liveNow: db.session.getSession(id).pipe(Effect.map(reportedOf)),
         hint: `; ${peekHint(id)}`,
-        onBack: (h) =>
-          Effect.gen(function* () {
-            const projectId = session.projectId
-            if (!interrupted) return { id, projectId, ok: true, message: `${id} restarted` }
-            const missed = yield* prompt(
-              h,
-              (yield* db.session.getSession(id)) ?? session,
-              terminalOf(session),
-              noticeEnvelope(continueText(version)),
-            )
-            return missed === undefined
-              ? { id, projectId, ok: true, message: `${id} restarted; its interrupted execution continues` }
-              : { id, projectId, ok: false, message: `${id} restarted, but ${missed}` }
-          }),
+        interrupted,
       })
     })
 
@@ -298,24 +288,13 @@ export const make = Effect.gen(function* () {
         terminal: place.address,
         pid: pidOf(entry),
         harnessSessionId: entry.process?.conversation ?? null,
-        argv: entryArgv(entry),
+        argv: entryArgv(entry, interrupted),
         liveNow: Effect.gen(function* () {
           const row = yield* db.session.entryOf(projectId)
           return row?.id === id ? reportedOf(row) : undefined
         }),
         hint: "",
-        onBack: (h) =>
-          Effect.gen(function* () {
-            if (!interrupted) return { id, projectId, ok: true, message: `${label} restarted` } satisfies Restarted
-            const row = yield* db.session.getSession(id)
-            const missed =
-              row === undefined
-                ? "it is gone"
-                : yield* prompt(h, row, place.address, noticeEnvelope(continueText(version)))
-            return missed === undefined
-              ? { id, projectId, ok: true, message: `${label} restarted; its interrupted execution continues` }
-              : { id, projectId, ok: false, message: `${label} restarted, but ${missed}` }
-          }),
+        interrupted,
       })
     })
 
@@ -455,7 +434,6 @@ export const node = LayerNode.make({
     Agents.node,
     Bus.node,
     Db.node,
-    Executions.node,
     Harness.node,
     Harnesses.node,
     Placement.node,

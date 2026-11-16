@@ -158,7 +158,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   the ready timeout ends it `not_started`. Every harness has one: Claude, Pi and Cursor take `--` (Claude's
   `--allowedTools` would otherwise swallow the message), agy `--prompt-interactive`. A start never waits for a ready
   report first, and messages to a running process keep their own delivery (typed or pulled). An in-place restart
-  carries no message. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
+  (`vibest daemon restart`, an outdated integration) of a session whose execution was interrupted carries the continue
+  notice as its message, and the process continues the open execution; no restart types anything. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
   the system prompt in a prompt) is in its launch argv the same way: `startEntry` opens its execution with the
   process, and `entryCommand` builds the line with `Harness.harnessArgv`.
 - Every start in a new terminal names its process: `VIBEST_PROCESS` (the process row id) is in the environment of every

@@ -117,10 +117,7 @@ describe("restart in place", () => {
       assert.isFalse(yield* (yield* SessionLive.Service).restarting.has(id))
       assert.notStrictEqual(row.process?.pid, pid)
       assert.strictEqual(executionStateOf(row), "open")
-      assert.include(
-        (yield* herdr.callsTo("send")).map((s) => s.text),
-        noticeEnvelope(continueText(VERSION)),
-      )
+      assert.strictEqual(run!.argv.at(-1), noticeEnvelope(continueText(VERSION)))
       yield* herdr.seedAgent("test/coord")
       yield* writeEnd(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endExecution(id)
@@ -151,10 +148,7 @@ describe("restart in place", () => {
       )
       assert.deepStrictEqual(yield* processes.signaled, [pid])
       assert.lengthOf(yield* herdr.callsTo("run"), 1)
-      assert.lengthOf(
-        (yield* herdr.callsTo("send")).filter((s) => s.text === noticeEnvelope(continueText(VERSION))),
-        1,
-      )
+      assert.strictEqual((yield* herdr.callsTo("run"))[0]!.argv.at(-1), noticeEnvelope(continueText(VERSION)))
     }),
   )
 
@@ -203,7 +197,7 @@ describe("restart in place", () => {
   )
 
   test(
-    "a Pi entry session (inbox subscribe) with an open execution, after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then the continue notice is typed into the execution it continues",
+    "a Pi entry session (inbox subscribe) with an open execution, after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then the continue notice is in the launch argv of the process that continues the execution",
     Effect.gen(function* () {
       const { db, sessions, id: sub, pid } = yield* busyPiSubagent
       const processes = yield* FakeProcesses
@@ -249,15 +243,15 @@ describe("restart in place", () => {
       )
       assert.deepStrictEqual(yield* entryPending(db, projectId), [], "the continuation waits behind nothing")
       assert.strictEqual(yield* db.session.openExecution(entryId), interrupted, "the interrupted execution stays open")
-      assert.include(
-        (yield* herdr.callsTo("send")).map((c) => c.text),
-        noticeEnvelope(continueText(VERSION)),
-        "the continuation is typed into the execution it continues",
-      )
       const entryArgv = (yield* herdr.callsTo("run"))
         .map((c) => c.argv)
         .find((argv) => argv[0] === "env" && argv.includes(`VIBEST_SESSION_ID=${entryId}`))
       assert.ok(entryArgv, "the entry session is restarted by typing env")
+      assert.strictEqual(
+        entryArgv.at(-1),
+        noticeEnvelope(continueText(VERSION)),
+        "the continuation is in the argv of the process that continues the execution",
+      )
       assert.ok(entryArgv!.includes(`VIBEST_SESSION_ID=${entryId}`))
       assert.ok(entryArgv!.includes(`VIBEST_PROCESS=${yield* db.session.currentProcessId(entryId)}`))
       assert.ok(entryArgv!.includes("pi"))
@@ -307,8 +301,8 @@ describe("restart in place", () => {
       yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* db.session.patchLive(id, { ready: 2, pid: 500 })
       yield* held.release()
-      yield* untilVirtual(herdr.callsTo("send").pipe(Effect.map((calls) => calls.map((c) => c.text))), (texts) =>
-        texts.includes(noticeEnvelope(continueText(VERSION))),
+      yield* untilVirtual(herdr.callsTo("run").pipe(Effect.map((calls) => calls.map((c) => c.argv.at(-1)))), (last) =>
+        last.includes(noticeEnvelope(continueText(VERSION))),
       )
       assert.deepStrictEqual(yield* entryPending(db, projectId), [])
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),

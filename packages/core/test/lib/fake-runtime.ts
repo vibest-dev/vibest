@@ -11,10 +11,20 @@ type AgentState = R.AgentState
 
 export const KIND = "herdr"
 
-const withMessage = (argv: ReadonlyArray<string>) => argv[0] === "sh" && argv[2]?.includes(`cat -- "$0"`) === true
+const envPrefix = (argv: ReadonlyArray<string>) =>
+  argv[0] === "env" ? 1 + argv.slice(1).findIndex((part) => !/^[A-Z_]+=/.test(part)) : 0
 
-const execed = (argv: ReadonlyArray<string>): Array<string> =>
-  withMessage(argv) ? [...argv.slice(4), fs.readFileSync(argv[3]!, "utf8")] : [...argv]
+const withMessage = (argv: ReadonlyArray<string>) => {
+  const at = envPrefix(argv)
+  return argv[at] === "sh" && argv[at + 2]?.includes(`cat -- "$0"`) === true
+}
+
+const execed = (argv: ReadonlyArray<string>): Array<string> => {
+  const at = envPrefix(argv)
+  return withMessage(argv)
+    ? [...argv.slice(0, at), ...argv.slice(at + 4), fs.readFileSync(argv[at + 3]!, "utf8")]
+    : [...argv]
+}
 
 export interface FakeAgent {
   readonly vibestSession?: string

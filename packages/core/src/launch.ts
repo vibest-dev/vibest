@@ -46,6 +46,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     E,
     R
   >
+  readonly message?: string | undefined
 }) {
   const definition = yield* definitionOf(input.agent)
   const adapter = yield* (yield* Harnesses.Service).get(input.harness)
@@ -84,7 +85,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     ...(saved.process !== undefined ? { VIBEST_PROCESS: String(saved.process) } : {}),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
-  const message = saved.firstInput === undefined ? undefined : withTask(promptText, saved.firstInput)
+  const message = input.message ?? (saved.firstInput === undefined ? undefined : withTask(promptText, saved.firstInput))
   const argv = PluginHarness.harnessArgv(
     adapter,
     {
