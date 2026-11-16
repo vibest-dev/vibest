@@ -426,7 +426,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S29",
     title:
-      "vibestd killed (kill -9) as soon as a subagent's terminal is placed: its task is in the launch argv, so the model is asked it once, it is the input of one execution, and that completed execution sends nothing",
+      "vibestd killed (kill -9) as soon as a subagent's terminal is placed: its task is in the launch argv, so the model is asked it once and it is the input of one execution, which ends; it sends nothing when it completed, and one notice to its creator when the harness's reports fell in the outage",
     run: async (w) => {
       const p = await piProject(w, "s29")
       try {
@@ -443,14 +443,12 @@ const checks: ReadonlyArray<Check> = [
         await w.killDaemon(daemon)
         await p.startDaemon()
         p.model.release()
-        await until(
-          "one completed execution",
-          () => p.executionEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed",
-          60_000,
-        )
+        await until("its one execution ended", () => p.executionEnds(sub) === 1, 60_000)
         await nothingMoreComesWithin(3_000)
+        expect(p.executionEnds(sub) === 1, `${p.executionEnds(sub)} executions ended`)
         expect(p.model.asked("t1") === 1, `the task was asked ${p.model.asked("t1")} times`)
-        expect(p.sent(sub) === 0, `${p.sent(sub)} rows sent by the session`)
+        const told = p.lastEnd(sub)?.status === "completed" ? 0 : 1
+        expect(p.sent(sub) === told, `${p.sent(sub)} rows sent by the session, outcome ${p.lastEnd(sub)?.status}`)
         const input = row<{ n: number }>(
           w,
           `SELECT count(*) AS n FROM event e JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.inbox'

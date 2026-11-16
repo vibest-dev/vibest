@@ -216,8 +216,11 @@ const checks: ReadonlyArray<Check> = [
         await reached("the entry session's execution on the first message", result("done-zero"))
         await until("herdr finds the subagent in its pane", async () => (await listed(zero))?.agent === "pi", 60_000)
         const subPane = (await listed(zero))!.pane_id
+        await until("the subagent reports the old integration", () => {
+          const row = subRow(zero)
+          return row?.version === old && row.pid !== null
+        })
         const subBefore = subRow(zero)!
-        expect(subBefore.version === old && subBefore.pid !== null, `the subagent's row: ${JSON.stringify(subBefore)}`)
         await until(
           "the entry session reports the old integration and its conversation",
           () => {

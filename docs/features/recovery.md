@@ -40,7 +40,8 @@ launch, with one notice, and removes its worktree, or keeps it and says why.
 ## S29. vibestd killed while a session starts
 
 When vibestd is killed right after a session's terminal is placed, its task is already in the launch argv: the agent
-works on it once, as one execution, and that execution sends nothing.
+works on it once, as one execution, and that execution ends. It sends nothing when it completed; when the harness
+reported its start or end while vibestd was down, the execution ends unfinished and the session's creator gets one notice.
 
 ## S30. Archive cut off
 
