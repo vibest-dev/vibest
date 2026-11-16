@@ -198,7 +198,7 @@ const LONG_TASK = "Run this shell command exactly: sleep 120. Then reply with ex
 const reports = (runtime: Runtime): Check => ({
   id: `I10-${runtime}`,
   tier: "agent",
-  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is typed only after it is ready, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, a message sent while unsent text sits in its input box clears that text and is delivered, vibest interrupt ends the next one interrupted with no notice, after an interrupt right after a typed submission the next message is delivered alone, and the plugin never writes to the terminal; its hook events and screens are recorded`,
+  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is in its launch argv, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, a message sent while unsent text sits in its input box clears that text and is delivered, vibest interrupt ends the next one interrupted with no notice, after an interrupt right after a typed submission the next message is delivered alone, and the plugin never writes to the terminal; its hook events and screens are recorded`,
   run: async (w, evidence) => {
     const c = await cursorWorld(w, runtime, `i10${runtime}`)
     const ids: Array<string> = []
@@ -299,15 +299,15 @@ const reports = (runtime: Runtime): Check => ({
         "the plugin wrote to the terminal",
       )
       keep("fresh, before any input", await c.freshScreen())
-      const timing = row<{ ready: number | null; started: number }>(
+      const timing = row<{ placed: number | null; started: number }>(
         w,
-        `SELECT p.ready_at AS ready, (SELECT min(started_at) FROM execution x WHERE x.session_id = p.session_id) AS started
+        `SELECT p.placed_at AS placed, (SELECT min(started_at) FROM execution x WHERE x.session_id = p.session_id) AS started
           FROM process p WHERE p.session_id = ? ORDER BY p.id LIMIT 1`,
         id,
       )
       expect(
-        timing?.ready != null && timing.ready <= timing.started,
-        `the first task was typed before the session was ready: ${JSON.stringify(timing)}`,
+        timing?.placed != null && timing.started <= timing.placed,
+        `the first task did not start with the process: ${JSON.stringify(timing)}`,
       )
     } finally {
       await w.writeEvidence(path.join(evidence, `I10-${runtime}-screens.txt`), `${screens.join("\n")}\n`)
