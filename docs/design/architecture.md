@@ -576,8 +576,8 @@ entry session's integration delivers it as new input     ← back in the convers
 A skill is a `SKILL.md` instruction document for an Agent. vibest has only builtin skills, `delegate` and
 `pipeline` in `packages/skills/`; it loads no skill directory of the user or of a Project. The build copies them into
 each harness's vibest plugin: Claude Code and Cursor load that plugin (`--plugin-dir`) in every Agent, and each skill's
-description says only the entry session uses it; Pi's vibest extension offers them (`resources_discover`) to the main
-Agent only. Skills the user installed in the CLI itself stay the CLI's own.
+description says only the entry session uses it; Pi's vibest extension offers them (`resources_discover`) to the entry
+session only. Skills the user installed in the CLI itself stay the CLI's own.
 
 | Skill    | The entry session…                                                                                                                                                                                                                                                                                                                                                                      |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
