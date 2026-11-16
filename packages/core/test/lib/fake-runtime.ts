@@ -102,7 +102,6 @@ export class FakeRuntime extends Context.Service<
     }>
     readonly reachable: Ref.Ref<boolean>
     readonly onStarted: Ref.Ref<(session: string) => Effect.Effect<void>>
-    readonly screen: Ref.Ref<string>
     readonly skipPromptUpdates: Ref.Ref<number>
     readonly events: PubSub.PubSub<RuntimeEvent>
   }
@@ -226,7 +225,6 @@ export class FakeRuntime extends Context.Service<
 
       const reachable = yield* Ref.make(true)
       const skipPromptUpdates = yield* Ref.make(0)
-      const screen = yield* Ref.make("pane tail")
 
       const addPane = (paneId: string, workspaceId: string, cwd: string) =>
         Effect.gen(function* () {
@@ -396,7 +394,7 @@ export class FakeRuntime extends Context.Service<
             terminal.id,
             Effect.flatMap(Ref.get(panes), (map): Effect.Effect<string, R.RuntimeError> =>
               HashMap.has(map, terminal.id)
-                ? Ref.get(screen)
+                ? Effect.succeed("pane tail")
                 : new R.RuntimeError({ code: "not_found", message: `read: not_found` }),
             ),
           ),
@@ -552,7 +550,6 @@ export class FakeRuntime extends Context.Service<
         skipPromptUpdates,
         events,
         onStarted,
-        screen,
       })
     })
 

@@ -259,15 +259,6 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         tx(tellSender(recipient, message)).pipe(Effect.orDie),
       ),
 
-      handedInto: Effect.fn("Db.inbox.handedInto")((sessionId: string, execution: number) =>
-        sql<{
-          id: number
-        }>`SELECT id FROM inbox WHERE session_id = ${sessionId} AND execution_id = ${execution} LIMIT 1`.pipe(
-          Effect.map((rows) => rows.length > 0),
-          Effect.orDie,
-        ),
-      ),
-
       queuedBy: Effect.fn("Db.inbox.queuedBy")((sessionId: string, request: string) =>
         reads.queuedBy(sessionId, request).pipe(
           Effect.map((id) => id !== undefined),

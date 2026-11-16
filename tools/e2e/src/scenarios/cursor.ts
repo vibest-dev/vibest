@@ -177,18 +177,12 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
 const TOOL_TASK =
   "First write one short sentence saying you are starting. Then run this shell command exactly: echo i10-tool. Then reply with exactly: pong"
 const EARLY_TASK = "Run this shell command exactly: sleep 60. Then reply with exactly: i10-early"
-const inputLine = (screen: string) =>
-  screen
-    .split("\n")
-    .filter((line) => line.trimStart().startsWith("→ "))
-    .at(-1) ?? ""
-const LONG_COMMAND = "Run this shell command exactly: sleep 120."
-const LONG_REPLY = "Then reply with exactly: slept"
+const LONG_TASK = "Run this shell command exactly: sleep 120. Then reply with exactly: slept"
 
 const reports = (runtime: Runtime): Check => ({
   id: `I10-${runtime}`,
   tier: "agent",
-  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is typed only after it is ready, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, a message sent while unsent text sits in its input box stays queued until the box is empty, vibest interrupt ends the next one interrupted with no notice, an interrupt right after a typed submission leaves the input box empty so the next message is delivered alone, and the plugin never writes to the terminal; its hook events and screens are recorded`,
+  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is typed only after it is ready, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, a message sent while unsent text sits in its input box clears that text and is delivered, vibest interrupt ends the next one interrupted with no notice, after an interrupt right after a typed submission the next message is delivered alone, and the plugin never writes to the terminal; its hook events and screens are recorded`,
   run: async (w, evidence) => {
     const c = await cursorWorld(w, runtime, `i10${runtime}`)
     const ids: Array<string> = []
@@ -230,22 +224,7 @@ const reports = (runtime: Runtime): Check => ({
       await Bun.sleep(1_500)
       keep("text in the box", await c.screen(id))
       const firstEvents = (await hookEvents(w)).length
-      await w.ok(["send", id, "--", LONG_COMMAND], { cwd: c.repo })
-      await Bun.sleep(12_000)
-      const held = await c.screen(id)
-      keep("a message sent while text is in the box", held)
-      expect(
-        c.executions(id).length === 1 && held.includes("draft text left in the box") && !held.includes("sleep 120"),
-        `a message was typed over unsent text: executions ${JSON.stringify(c.executions(id))}`,
-      )
-      expect(
-        (await c.log()).includes("delivery waits: the input box is not empty"),
-        "delivery did not wait for the box",
-      )
-      await c.pressKeys(id, ["ctrl+u"])
-      await Bun.sleep(1_500)
-      keep("after ctrl+u", await c.screen(id))
-      await w.ok(["send", id, "--", LONG_REPLY], { cwd: c.repo })
+      await w.ok(["send", id, "--", LONG_TASK], { cwd: c.repo })
       await until(
         "the second execution at work",
         async () =>
@@ -253,6 +232,12 @@ const reports = (runtime: Runtime): Check => ({
           (await hookEvents(w)).slice(firstEvents).some((e) => e.event === "preToolUse") &&
           (await c.listed(id))?.executionState === "open",
         180_000,
+      )
+      const overDraft = await c.screen(id)
+      keep("a message sent while text was in the box", overDraft)
+      expect(
+        !overDraft.includes("draft text left in the box"),
+        `the draft was not cleared before the message was typed:\n${overDraft}`,
       )
       await Bun.sleep(3_000)
       await w.ok(["interrupt", id], { cwd: c.repo, timeoutMs: 60_000 })
@@ -272,12 +257,7 @@ const reports = (runtime: Runtime): Check => ({
       await w.ok(["interrupt", id], { cwd: c.repo, timeoutMs: 60_000 })
       await until("the early task interrupted", () => c.executions(id)[early]?.outcome != null, 60_000)
       await Bun.sleep(3_000)
-      const afterEarly = await c.screen(id)
-      keep("after an interrupt right after the typed submission", afterEarly)
-      expect(
-        !inputLine(afterEarly).includes("i10-early"),
-        `the interrupted task was left in the input box: ${inputLine(afterEarly)}`,
-      )
+      keep("after an interrupt right after the typed submission", await c.screen(id))
       await w.ok(["send", id, "--", "Reply with exactly: i10-fresh"], { cwd: c.repo })
       await until(
         "the message after the early interrupt answered",
@@ -455,7 +435,7 @@ const conversationAtStart: Check = {
 const entryTakesMessages = (runtime: Runtime): Check => ({
   id: `I14-${runtime}`,
   tier: "agent",
-  title: `Cursor (real model) as the entry session on ${runtime === "hc" ? "herdr-core" : "herdr"}: a message sent while it is idle with an empty box is typed and answered as its execution; one sent while the user's unsent text sits in the box waits, the box unchanged, and is typed alone after that text is submitted and answered; one sent while it works on a prompt typed in its pane is typed only after that work ends, each reply on its own execution`,
+  title: `Cursor (real model) as the entry session on ${runtime === "hc" ? "herdr-core" : "herdr"}: a message sent while it is idle with an empty box is typed and answered as its execution; one sent while the user's unsent text sits in the box clears that text and is typed and answered alone; one sent while it works on a prompt typed in its pane is typed only after that work ends, each reply on its own execution`,
   run: async (w, evidence) => {
     const c = await cursorWorld(w, runtime, "i14", "cursor")
     const screens: Array<string> = []
@@ -485,18 +465,10 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
       await answered("i14-one")
       keep("after the first message", await c.screen(entry))
 
-      await c.typeText(entry, "Reply with exactly: i14-typed")
+      await c.typeText(entry, "Reply with exactly: i14-draft")
       await Bun.sleep(1_500)
-      const before = c.executions(entry).length
+      keep("text in the box", await c.screen(entry))
       await w.ok(["send", entry, "--", "Reply with exactly: i14-two"], { cwd: c.repo })
-      await Bun.sleep(12_000)
-      const held = await c.screen(entry)
-      keep("a message sent while text is in the box", held)
-      expect(
-        c.executions(entry).length === before && held.includes("i14-typed") && !held.includes("i14-two"),
-        `a message was typed over the user's text: executions ${JSON.stringify(c.executions(entry))}`,
-      )
-      await c.pressKeys(entry, ["enter"])
       await answered("i14-two")
       const two = c.executions(entry).at(-1)!
       const handed = rows<{ content: string }>(
@@ -506,10 +478,12 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
         two.id,
       ).map((r) => r.content)
       expect(
-        handed.length === 1 && handed[0]!.includes("i14-two") && !(two.reply ?? "").includes("i14-typed"),
-        `the queued message was not typed alone: ${JSON.stringify({ two, handed })}`,
+        handed.length === 1 && handed[0]!.includes("i14-two") && !(two.reply ?? "").includes("i14-draft"),
+        `the message was not typed alone: ${JSON.stringify({ two, handed })}`,
       )
-      keep("after the submitted text and the queued message", await c.screen(entry))
+      const afterTwo = await c.screen(entry)
+      keep("after a message sent while text was in the box", afterTwo)
+      expect(!afterTwo.includes("i14-draft"), `the draft was not cleared before the message:\n${afterTwo}`)
 
       await c.typeText(entry, "Run this shell command exactly: sleep 25. Then reply with exactly: i14-slept")
       await Bun.sleep(1_000)

@@ -33,15 +33,6 @@ export const keychainProblem = (home: string) =>
 
 const cursorEnvironment = (home: string) => keychainProblem(home).pipe(Effect.provide(nodePlatform))
 
-const EMPTY_INPUT_BOX = /^\s*→ (Plan, search, build anything|Add a follow-up)\s*$/m
-const AT_WORK = /^\s*\S*\s*Working\s*$|ctrl\+c to stop/m
-const INPUT_AREA_LINES = 10
-
-export const cursorInputFree = (screen: string) => {
-  const inputArea = screen.trimEnd().split("\n").slice(-INPUT_AREA_LINES).join("\n")
-  return EMPTY_INPUT_BOX.test(inputArea) && !AT_WORK.test(inputArea)
-}
-
 export const cursor: Harness.HarnessDefinition = {
   id: "cursor",
   binary: "cursor-agent",
@@ -52,7 +43,6 @@ export const cursor: Harness.HarnessDefinition = {
   replyField: "text",
   ready: "runtime",
   readyOnStart: "integration",
-  inputFree: cursorInputFree,
   clearKeys: ["ctrl+u"],
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [

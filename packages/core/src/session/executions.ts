@@ -203,6 +203,9 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(r.blockedNotified, false)
     yield* db.session.setStatus(session.id, state)
     const send = Ref.set(r.prompting, true).pipe(
+      Effect.andThen(
+        adapter.clearKeys === undefined ? Effect.void : h.send(terminal, { keys: [...adapter.clearKeys] }),
+      ),
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )

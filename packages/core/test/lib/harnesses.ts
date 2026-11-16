@@ -95,7 +95,6 @@ export const CURSOR: HarnessDefinition = {
   replyField: "text",
   ready: "runtime",
   readyOnStart: "integration",
-  inputFree: (screen) => !screen.includes("draft"),
   clearKeys: ["ctrl+u"],
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [

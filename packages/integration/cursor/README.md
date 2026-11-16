@@ -16,10 +16,9 @@ vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`)
 - **the execution end**: `afterAgentResponse` goes to `vibest integration stop --harness cursor`; vibestd writes the session's
   result and shows it idle. Cursor does not run a plugin's `stop` hook.
 
-- **a free input box**: vibestd types a queued message only while Cursor's box shows its empty-box placeholder and no
-  work (`Working`, `ctrl+c to stop`); text you left in the box is never typed over, and the message waits for the next
-  check (a send, a state change, a response). When `vibest interrupt` stops a message vibest typed and Cursor draws it
-  back into the box, vibestd empties the box (`ctrl+u`); text you typed yourself is left there.
+- **typed messages**: Cursor cannot take messages through its hooks, so vibestd types them, and empties the input box
+  with `ctrl+u` right before each one. Text you left in the box unsent is cleared, as is a prompt Cursor drew back
+  after an interrupt.
 
 ## Limits (cursor-agent 2026.11.13)
 
@@ -31,7 +30,9 @@ vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`)
 - No permission, question or login wait is reported, so a Cursor session is never shown blocked on herdr-core. Sessions
   start with `--force`, so Cursor's own approval dialog does not hold them; vibest's guard still refuses what vibest
   forbids.
-- After a Ctrl+C with no response on herdr-core nothing wakes delivery; a queued message waits for the next send.
+- A draft you leave in a vibest session's input box is cleared when vibest types the next message there.
+- On herdr-core, after you stop your own prompt with Ctrl+C before Cursor answers, its execution stays open, so a
+  queued message waits until the next response or `vibest interrupt`.
 
 A report that does not reach vibestd fails its hook (never blocking the execution) and appends the error to
 `$VIBEST_HOME/vibestd.log`. Nothing is written to the terminal.

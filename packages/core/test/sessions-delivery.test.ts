@@ -17,13 +17,6 @@ import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo 
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
-const interrupted = (interrupt: Effect.Effect<{ readonly message: string }, unknown>) =>
-  Effect.gen(function* () {
-    const answer = yield* Ref.make<string | undefined>(undefined)
-    yield* Effect.forkChild(interrupt.pipe(Effect.flatMap((r) => Ref.set(answer, r.message))))
-    return yield* untilVirtual(Ref.get(answer), (message) => message !== undefined)
-  })
-
 describe.concurrent("Session", () => {
   test(
     "send while an execution runs is queued, then delivered merged once the session is idle",
@@ -429,28 +422,6 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "a message to an idle session whose input box holds unsent text stays queued, and is typed at the next check once the box is free",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
-      yield* writeEnd(id, "cursor", { text: "status: completed" })
-      yield* herdr.endExecution(id)
-      yield* sessions.check(id)
-      yield* settled
-      const typedNext = herdr.callsTo("send").pipe(Effect.map((calls) => calls.some((c) => c.text?.includes("next"))))
-      yield* Ref.set(herdr.screen, "→ draft text left in the box")
-      yield* sessions.send(id, "next")
-      yield* sessions.check(id)
-      yield* settled
-      assert.isFalse(yield* typedNext)
-      assert.lengthOf(yield* db.inbox.pendingInbox(id), 1)
-      yield* Ref.set(herdr.screen, "pane tail")
-      yield* sessions.check(id)
-      yield* until(typedNext, (typed) => typed)
-    }),
-  )
-
-  test(
     "an entry session whose harness reports its execution ends but does not pull its inbox gets a queued message typed when idle",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -474,24 +445,25 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "vibest interrupt of an execution vibest typed clears what the harness draws back into its input box; one the user typed is left alone",
+    "typed delivery empties the input box with the harness's clear keys right before each message, whatever the box holds; a harness without clear keys gets none",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions } = yield* spawnWorking(yield* makeRepository, "cursor")
-      const cleared = herdr
-        .callsTo("send")
-        .pipe(Effect.map((calls) => calls.filter((c) => c.keys?.includes("ctrl+u") === true).length))
-      yield* Ref.set(herdr.screen, "→ draft drawn back: do it")
-      const first = yield* Effect.forkChild(interrupted(sessions.interrupt(id)))
-      yield* untilVirtual(cleared, (n) => n > 0)
-      yield* Ref.set(herdr.screen, "pane tail")
-      assert.include((yield* Fiber.join(first))!, "interrupted")
-      const afterOwn = yield* cleared
-      yield* sessions.userPrompt(id, "typed by the user")
-      yield* herdr.updateAgent(id, (a) => ({ ...a, status: "working" }))
-      yield* Ref.set(herdr.screen, "→ draft of the user")
-      assert.include((yield* interrupted(sessions.interrupt(id)))!, "interrupted")
-      assert.strictEqual(yield* cleared, afterOwn)
+      const repo = yield* makeRepository
+      const { id, sessions } = yield* spawnWorking(repo, "cursor")
+      yield* writeEnd(id, "cursor", { text: "status: completed" })
+      yield* herdr.endExecution(id)
+      yield* sessions.check(id)
+      yield* settled
+      yield* sessions.send(id, "next")
+      yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("next") === true))
+      const cursorTerminal = (yield* herdr.terminalOf(id))?.id
+      const toCursor = (yield* herdr.callsTo("send")).filter((c) => c.terminal === cursorTerminal)
+      const typed = toCursor.flatMap((c, i) => (c.text === undefined ? [] : [toCursor[i - 1]?.keys]))
+      assert.deepStrictEqual(typed, [["ctrl+u"], ["ctrl+u"]])
+      const pi = yield* spawnWorking(repo, "pi")
+      const piTerminal = (yield* herdr.terminalOf(pi.id))?.id
+      const toPi = (yield* herdr.callsTo("send")).filter((c) => c.terminal === piTerminal)
+      assert.isFalse(toPi.some((c) => c.keys !== undefined))
     }),
   )
 
@@ -549,7 +521,8 @@ describe.concurrent("Session", () => {
         db.session.getSession(id),
         (w) => w !== undefined && executionStateOf(w) === "open" && w.status === "working",
       )
-      assert.include((yield* interrupted(sessions.interrupt(id)))!, "interrupted")
+      const stopped = yield* sessions.interrupt(id)
+      assert.include(stopped.message, "interrupted")
       assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("ctrl+c")))
       const row = (yield* db.session.getSession(id))!
       assert.strictEqual(row.status, "idle")

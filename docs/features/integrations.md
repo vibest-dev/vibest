@@ -51,11 +51,9 @@ reaches the model, and reading in its own Project folder is allowed.
 
 A real cursor-agent on the user's login reports to vibestd on herdr and on herdr-core: its first task is typed only
 after its plugin reported ready, `vibest ls` shows it working during an execution and idle after it, `vibest result` carries
-the reply, a message sent while the user's unsent text sits in its input box waits until the box is empty (it is never
-typed over that text), `vibest interrupt` ends the execution as interrupted with no notice (and, when it lands
-right after vibest typed a message and Cursor draws that message back into its box, empties the box, so the next
-message is delivered alone), and the plugin never writes to the
-terminal.
+the reply, a message sent while the user's unsent text sits in its input box clears that text and is delivered, `vibest
+interrupt` ends the execution as interrupted with no notice (also when it lands right after vibest typed a message, and
+the next message is then delivered alone), and the plugin never writes to the terminal.
 
 Checks `I10-herdr` and `I10-hc` (tier `agent`) script this on the user's Cursor login, and record which hook events
 Cursor dispatched and its screen in each input-box state.
@@ -85,8 +83,7 @@ first reply, `vibest send` reopens it on that conversation and the reply arrives
 
 With Cursor as the entry session (`vibest --harness cursor`), on herdr and on herdr-core, a message sent to it while it
 is idle with an empty input box is typed into Cursor and answered as an execution of the entry session. A message sent
-while the user's unsent text sits in the box waits and leaves the box unchanged; once that text is submitted and
-answered, the message is typed alone. A message sent while Cursor works on a prompt the user typed in its pane is typed
+while the user's unsent text sits in the box clears that text and is typed and answered alone. A message sent while Cursor works on a prompt the user typed in its pane is typed
 only after that work ends, and each reply is on its own execution.
 
 Checks `I14-herdr` and `I14-hc` (tier `agent`) script this on the user's Cursor login.

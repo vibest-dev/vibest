@@ -93,8 +93,9 @@ manages it. Items marked planned are not built.
   sender (a session, or the user). One delivery path, locked per recipient, for entry sessions and subagents alike:
   natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
   is kept and read with `vibest inbox`. A harness that polls (Claude) or subscribes (Pi) pulls its batches when idle;
-  any other harness (Cursor, agy) is typed into, whichever session it runs, and only while the harness definition's
-  `inputFree` (Cursor's: no unsent text and no work on screen) says its input box is free. A row with no session to go to is dropped.
+  any other harness (Cursor, agy) is typed into, whichever session it runs. When the harness definition gives
+  `clearKeys` (Cursor: `ctrl+u`), they are sent right before each typed message, so whatever sits in the input box (a
+  user's draft, a cancelled prompt the harness drew back) is cleared first. A row with no session to go to is dropped.
 - **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, and sessions it started; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its nearest living creator (its parent, else the parent's parent and so on; a creator on another machine through the
@@ -945,8 +946,9 @@ response (an error, Ctrl+C) sends nothing: on a runtime with state it becomes `l
 idle with no end for 10 s, on herdr-core it stays open until the next response or `vibest interrupt`. `sessionStart` records the conversation and reports ready; the definition's `readyOnStart` makes a new
 session wait for it even on herdr, which calls the pane settled before Cursor has drawn its input box. A resumed
 Cursor reports nothing, so it is ready when the runtime shows it settled; on herdr-core, which shows no state, it has
-no ready signal. Before a queued message is typed, the definition's `inputFree` reads the screen: the box is free when
-it shows its empty-box placeholder and neither `Working` nor `ctrl+c to stop`. The hook
+no ready signal. Cursor cannot take messages through its hooks, so they are typed: each typed message is preceded by
+`ctrl+u` (the definition's `clearKeys`), which empties the input box of whatever is there, a draft of the user's
+included. The hook
 script acts only for a vibest session (`VIBEST_SESSION_ID`). The guard hook is fail-closed: a crash, timeout or missing answer
 refuses the call, which Cursor would otherwise let through, so the guard always answers explicitly; `allow` only lets the
 call go on to Cursor's own permission checks. Every Cursor session starts with `--force`, so Cursor's own approval

@@ -55,7 +55,6 @@ export interface HarnessDefinition {
   readonly inbox?: "subscribe" | "poll"
   readonly ready: "integration" | "runtime"
   readonly readyOnStart?: "integration"
-  readonly inputFree?: (screen: string) => boolean
   readonly clearKeys?: ReadonlyArray<string>
   readonly startup?: Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
   readonly checkProvider?: (provider: string | null) => string | undefined

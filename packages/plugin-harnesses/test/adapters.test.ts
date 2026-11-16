@@ -3,7 +3,7 @@ import type { Harness } from "@vibest/plugin/effect"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
-import { cursor, cursorInputFree, cursorModels } from "../src/cursor.ts"
+import { cursor, cursorModels } from "../src/cursor.ts"
 import { pi, piModels } from "../src/pi.ts"
 import { agyLimits } from "../src/subscriptions/agy.ts"
 
@@ -94,36 +94,6 @@ describe("HarnessAdapter", () => {
 
   it("cursor sessions start with --force, so Cursor's own approval dialog never holds a vibest session", () => {
     assert.include(ADAPTERS.cursor.launchArgs(input), "--force")
-  })
-
-  it("cursor's input box is free only when it shows its empty-box placeholder and no work, as on cursor-agent 2026.11.13", () => {
-    const screen = (above: string, box: string, status = "") =>
-      [
-        "  Cursor Agent",
-        "  v2026.11.13-eacade1",
-        "",
-        above,
-        "",
-        "",
-        " ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
-        `  → ${box}${status}`,
-        " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
-        "  Auto · 7.5%                                  Run Everything",
-        "  /private/tmp/w/worktrees/i10/ed28 · 48db834",
-        "",
-      ].join("\n")
-    assert.isTrue(cursorInputFree(screen("", "Plan, search, build anything")), "fresh")
-    assert.isTrue(cursorInputFree(screen("  pong", "Add a follow-up")), "empty after an execution")
-    assert.isTrue(cursorInputFree(screen("  $ sleep 120 Cancelled • 3.6s", "Add a follow-up")), "after an interrupt")
-    assert.isFalse(cursorInputFree(screen("  pong", "draft text left in the box")), "text in the box")
-    assert.isFalse(
-      cursorInputFree(
-        screen("  [Pasted text #1 +62 lines]\n\n\n ⠀⠞ Working", "Add a follow-up", "      ctrl+c to stop"),
-      ),
-      "working",
-    )
-    assert.isFalse(cursorInputFree("  Run this command?\n  > Yes\n    No"), "a dialog")
-    assert.isFalse(cursorInputFree(""), "nothing read")
   })
 
   it("cursor reports its execution end at its response; its stop hook is not one", () => {

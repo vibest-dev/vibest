@@ -250,11 +250,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   task is no longer typed before cursor-agent has drawn its input box.
 - A Cursor entry session takes queued messages: an entry session is skipped by typed delivery only when its harness
   pulls its own inbox (Pi, Claude), not when its harness reports its execution ends.
-- Harness definitions take `clearKeys` (plugin authors): after `vibest interrupt` stops an execution whose input vibest
-  typed, vibestd sends them until the input box reads free, so a harness that draws the cancelled input back (Cursor)
-  does not hold every later message. Cursor's are `ctrl+u`.
-- Harness definitions take `inputFree(screen)` (plugin authors): a queued message is not typed into an idle session
-  whose input box holds unsent text; it waits for the next check. Cursor uses it.
+- Harness definitions take `clearKeys` (plugin authors): vibestd sends them right before each message it types, so the
+  input box is empty first, whatever it held. Cursor's are `ctrl+u`: a draft left in a Cursor session's box, or a
+  prompt Cursor drew back after an interrupt, is cleared when the next message is typed.
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
 - **Antigravity (`agy`) is a harness plugin**: add the folder `harnesses/agy` of the install directory to `plugins` in
   `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an

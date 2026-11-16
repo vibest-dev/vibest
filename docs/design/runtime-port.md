@@ -145,18 +145,11 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   process (one that starts on a recorded conversation) keeps `ready`, for a harness that reports nothing when it
   resumes (Cursor's `sessionStart` runs only for a new conversation). A process that exits before its execution ends
   loses the execution, as today.
-- Free input box: a harness definition may give `inputFree(screen)`, read on the terminal's last 40 lines before a
-  queued message is typed into an idle session. While it says the box is not free (the user left unsent text there,
-  or the harness is still at work), the message stays queued and is tried again at the next wake point that checks the
-  session (a send, a terminal state change, an execution end); there is no timer. Cursor's box is free when its
-  empty-box placeholder is drawn and neither `Working` nor `ctrl+c to stop` is. A first task is not checked: it is
-  typed into a process that has just become ready.
-- Clearing vibest's own input: when `vibest interrupt` stops an execution whose input vibest typed (a task or
-  delivered messages), and the definition gives `clearKeys`, vibestd looks at the screen until the box reads free three
-  times in a row (at most 16 looks, 400 ms apart, under the session lock) and sends `clearKeys` each time it does not.
-  A harness can draw the cancelled input back into its box after the interrupt (Cursor does when the interrupt lands
-  before it starts working), and that text is vibest's, not the user's: left there, `inputFree` would hold every later
-  message. An execution the user typed is left alone. Cursor's `clearKeys` is `ctrl+u`.
+- Empty input box before typing: when a harness definition gives `clearKeys`, vibestd sends them right before it types
+  a message (a first task, delivered messages, a retype), whatever the box holds: a draft the user left there is
+  cleared, as is a cancelled prompt the harness drew back after an interrupt (Cursor does when the interrupt lands
+  before it starts working). A harness that cannot take messages any other way trades the user's unsent draft for
+  messages that always arrive. Cursor's `clearKeys` is `ctrl+u`.
 
 ### Terminal status ownership
 
@@ -180,9 +173,9 @@ blocked on herdr-core. What follows from that on herdr-core, which has no state 
   `vibest interrupt`; on herdr the runtime's idle makes it `lost` after 10 s.
 - A resumed Cursor (`--resume` runs no `sessionStart`) has no ready signal: the first message after a resume is typed
   without waiting for one.
-- A message sent while a person's own prompt runs in a Cursor pane waits for a free input box (`inputFree`); a prompt
-  the person stopped with Ctrl+C gives no execution end, so the message waits for the next wake point (a send, a
-  response). A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
+- A prompt a person typed in a Cursor pane opens an execution at its first thought or tool report, so a message sent
+  meanwhile waits for that execution's end; a prompt the person stopped with Ctrl+C gives no end, so the message waits
+  until the next response or `vibest interrupt`. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
 Antigravity (`agy`) has no hooks vibest can load for one session, only a session-only `--settings` JSON, so vibest launches it
 with a `statusLine` command (`harnesses/agy/status.sh`, `stack_with_default`). agy runs it on every state change with the state as
