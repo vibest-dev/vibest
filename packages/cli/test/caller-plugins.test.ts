@@ -4,6 +4,9 @@ import { callerTarget, entryPlace, specHits, type CallerHit } from "@vibest/core
 import { Builtins, builtinsNode } from "@vibest/core/plugin"
 import type { Caller, RuntimeDefinition } from "@vibest/core/plugin/domains"
 import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
+import { hostReplacements } from "@vibest/platform-bun/test/lib/fakes"
+import { PATH_WITHOUT_HARNESS_CLIS } from "@vibest/platform-bun/test/lib/fakes"
+import { memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { run as runDaemon } from "@vibest/server/daemon"
@@ -11,10 +14,6 @@ import { ConfigProvider, Effect, FileSystem, Layer, Path, PubSub, Queue, Stream 
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
-
-import { hostReplacements } from "./fakes.ts"
-import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
-import { memoryBus } from "./unit-helpers.ts"
 
 const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
   id,

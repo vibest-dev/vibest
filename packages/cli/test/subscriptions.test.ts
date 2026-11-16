@@ -3,6 +3,16 @@ import { Harness } from "@vibest/core/harness"
 import { makePlugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import {
+  agentsLayer,
+  runtimesLayer,
+  subscriptionsLayer,
+  harnessesLayer,
+  makeRepository,
+  runVibest,
+  testLayer,
+} from "@vibest/platform-bun/test/lib/fakes"
+import { memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
 import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
@@ -17,17 +27,6 @@ import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
-
-import {
-  agentsLayer,
-  runtimesLayer,
-  subscriptionsLayer,
-  harnessesLayer,
-  makeRepository,
-  runVibest,
-  testLayer,
-} from "./fakes.ts"
-import { memoryBus } from "./unit-helpers.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const PI_SECRET = "pi-key-do-not-log"

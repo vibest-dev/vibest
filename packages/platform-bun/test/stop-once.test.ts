@@ -4,7 +4,7 @@ import { Drain } from "@vibest/core/drain"
 import { stopOnce } from "@vibest/server/stop"
 import { Deferred, Effect, Fiber, Layer } from "effect"
 
-import { memoryBus } from "./unit-helpers.ts"
+import { memoryBus } from "./lib/unit-helpers.ts"
 
 const drainLayer = Drain.layer.pipe(Layer.provideMerge(memoryBus))
 

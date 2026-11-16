@@ -6,14 +6,6 @@ import { noticeEnvelope } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
 import { CONTINUE, continueText } from "@vibest/core/session/restart"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { VibestCommand } from "@vibest/schema/layout"
-import { PROTOCOL } from "@vibest/schema/version"
-import { Clock, Effect, Fiber, Ref, type Scope } from "effect"
-import { TestClock } from "effect/testing"
-
-import { daemonPlan } from "../src/update.ts"
-import { VERSION } from "../src/version.ts"
 import {
   CLAUDE,
   CURSOR,
@@ -30,7 +22,15 @@ import {
   untilVirtual,
   writeEnd,
   projectOf,
-} from "./fakes.ts"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
+import { Clock, Effect, Fiber, Ref, type Scope } from "effect"
+import { TestClock } from "effect/testing"
+
+import { daemonPlan } from "../src/update.ts"
+import { VERSION } from "../src/version.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () =>

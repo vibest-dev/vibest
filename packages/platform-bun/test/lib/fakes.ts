@@ -25,10 +25,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { commandOf, note } from "../../../tools/reap.ts"
-import { VERSION } from "../src/version.ts"
-import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime } from "./fake-runtime.ts"
+import { commandOf, note } from "../../../../tools/reap.ts"
+export const VERSION = "0.0.0-local"
+import { FakeGit } from "@vibest/core/test/lib/fake-git"
+import { FakeRuntime } from "@vibest/core/test/lib/fake-runtime"
 
 export {
   agentsLayer,
@@ -93,7 +93,7 @@ export const withStdin = (input: string, command: string, args: ReadonlyArray<st
 
 export const PATH_WITHOUT_HARNESS_CLIS = "/usr/bin:/bin"
 
-const mainTs = `${import.meta.dirname}/../src/main.ts`
+const mainTs = `${import.meta.dirname}/../../../cli/src/main.ts`
 
 export const noteRecorded = (daemonInfo: string) =>
   Effect.gen(function* () {

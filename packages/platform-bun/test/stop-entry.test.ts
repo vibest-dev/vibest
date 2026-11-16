@@ -29,7 +29,7 @@ import {
   untilVirtual,
   projectOf,
   processesOn,
-} from "./fakes.ts"
+} from "./lib/fakes.ts"
 
 const served = (options: TestOptions) =>
   Server.layer.pipe(

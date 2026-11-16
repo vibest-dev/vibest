@@ -24,7 +24,7 @@ import {
   testLayer,
   type TestServices,
   wire,
-} from "./fakes.ts"
+} from "./lib/fakes.ts"
 
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),

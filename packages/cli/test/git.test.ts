@@ -13,6 +13,7 @@ import {
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { SessionLive } from "@vibest/core/session/live"
 import { copyIncluded, gitState, mainCheckout } from "@vibest/core/worktree"
+import { tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
 import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
@@ -20,8 +21,6 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
-
-import { tempDirectory } from "./fakes.ts"
 
 const ownGitHome = Layer.effect(
   ChildProcessSpawner.ChildProcessSpawner,

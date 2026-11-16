@@ -10,6 +10,8 @@ import { applyOnly, type Migration, migrations } from "@vibest/core/database/mig
 import * as Projectors from "@vibest/core/database/projectors"
 import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
+import { tempDirectory, EXECUTIONS, projectOf } from "@vibest/platform-bun/test/lib/fakes"
+import { database, session, place } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Catalog, CATALOG_VERSION, type FactType } from "@vibest/schema/event"
 import { ID } from "@vibest/schema/id"
@@ -17,9 +19,6 @@ import { Cause, Effect, Exit, FileSystem, Layer, Path } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
-
-import { tempDirectory, EXECUTIONS, projectOf } from "./fakes.ts"
-import { database, session, place } from "./unit-helpers.ts"
 
 const fact = (
   type: FactType,

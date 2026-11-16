@@ -28,8 +28,8 @@ import {
   until,
   untilVirtual,
   writeEnd,
-} from "./fakes.ts"
-import { asEntry } from "./rpc-helpers.ts"
+} from "./lib/fakes.ts"
+import { asEntry } from "./lib/rpc-helpers.ts"
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
 

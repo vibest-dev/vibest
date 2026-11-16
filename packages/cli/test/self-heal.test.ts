@@ -7,6 +7,16 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
+import {
+  PATH_WITHOUT_HARNESS_CLIS,
+  noteRecorded,
+  pingOf,
+  projectOf,
+  recordedInfo,
+  runVibest,
+  stopRecorded,
+  tempDirectory,
+} from "@vibest/platform-bun/test/lib/fakes"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { PingResult } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -21,16 +31,6 @@ import * as Platform from "#platform"
 
 import { replaceDaemon, type Timing } from "../src/replace.ts"
 import { VERSION } from "../src/version.ts"
-import {
-  PATH_WITHOUT_HARNESS_CLIS,
-  noteRecorded,
-  pingOf,
-  projectOf,
-  recordedInfo,
-  runVibest,
-  stopRecorded,
-  tempDirectory,
-} from "./fakes.ts"
 
 const typed = (text: string, terminal = true) =>
   Stdio.layerTest({

@@ -8,6 +8,28 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
 import { unwrapped } from "@vibest/core/replies"
+import {
+  callerPlugin,
+  FakeGit,
+  runVibest,
+  tempDirectory,
+  until,
+  untilVirtual,
+  yieldToIo,
+} from "@vibest/platform-bun/test/lib/fakes"
+import {
+  A_ENTRY,
+  COMMIT,
+  entryOn,
+  Net,
+  onB,
+  peerSession,
+  REMOTE,
+  REPOSITORY,
+  repoStack,
+  served,
+  twoMachines,
+} from "@vibest/platform-bun/test/lib/machines-fakes"
 import { PEER_BY_USER, peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
@@ -23,20 +45,6 @@ import * as Platform from "#platform"
 
 import { teardown } from "../src/cli.ts"
 import { pipeStdio } from "../src/connect.ts"
-import { callerPlugin, FakeGit, runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "./fakes.ts"
-import {
-  A_ENTRY,
-  COMMIT,
-  entryOn,
-  Net,
-  onB,
-  peerSession,
-  REMOTE,
-  REPOSITORY,
-  repoStack,
-  served,
-  twoMachines,
-} from "./machines-fakes.ts"
 
 type Stack = Context.Context<Layer.Success<ReturnType<typeof served>>>
 

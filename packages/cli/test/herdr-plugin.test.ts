@@ -8,6 +8,15 @@ import { Db } from "@vibest/core/database/db"
 import { terminalOf } from "@vibest/core/database/db-rows"
 import { Project } from "@vibest/core/project"
 import {
+  FakeRuntime,
+  makeRepository,
+  projectOf,
+  runVibest,
+  stopRecorded,
+  tempDirectory,
+  testLayer,
+} from "@vibest/platform-bun/test/lib/fakes"
+import {
   ACTIONS,
   formatUsage,
   type HerdrDaemon,
@@ -29,7 +38,6 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { ARCHIVE_ROOTS, copyHerdrPlugin } from "../scripts/archive-layout.ts"
-import { FakeRuntime, makeRepository, projectOf, runVibest, stopRecorded, tempDirectory, testLayer } from "./fakes.ts"
 
 const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({
   workspaceId: undefined,

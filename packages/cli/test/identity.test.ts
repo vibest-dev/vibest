@@ -1,13 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import { HOST_ID_TIMEOUT, ioregUuid, loadIdentity, readHostId, shortHostName } from "@vibest/core/identity"
+import { runVibest, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { ID } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { Duration, Effect, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
-
-import { runVibest, tempDirectory } from "./fakes.ts"
 
 const host = (id: string | undefined, name = "mac-mini.local") => ({ name, id: Effect.succeed(id), pid: 4242 })
 

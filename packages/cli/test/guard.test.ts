@@ -7,6 +7,16 @@ import type { RuntimesShape } from "@vibest/core/plugin/domains"
 import { Project } from "@vibest/core/project"
 import { type Runtime, Runtimes } from "@vibest/core/runtimes"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
+import {
+  agentsLayer,
+  FakeGit,
+  HARNESSES,
+  harnessesLayer,
+  makeRepository,
+  runVibest,
+  tempDirectory,
+  testLayer,
+} from "@vibest/platform-bun/test/lib/fakes"
 import { Forbidden } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { Host } from "@vibest/server/daemon"
@@ -35,16 +45,6 @@ import { Commands, entryFlags } from "../src/commands/commands.ts"
 import { Runtime as CliRuntime } from "../src/framework/runtime.ts"
 import { Spec } from "../src/framework/spec.ts"
 import { Host as CliHost } from "../src/host.ts"
-import {
-  agentsLayer,
-  FakeGit,
-  HARNESSES,
-  harnessesLayer,
-  makeRepository,
-  runVibest,
-  tempDirectory,
-  testLayer,
-} from "./fakes.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const RUNTIME_PROGRAMS = new Set(["herdr"])

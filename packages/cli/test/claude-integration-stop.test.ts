@@ -2,6 +2,7 @@ import net from "node:net"
 
 import { assert, layer } from "@effect/vitest"
 import { HOOK_RETRY_DELAY } from "@vibest/client/client"
+import { tempDirectory, untilVirtual } from "@vibest/platform-bun/test/lib/fakes"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
@@ -11,7 +12,6 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { integrationPrompt, integrationReady, integrationStop } from "../src/integration.ts"
-import { tempDirectory, untilVirtual } from "./fakes.ts"
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationStop("claude", raw).pipe(
