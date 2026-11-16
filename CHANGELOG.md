@@ -13,7 +13,8 @@ release. Each release lists what broke, who is affected and how to migrate under
   `moved` or `candidates` result, `ProjectMoved` is no longer an RPC error and `moveCandidates` is gone. To move a
   project run `vibest project move <old-directory>` inside the repository at its new place (new RPC `Project.Move`,
   user only): the project keeps its id, memories and sessions; it is refused when no project is recorded at the old
-  directory, a project is already recorded here, or the old directory still exists.
+  directory, a project is already recorded here, or the old directory still exists. `PROTOCOL` is now 11: a vibest
+  and a vibestd of different protocols refuse each other, so run `vibest update` after upgrading.
 - **Agent hooks change the event instead of returning a decision** (plugin authors): `agent.hook("start.before" | "fail", callback)`
   callbacks return nothing (`Effect<void, …>`, Promise `void`) and assign to the event (their own deep copy of it): `start.before` events have
   mutable `prompt`, `harness`, `provider`, `model`, `machine` and `runtime`; `fail` events have a mutable `move`.

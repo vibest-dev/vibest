@@ -52,15 +52,27 @@ export const resolveProject = Effect.fn("Project.resolveProject")(function* (db:
   return { id, directory: located.root }
 })
 
+const resolveThroughExistingAncestor = Effect.fn("Project.resolveThroughExistingAncestor")(function* (target: string) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const resolve = (current: string, suffix: string[]): Effect.Effect<string> =>
+    fs.realPath(current).pipe(
+      Effect.map((real) => path.join(real, ...suffix)),
+      Effect.catch(() => {
+        const up = path.dirname(current)
+        return up === current ? Effect.succeed(target) : resolve(up, [path.basename(current), ...suffix])
+      }),
+    )
+  return yield* resolve(target, [])
+})
+
 export const moveProjectHere = Effect.fn("Project.moveProjectHere")(function* (
   db: Db.Interface,
   located: Located,
   from: string,
 ) {
   const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const parent = yield* fs.realPath(path.dirname(from)).pipe(Effect.orElseSucceed(() => path.dirname(from)))
-  const old = path.join(parent, path.basename(from))
+  const old = yield* resolveThroughExistingAncestor(from)
   const recorded = yield* db.project.projectAt(old)
   if (recorded === undefined || recorded.directory !== old)
     return yield* new MoveRefused({ message: `no project is recorded at ${old}` })

@@ -500,6 +500,37 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
       }),
   )
 
+  it.effect("project move finds the recorded project through a symlinked spelling of a parent that moved too", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* tempDirectory("vibest-move-")
+      const home = path.join(dir, "home")
+      yield* Effect.gen(function* () {
+        const db = yield* Db.Service
+        const physical = yield* fs.realPath(dir).pipe(Effect.map((real) => path.join(real, "physical")))
+        const repo = path.join(physical, "parent", "repo")
+        yield* fs.makeDirectory(repo, { recursive: true })
+        yield* sh(repo, "init", "-q", "-b", "main")
+        const first = yield* Effect.flatMap(locateProject(repo), (located) => resolveProject(db, located))
+        const alias = path.join(dir, "alias")
+        yield* fs.symlink(physical, alias)
+        const moved = path.join(dir, "elsewhere", "repo")
+        yield* fs.makeDirectory(path.dirname(moved))
+        yield* fs.rename(path.join(physical, "parent", "repo"), moved)
+        yield* fs.rename(path.join(physical, "parent"), path.join(physical, "moved-parent"))
+        const done = yield* Effect.flatMap(locateProject(moved), (located) =>
+          moveProjectHere(db, located, path.join(alias, "parent", "repo")),
+        )
+        assert.strictEqual(done.id, first.id)
+        assert.strictEqual(done.from, repo)
+      }).pipe(
+        Effect.provide(database(path.join(dir, "vibest.db"))),
+        Effect.provide(Layer.effect(Layout, Layout.make(home))),
+      )
+    }),
+  )
+
   it.effect(
     "a move cut off before it is recorded leaves vibest's worktrees repaired and the project where it was; running it again moves it",
     () =>
