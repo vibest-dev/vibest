@@ -16,9 +16,10 @@ export const addCursorPlugin = (w: { readonly vibestHome: string }, harnesses: s
 export const addAgyPlugin = async (w: { readonly vibestHome: string }, harnesses: string, binary: string) => {
   const plugins = [path.join(harnesses, "agy")]
   if (binary !== "agy") {
-    const file = path.join(w.vibestHome, "agy-binary.js")
+    const dir = path.join(w.vibestHome, "agy-binary")
+    await fs.mkdir(dir, { recursive: true })
     await fs.writeFile(
-      file,
+      path.join(dir, "index.js"),
       `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({
@@ -27,7 +28,7 @@ export default Plugin.define({
 })
 `,
     )
-    plugins.push(file)
+    plugins.push(dir)
   }
   await configurePlugins(w, (existing) => [...existing, ...plugins])
 }

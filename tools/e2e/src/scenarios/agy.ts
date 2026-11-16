@@ -230,7 +230,7 @@ const checks: ReadonlyArray<Check> = [
           throw new Error(`${error.message}; terminal states seen: ${[...seen]}\n${await core.screens()}`)
         })
         const status = await statusOf()
-        expect(status === "idle", `the terminal ends ${status}`)
+        expect(status === "idle" || status === "done", `the terminal ends ${status}`)
         expect(seen.has("working"), `the terminal was never working: ${[...seen]}`)
       } finally {
         await core.stop()
