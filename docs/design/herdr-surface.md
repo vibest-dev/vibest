@@ -242,15 +242,13 @@ fragile.
   --session <s>` spawned detached, so the server is its own session leader, as herdr saved machines require. `near`
   places the terminal only while its pane exists; a stale one (closed while vibestd was down, or herdr restarted)
   falls back to the Project's workspace: the checkout's worktree group, else a workspace with a pane at that path
-  (symlinks resolved), else a new one. `tab.create` and `pane.split` are the only places env can be set. A command
-  that is not a harness is typed into the shell after it drew (up to 30 s), not exec'd, so the terminal stays at
+  (symlinks resolved), else a new one. `tab.create` and `pane.split` are the only places env can be set. Every
+  command, a harness included, is typed into the shell after it drew (up to 30 s): vibest never uses `agent.start`,
+  whose arguments cannot carry a line break, so a first message in the argv could not reach it. A harness line
+  `exec`s the harness, so herdr finds it by process name; any other command is not exec'd, so the terminal stays at
   its shell and `run` can start another there. Anything that fails after the pane exists closes it again: core only
   closes what `open` returned, and a harness that dies at start (its usage limit, a bad flag) must not leave an
   empty shell.
-- **agent.start.** herdr types the harness once the shell is idle. After a harness exits herdr keeps its name on
-  that pane until it sees the agent gone, so `agent_name_taken` on the same pane and `agent_pane_busy` are retried
-  (40 times, 500 ms apart). Without herdr's integration for that harness a start never settles; the error and
-  `vibest doctor` point at `herdr integration status` and `herdr integration install <harness>`.
 - **send.** herdr refuses `agent.prompt` (`agent_not_ready`) until it marks the agent ready, and it marks it only
   when something reads it (`agent.get`), never on `agent.prompt`; a harness that reports its own state (herdr's Pi
   hook) sends no further event once idle. A prompt sent before the mark works, but herdr then drops the name when
@@ -258,7 +256,7 @@ fragile.
   reads the agent and then prompts, for about 30 s; an agent never marked gets the text as one bracketed paste and
   Enter (`pane.send_input`), as `agent.prompt` sends it. `pane.send_text` reaches a TUI as keystrokes in chunks,
   and a long multi-line text loses its first chunks.
-- **run.** A harness in a named terminal goes through `agent.start` again. Any other command is typed only once
+- **run.** A command is typed only once
   every foreground process of the pane is a shell: its own, or one a wrapper left (`sh -c '"$@"; exec $SHELL'`).
   `process` counts as running anything in the foreground besides the pane's shell, and a named agent whose launch is
   still pending: the shell may still be starting, so no agent process exists yet, and a reconcile must not read that

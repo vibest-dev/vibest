@@ -258,7 +258,7 @@ const make = Effect.gen(function* () {
       )
       if (opened === undefined) return yield* Effect.die("launch opened no terminal")
       const pane = opened
-      yield* run(pane, Launch.restartArgv(command)).pipe(
+      yield* run(pane, Launch.launchLine(command)).pipe(
         Effect.mapError((error) => new LaunchFailed({ message: error.message })),
       )
       const routing =

@@ -36,7 +36,7 @@ import { Git } from "../git.ts"
 import { encodeCommand, Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
-import { definitionIn, messageFromFile } from "../launch.ts"
+import { definitionIn, launchLine, messageFromFile } from "../launch.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
@@ -195,7 +195,8 @@ export const make = Effect.gen(function* () {
     resume: boolean,
     first?: FirstInput,
   ) {
-    const argv = yield* launchArgv(session, resume, first?.text)
+    const [file, ...args] = yield* launchArgv(session, resume, first?.text)
+    const argv = (process: number | undefined) => launchLine({ file: file!, args, env: vibestEnv(session, process) })
     const execution = yield* Ref.make<number | undefined>(undefined)
     const beforeStart =
       first === undefined
@@ -275,7 +276,7 @@ export const make = Effect.gen(function* () {
     input: {
       readonly project: string
       readonly cwd: string
-      readonly argv: ReadonlyArray<string>
+      readonly argv: (process: number | undefined) => ReadonlyArray<string>
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
       readonly env?: Readonly<Record<string, string>> | undefined
@@ -292,7 +293,7 @@ export const make = Effect.gen(function* () {
       .open({
         project: input.project,
         cwd: input.cwd,
-        argv: input.argv,
+        argv: input.argv(started),
         env: { ...input.env, ...vibestEnv(session, started) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),

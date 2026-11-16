@@ -21,10 +21,10 @@ const withMessage = (argv: ReadonlyArray<string>) => {
 
 const execed = (argv: ReadonlyArray<string>): Array<string> => {
   const at = envPrefix(argv)
-  return withMessage(argv)
-    ? [...argv.slice(0, at), ...argv.slice(at + 4), fs.readFileSync(argv[at + 3]!, "utf8")]
-    : [...argv]
+  return withMessage(argv) ? [...argv.slice(at + 4), fs.readFileSync(argv[at + 3]!, "utf8")] : argv.slice(at)
 }
+
+const envPairs = (argv: ReadonlyArray<string>) => argv.slice(1, envPrefix(argv))
 
 export interface FakeAgent {
   readonly vibestSession?: string
@@ -64,7 +64,7 @@ export interface RuntimeCalls {
   readonly state: { readonly terminal: string }
   readonly session: { readonly terminal: string }
   readonly close: { readonly terminal: string }
-  readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string> }
+  readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string>; readonly env: ReadonlyArray<string> }
   readonly present: { readonly terminal: string; readonly info: Readonly<Record<string, string>> }
   readonly see: { readonly terminal: string; readonly finished: number }
   readonly focus: { readonly terminal: string }
@@ -301,7 +301,7 @@ export class FakeRuntime extends Context.Service<
       const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
         call(
           "run",
-          { terminal: terminal.id, argv: execed(argv) },
+          { terminal: terminal.id, argv: execed(argv), env: envPairs(argv) },
           terminal.id,
           Effect.gen(function* () {
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")

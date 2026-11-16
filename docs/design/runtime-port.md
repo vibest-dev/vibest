@@ -58,7 +58,7 @@ session `default` and ignores `near`); each is the runtime's to honor as it can.
 | `locate(peer, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                          | —                      | remote rows: "cannot be shown here"      |
 | `doctor(harnesses)`       | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs             | what tern needs        | `vibest doctor` shows `status` only      |
 
-How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.send_*`, `pane.read`,
+How the required members map: herdr `tab.create` (env) + `pane.send_text`, `pane.send_*`, `pane.read`,
 `pane.process_info`, `pane.close`; rex `session.new_split` (`command`, env via `/usr/bin/env K=V`), `block.event`,
 `terminal.format`, `terminal.process`, `block.close`; tern `split|new tab -- argv` (env via `/usr/bin/env`), `send`,
 `capture`, `process --json`, `close`.
@@ -162,11 +162,9 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   notice as its message, and the process continues the open execution; no restart types anything. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
   the system prompt in a prompt) is in its launch argv the same way: `startEntry` opens its execution with the
   process, and `entryCommand` builds the line with `Harness.harnessArgv`.
-- Every start in a new terminal names its process: `VIBEST_PROCESS` (the process row id) is in the environment of every
-  terminal vibestd opens, entry sessions included, and an entry session restarted in place types it with its other
-  identity variables. A plugin that keeps state per process (agy's root conversation) needs no special case. A
-  subagent started again in its own pane (a restart, a usage-limit move in place) keeps the pane's earlier value:
-  herdr starts it as a named agent from its bare argv, which carries no environment.
+- Every start names its process: every launch line is `env VIBEST_PROCESS=<n> <identity pairs> <command>`
+  (`Launch.launchLine`), in a new terminal or typed into one it reuses (a restart, a usage-limit move in place), entry
+  sessions included. A plugin that keeps state per process (agy's root conversation) needs no special case.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). A process that exits before its execution ends
   loses the execution, as today.
@@ -212,8 +210,7 @@ forwards `prompt` and `stop` only for the first conversation the process reports
 `$TMPDIR/vibest-agy-<session>-<process>`). agy fires no `Stop` when the person presses Esc; on herdr the execution then
 becomes `lost` after 10 s of idle, on herdr-core it stays open until the next `Stop` or `vibest interrupt`. vibest writes
 nothing to the terminal for agy and sets no `--settings`: classic herdr detects agy's state from its screen (it finds agy by
-process name: vibest types agy's command line, since herdr's `agent.start` refuses an argument with a line break and
-agy's first message is one), and on herdr-core the session's state is the one its hooks
+process name: vibest types every command line), and on herdr-core the session's state is the one its hooks
 last reported. The added folder shows in agy's workspace list and the agent can read it, as Claude's `--plugin-dir`
 files. `PreToolUse` goes to `vibest integration guard --harness agy`; the definition's `guardCall` turns agy's tool call
 into the guard's shape (`run_command` as `Bash`, `read_file` as `Read`, `write_file` as `Write`, `edit_file` as `Edit`,

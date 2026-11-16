@@ -22,7 +22,7 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import { entryCommand, restartArgv } from "../launch.ts"
+import { entryCommand, launchLine } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import { Processes } from "../processes.ts"
@@ -127,7 +127,7 @@ export const make = Effect.gen(function* () {
         message: continuing(interrupted),
       })
       return (process: number | undefined) =>
-        restartArgv(
+        launchLine(
           process === undefined ? command : { ...command, env: { ...command.env, VIBEST_PROCESS: String(process) } },
         )
     }).pipe(
@@ -240,7 +240,7 @@ export const make = Effect.gen(function* () {
         (session.process?.conversation ?? null) !== null,
         message === undefined ? undefined : { text: message, onHandover: Effect.void },
       ),
-      (plan) => () => plan.argv,
+      (plan) => plan.argv,
     )
   }
 

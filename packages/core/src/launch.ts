@@ -140,7 +140,7 @@ export const messageFromFile = (argv: ReadonlyArray<string>, file: string) => [
   ...argv,
 ]
 
-export const restartArgv = (command: {
+export const launchLine = (command: {
   readonly file: string
   readonly args: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>

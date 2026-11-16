@@ -109,6 +109,11 @@ describe("restart in place", () => {
       yield* ran.release()
       const [run] = yield* herdr.callsTo("run")
       assert.strictEqual(run!.argv[0], "pi")
+      assert.include(
+        run!.env,
+        `VIBEST_PROCESS=${yield* db.session.currentProcessId(id)}`,
+        "a subagent restarted in its pane names its new process",
+      )
       assert.includeMembers([...run!.argv], ["--session-id", (down.process?.conversation ?? null)!])
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
@@ -225,7 +230,7 @@ describe("restart in place", () => {
       )
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([entryId, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
-      yield* until(herdr.callsTo("run"), (runs) => runs.some((r) => r.argv[0] === "env"))
+      yield* until(herdr.callsTo("run"), (runs) => runs.some((r) => r.env.includes(`VIBEST_SESSION_ID=${entryId}`)))
       yield* until(processes.signaled, (signaled) => [pid, 400].every((p) => signaled.includes(p)))
       yield* db.session.patchLive(entryId, { pid: 500, ready: null })
       yield* db.session.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
@@ -243,18 +248,15 @@ describe("restart in place", () => {
       )
       assert.deepStrictEqual(yield* entryPending(db, projectId), [], "the continuation waits behind nothing")
       assert.strictEqual(yield* db.session.openExecution(entryId), interrupted, "the interrupted execution stays open")
-      const entryArgv = (yield* herdr.callsTo("run"))
-        .map((c) => c.argv)
-        .find((argv) => argv[0] === "env" && argv.includes(`VIBEST_SESSION_ID=${entryId}`))
-      assert.ok(entryArgv, "the entry session is restarted by typing env")
+      const entryRun = (yield* herdr.callsTo("run")).find((c) => c.env.includes(`VIBEST_SESSION_ID=${entryId}`))
+      assert.ok(entryRun, "the entry session is restarted by typing env")
       assert.strictEqual(
-        entryArgv.at(-1),
+        entryRun.argv.at(-1),
         noticeEnvelope(continueText(VERSION)),
         "the continuation is in the argv of the process that continues the execution",
       )
-      assert.ok(entryArgv!.includes(`VIBEST_SESSION_ID=${entryId}`))
-      assert.ok(entryArgv!.includes(`VIBEST_PROCESS=${yield* db.session.currentProcessId(entryId)}`))
-      assert.ok(entryArgv!.includes("pi"))
+      assert.ok(entryRun.env.includes(`VIBEST_PROCESS=${yield* db.session.currentProcessId(entryId)}`))
+      assert.strictEqual(entryRun.argv[0], "pi")
       const identity = new Set([
         "VIBEST_SESSION_ID",
         "VIBEST_PROCESS",
@@ -266,8 +268,7 @@ describe("restart in place", () => {
         "VIBEST_HOME",
         "VIBEST_COMMAND",
       ])
-      for (const pair of entryArgv!.slice(1, entryArgv!.indexOf("pi")))
-        assert.ok(identity.has(pair.slice(0, pair.indexOf("="))), pair)
+      for (const pair of entryRun.env) assert.ok(identity.has(pair.slice(0, pair.indexOf("="))), pair)
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
   )
 
