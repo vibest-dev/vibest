@@ -62,6 +62,8 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
       "harnesses/cursor/.cursor-plugin/plugin.json",
       "harnesses/cursor/hooks/hooks.json",
       "harnesses/cursor/index.js",
+      "harnesses/agy/index.js",
+      "harnesses/agy/status.sh",
       "harnesses/pi/extension.mjs",
       "harnesses/pi/presentation.mjs",
       "harnesses/claude/skills/*/SKILL.md",

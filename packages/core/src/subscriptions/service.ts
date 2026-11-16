@@ -93,7 +93,9 @@ export const make = Effect.gen(function* () {
   const read = (definition: HarnessDefinition, home: string) =>
     Effect.gen(function* () {
       const id = definition.id
-      const read = yield* definition.subscription!(home).pipe(Effect.timeoutOption(SUBSCRIPTION_TIMEOUT))
+      const read = yield* definition.subscription!(home, definition.binary).pipe(
+        Effect.timeoutOption(SUBSCRIPTION_TIMEOUT),
+      )
       if (Option.isNone(read))
         return yield* Effect.logWarning(`subscriptions: ${id} poll timed out after ${SUBSCRIPTION_TIMEOUT}`)
       for (const row of read.value)

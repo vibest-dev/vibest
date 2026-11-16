@@ -273,18 +273,15 @@ describe.concurrent("Session", () => {
       yield* sessions.send(id, "next")
       yield* held.reached
       yield* held.release("busy")
-      const done = yield* until(
-        db.session.getSession(id),
-        (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "not_started",
-      )
-      assert.strictEqual(executionStateOf(done), "not_started")
+      const notices = yield* until(sqlNotices(id), (all) => all.at(-1)?.includes("send: busy") === true)
+      assert.include(notices.at(-1)!, "send: busy")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "not_started")
       assert.deepStrictEqual(
         yield* sql<{
           status: string
         }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         [{ status: "failed" }],
       )
-      assert.include((yield* sqlNotices(id)).at(-1)!, "send: busy")
     }),
     { hooked: ["pi"] },
   )

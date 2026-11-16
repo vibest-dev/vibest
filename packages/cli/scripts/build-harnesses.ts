@@ -5,7 +5,7 @@ const app = path.dirname(import.meta.dir)
 const outdir = path.resolve(process.argv[2] ?? path.join(app, "harnesses"))
 const integration = path.join(app, "../../packages/integration")
 fs.rmSync(outdir, { recursive: true, force: true })
-for (const harness of ["pi", "claude", "cursor"]) {
+for (const harness of ["pi", "claude", "cursor", "agy"]) {
   const { exitCode } = Bun.spawnSync(
     ["bun", path.join(integration, harness, "scripts/build.ts"), path.join(outdir, harness)],
     {
@@ -14,6 +14,7 @@ for (const harness of ["pi", "claude", "cursor"]) {
   )
   if (exitCode !== 0) process.exit(exitCode)
   const skills = path.join(integration, harness, harness === "pi" ? "src/skills" : "skills")
+  if (harness === "agy") continue
   const names = fs
     .readdirSync(skills, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skills, entry.name, "SKILL.md")))
@@ -28,14 +29,16 @@ for (const harness of ["pi", "claude", "cursor"]) {
   }
 }
 
-const cursorPlugin = await Bun.build({
-  entrypoints: [path.join(app, "../plugin-harnesses/src/cursor-plugin.ts")],
-  outdir: path.join(outdir, "cursor"),
-  naming: "index.js",
-  target: "bun",
-  external: ["effect", "effect/*", "@vibest/plugin", "@vibest/plugin/*"],
-})
-if (!cursorPlugin.success) {
-  for (const log of cursorPlugin.logs) console.error(log)
-  process.exit(1)
+for (const harness of ["cursor", "agy"]) {
+  const plugin = await Bun.build({
+    entrypoints: [path.join(app, `../plugin-harnesses/src/${harness}-plugin.ts`)],
+    outdir: path.join(outdir, harness),
+    naming: "index.js",
+    target: "bun",
+    external: ["effect", "effect/*", "@vibest/plugin", "@vibest/plugin/*"],
+  })
+  if (!plugin.success) {
+    for (const log of plugin.logs) console.error(log)
+    process.exit(1)
+  }
 }

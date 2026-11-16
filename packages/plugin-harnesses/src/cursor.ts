@@ -1,11 +1,9 @@
-import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChildProcessSpawner"
-import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
-import * as NodePath from "@effect/platform-node-shared/NodePath"
 import type { Harness } from "@vibest/plugin/effect"
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { Effect, FileSystem, Path } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { noProvider, opt } from "./models.ts"
+import { nodePlatform } from "./node-platform.ts"
 import { cursorSubscription } from "./subscriptions/cursor.ts"
 
 export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
@@ -33,11 +31,7 @@ export const keychainProblem = (home: string) =>
       : `Cursor is disabled: HOME has no login keychain file (${keychain}); use the macOS login home to avoid Cursor's keychain probe dialog`
   })
 
-export const cursorPlatform = NodeChildProcessSpawner.layer.pipe(
-  Layer.provideMerge(Layer.merge(NodeFileSystem.layer, NodePath.layer)),
-)
-
-const cursorEnvironment = (home: string) => keychainProblem(home).pipe(Effect.provide(cursorPlatform))
+const cursorEnvironment = (home: string) => keychainProblem(home).pipe(Effect.provide(nodePlatform))
 
 export const cursor: Harness.HarnessDefinition = {
   id: "cursor",
@@ -63,7 +57,7 @@ export const cursor: Harness.HarnessDefinition = {
     Effect.gen(function* () {
       const spawner = yield* Effect.service(ChildProcessSpawner.ChildProcessSpawner)
       return yield* cursorSubscription(spawner)(home, yield* cursorEnvironment(home))
-    }).pipe(Effect.provide(cursorPlatform)),
+    }).pipe(Effect.provide(nodePlatform)),
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
