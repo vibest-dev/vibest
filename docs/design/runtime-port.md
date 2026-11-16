@@ -200,8 +200,9 @@ answer). Hooks carry no marker for agy's own subagents, which run their own conv
 forwards `prompt` and `stop` only for the first conversation the process reports (kept in
 `$TMPDIR/vibest-agy-<session>-<process>`). agy fires no `Stop` when the person presses Esc; on herdr the execution then
 becomes `lost` after 10 s of idle, on herdr-core it stays open until the next `Stop` or `vibest interrupt`. vibest writes
-nothing to the terminal for agy and sets no `--settings`: classic herdr detects agy's state from its screen (as herdr's own
-`agy` agent, or by process name for a wrapper such as `agyx`), and on herdr-core the session's state is the one its hooks
+nothing to the terminal for agy and sets no `--settings`: classic herdr detects agy's state from its screen (it finds agy by
+process name: vibest types agy's command line, since herdr's `agent.start` refuses an argument with a line break and
+agy's first message is one), and on herdr-core the session's state is the one its hooks
 last reported. The added folder shows in agy's workspace list and the agent can read it, as Claude's `--plugin-dir`
 files. `PreToolUse` goes to `vibest integration guard --harness agy`; the definition's `guardCall` turns agy's tool call
 into the guard's shape (`run_command` as `Bash`, `read_file` as `Read`, `write_file` as `Write`, `edit_file` as `Edit`,
