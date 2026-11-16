@@ -38,8 +38,8 @@ export const layer = Layer.effectDiscard(
         yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
         yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
         yield* putRepositories(sql, id, fact.data.repositories)
-        yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
-          WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, ${from.length + 1}) = ${`${from}/`})`
+        yield* sql`UPDATE session SET directory = ${to} || substr(directory, length(${from}) + 1)
+          WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, length(${from}) + 1) = ${`${from}/`})`
       }),
     )
     yield* bus.project(ProjectRepositoriesChanged, (fact) =>
