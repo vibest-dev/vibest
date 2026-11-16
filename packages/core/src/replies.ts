@@ -12,6 +12,14 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
   }
 }
 
+export const guardInputOf = (adapter: HarnessDefinition, raw: string) => {
+  if (adapter.guardCall === undefined) return raw
+  const event = jsonObject(raw)
+  if (event === undefined) return raw
+  const call = adapter.guardCall(event)
+  return call === undefined ? undefined : JSON.stringify(call)
+}
+
 export const promptOf = (adapter: HarnessDefinition, raw: string) => {
   const event = jsonObject(raw)
   return event && adapter.userPrompt?.(event)

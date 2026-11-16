@@ -266,9 +266,13 @@ release. Each release lists what broke, who is affected and how to migrate under
   waits for its response instead of being typed in.
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
 - **Antigravity (`agy`) is a harness plugin**: add the folder `harnesses/agy` of the install directory to `plugins` in
-  `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an
-  execution when the runtime reports idle, with no reply text) and has no vibest pre-tool guard. For plugin authors,
+  `~/.vibest/vibest.json`. vibest adds that folder with `agy --add-dir`, and agy loads its workspace plugin: hooks report
+  the conversation, the execution start and its end (no reply text: agy's `Stop` carries none), and vibest's guard checks
+  agy's tool calls. vibest writes nothing to the terminal for agy. For plugin authors,
   `HarnessDefinition.subscription` is now called with the definition's `binary` as its second argument.
+- Harness definitions take `guardCall(event)` (plugin authors): it turns a harness's own pre-tool event into the shape
+  vibest's guard reads (`tool_name`, `tool_input`, `cwd`); `undefined` lets a tool the guard has no rule for through.
+  agy uses it.
 
 ### Changed
 

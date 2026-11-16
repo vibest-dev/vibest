@@ -30,6 +30,38 @@ export const agyExecutionEnd = (event: Readonly<Record<string, unknown>>) => {
   return { end: { text: "", conversation_id: agyConversation(event), ...(error !== "" ? { error } : {}) } }
 }
 
+const GUARDED_TOOLS: Readonly<Record<string, string>> = {
+  read_file: "Read",
+  view_file: "Read",
+  write_file: "Write",
+  write_to_file: "Write",
+  edit_file: "Edit",
+  replace_file_content: "Edit",
+  multi_replace_file_content: "Edit",
+  list_dir: "LS",
+  grep_search: "Grep",
+  find_by_name: "Find",
+}
+const PATH_ARGS = ["Path", "AbsolutePath", "TargetFile", "File", "DirectoryPath", "SearchPath", "SearchDirectory"]
+
+const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
+
+export const agyGuardCall = (event: Readonly<Record<string, unknown>>) => {
+  const call = event.toolCall
+  if (typeof call !== "object" || call === null) return undefined
+  const { name, args } = call as { name?: unknown; args?: unknown }
+  const input = (typeof args === "object" && args !== null ? args : {}) as Readonly<Record<string, unknown>>
+  const at = { cwd: event.cwd }
+  if (name === "run_command") {
+    const cwd = text(input.Cwd)
+    return { ...at, tool_name: "Bash", tool_input: { command: input.CommandLine, ...(cwd ? { cwd } : {}) } }
+  }
+  const tool = typeof name === "string" ? GUARDED_TOOLS[name] : undefined
+  if (tool === undefined) return undefined
+  const path = PATH_ARGS.map((key) => text(input[key])).find((value) => value !== undefined)
+  return { ...at, tool_name: tool, tool_input: path === undefined ? {} : { path } }
+}
+
 const agyStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.succeed((pane) =>
   Effect.gen(function* () {
     const screen = yield* pane.screen
@@ -66,4 +98,6 @@ export const agy: Harness.HarnessDefinition = {
   conversationOf: agyConversation,
   userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { text: "" } : undefined),
   executionEnd: agyExecutionEnd,
+  guardCall: agyGuardCall,
+  guardAnswer: (reason) => (reason ? { decision: "deny", reason } : { decision: "allow" }),
 }

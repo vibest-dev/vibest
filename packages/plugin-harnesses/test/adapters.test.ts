@@ -39,6 +39,23 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(agy.executionEnd!({ hookEventName: "PreInvocation", conversationId: "c1" }))
   })
 
+  it("agy's tool calls reach the guard in the shape it reads; a tool it has no rule for is not asked", () => {
+    const call = (name: string, args: Record<string, unknown>) =>
+      agy.guardCall!({ cwd: "/w", toolCall: { name, args } })
+    assert.deepStrictEqual(call("run_command", { CommandLine: "ls", Cwd: "/w/sub" }), {
+      cwd: "/w",
+      tool_name: "Bash",
+      tool_input: { command: "ls", cwd: "/w/sub" },
+    })
+    assert.deepStrictEqual(call("read_file", { Path: "/w/a.txt" }), {
+      cwd: "/w",
+      tool_name: "Read",
+      tool_input: { path: "/w/a.txt" },
+    })
+    assert.deepStrictEqual(call("edit_file", { Path: "/w/b.txt", Target: "hi", Replacement: "bye" })?.tool_name, "Edit")
+    assert.isUndefined(call("invoke_subagent", { Prompt: "x" }))
+  })
+
   it("agy lists models from the JSON the CLI prints after its progress line", () => {
     const json = JSON.stringify({
       status: "SUCCESS",

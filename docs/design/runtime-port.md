@@ -192,7 +192,12 @@ becomes `lost` after 10 s of idle, on herdr-core it stays open until the next `S
 nothing to the terminal for agy and sets no `--settings`: classic herdr detects agy's state from its screen (as herdr's own
 `agy` agent, or by process name for a wrapper such as `agyx`), and on herdr-core the session's state is the one its hooks
 last reported. The added folder shows in agy's workspace list and the agent can read it, as Claude's `--plugin-dir`
-files.
+files. `PreToolUse` goes to `vibest integration guard --harness agy`; the definition's `guardCall` turns agy's tool call
+into the guard's shape (`run_command` as `Bash`, `read_file` as `Read`, `write_file` as `Write`, `edit_file` as `Edit`,
+and the older names agy documents), and `deny` stops the call (agy shows the reason only in the expanded tool row). A
+failed `vibest` answers `deny` from `hook.sh`, but the guard is fail-open where agy is: a hook agy cannot start, or one
+that passes its 30 s timeout, is skipped and the tool runs; and sessions run with `--dangerously-skip-permissions`, so
+nothing else asks first.
 
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,

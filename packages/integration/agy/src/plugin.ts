@@ -3,7 +3,7 @@ import pkg from "../package.json" with { type: "json" }
 export const PLUGIN = ".agents/plugins/vibest"
 
 export const HOOK = `#!/bin/sh
-# @vibest/agy ${pkg.version}: \`vibest integration prompt\` at a conversation's start and before each model call, \`stop\` at its end.
+# @vibest/agy ${pkg.version}: \`vibest integration guard\` before a tool call, \`prompt\` at a conversation's start and before each model call, \`stop\` at its end.
 # The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
 # cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
 vibest() {
@@ -35,6 +35,12 @@ own_conversation() {
   [ "$(cat "$seen")" = "$conversation" ]
 }
 case "\${1:-}" in
+  guard)
+    if [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; echo '{"decision":"allow"}'; exit 0; fi
+    # agy runs a tool whose hook fails or times out: a failed check answers deny itself.
+    vibest integration guard --harness agy 2>>"$log" ||
+      echo '{"decision":"deny","reason":"vibest integration guard failed; the tool call is refused."}'
+    ;;
   prompt | stop)
     input=$(cat)
     if [ -n "\${VIBEST_SESSION_ID:-}" ] && own_conversation; then
@@ -57,6 +63,7 @@ export const files: Readonly<Record<string, string>> = {
         SessionStart: hook("prompt"),
         PreInvocation: hook("prompt"),
         Stop: hook("stop"),
+        PreToolUse: [{ matcher: "", hooks: hook("guard") }],
       },
     },
     null,

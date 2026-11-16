@@ -275,6 +275,30 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
+    id: "H14",
+    tier: "agent",
+    title:
+      "agy (real): a tool call vibest's guard refuses does not run (a herdr command); the session goes on and writes its marker",
+    run: async (w, evidence) => {
+      const binary = await signedIn(w)
+      await w.stopDaemon()
+      await addAgyPlugin(w, harnesses, binary)
+      const ran = path.join(w.root, "h14-ran.txt")
+      const marker = path.join(w.root, "h14-marker.txt")
+      const task = `Run exactly this shell command with your command tool: herdr --version > ${ran}. Whatever happens, then run exactly this shell command: echo done > ${marker}. Then reply with exactly: H14-DONE`
+      await withSession(w, "agy", [], task, async ({ id }) => {
+        await untilShown(w, id, evidence, "the execution completed", () => completed(w, id) === 1)
+        const exists = (file: string) =>
+          fs.stat(file).then(
+            () => true,
+            () => false,
+          )
+        expect(!(await exists(ran)), "the refused herdr command ran")
+        expect(await exists(marker), "the session did not go on to write its marker")
+      })
+    },
+  },
+  {
     id: "H13",
     tier: "agent",
     title:

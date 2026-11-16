@@ -4,6 +4,7 @@ import { harnessCatalog } from "@vibest/core/harness"
 import { Harnesses, unprovided } from "@vibest/core/harnesses"
 import { type HookCaller, Integration } from "@vibest/core/integration"
 import { forProvider } from "@vibest/core/models"
+import { guardInputOf } from "@vibest/core/replies"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"
 import { Caller, Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
@@ -59,9 +60,13 @@ export const make = Effect.gen(function* () {
             method: "Integration.Guard",
             message: "Integration.Guard checks the tool call of a session",
           })
-        const reason = yield* integration
-          .guard(caller.sessionId, input)
-          .pipe(Effect.mapError((e) => new InvalidCaller({ method: "Integration.Guard", message: String(e) })))
+        const call = guardInputOf(definition, input)
+        const reason =
+          call === undefined
+            ? undefined
+            : yield* integration
+                .guard(caller.sessionId, call)
+                .pipe(Effect.mapError((e) => new InvalidCaller({ method: "Integration.Guard", message: String(e) })))
         const answer = definition.guardAnswer === undefined ? reason : definition.guardAnswer(reason)
         return answer === undefined ? {} : { answer }
       }),

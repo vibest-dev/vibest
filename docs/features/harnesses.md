@@ -66,6 +66,11 @@ its `SessionStart`, and the execution completes at agy's `Stop` (no reply text: 
 `vibest send` while it is idle is the next execution. When its pane closes, the next send resumes the same conversation
 with `agy --conversation`.
 
+## H14. vibest's guard checks agy's tool calls
+
+A tool call of an agy session that vibest's guard refuses (a herdr command, another project's folder) does not run, and
+the session goes on. Ceiling: agy runs the tool when the hook cannot start or passes its timeout.
+
 ## H13. agy loads vibest's plugin for the session only
 
 An agy session vibest starts loads vibest's hooks and skills from the install's `harnesses/agy` folder (added with

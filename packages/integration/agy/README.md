@@ -9,6 +9,8 @@ loads from the install's `harnesses/agy` folder, which vibest adds to each sessi
   `agy --conversation` and shows the session working.
 - **the execution end**: `Stop` goes to `vibest integration stop --harness agy`; the execution completes, or fails with
   agy's `error`. agy's `Stop` carries no answer, so there is no reply text: `vibest peek` shows it.
+- **the tool guard**: `PreToolUse` goes to `vibest integration guard --harness agy`; vibestd answers in agy's shape and
+  a refused call does not run. When `vibest` fails, `hook.sh` answers `deny` itself.
 - **agy's own subagents** run their own conversations in the same process and fire the same hooks; only the first
   conversation the process reports goes to vibestd.
 
@@ -19,6 +21,8 @@ credentials are not read or changed by vibest.
 
 - Esc fires no `Stop`: on herdr the execution is recorded `lost` after the pane is idle for 10 s; on herdr-core it stays
   open until the next `Stop` or `vibest interrupt`.
+- The guard is fail-open where agy is: a hook agy cannot start, or one past its 30 s timeout, is skipped and the tool
+  runs, with nothing else asking first (`--dangerously-skip-permissions`).
 - The added folder shows in agy's workspace list, and the agent can read it.
 
 Outside a vibest agent (no `VIBEST_SESSION_ID`) the hooks report nothing.
