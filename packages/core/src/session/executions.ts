@@ -35,9 +35,6 @@ export const busyOf = (seen: AgentSeen) => {
 
 const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 
-const usable = (seen: AgentSeen, adapter: HarnessDefinition) =>
-  Harnesses.runtimeLifecycle(adapter) ? seen === "idle" : settled(seen)
-
 const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
 
 export const make = Effect.gen(function* () {
@@ -59,13 +56,12 @@ export const make = Effect.gen(function* () {
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
           const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-          const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && usable(seen, adapter))
+          const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && seen === "idle")
           return { seen, ready }
         })
         return yield* look.pipe(
           Effect.flatMap((now) => {
-            if (now.ready || step === undefined || (settled(now.seen) && !Harnesses.runtimeLifecycle(adapter)))
-              return Effect.succeed(now)
+            if (now.ready || step === undefined) return Effect.succeed(now)
             return step({
               screen,
               sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),

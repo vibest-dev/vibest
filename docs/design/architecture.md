@@ -294,11 +294,9 @@ is `kept`). An Agent is reused by its id; one that may be needed again should be
 **Idle:** vibest does not model the CLI agent's internal loop. herdr's `idle` is the status. A piece of work ends
 when its integration reports the end of its work (Claude `Stop`, Pi `agent_settled`, …) and its inbox is empty;
 that is when the execution ends and the next Message is delivered. For a harness with an integration, herdr reporting idle with no hook result for
-10 s makes the Message `lost` (a reason and the `vibest peek <id>` command, never screen text; the last 30 lines go to vibestd.log); only a harness whose
-definition has no `executionEnd` (agy) treats the runtime's idle as the end: an execution vibest handed over, or one the runtime saw start with no open
-execution (`working` reported while nothing was open: typed work, the entry session's included), is `completed` the moment the runtime reports idle, with no
-reply text and no way to tell an error from an answer; `blocked` keeps it open. Such a harness is ready for its first task only once the runtime reports
-idle (not blocked on a login or a dialog). An entry session whose harness does not pull its own inbox (agy, Cursor) takes
+10 s makes the Message `lost` (a reason and the `vibest peek <id>` command, never screen text; the last 30 lines go to vibestd.log). Every harness
+reports its execution end; none is ended by the runtime's idle alone. A harness whose readiness is the runtime's is ready for a message once the
+runtime shows its terminal idle (not blocked on a login or a dialog); until then its definition's startup step answers the dialogs it knows. An entry session whose harness does not pull its own inbox (agy, Cursor) takes
 queued messages by typing, like any other session of that harness.
 
 **Outcome of a task or message** (omac's execution states, copied): a Message vibest delivered is `completed` or
