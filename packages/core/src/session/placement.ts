@@ -455,13 +455,12 @@ export const make = Effect.gen(function* () {
     function* (h: Runtime, session: SessionRow, first?: FirstInput) {
       const { root, cwd } = yield* locate(session)
       const plan = yield* launching(session, true, first)
-      const terminal = yield* undoOnFailure(
-        plan.starting(
+      const terminal = yield* plan.starting(
+        undoOnFailure(
           openTerminal(h, undefined, session, { project: root, cwd, argv: plan.argv, beforeStart: plan.beforeStart }),
-        ),
-        (terminal) => h.close(terminal).pipe(Effect.ignore),
+          (terminal) => h.close(terminal).pipe(Effect.ignore),
+        ).pipe(Effect.tap((terminal) => show(h, session, terminal, root))),
       )
-      yield* show(h, session, terminal, root)
       return yield* plan.deliver(h, session, terminal)
     },
     Effect.scoped,

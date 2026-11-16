@@ -22,7 +22,7 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import { entryCommand, restartArgv } from "../launch.ts"
+import { asProcess, entryCommand, restartArgv } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import { Processes } from "../processes.ts"
@@ -200,13 +200,18 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* restarting.mark(id)
           const sent = yield* processes.terminate(pid)
-          if (sent === "denied") yield* restarting.clear(id)
-          else yield* db.session.restartProcess(id)
-          return sent
+          if (sent === "denied") {
+            yield* restarting.clear(id)
+            return { sent, process: undefined }
+          }
+          return { sent, process: yield* db.session.restartProcess(id) }
         }),
       )
-      if (signalled === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
-      const ran = yield* h.run!(t.terminal, argv).pipe(Effect.exit)
+      if (signalled.sent === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
+      const ran = yield* h.run!(
+        t.terminal,
+        signalled.process === undefined ? argv : asProcess(argv, signalled.process),
+      ).pipe(Effect.exit)
       const cameBack = yield* Effect.scoped(
         Effect.gen(function* () {
           const started = yield* startedAgain(id, t.liveNow).pipe(Effect.forkScoped)

@@ -286,6 +286,10 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Changed
 
+- Every harness start names its process in `VIBEST_PROCESS`, entry sessions included, and an in-place start (a
+  restart, a move in place) runs under `env VIBEST_PROCESS=<new id>`. Before, an entry session had none and an in-place
+  start kept the old one, so agy's reports after a new conversation in the same entry session, or after an in-place
+  start, were dropped.
 - Cursor sessions start with `--force`: Cursor no longer asks "Run this command?" before a shell call in a session
   vibest started, whatever approval mode the user set for Cursor; vibest's guard still refuses what vibest forbids
   (herdr, another project's folder).

@@ -10,6 +10,7 @@ import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harness, harnessOptions, preflight } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
+import { asProcess } from "../launch.ts"
 import { errorMessage, Plugins, PluginsNotActive } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { RuntimeError, type Runtime, type Terminal } from "../runtimes.ts"
@@ -276,21 +277,24 @@ export const make = Effect.gen(function* () {
               },
       }
       const plan = yield* launching(nextRow, false, yield* taskInput(nextRow, next.prompt))
-      if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
-      const placed = inPlace
-        ? yield* plan
-            .starting(Effect.andThen(plan.beforeStart, h.run!(terminal!, plan.argv)))
-            .pipe(Effect.as(terminal!), Effect.exit)
-        : yield* plan
-            .starting(
-              openTerminal(h, undefined, nextRow, {
-                project: root,
-                cwd,
-                argv: plan.argv,
-                beforeStart: plan.beforeStart,
-              }),
-            )
-            .pipe(Effect.exit)
+      const process = inPlace
+        ? yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
+        : undefined
+      const placed =
+        process !== undefined
+          ? yield* plan
+              .starting(Effect.andThen(plan.beforeStart, h.run!(terminal!, asProcess(plan.argv, process))))
+              .pipe(Effect.as(terminal!), Effect.exit)
+          : yield* plan
+              .starting(
+                openTerminal(h, undefined, nextRow, {
+                  project: root,
+                  cwd,
+                  argv: plan.argv,
+                  beforeStart: plan.beforeStart,
+                }),
+              )
+              .pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         const failed = Cause.squash(placed.cause)
         const startDeath = failed instanceof RuntimeError && failed.code === "failed"

@@ -30,7 +30,7 @@ log="\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log"
 own_conversation() {
   conversation=$(printf '%s' "$input" | tr '\\n' ' ' | sed -n 's/.*"conversationId" *: *"\\([^"]*\\)".*/\\1/p')
   [ -n "$conversation" ] || return 1
-  seen="\${TMPDIR:-/tmp}/vibest-agy-$VIBEST_SESSION_ID-\${VIBEST_PROCESS:-0}"
+  seen="\${TMPDIR:-/tmp}/vibest-agy-$VIBEST_SESSION_ID-$VIBEST_PROCESS"
   [ -s "$seen" ] || printf '%s' "$conversation" >"$seen"
   [ "$(cat "$seen")" = "$conversation" ]
 }

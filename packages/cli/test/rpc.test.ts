@@ -291,6 +291,22 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "every entry session launch names its own process, so a new conversation in the same entry session is told apart",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const c = asCli(yield* client, yield* makeRepository)
+      const enter = (harness: "pi" | "claude") =>
+        c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal: "test/p1" })
+      const first = yield* enter("pi")
+      assert.strictEqual(first.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
+      const second = yield* enter("claude")
+      assert.strictEqual(second.sessionId, first.sessionId)
+      assert.strictEqual(second.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
+      assert.notStrictEqual(second.command.env.VIBEST_PROCESS, first.command.env.VIBEST_PROCESS)
+    }),
+  )
+
+  test(
     "a session sends only as itself; an unknown session is refused",
     Effect.gen(function* () {
       const db = yield* Db.Service

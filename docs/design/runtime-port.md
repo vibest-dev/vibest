@@ -152,7 +152,13 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   waits for the harness's report to accept it, answering the definition's startup dialogs meanwhile; no report within
   the ready timeout ends it `not_started`. agy uses it (`--prompt-interactive`): agy reports nothing before its first
   input, so on a runtime with no state for it nothing else could say it is ready. An in-place restart carries no
-  message.
+  message. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
+  the system prompt in a prompt) does not go through `Placement.launching`: it is queued and typed, so agy as the entry
+  session on herdr-core waits the ready timeout and fails `NotReady`.
+- Every start names its process: `VIBEST_PROCESS` (the process row id) is in the environment of every launch, entry
+  sessions included, and an in-place start (a restart, a move in place) runs under `env VIBEST_PROCESS=<new id>`, so a
+  plugin that keeps state per process (agy's root conversation) needs no special case and reports are never taken for
+  an older process's.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). `readyOnStart: "integration"` makes a process
   that starts a new conversation wait for the ready report even when the runtime already shows it idle: a runtime can

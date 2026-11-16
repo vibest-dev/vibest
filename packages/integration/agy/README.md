@@ -33,6 +33,9 @@ credentials are not read or changed by vibest.
   vibest accepts its trust dialog; the list grows by one entry per session, and vibest never reads or cleans it.
 - On herdr-core nothing shows agy blocked (sign-in, a plan waiting for approval), and an execution ended by Esc stays
   open until the next `Stop` or `vibest interrupt`.
+- agy as the entry session on herdr-core does not start: an entry session's first input (sent when its harness takes
+  the system prompt in a prompt, as agy does) is still typed and does not go through the launch argv, so vibestd waits
+  for a ready signal herdr-core never gives and gives up after 60 s (`NotReady`). On herdr the entry session works.
 - Usage: vibest counts agy as limited only when every model group in `agy /usage` has an exhausted window; a session
   that hits one model's limit ends at its `Stop` with agy's error.
 
