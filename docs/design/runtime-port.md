@@ -163,12 +163,20 @@ Pi UI widget kinds describe how a prompt is drawn, not why it blocks, so vibest 
 question or auth; an unknown blocked reason would omit kind, and native reports are left unchanged.
 
 Cursor writes no terminal status. Its hooks run detached from the terminal (no `/dev/tty`), so its plugin reports to
-vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types the first task only then, since herdr-core
-has no status for Cursor), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
+vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types a new session's first task only then, on
+herdr too: `readyOnStart`), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
 also hooks it) are an execution start, which vibestd shows as working, and `afterAgentResponse` is the execution end, shown as
-idle. Cursor 2026.11.05 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
+idle. Cursor 2026.11.13 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
 when user or project hooks also have one. It reports no permission/question/auth waits, so vibestd never shows it
-blocked on herdr-core. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
+blocked on herdr-core. What follows from that on herdr-core, which has no state of its own for Cursor:
+
+- An execution Cursor ends without a response (an error, Ctrl+C) stays open until the next response or
+  `vibest interrupt`; on herdr the runtime's idle makes it `lost` after 10 s.
+- A resumed Cursor (`--resume` runs no `sessionStart`) has no ready signal: the first message after a resume is typed
+  without waiting for one.
+- A message sent while a person's own prompt runs in a Cursor pane waits for a free input box (`inputFree`); a prompt
+  the person stopped with Ctrl+C gives no execution end, so the message waits for the next wake point (a send, a
+  response). A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
 Antigravity (`agy`) has no hooks vibest can load for one session, only a session-only `--settings` JSON, so vibest launches it
 with a `statusLine` command (`harnesses/agy/status.sh`, `stack_with_default`). agy runs it on every state change with the state as

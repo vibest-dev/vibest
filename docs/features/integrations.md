@@ -58,6 +58,10 @@ terminal.
 Checks `I10-herdr` and `I10-hc` (tier `agent`) script this on the user's Cursor login, and record which hook events
 Cursor dispatched and its screen in each input-box state.
 
+Known limits, from Cursor itself: results come only from its response, so an execution it ends without one (an error,
+Ctrl+C) is `lost` on herdr and stays open on herdr-core until the next response or `vibest interrupt`; a resumed Cursor
+has no ready report; it never shows as blocked on herdr-core.
+
 ## I11. Another vibest first on PATH
 
 When another `vibest` comes first on PATH, the integrations still reach the vibest that started them: a Pi entry session

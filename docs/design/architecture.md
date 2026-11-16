@@ -93,7 +93,8 @@ manages it. Items marked planned are not built.
   sender (a session, or the user). One delivery path, locked per recipient, for entry sessions and subagents alike:
   natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
   is kept and read with `vibest inbox`. A harness that polls (Claude) or subscribes (Pi) pulls its batches when idle;
-  any other harness (Cursor) is typed into, whichever session it runs. A row with no session to go to is dropped.
+  any other harness (Cursor, agy) is typed into, whichever session it runs, and only while the harness definition's
+  `inputFree` (Cursor's: no unsent text and no work on screen) says its input box is free. A row with no session to go to is dropped.
 - **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, and sessions it started; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its nearest living creator (its parent, else the parent's parent and so on; a creator on another machine through the
@@ -882,7 +883,7 @@ npm package (a pane vibestd opened runs the binary, not the launcher) then tries
 (`node_modules/@vibest/cli`) or nested. From source there is no layout to look beside. The adapter loads the plugin into
 each session it starts, and into the entry session: Pi `-e <dir>/extension.mjs -e <dir>/presentation.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
 Each of these adds to what the harness loads; the user's own plugins, extensions and hooks keep loading beside it
-(checked against Pi 1.4, Claude Code 2.1.316 and cursor-agent 2026.10.22). Why not install into the harness's config:
+(checked against Pi 1.4, Claude Code 2.1.316 and cursor-agent 2026.11.13). Why not install into the harness's config:
 
 - scope: an installed plugin runs in every session of the user, not only vibest's (a fail-closed guard of a broken
   vibest would block the user's own Cursor);
@@ -892,22 +893,22 @@ Each of these adds to what the harness loads; the user's own plugins, extensions
 
 The cost: a harness started by hand does not load it, which is the intent. vibest never writes into a harness's config. `preflight` refuses a harness whose plugin directory is missing: results come only from the plugin's execution-end hook.
 
-| vibest event                   | Claude Code              | Cursor                       | Pi                              |
-| ------------------------------ | ------------------------ | ---------------------------- | ------------------------------- |
-| `agent.session`                | `SessionStart`           | to verify                    | `session_start`                 |
-| `agent.prompt`                 | `prompt.submit` (origin) | `beforeSubmitPrompt`         | `agent_start`                   |
-| `agent.tool`                   | `tool.call`              | `preToolUse`                 | `tool_call`, `tool_execution_*` |
-| execution end with last reply  | `turn.complete` (answer) | `afterAgentResponse`, `stop` | `agent_end`, `agent_settled`    |
-| `agent.fail`                   | `turn.complete` (error)  | `stop` not completed         | `agent_end` with error          |
-| `agent.blocked`                | `Notification`           | to verify                    | —                               |
-| `agent.exit`                   | `SessionEnd`             | herdr                        | `session_shutdown`              |
-| native delivery into the agent | plugin hooks module      | none (herdr typing)          | extension                       |
+| vibest event                   | Claude Code              | Cursor                           | Pi                              |
+| ------------------------------ | ------------------------ | -------------------------------- | ------------------------------- |
+| `agent.session`                | `SessionStart`           | `sessionStart` (new only)        | `session_start`                 |
+| `agent.prompt`                 | `prompt.submit` (origin) | `beforeSubmitPrompt` (see below) | `agent_start`                   |
+| `agent.tool`                   | `tool.call`              | `preToolUse`                     | `tool_call`, `tool_execution_*` |
+| execution end with last reply  | `turn.complete` (answer) | `afterAgentResponse`             | `agent_end`, `agent_settled`    |
+| `agent.fail`                   | `turn.complete` (error)  | none                             | `agent_end` with error          |
+| `agent.blocked`                | `Notification`           | to verify                        | —                               |
+| `agent.exit`                   | `SessionEnd`             | herdr                            | `session_shutdown`              |
+| native delivery into the agent | plugin hooks module      | none (herdr typing)              | extension                       |
 
 What omac installs and uses today: Claude `Stop`, `StopFailure`, `PreToolUse`;
 Cursor `afterAgentResponse`, `stop` (not `completed` becomes an error), `preToolUse` (`failClosed`); Pi
 `session_start`, `before_agent_start`, `tool_call`, `agent_end`, `agent_settled`. Every other cell is new in
-vibest and is verified before it is relied on (open question 1). Until then the CLI's conversation id is taken
-at the execution end (Claude `session_id`, Cursor `conversation_id`) and at Pi `session_start`.
+vibest and is verified before it is relied on (open question 1). The CLI's conversation id is taken at the execution
+end (Claude `session_id`, Cursor `conversation_id`), at Cursor's `sessionStart` and at Pi `session_start`.
 
 vibest's Claude plugin uses the hooks module's native `turn.complete`, `prompt.submit` and `tool.call`, not the
 classic `Stop`, `StopFailure`, `UserPromptSubmit` and `PreToolUse`: Claude fires no `Stop` for an execution stopped with Esc,
@@ -933,8 +934,19 @@ Anthropic's recommendation, not the user's setting, and is dropped) and `get_set
 runs), under `--safe-mode` so no hooks or plugins run (`--bare` would skip OAuth and return a short list).
 
 **Cursor: hook files.** `@vibest/cursor` is the plugin as files that vibest writes into its home; cursor-agent
-(checked against 2026.10.22) runs a plugin directory's `hooks/hooks.json` like `~/.cursor/hooks.json`, with the plugin
-root as the hook's working directory; `afterAgentResponse` carries the reply as `text`, `stop` only a status. The hook
+(checked against 2026.11.13) runs a plugin directory's `hooks/hooks.json` like `~/.cursor/hooks.json`, with the plugin
+root as the hook's working directory. Of the hooks the plugin declares, Cursor dispatches `sessionStart` (a new
+conversation only, never on `--resume`), `preToolUse`, `afterAgentThought`, `postToolUse` and `afterAgentResponse`
+(once per answered execution, carrying the reply as `text`); it does not dispatch a plugin's `stop`, and
+`beforeSubmitPrompt` only when the user's or the project's own hooks also have one. So results come only from
+`afterAgentResponse`; a prompt typed in the pane is not seen as it is submitted, but its first thought or tool report
+opens an execution for it (with no prompt text), which its response ends; and an execution Cursor ends without a
+response (an error, Ctrl+C) sends nothing: on a runtime with state it becomes `lost` once the runtime shows the pane
+idle with no end for 10 s, on herdr-core it stays open until the next response or `vibest interrupt`. `sessionStart` records the conversation and reports ready; the definition's `readyOnStart` makes a new
+session wait for it even on herdr, which calls the pane settled before Cursor has drawn its input box. A resumed
+Cursor reports nothing, so it is ready when the runtime shows it settled; on herdr-core, which shows no state, it has
+no ready signal. Before a queued message is typed, the definition's `inputFree` reads the screen: the box is free when
+it shows its empty-box placeholder and neither `Working` nor `ctrl+c to stop`. The hook
 script acts only for a vibest session (`VIBEST_SESSION_ID`). The guard hook is fail-closed: a crash, timeout or missing answer
 refuses the call, which Cursor would otherwise let through, so the guard always answers explicitly; `allow` only lets the
 call go on to Cursor's own permission checks. Every Cursor session starts with `--force`, so Cursor's own approval
@@ -953,7 +965,8 @@ exit at EOF before it answers, and stops at the first output that holds a list. 
 harness's default provider; `default` marks what it runs with no model given, as its own settings decide.
 
 **Nested conversations are filtered** (omac `integration.ts`): events carrying `agent_id` (the CLI's own
-subagents), and Cursor events whose `CURSOR_CONVERSATION_ID` differs from the conversation's, are ignored.
+subagents) are ignored; a Cursor execution end with another `conversation_id` records that id as the session's
+conversation.
 
 ## 9. Harness choice
 
