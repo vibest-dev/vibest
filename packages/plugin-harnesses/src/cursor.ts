@@ -53,6 +53,7 @@ export const cursor: Harness.HarnessDefinition = {
   ready: "runtime",
   readyOnStart: "integration",
   inputFree: cursorInputFree,
+  clearKeys: ["ctrl+u"],
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),

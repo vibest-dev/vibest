@@ -17,6 +17,13 @@ import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo 
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
+const interrupted = (interrupt: Effect.Effect<{ readonly message: string }, unknown>) =>
+  Effect.gen(function* () {
+    const answer = yield* Ref.make<string | undefined>(undefined)
+    yield* Effect.forkChild(interrupt.pipe(Effect.flatMap((r) => Ref.set(answer, r.message))))
+    return yield* untilVirtual(Ref.get(answer), (message) => message !== undefined)
+  })
+
 describe.concurrent("Session", () => {
   test(
     "send while an execution runs is queued, then delivered merged once the session is idle",
@@ -467,6 +474,28 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "vibest interrupt of an execution vibest typed clears what the harness draws back into its input box; one the user typed is left alone",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions } = yield* spawnWorking(yield* makeRepository, "cursor")
+      const cleared = herdr
+        .callsTo("send")
+        .pipe(Effect.map((calls) => calls.filter((c) => c.keys?.includes("ctrl+u") === true).length))
+      yield* Ref.set(herdr.screen, "→ draft drawn back: do it")
+      const first = yield* Effect.forkChild(interrupted(sessions.interrupt(id)))
+      yield* untilVirtual(cleared, (n) => n > 0)
+      yield* Ref.set(herdr.screen, "pane tail")
+      assert.include((yield* Fiber.join(first))!, "interrupted")
+      const afterOwn = yield* cleared
+      yield* sessions.userPrompt(id, "typed by the user")
+      yield* herdr.updateAgent(id, (a) => ({ ...a, status: "working" }))
+      yield* Ref.set(herdr.screen, "→ draft of the user")
+      assert.include((yield* interrupted(sessions.interrupt(id)))!, "interrupted")
+      assert.strictEqual(yield* cleared, afterOwn)
+    }),
+  )
+
+  test(
     "Cursor on a runtime that shows its terminal idle at once: a new session's first task still waits for its ready report",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -520,8 +549,7 @@ describe.concurrent("Session", () => {
         db.session.getSession(id),
         (w) => w !== undefined && executionStateOf(w) === "open" && w.status === "working",
       )
-      const stopped = yield* sessions.interrupt(id)
-      assert.include(stopped.message, "interrupted")
+      assert.include((yield* interrupted(sessions.interrupt(id)))!, "interrupted")
       assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("ctrl+c")))
       const row = (yield* db.session.getSession(id))!
       assert.strictEqual(row.status, "idle")

@@ -50,6 +50,10 @@ export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused"
 export const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
   Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
 
+const CLEAR_LOOKS = 16
+const CLEAR_FREE_LOOKS = 3
+const CLEAR_SPACING = Duration.millis(400)
+
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
@@ -309,6 +313,25 @@ export const make = Effect.gen(function* () {
     merge: (pending, next) => ({ rows: new Set([...pending.rows, ...next.rows]), ended: pending.ended || next.ended }),
   })
 
+  const clearOwnInput = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
+    Effect.gen(function* () {
+      const definition = harnesses.find(harnessIdOf(session))
+      const keys = definition?.clearKeys
+      if (keys === undefined || !(yield* db.inbox.handedInto(session.id, execution))) return
+      const clear = h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore)
+      const free = definition?.inputFree
+      if (free === undefined) return yield* clear
+      let freeInARow = 0
+      for (let look = 0; look < CLEAR_LOOKS && freeInARow < CLEAR_FREE_LOOKS; look++) {
+        if (free(yield* h.read(terminal, 40).pipe(Effect.orElseSucceed(() => "")))) freeInARow++
+        else {
+          freeInARow = 0
+          yield* clear
+        }
+        yield* Effect.sleep(CLEAR_SPACING)
+      }
+    })
+
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
     return yield* locked(id)(
@@ -330,6 +353,7 @@ export const make = Effect.gen(function* () {
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
+        yield* clearOwnInput(h, session, terminal, execution)
         const closed = yield* db.session.closeExecution(id, execution, "interrupted")
         if (closed && !runtimeKnows) yield* db.session.setStatus(id, "idle")
         const last = closed ? undefined : yield* db.session.latestReply(id)

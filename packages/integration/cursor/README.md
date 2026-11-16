@@ -18,7 +18,8 @@ vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`)
 
 - **a free input box**: vibestd types a queued message only while Cursor's box shows its empty-box placeholder and no
   work (`Working`, `ctrl+c to stop`); text you left in the box is never typed over, and the message waits for the next
-  check (a send, a state change, a response).
+  check (a send, a state change, a response). When `vibest interrupt` stops a message vibest typed and Cursor draws it
+  back into the box, vibestd empties the box (`ctrl+u`); text you typed yourself is left there.
 
 ## Limits (cursor-agent 2026.11.13)
 

@@ -176,13 +176,19 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
 
 const TOOL_TASK =
   "First write one short sentence saying you are starting. Then run this shell command exactly: echo i10-tool. Then reply with exactly: pong"
+const EARLY_TASK = "Run this shell command exactly: sleep 60. Then reply with exactly: i10-early"
+const inputLine = (screen: string) =>
+  screen
+    .split("\n")
+    .filter((line) => line.trimStart().startsWith("→ "))
+    .at(-1) ?? ""
 const LONG_COMMAND = "Run this shell command exactly: sleep 120."
 const LONG_REPLY = "Then reply with exactly: slept"
 
 const reports = (runtime: Runtime): Check => ({
   id: `I10-${runtime}`,
   tier: "agent",
-  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is typed only after it is ready, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, a message sent while unsent text sits in its input box stays queued until the box is empty, vibest interrupt ends the next one interrupted with no notice, and the plugin never writes to the terminal; its hook events and screens are recorded`,
+  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is typed only after it is ready, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, a message sent while unsent text sits in its input box stays queued until the box is empty, vibest interrupt ends the next one interrupted with no notice, an interrupt right after a typed submission leaves the input box empty so the next message is delivered alone, and the plugin never writes to the terminal; its hook events and screens are recorded`,
   run: async (w, evidence) => {
     const c = await cursorWorld(w, runtime, `i10${runtime}`)
     const ids: Array<string> = []
@@ -259,6 +265,37 @@ const reports = (runtime: Runtime): Check => ({
         `executions after the interrupt: ${JSON.stringify(second)}`,
       )
       expect(c.notices(id) === 0, `notices from ${id}: ${c.notices(id)}`)
+
+      const early = c.executions(id).length
+      await w.ok(["send", id, "--", EARLY_TASK], { cwd: c.repo })
+      await until("the early task typed", () => c.executions(id).length > early, 60_000)
+      await w.ok(["interrupt", id], { cwd: c.repo, timeoutMs: 60_000 })
+      await until("the early task interrupted", () => c.executions(id)[early]?.outcome != null, 60_000)
+      await Bun.sleep(3_000)
+      const afterEarly = await c.screen(id)
+      keep("after an interrupt right after the typed submission", afterEarly)
+      expect(
+        !inputLine(afterEarly).includes("i10-early"),
+        `the interrupted task was left in the input box: ${inputLine(afterEarly)}`,
+      )
+      await w.ok(["send", id, "--", "Reply with exactly: i10-fresh"], { cwd: c.repo })
+      await until(
+        "the message after the early interrupt answered",
+        () => c.executions(id).some((x) => x.outcome === "completed" && (x.reply ?? "").includes("i10-fresh")),
+        180_000,
+      )
+      const fresh = c.executions(id).at(-1)!
+      const handed = rows<{ content: string }>(
+        w,
+        "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+        id,
+        fresh.id,
+      ).map((r) => r.content)
+      expect(
+        handed.length === 1 && handed[0]!.includes("i10-fresh") && !(fresh.reply ?? "").includes("i10-early"),
+        `the message after the early interrupt was not delivered alone: ${JSON.stringify({ fresh, handed })}`,
+      )
+      keep("after the message that followed the early interrupt", await c.screen(id))
       const log = await c.log()
       expect(!log.includes("did not reach vibestd"), "a report did not reach vibestd")
       expect(

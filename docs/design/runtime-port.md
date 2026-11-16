@@ -151,6 +151,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   session (a send, a terminal state change, an execution end); there is no timer. Cursor's box is free when its
   empty-box placeholder is drawn and neither `Working` nor `ctrl+c to stop` is. A first task is not checked: it is
   typed into a process that has just become ready.
+- Clearing vibest's own input: when `vibest interrupt` stops an execution whose input vibest typed (a task or
+  delivered messages), and the definition gives `clearKeys`, vibestd looks at the screen until the box reads free three
+  times in a row (at most 16 looks, 400 ms apart, under the session lock) and sends `clearKeys` each time it does not.
+  A harness can draw the cancelled input back into its box after the interrupt (Cursor does when the interrupt lands
+  before it starts working), and that text is vibest's, not the user's: left there, `inputFree` would hold every later
+  message. An execution the user typed is left alone. Cursor's `clearKeys` is `ctrl+u`.
 
 ### Terminal status ownership
 
