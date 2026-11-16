@@ -145,6 +145,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   process (one that starts on a recorded conversation) keeps `ready`, for a harness that reports nothing when it
   resumes (Cursor's `sessionStart` runs only for a new conversation). A process that exits before its execution ends
   loses the execution, as today.
+- Free input box: a harness definition may give `inputFree(screen)`, read on the terminal's last 40 lines before a
+  queued message is typed into an idle session. While it says the box is not free (the user left unsent text there,
+  or the harness is still at work), the message stays queued and is tried again at the next wake point that checks the
+  session (a send, a terminal state change, an execution end); there is no timer. Cursor's box is free when its
+  empty-box placeholder is drawn and neither `Working` nor `ctrl+c to stop` is. A first task is not checked: it is
+  typed into a process that has just become ready.
 
 ### Terminal status ownership
 

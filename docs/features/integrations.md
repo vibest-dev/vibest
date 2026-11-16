@@ -51,7 +51,8 @@ reaches the model, and reading in its own Project folder is allowed.
 
 A real cursor-agent on the user's login reports to vibestd on herdr and on herdr-core: its first task is typed only
 after its plugin reported ready, `vibest ls` shows it working during an execution and idle after it, `vibest result` carries
-the reply, `vibest interrupt` ends the execution as interrupted with no notice, and the plugin never writes to the
+the reply, a message sent while the user's unsent text sits in its input box waits until the box is empty (it is never
+typed over that text), `vibest interrupt` ends the execution as interrupted with no notice, and the plugin never writes to the
 terminal.
 
 Checks `I10-herdr` and `I10-hc` (tier `agent`) script this on the user's Cursor login, and record which hook events

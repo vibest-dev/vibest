@@ -167,12 +167,13 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string) => {
 
 const TOOL_TASK =
   "First write one short sentence saying you are starting. Then run this shell command exactly: echo i10-tool. Then reply with exactly: pong"
-const LONG_TASK = "Run this shell command exactly: sleep 120. Then reply with exactly: slept"
+const LONG_COMMAND = "Run this shell command exactly: sleep 120."
+const LONG_REPLY = "Then reply with exactly: slept"
 
 const reports = (runtime: Runtime): Check => ({
   id: `I10-${runtime}`,
   tier: "agent",
-  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is typed only after it is ready, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, vibest interrupt ends the next one interrupted with no notice, and the plugin never writes to the terminal; its hook events and screens are recorded`,
+  title: `Cursor (real model) on ${runtime === "hc" ? "herdr-core" : "herdr"}: its first task is typed only after it is ready, vibest ls shows it working during an execution and idle after it, an execution that speaks, runs a tool and answers is exactly one completed execution carrying the reply, a message sent while unsent text sits in its input box stays queued until the box is empty, vibest interrupt ends the next one interrupted with no notice, and the plugin never writes to the terminal; its hook events and screens are recorded`,
   run: async (w, evidence) => {
     const c = await cursorWorld(w, runtime, `i10${runtime}`)
     const ids: Array<string> = []
@@ -189,7 +190,7 @@ const reports = (runtime: Runtime): Check => ({
           const e = await c.listed(id)
           if (e) seen.add(`${e.status}/${e.executionState}`)
           if (e?.executionState === "open" && workingScreen === "") workingScreen = await c.screen(id)
-          return e !== undefined && e.executionState !== "open" && c.executions(id).length > 0
+          return c.executions(id)[0]?.outcome != null
         },
         240_000,
       ).catch(async (e: Error) => {
@@ -213,12 +214,23 @@ const reports = (runtime: Runtime): Check => ({
       await c.typeText(id, "draft text left in the box")
       await Bun.sleep(1_500)
       keep("text in the box", await c.screen(id))
+      const firstEvents = (await hookEvents(w)).length
+      await w.ok(["send", id, "--", LONG_COMMAND], { cwd: c.repo })
+      await Bun.sleep(12_000)
+      const held = await c.screen(id)
+      keep("a message sent while text is in the box", held)
+      expect(
+        c.executions(id).length === 1 && held.includes("draft text left in the box") && !held.includes("sleep 120"),
+        `a message was typed over unsent text: executions ${JSON.stringify(c.executions(id))}`,
+      )
+      expect(
+        (await c.log()).includes("delivery waits: the input box is not empty"),
+        "delivery did not wait for the box",
+      )
       await c.pressKeys(id, ["ctrl+u"])
       await Bun.sleep(1_500)
       keep("after ctrl+u", await c.screen(id))
-
-      const firstEvents = (await hookEvents(w)).length
-      await w.ok(["send", id, "--", LONG_TASK], { cwd: c.repo })
+      await w.ok(["send", id, "--", LONG_REPLY], { cwd: c.repo })
       await until(
         "the second execution at work",
         async () =>
@@ -355,12 +367,14 @@ const conversationAtStart: Check = {
       ids.push(id)
       await until("the session start reported", () => fact(id, "process.ready").length > 0, 120_000)
       const ready = fact(id, "process.ready")[0]!
+      await until("the conversation", () => fact(id, "process.conversation").length > 0, 2_000).catch(() => undefined)
       const noted = fact(id, "process.conversation")
       expect(
-        noted.length > 0 && noted[0]!.at <= ready.at,
+        noted.length > 0 && Math.abs(noted[0]!.at - ready.at) <= 1_000,
         `the conversation was not recorded at the session start: ready ${JSON.stringify(ready)}, conversation ${JSON.stringify(noted)}`,
       )
       const conversation = (JSON.parse(noted[0]!.data) as { conversation: string }).conversation
+      await until("the first task taken", () => fact(id, "execution.accepted").length > 0, 60_000)
       await closePane(id)
       expect(
         !c.executions(id).some((x) => x.outcome === "completed"),

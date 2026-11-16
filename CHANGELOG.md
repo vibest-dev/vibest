@@ -248,6 +248,8 @@ release. Each release lists what broke, who is affected and how to migrate under
 - Harness definitions take `readyOnStart: "integration"` (plugin authors): a process that starts a new conversation
   waits for the integration's ready report even when its `ready` is `runtime`. Cursor uses it, so on herdr its first
   task is no longer typed before cursor-agent has drawn its input box.
+- Harness definitions take `inputFree(screen)` (plugin authors): a queued message is not typed into an idle session
+  whose input box holds unsent text; it waits for the next check. Cursor uses it.
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
 
 ### Changed

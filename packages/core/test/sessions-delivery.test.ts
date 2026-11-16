@@ -425,6 +425,28 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "a message to an idle session whose input box holds unsent text stays queued, and is typed at the next check once the box is free",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
+      yield* writeEnd(id, "cursor", { text: "status: completed" })
+      yield* herdr.endExecution(id)
+      yield* sessions.check(id)
+      yield* settled
+      const typedNext = herdr.callsTo("send").pipe(Effect.map((calls) => calls.some((c) => c.text?.includes("next"))))
+      yield* Ref.set(herdr.screen, "→ draft text left in the box")
+      yield* sessions.send(id, "next")
+      yield* sessions.check(id)
+      yield* settled
+      assert.isFalse(yield* typedNext)
+      assert.lengthOf(yield* db.inbox.pendingInbox(id), 1)
+      yield* Ref.set(herdr.screen, "pane tail")
+      yield* sessions.check(id)
+      yield* until(typedNext, (typed) => typed)
+    }),
+  )
+
+  test(
     "Cursor on a runtime that shows its terminal idle at once: a new session's first task still waits for its ready report",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

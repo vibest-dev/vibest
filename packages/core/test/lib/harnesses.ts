@@ -95,6 +95,7 @@ export const CURSOR: HarnessDefinition = {
   replyField: "text",
   ready: "runtime",
   readyOnStart: "integration",
+  inputFree: (screen) => !screen.includes("draft"),
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),

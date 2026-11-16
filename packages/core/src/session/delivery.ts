@@ -65,6 +65,15 @@ export const make = Effect.gen(function* () {
   const { locked } = locks
   const { undelivered } = inbox
 
+  const inputFree = (h: Runtime, session: SessionRow, terminal: Terminal) =>
+    Effect.gen(function* () {
+      const free = harnesses.find(harnessIdOf(session))?.inputFree
+      if (free === undefined) return true
+      if (free(yield* h.read(terminal, 40).pipe(Effect.orElseSucceed(() => "")))) return true
+      yield* Effect.logInfo("delivery waits: the input box is not empty", { "session.id": session.id })
+      return false
+    })
+
   const deliverQueued = Effect.fn("Delivery.deliverQueued")(function* (
     h: Runtime,
     session: SessionRow,
@@ -75,6 +84,7 @@ export const make = Effect.gen(function* () {
     if (inbox.pulls(harnessIdOf(session))) return
     const pending = yield* db.inbox.pendingInbox(session.id)
     if (pending.length === 0) return
+    if (!(yield* inputFree(h, session, terminal))) return
     const batch = nextBatch(pending)
     const ids = batch.map((r) => r.id)
     const claimed: Array<number> = []
