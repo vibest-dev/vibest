@@ -67,9 +67,9 @@ export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const sessionLive = yield* SessionLive.Service
   const locks = yield* SessionLocks.Service
-  const { prompt, interruptAgent, launched } = yield* Executions.Service
+  const { prompt, interruptAgent } = yield* Executions.Service
   const exits = yield* Exits.Service
-  const { worktreeOf, handTask, resume, takesFirstInput } = yield* Placement.Service
+  const { worktreeOf, notice, resume, taskInput } = yield* Placement.Service
   const reactor = yield* Reactor.make
   const { locked } = locks
   const { undelivered } = inbox
@@ -87,7 +87,12 @@ export const make = Effect.gen(function* () {
     > = (text, onHandover) => prompt(h, session, terminal, text, onHandover),
   ) {
     const task = yield* db.inbox.untakenTask(session.id)
-    if (task !== undefined) return yield* handTask(h, session, terminal, task)
+    if (task !== undefined) {
+      const first = yield* taskInput(session, task)
+      const notStarted = yield* hand(first.text, first.onHandover)
+      if (notStarted) yield* notice(session, notStarted)
+      return
+    }
     if (inbox.pulls(harnessIdOf(session))) return
     const pending = yield* db.inbox.pendingInbox(session.id)
     if (pending.length === 0) return
@@ -122,23 +127,25 @@ export const make = Effect.gen(function* () {
       ),
       Effect.catchTags({
         RuntimeError: (e) =>
-          e.code === "unreachable"
-            ? db.inbox.pendingInbox(session.id).pipe(
-                Effect.flatMap((pending) =>
-                  pending.some((r) => claimed.includes(r.id))
-                    ? Effect.fail(e)
-                    : undelivered(
-                        session,
-                        batch.filter((r) => claimed.includes(r.id)),
-                        `the connection to ${runtimeOf(session)} broke after the message was handed over (${e.message}); it may have reached the session`,
-                      ),
+          claimed.length === 0
+            ? Effect.fail(e)
+            : e.code === "unreachable"
+              ? db.inbox.pendingInbox(session.id).pipe(
+                  Effect.flatMap((pending) =>
+                    pending.some((r) => claimed.includes(r.id))
+                      ? Effect.fail(e)
+                      : undelivered(
+                          session,
+                          batch.filter((r) => claimed.includes(r.id)),
+                          `the connection to ${runtimeOf(session)} broke after the message was handed over (${e.message}); it may have reached the session`,
+                        ),
+                  ),
+                )
+              : undelivered(
+                  session,
+                  batch.filter((r) => claimed.includes(r.id)),
+                  e.message,
                 ),
-              )
-            : undelivered(
-                session,
-                batch.filter((r) => claimed.includes(r.id)),
-                e.message,
-              ),
         NotReady: (e) => {
           const rows = batch.filter((r) => claimed.includes(r.id))
           if (rows.length > 0) return undelivered(session, rows, e.message)
@@ -187,9 +194,9 @@ export const make = Effect.gen(function* () {
           id,
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
-      if ((yield* db.inbox.untakenTask(id)) === undefined && (yield* takesFirstInput(session)))
+      if (!inbox.pulls(harnessIdOf(session)))
         return yield* deliverQueued(h, session, terminal, (text, onHandover) =>
-          resume(h, session, text).pipe(Effect.flatMap((opened) => launched(h, session, opened, onHandover))),
+          resume(h, session, { text, onHandover }),
         )
       yield* resume(h, session)
     }

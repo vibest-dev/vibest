@@ -238,18 +238,19 @@ export const make = Effect.gen(function* () {
     return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
   }, Effect.scoped)
 
+  const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
+    const { execution } = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(id, at))
+    yield* onHandover
+    return execution
+  })
+
   const launched = Effect.fn("Executions.launched")(function* (
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
-    onHandover: Effect.Effect<void> = Effect.void,
+    execution: number,
   ) {
     const adapter = yield* harnesses.get(harnessIdOf(session))
-    const open = yield* db.session.openExecution(session.id)
-    const execution =
-      open ??
-      (yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(session.id, at))).execution
-    yield* onHandover
     const step = adapter.startup ? yield* adapter.startup : undefined
     const answer =
       step === undefined
@@ -281,7 +282,7 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, launched, finish }
+  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, openFirst, launched, finish }
 })
 
 export type Interface = Effect.Success<typeof make>

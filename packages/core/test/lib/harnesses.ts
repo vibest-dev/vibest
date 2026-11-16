@@ -119,6 +119,15 @@ export const CURSOR: HarnessDefinition = {
 export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", inbox: "subscribe" }
 export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", inbox: "poll" }
 
+const { readyOnStart: _readyOnStart, ...cursorAtStart } = CURSOR
+
+export const FIRST_IN_ARGV: HarnessDefinition = {
+  ...cursorAtStart,
+  id: "first",
+  binary: "first",
+  firstInput: (text) => ["--first", text],
+}
+
 export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
 
 export const harnessesFrom = (

@@ -11,7 +11,7 @@ loads from the install's `harnesses/agy` folder, which vibest adds to each sessi
   agy's `error`. agy's `Stop` carries no answer, so there is no reply text: `vibest peek` shows it.
 - **the tool guard**: `PreToolUse` goes to `vibest integration guard --harness agy`; vibestd answers in agy's shape and
   a refused call does not run. When `vibest` fails, `hook.sh` answers `deny` itself.
-- **the first message**: a process vibest starts (a new session, or a resume after its terminal is gone) gets its first
+- **the first message**: a process vibest starts (a new session, a resume after its terminal is gone, or a move onto agy after a usage limit) gets its first
   message as `agy --prompt-interactive <message>`, so agy takes it once it is ready itself: herdr-core has no state for
   agy that could say so. While it waits, vibest's startup step accepts agy's folder trust dialog.
 - **typed messages**: later messages are typed into agy, and empties the input box first (`ctrl+e`, then `ctrl+u` 40

@@ -144,11 +144,14 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   runtime with no status for a harness (herdr-core) needs no harness-specific branch: a typed message is accepted by
   the harness's report of it, never by the runtime not knowing.
 - First input in the launch argv: a harness definition with `firstInput` gets a starting process's first message (a
-  new session's task, or the queued messages that resume an exited one) as launch arguments instead of typed text.
-  vibestd opens the execution at launch and waits for the harness's report to accept it, answering the definition's
-  startup dialogs meanwhile; no report within the ready timeout ends it `not_started`. agy uses it
-  (`--prompt-interactive`): agy reports nothing before its first input, so on a runtime with no state for it nothing
-  else could say it is ready. In-place restart and moves still type.
+  new session's task, the queued messages that resume an exited one, or the task a usage-limit move carries, in a new
+  terminal or in place) as launch arguments instead of typed text. Every start goes through one function
+  (`Placement.launching`): it builds the argv and, for a first input, opens the execution and hands the message to it
+  after the process is recorded and before it starts, so a report the harness sends at once finds it. vibestd then
+  waits for the harness's report to accept it, answering the definition's startup dialogs meanwhile; no report within
+  the ready timeout ends it `not_started`. agy uses it (`--prompt-interactive`): agy reports nothing before its first
+  input, so on a runtime with no state for it nothing else could say it is ready. An in-place restart carries no
+  message.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). `readyOnStart: "integration"` makes a process
   that starts a new conversation wait for the ready report even when the runtime already shows it idle: a runtime can

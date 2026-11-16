@@ -12,7 +12,7 @@ import { TestClock } from "effect/testing"
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { CURSOR, PI } from "./lib/harnesses.ts"
+import { CURSOR, FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
 import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
@@ -483,6 +483,41 @@ describe.concurrent("Session", () => {
       yield* db.session.patchLive(id, { ready: yield* Clock.currentTimeMillis })
       yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("do it")))
     }),
+  )
+
+  test(
+    "a harness that takes its first message in its launch argv and reports its start and end before vibestd looks: one execution, opened before the process started, carries the task and completes; nothing is typed",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const integration = yield* Integration.Service
+      yield* Ref.set(herdr.onStarted, (session) =>
+        Effect.gen(function* () {
+          const who = { id: session, entry: false, harness: FIRST_IN_ARGV.id }
+          yield* herdr.updateAgent(session, (a) => ({ ...a, status: "unknown", registerPrompt: false }))
+          yield* integration.prompt(who, JSON.stringify({ hook_event_name: "afterAgentThought" }))
+          yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
+        }),
+      )
+      const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository, "first"))
+      yield* until(db.session.getSession(id), (row) => row !== undefined && executionStateOf(row) === "completed")
+      yield* settled
+      const sql = yield* SqlClient.SqlClient
+      const executions = yield* sql<{
+        status: string
+        input: string
+      }>`SELECT status, input FROM ${sql.literal(EXECUTIONS)} e WHERE e.session_id = ${id}`.pipe(Effect.orDie)
+      assert.deepStrictEqual(
+        executions.map((e) => [e.status, e.input.includes("do it")]),
+        [["completed", true]],
+      )
+      const [open] = yield* herdr.callsTo("open")
+      assert.include(open!.argv.slice(-2).join(" "), "--first")
+      assert.include(open!.argv.at(-1)!, "do it")
+      assert.isFalse((yield* herdr.callsTo("send")).some((call) => call.text !== undefined))
+    }),
+    { harnesses: [PI, FIRST_IN_ARGV] },
   )
 
   test(

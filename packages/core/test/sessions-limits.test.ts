@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf, exitedAt, executionStateOf, terminalOf } from "@vibest/core/database/db-rows"
+import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin/effect"
@@ -11,6 +12,7 @@ import { TestClock } from "effect/testing"
 
 import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
 import { EXECUTIONS, settled, until, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
@@ -168,6 +170,35 @@ describe.concurrent("Session", () => {
         ["pi"],
       )
     }),
+  )
+
+  test(
+    "a usage-limit move onto a harness that takes its first message in its launch argv starts it with the task in the argv and types nothing; its report accepts that execution",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const typed = (yield* herdr.callsTo("send")).filter((call) => call.text !== undefined).length
+      yield* herdr.endExecution(id)
+      yield* writeEnd(id, "pi", { error: "rate_limit" })
+      const moving = yield* Effect.forkChild(sessions.check(id))
+      yield* until(herdr.callsTo("run"), (calls) => calls.length === 1)
+      const [run] = yield* herdr.callsTo("run")
+      assert.strictEqual(run!.argv[0], "first")
+      assert.strictEqual(run!.argv.at(-2), "--first")
+      assert.include(run!.argv.at(-1)!, "do it")
+      const execution = yield* until(db.session.openExecution(id), (open) => open !== undefined)
+      yield* (yield* Integration.Service).prompt(
+        { id, entry: false, harness: FIRST_IN_ARGV.id },
+        JSON.stringify({ hook_event_name: "afterAgentThought" }),
+      )
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(moving)
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "first")
+      assert.isTrue(yield* db.session.executionAccepted(id))
+      assert.strictEqual(yield* db.session.openExecution(id), execution)
+      assert.strictEqual((yield* herdr.callsTo("send")).filter((call) => call.text !== undefined).length, typed)
+    }),
+    { plugins: [chooseNext], harnesses: [PI, FIRST_IN_ARGV] },
   )
 
   test(

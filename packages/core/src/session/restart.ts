@@ -100,7 +100,7 @@ export const make = Effect.gen(function* () {
   const version = (yield* App.Service).version
   const { awaitReady, prompt } = yield* Executions.Service
   const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
-  const { launchArgv } = yield* Placement.Service
+  const { launching } = yield* Placement.Service
   const reconcile = yield* Reconcile.Service
   const vibestCommand = yield* VibestCommand
 
@@ -147,7 +147,7 @@ export const make = Effect.gen(function* () {
     readonly harnessSessionId: string | null
     readonly argv: Effect.Effect<
       ReadonlyArray<string>,
-      Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launchArgv>>
+      Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launching>>
     >
     readonly liveNow: LiveNow
     readonly hint: string
@@ -233,7 +233,8 @@ export const make = Effect.gen(function* () {
     )
   }
 
-  const againArgv = (session: SessionRow) => launchArgv(session, (session.process?.conversation ?? null) !== null)
+  const againArgv = (session: SessionRow) =>
+    Effect.map(launching(session, (session.process?.conversation ?? null) !== null), (plan) => plan.argv)
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
