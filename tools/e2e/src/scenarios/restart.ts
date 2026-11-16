@@ -406,7 +406,8 @@ const checks: ReadonlyArray<Check> = [
         const processOf = () =>
           rows<{ process: number }>(w, "SELECT process_id AS process FROM session WHERE id = ?", id)[0]?.process
         const oldProcess = processOf()
-        const pane = (await listed(id))?.pane_id
+        await until("herdr finds the subagent in its pane", async () => (await listed(id))?.agent === "pi", 60_000)
+        const pane = (await listed(id))!.pane_id
         const daemonBefore = await w.daemonPid()
 
         await point(binary)
@@ -623,6 +624,7 @@ export default Plugin.define({
             seen.some((s) => s.startsWith("/v2/")),
             `the second login got no request: ${JSON.stringify(seen)}`,
           )
+          await until("herdr finds the moved subagent", async () => (await listed())?.agent === "pi", 60_000)
           const after = await listed()
           expect(
             after?.agent === "pi" && after.pane_id === pane,
