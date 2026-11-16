@@ -137,7 +137,11 @@ export const harnessesFrom = (
   definitions: ReadonlyArray<HarnessDefinition> = HARNESSES,
 ): Effect.Effect<HarnessesShape, never, Scope.Scope> =>
   Effect.tap(Harnesses.make, (harnesses) =>
-    harnesses.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
+    harnesses.transform((editor) =>
+      [...definitions, ...(definitions.some((d) => d.id === PULLING_PI.id) ? [] : [PULLING_PI])].forEach((definition) =>
+        editor.add(definition),
+      ),
+    ),
   )
 
 export const noHostEnv = Layer.succeed(Runtimes.HostEnv, { drop: () => {} })

@@ -444,6 +444,29 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "an entry session whose harness reports its execution ends but does not pull its inbox gets a queued message typed when idle",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      yield* herdr.seedAgent("test/cursor-entry")
+      const { sessionId } = yield* db.session.startEntry(
+        yield* projectOf(repo),
+        "cursor",
+        false,
+        { runtime: RUNTIME, address: { machine: "local", id: "test/cursor-entry" } },
+        { agent: "coordinator" },
+      )
+      yield* db.session.patchLive(sessionId, { ready: yield* Clock.currentTimeMillis })
+      yield* sessions.deliverTo(sessionId, "hello entry")
+      yield* untilVirtual(herdr.callsTo("send"), (calls) =>
+        calls.some((c) => c.terminal === "test/cursor-entry" && c.text?.includes("hello entry") === true),
+      )
+    }),
+  )
+
+  test(
     "Cursor on a runtime that shows its terminal idle at once: a new session's first task still waits for its ready report",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

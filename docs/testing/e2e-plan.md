@@ -243,8 +243,8 @@ Claude, OpenAI-compatible for Pi) with shadow harness config, so its prompts and
 a real model. No script can prove these, so the verifying agent does them by hand:
 
 - D9 needs a newer release published to npm.
-- I5 and I10 need the user's own Cursor login (`pnpm e2e --tier agent I5 I10` runs their scripts on it: I10-herdr and
-  I10-hc). Cursor cannot run on a fake model: `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a
+- I5, I10, I12, I13 and I14 need the user's own Cursor login (`pnpm e2e --tier agent I5 I10 I12 I13 I14` runs their
+  scripts on it, I10 and I14 as `-herdr` and `-hc`). Cursor cannot run on a fake model: `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a
   model API a fake can answer, and a real model cannot be held between hook events.
 - S39 depends on timing: the Claude plugin polls every second and the Pi stream claims each message as it is queued, so
   whether two reports share one delivery depends on when they are queued.

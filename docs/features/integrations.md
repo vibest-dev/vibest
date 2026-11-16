@@ -75,6 +75,16 @@ A Cursor session's conversation is recorded when Cursor starts it, before any re
 first reply, `vibest send` reopens it on that conversation and the reply arrives; closed again after a reply, the next
 `vibest send` resumes it too.
 
+## I14. A Cursor entry session takes messages
+
+With Cursor as the entry session (`vibest --harness cursor`), on herdr and on herdr-core, a message sent to it while it
+is idle with an empty input box is typed into Cursor and answered as an execution of the entry session. A message sent
+while the user's unsent text sits in the box waits and leaves the box unchanged; once that text is submitted and
+answered, the message is typed alone. A message sent while Cursor works on a prompt the user typed in its pane is typed
+only after that work ends, and each reply is on its own execution.
+
+Checks `I14-herdr` and `I14-hc` (tier `agent`) script this on the user's Cursor login.
+
 ## R6. Pi's guard
 
 Pi applies the same guard rules inside vibest's extension.

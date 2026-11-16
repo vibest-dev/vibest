@@ -300,6 +300,7 @@ describe("vibest.sock", () => {
       const spawner = yield* asEntry(raw, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* (yield* FakeRuntime).seedAgent("test/p1")
       const launch = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "claude",
@@ -634,6 +635,7 @@ describe("vibest.sock", () => {
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       const session = yield* asSession(raw, id)
+      yield* (yield* FakeRuntime).seedAgent("test/p1")
       const entry = (yield* cli["Project.EntrySession"]({
         agent: "coordinator",
         harness: "claude",

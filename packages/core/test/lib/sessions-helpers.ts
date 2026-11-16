@@ -11,7 +11,7 @@ import { SqlClient } from "effect/sql"
 import { KIND as RUNTIME } from "../../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./directory.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
-import { CLAUDE } from "./harnesses.ts"
+import { CLAUDE, PULLING_PI } from "./harnesses.ts"
 import { settled, EXECUTIONS, until, writeEnd } from "./observe.ts"
 import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
@@ -25,7 +25,7 @@ export const entryOfProject = (repo: string) =>
     if (found !== undefined) return found.id
     return (yield* db.session.startEntry(
       projectId,
-      "pi",
+      PULLING_PI.id,
       false,
       {
         runtime: RUNTIME,

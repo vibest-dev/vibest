@@ -55,7 +55,10 @@ export const hookEvents = async (w: World) =>
       }
     })
 
-export const cursorWorld = async (w: World, runtime: Runtime, name: string) => {
+const hcKey = (c: string) =>
+  c === " " ? "space" : c === ":" ? "shift+;" : /[A-Z]/.test(c) ? `shift+${c.toLowerCase()}` : c
+
+export const cursorWorld = async (w: World, runtime: Runtime, name: string, entry: "pi" | "cursor" = "pi") => {
   await requireCursor(w, runtime)
   const logged = await loggingHarnesses(w)
   await addCursorPlugin(w, logged)
@@ -66,13 +69,14 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string) => {
   await w.stopDaemon()
   const core = runtime === "hc" ? await isolatedCore(w, w.config.pi, name) : undefined
   if (core) w.ownRuntimes.add("hc")
-  await w.entry({
-    cwd: repo,
-    processEnv: daemonEnv,
-    ...(core
-      ? { runtime: "hc", extra: ["--runtime", "hc"], hc: { run: core.hc }, name: `${name}-entry` }
-      : { session }),
-  })
+  const placement = core
+    ? { runtime: "hc", extra: ["--runtime", "hc"], hc: { run: core.hc }, name: `${name}-entry` }
+    : { session }
+  if (entry === "pi") await w.entry({ cwd: repo, processEnv: daemonEnv, ...placement })
+  else {
+    await w.ok(["daemon"], { cwd: repo, env: daemonEnv })
+    await w.startEntry({ harness: "cursor", cwd: repo, processEnv: daemonEnv, timeoutMs: 120_000, ...placement })
+  }
   const runtimeOf = (id: string) =>
     (
       JSON.parse(row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, id)?.r ?? "{}") as {
@@ -84,12 +88,13 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string) => {
     return core ? at.slice(0, at.indexOf("@")) : (at.split("/")[1] ?? "")
   }
   const screen = async (id: string) => {
-    const peek = await w.vibest(["peek", id, "--lines", "60"], { cwd: repo })
-    return peek.stdout
+    if (core) return (await core.hc("read", terminalOf(id))).stdout
+    const read = await herdr(herdrSocket, "pane.read", { pane_id: terminalOf(id), source: "visible", strip_ansi: true })
+    return String((read.read as { text?: string } | undefined)?.text ?? "")
   }
   const typeText = async (id: string, text: string) => {
     if (core) {
-      const r = await core.hc("keys", terminalOf(id), ...[...text].map((c) => (c === " " ? "space" : c)))
+      const r = await core.hc("keys", terminalOf(id), ...[...text].map(hcKey))
       expect(r.code === 0, `hc keys: ${r.stderr}${r.stdout}`)
     } else await herdr(herdrSocket, "pane.send_text", { pane_id: terminalOf(id), text })
   }
@@ -406,6 +411,98 @@ const conversationAtStart: Check = {
   },
 }
 
-const checks: ReadonlyArray<Check> = [reports("herdr"), reports("hc"), noApprovalDialog, conversationAtStart]
+const entryTakesMessages = (runtime: Runtime): Check => ({
+  id: `I14-${runtime}`,
+  tier: "agent",
+  title: `Cursor (real model) as the entry session on ${runtime === "hc" ? "herdr-core" : "herdr"}: a message sent while it is idle with an empty box is typed and answered as its execution; one sent while the user's unsent text sits in the box waits, the box unchanged, and is typed alone after that text is submitted and answered; one sent while it works on a prompt typed in its pane is typed only after that work ends, each reply on its own execution`,
+  run: async (w, evidence) => {
+    const c = await cursorWorld(w, runtime, "i14", "cursor")
+    const screens: Array<string> = []
+    const keep = (label: string, text: string) => screens.push(`=== ${label}\n${text.trimEnd()}`)
+    const entry = (await w.entryOf(c.repo))!
+    const answered = (marker: string) =>
+      until(
+        `the reply ${marker}`,
+        () => c.executions(entry).some((x) => x.outcome === "completed" && (x.reply ?? "").includes(marker)),
+        240_000,
+      ).catch(async (e: Error) => {
+        throw new Error(`${e.message}; executions ${JSON.stringify(c.executions(entry))}\n${await c.screen(entry)}`)
+      })
+    const onScreen = (marker: string, ms: number) =>
+      until(`${marker} on the screen`, async () => (await c.screen(entry)).includes(marker), ms)
+    try {
+      await until(
+        "the Cursor entry session ready and idle",
+        async () =>
+          row<{ r: number | null }>(w, `SELECT ready_at AS r FROM process WHERE session_id = ? ORDER BY id DESC`, entry)
+            ?.r != null && (await c.listed(entry))?.status === "idle",
+        180_000,
+      ).catch(async (e: Error) => {
+        throw new Error(`${e.message}; screen:\n${await c.screen(entry).catch(() => "")}`)
+      })
+      await w.ok(["send", entry, "--", "Reply with exactly: i14-one"], { cwd: c.repo })
+      await answered("i14-one")
+      keep("after the first message", await c.screen(entry))
+
+      await c.typeText(entry, "Reply with exactly: i14-typed")
+      await Bun.sleep(1_500)
+      const before = c.executions(entry).length
+      await w.ok(["send", entry, "--", "Reply with exactly: i14-two"], { cwd: c.repo })
+      await Bun.sleep(12_000)
+      const held = await c.screen(entry)
+      keep("a message sent while text is in the box", held)
+      expect(
+        c.executions(entry).length === before && held.includes("i14-typed") && !held.includes("i14-two"),
+        `a message was typed over the user's text: executions ${JSON.stringify(c.executions(entry))}`,
+      )
+      await c.pressKeys(entry, ["enter"])
+      await answered("i14-two")
+      const two = c.executions(entry).at(-1)!
+      const handed = rows<{ content: string }>(
+        w,
+        "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+        entry,
+        two.id,
+      ).map((r) => r.content)
+      expect(
+        handed.length === 1 && handed[0]!.includes("i14-two") && !(two.reply ?? "").includes("i14-typed"),
+        `the queued message was not typed alone: ${JSON.stringify({ two, handed })}`,
+      )
+      keep("after the submitted text and the queued message", await c.screen(entry))
+
+      await c.typeText(entry, "Run this shell command exactly: sleep 25. Then reply with exactly: i14-slept")
+      await Bun.sleep(1_000)
+      await c.pressKeys(entry, ["enter"])
+      await onScreen("Working", 60_000)
+      const working = c.executions(entry).length
+      await w.ok(["send", entry, "--", "Reply with exactly: i14-three"], { cwd: c.repo })
+      await Bun.sleep(5_000)
+      expect(
+        c.executions(entry).length === working,
+        `a message was typed while the typed prompt ran: ${JSON.stringify(c.executions(entry))}`,
+      )
+      await answered("i14-three")
+      const after = await c.screen(entry)
+      keep("after the typed prompt and the message sent meanwhile", after)
+      const three = c.executions(entry).at(-1)!
+      expect(
+        !(three.reply ?? "").includes("i14-slept") && after.indexOf("i14-slept") < after.lastIndexOf("i14-three"),
+        `the replies crossed: ${JSON.stringify(three)}`,
+      )
+    } finally {
+      await w.writeEvidence(path.join(evidence, `I14-${runtime}-screens.txt`), `${screens.join("\n")}\n`)
+      await c.close([])
+    }
+  },
+})
+
+const checks: ReadonlyArray<Check> = [
+  reports("herdr"),
+  reports("hc"),
+  noApprovalDialog,
+  conversationAtStart,
+  entryTakesMessages("herdr"),
+  entryTakesMessages("hc"),
+]
 
 export default checks

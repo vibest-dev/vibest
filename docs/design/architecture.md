@@ -296,7 +296,8 @@ that is when the execution ends and the next Message is delivered. For a harness
 definition has no `executionEnd` (agy) treats the runtime's idle as the end: an execution vibest handed over, or one the runtime saw start with no open
 execution (`working` reported while nothing was open: typed work, the entry session's included), is `completed` the moment the runtime reports idle, with no
 reply text and no way to tell an error from an answer; `blocked` keeps it open. Such a harness is ready for its first task only once the runtime reports
-idle (not blocked on a login or a dialog), and its entry session takes queued messages like any other.
+idle (not blocked on a login or a dialog). An entry session whose harness does not pull its own inbox (agy, Cursor) takes
+queued messages by typing, like any other session of that harness.
 
 **Outcome of a task or message** (omac's execution states, copied): a Message vibest delivered is `completed` or
 `failed` by its execution, `lost` as above, `not_started` when delivery could not be confirmed (§3.2), `interrupted`

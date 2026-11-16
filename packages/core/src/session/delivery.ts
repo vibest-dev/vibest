@@ -164,7 +164,7 @@ export const make = Effect.gen(function* () {
     const session = yield* getRow(id)
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
     if (
-      (session.entry && !Harnesses.runtimeLifecycle(harnesses.find(harnessIdOf(session)))) ||
+      (session.entry && inbox.pulls(harnessIdOf(session))) ||
       executionStateOf(session) === "open" ||
       session.status === "blocked" ||
       ((session.process?.placedAt ?? null) === null && exitedAt(session) === null) ||
