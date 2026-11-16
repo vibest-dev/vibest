@@ -276,18 +276,21 @@ export const make = Effect.gen(function* () {
               },
       }
       const plan = yield* launching(nextRow, false, yield* taskInput(nextRow, next.prompt))
-      if (inPlace) {
-        yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
-        yield* plan.beforeStart
-      }
+      if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
       const placed = inPlace
-        ? yield* h.run!(terminal!, plan.argv).pipe(Effect.as(terminal!), Effect.exit)
-        : yield* openTerminal(h, undefined, nextRow, {
-            project: root,
-            cwd,
-            argv: plan.argv,
-            beforeStart: plan.beforeStart,
-          }).pipe(Effect.exit)
+        ? yield* plan
+            .starting(Effect.andThen(plan.beforeStart, h.run!(terminal!, plan.argv)))
+            .pipe(Effect.as(terminal!), Effect.exit)
+        : yield* plan
+            .starting(
+              openTerminal(h, undefined, nextRow, {
+                project: root,
+                cwd,
+                argv: plan.argv,
+                beforeStart: plan.beforeStart,
+              }),
+            )
+            .pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         const failed = Cause.squash(placed.cause)
         const startDeath = failed instanceof RuntimeError && failed.code === "failed"

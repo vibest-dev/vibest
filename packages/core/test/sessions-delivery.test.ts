@@ -521,6 +521,39 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "a resume of a harness that takes its first message in its launch argv whose terminal fails to open closes the execution it opened, so the next send resumes again",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const integration = yield* Integration.Service
+      yield* Ref.set(herdr.onStarted, (session) =>
+        Effect.gen(function* () {
+          const who = { id: session, entry: false, harness: FIRST_IN_ARGV.id }
+          yield* integration.prompt(who, JSON.stringify({ hook_event_name: "afterAgentThought" }))
+          yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
+        }),
+      )
+      const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository, "first"))
+      yield* until(db.session.getSession(id), (row) => row !== undefined && executionStateOf(row) === "completed")
+      yield* db.session.noteConversation(id, "conversation-1")
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* until(db.session.getSession(id), (row) => row !== undefined && exitedAt(row) !== null)
+      const placed = (yield* herdr.callsTo("open")).length
+      const held = yield* herdr.hold("open", id)
+      yield* sessions.send(id, "again")
+      yield* held.reached
+      yield* held.release("failed")
+      yield* until(db.session.openExecution(id), (open) => open === undefined)
+      yield* sessions.send(id, "once more")
+      const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 2)
+      assert.include(opens.at(-1)!.argv.at(-1)!, "once more")
+    }),
+    { harnesses: [PI, FIRST_IN_ARGV] },
+  )
+
+  test(
     "Cursor on a runtime with no status for it: the task waits for its ready report; typed, its first activity report accepts it and shows it working, with no resend; its execution end shows it idle, and an interrupt goes by its open execution",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

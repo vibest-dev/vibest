@@ -198,7 +198,11 @@ export const make = Effect.gen(function* () {
         if (opened !== undefined) return yield* launched(h, row, terminal, opened)
         return yield* prompt(h, row, terminal, first.text, first.onHandover)
       })
-    return { argv, beforeStart, deliver }
+    const abandoned = Effect.flatMap(Ref.get(execution), (opened) =>
+      opened === undefined ? Effect.void : db.session.closeExecution(session.id, opened, "not_started"),
+    )
+    const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError(() => abandoned))
+    return { argv, beforeStart, starting, deliver }
   }, provided)
 
   const handTask = Effect.fn("Placement.handTask")(function* (
@@ -360,16 +364,18 @@ export const make = Effect.gen(function* () {
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
     const plan = yield* launching(session, false, yield* taskInput(session, firstPrompt))
     const terminal = yield* openOrMove(
-      openTerminal(h, target, session, {
-        project: root,
-        cwd: worktree,
-        argv: plan.argv,
-        beforeStart: plan.beforeStart,
-        env,
-        endedByCaller: true,
-        ...(near !== undefined ? { near } : {}),
-        ...(sharedFrom !== undefined ? { split: true } : {}),
-      }),
+      plan.starting(
+        openTerminal(h, target, session, {
+          project: root,
+          cwd: worktree,
+          argv: plan.argv,
+          beforeStart: plan.beforeStart,
+          env,
+          endedByCaller: true,
+          ...(near !== undefined ? { near } : {}),
+          ...(sharedFrom !== undefined ? { split: true } : {}),
+        }),
+      ),
     )
     if ("limited" in terminal)
       return { _tag: "Limited", input: firstPrompt, error: terminal.limited } satisfies LaunchOutcome
@@ -450,7 +456,9 @@ export const make = Effect.gen(function* () {
       const { root, cwd } = yield* locate(session)
       const plan = yield* launching(session, true, first)
       const terminal = yield* undoOnFailure(
-        openTerminal(h, undefined, session, { project: root, cwd, argv: plan.argv, beforeStart: plan.beforeStart }),
+        plan.starting(
+          openTerminal(h, undefined, session, { project: root, cwd, argv: plan.argv, beforeStart: plan.beforeStart }),
+        ),
         (terminal) => h.close(terminal).pipe(Effect.ignore),
       )
       yield* show(h, session, terminal, root)

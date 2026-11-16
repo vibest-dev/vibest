@@ -147,7 +147,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   new session's task, the queued messages that resume an exited one, or the task a usage-limit move carries, in a new
   terminal or in place) as launch arguments instead of typed text. Every start goes through one function
   (`Placement.launching`): it builds the argv and, for a first input, opens the execution and hands the message to it
-  after the process is recorded and before it starts, so a report the harness sends at once finds it. vibestd then
+  after the process is recorded and before it starts, so a report the harness sends at once finds it. If that start fails (the terminal does not open, or the in-place start fails), the execution it opened is closed
+  `not_started` unless the harness already ended it, so a later message resumes the session again. vibestd then
   waits for the harness's report to accept it, answering the definition's startup dialogs meanwhile; no report within
   the ready timeout ends it `not_started`. agy uses it (`--prompt-interactive`): agy reports nothing before its first
   input, so on a runtime with no state for it nothing else could say it is ready. An in-place restart carries no
