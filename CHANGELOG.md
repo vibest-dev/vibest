@@ -245,6 +245,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Added
 
+- Harness definitions take `readyOnStart: "integration"` (plugin authors): a process that starts a new conversation
+  waits for the integration's ready report even when its `ready` is `runtime`. Cursor uses it, so on herdr its first
+  task is no longer typed before cursor-agent has drawn its input box.
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
 
 ### Changed

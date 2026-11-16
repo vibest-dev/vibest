@@ -6,8 +6,10 @@ vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`)
   (`Integration.Guard`), which runs the guard rules and answers in Cursor's shape (the `cursor` definition's
   `guardAnswer`); it refuses an agent driving herdr itself or reading the project store's files directly. It runs
   fail-closed.
-- **readiness**: `sessionStart` goes to `vibest integration prompt --harness cursor`, which records the session's
-  conversation id, and then to `vibest integration ready --harness cursor`.
+- **readiness**: `sessionStart` goes both to `vibest integration prompt --harness cursor`, which records the session's
+  conversation id, and to `vibest integration ready --harness cursor` (Cursor runs the two at once); vibestd types a new session's first task
+  only after it (`readyOnStart`). Cursor runs no `sessionStart` when it resumes a conversation, so a resumed session is
+  ready when the runtime shows it settled.
 - **an execution at work**: `afterAgentThought`, `postToolUse` and `beforeSubmitPrompt` go to
   `vibest integration prompt --harness cursor`; vibestd shows the session working, and opens an execution for a prompt the
   user typed. Cursor runs a plugin's `beforeSubmitPrompt` only when user or project hooks also have one.

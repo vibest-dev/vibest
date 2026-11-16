@@ -138,8 +138,13 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - Core follows each Agent with `events` and `state` when present; it never polls `process`. When an execution ends (state
   idle after working, or the process exited), core takes the reported execution end and delivers the result. An execution end
   vibestd had not written when it stopped is lost; reconciliation records that execution lost.
-- Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its execution
-  ends loses the execution, as today.
+- Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
+  `runtime`, the ready report or the runtime showing the terminal settled. `readyOnStart: "integration"` makes a process
+  that starts a new conversation wait for the ready report even when the runtime already shows it settled: a runtime can
+  call a terminal idle before the harness has drawn its input box, and text typed then goes to the shell. A resumed
+  process (one that starts on a recorded conversation) keeps `ready`, for a harness that reports nothing when it
+  resumes (Cursor's `sessionStart` runs only for a new conversation). A process that exits before its execution ends
+  loses the execution, as today.
 
 ### Terminal status ownership
 

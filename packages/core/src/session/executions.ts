@@ -43,16 +43,20 @@ export const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const { track } = yield* SessionLive.Service
 
+  const startsNewConversation = (id: string) =>
+    Effect.map(db.session.getSession(id), (session) => (session?.process?.conversation ?? null) === null)
+
   const awaitReady = Effect.fn("Executions.awaitReady")(
     (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
       Effect.gen(function* () {
         const reports = adapter.ready === "integration"
-        if (h.state === undefined && !reports) return "unknown" as AgentState
+        const waitsForReport = reports || (adapter.readyOnStart === "integration" && (yield* startsNewConversation(id)))
+        if (h.state === undefined && !waitsForReport) return "unknown" as AgentState
         const step = adapter.startup ? yield* adapter.startup : undefined
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
           const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-          const ready = (yield* db.session.readyAt(id)) !== undefined || (!reports && settled(seen))
+          const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && settled(seen))
           return { seen, ready }
         })
         return yield* look.pipe(

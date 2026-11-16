@@ -94,6 +94,7 @@ export const CURSOR: HarnessDefinition = {
   interruptKey: "ctrl+c",
   replyField: "text",
   ready: "runtime",
+  readyOnStart: "integration",
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),

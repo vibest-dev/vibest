@@ -425,6 +425,24 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "Cursor on a runtime that shows its terminal idle at once: a new session's first task still waits for its ready report",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      yield* Ref.set(herdr.onStarted, (session) =>
+        herdr.updateAgent(session, (a) => ({ ...a, status: "idle", registerPrompt: false })),
+      )
+      const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository, "cursor"))
+      yield* until(db.session.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
+      for (let i = 0; i < 20; i++) yield* untilVirtual(Effect.succeed(0), () => true)
+      assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
+      yield* db.session.patchLive(id, { ready: yield* Clock.currentTimeMillis })
+      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("do it")))
+    }),
+  )
+
+  test(
     "Cursor on a runtime with no status for it: the task waits for its ready report and, typed, shows it working without a resend; its execution end shows it idle, and an interrupt goes by its open execution",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
