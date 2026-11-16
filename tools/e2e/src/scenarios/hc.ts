@@ -23,7 +23,7 @@ type HcTerminal = {
   labels: Record<string, string>
 }
 
-const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
+export const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
   const dirs = {
     state: path.join(w.root, `${tag}-state`),
     config: path.join(w.root, `${tag}-config`),

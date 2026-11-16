@@ -54,6 +54,9 @@ after its plugin reported ready, `vibest ls` shows it working during an executio
 the reply, `vibest interrupt` ends the execution as interrupted with no notice, and the plugin never writes to the
 terminal.
 
+Checks `I10-herdr` and `I10-hc` (tier `agent`) script this on the user's Cursor login, and record which hook events
+Cursor dispatched and its screen in each input-box state.
+
 ## I11. Another vibest first on PATH
 
 When another `vibest` comes first on PATH, the integrations still reach the vibest that started them: a Pi entry session
