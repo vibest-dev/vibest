@@ -2,7 +2,7 @@ import { entryPlace, specHits, filterCallerEnv } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project/create"
-import { resolveProject } from "@vibest/core/project/identity"
+import { moveProjectHere, resolveProject } from "@vibest/core/project/identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { LaunchFailed } from "@vibest/schema/session"
 import { Effect } from "effect"
@@ -17,15 +17,23 @@ export const make = Effect.gen(function* () {
   const project = yield* Project.Service
   const runtimes = yield* Runtimes.Service
   return {
-    "Project.Open": ({ move }) =>
+    "Project.Open": () =>
       Effect.gen(function* () {
         const c = yield* cliOnly("Project.Open")
-        const project = yield* resolveProject(db, yield* atProject(c.repositoryRoot), move)
+        const project = yield* resolveProject(db, yield* atProject(c.repositoryRoot))
+        return { projectId: project.id, directory: project.directory }
+      }),
+
+    "Project.Move": ({ from }) =>
+      Effect.gen(function* () {
+        const c = yield* cliOnly("Project.Move")
+        const moved = yield* moveProjectHere(db, yield* atProject(c.repositoryRoot), from)
         return {
-          projectId: project.id,
-          directory: project.directory,
-          ...("moved" in project ? { moved: project.moved } : {}),
-          ...("candidates" in project ? { candidates: project.candidates } : {}),
+          projectId: moved.id,
+          directory: moved.directory,
+          from: moved.from,
+          repaired: moved.repaired,
+          manual: moved.manual,
         }
       }),
 
@@ -73,6 +81,7 @@ export const make = Effect.gen(function* () {
 
 export const layer = group([
   "Project.Open",
+  "Project.Move",
   "Project.EntryPlace",
   "Project.Create",
   "Project.Info",

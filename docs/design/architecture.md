@@ -1109,8 +1109,8 @@ prompt from the entry session or from vibest's own delivery is ignored). Of the 
 - `SessionInfo.task` is the first row delivered from the user or the parent (`List` cuts it to 500 characters);
   `latest.summary` is the first trimmed line of the execution's `reply`.
 - `Launch` opens `vibest`'s entry session outside the repository's workspace: a tab there, or a new workspace at its
-  root, whose shell runs argv. `Project.Open` finds or makes the project of the directory (`move` answers a
-  `ProjectMoved`). `Project.StartEntry` picks the entry session's harness, provider, model and runtime and writes
+  root, whose shell runs argv. `Project.Open` finds or makes the project of the directory; `Project.Move` (the user only) moves the project
+  recorded at an old directory to it. `Project.StartEntry` picks the entry session's harness, provider, model and runtime and writes
   nothing. `Project.EntrySession` then upserts the entry session row at its terminal and returns the harness
   command the CLI execs, with the caller's PID. An entry session's pane does not keep those variables in its shell.
   `Project.RunningEntry` finds the entry session in another pane; `Project.StopEntry` sends SIGTERM to its

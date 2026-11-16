@@ -72,25 +72,6 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.orDie),
     ),
 
-    moveCandidates: Effect.fn("Db.project.moveCandidates")((remotes: ReadonlyArray<string>) =>
-      Effect.gen(function* () {
-        const wanted = [...new Set(remotes)].sort()
-        if (wanted.length === 0) return []
-        const rows = yield* sql<{ id: string; directory: string; remote: string | null }>`SELECT p.id, p.directory,
-            r.remote_url AS remote FROM project p JOIN project_repository r ON r.project_id = p.id
-          WHERE p.directory IS NOT NULL AND p.id IN (SELECT project_id FROM project_repository WHERE ${sql.in("remote_url", wanted)})`
-        const byProject = new Map<string, { directory: string; remotes: Set<string> }>()
-        for (const row of rows) {
-          const entry = byProject.get(row.id) ?? { directory: row.directory, remotes: new Set<string>() }
-          if (row.remote !== null) entry.remotes.add(row.remote)
-          byProject.set(row.id, entry)
-        }
-        return [...byProject]
-          .filter(([, p]) => [...p.remotes].sort().join("\n") === wanted.join("\n"))
-          .map(([id, p]) => ({ id, directory: p.directory }))
-      }).pipe(Effect.orDie),
-    ),
-
     moveProject: Effect.fn("Db.project.moveProject")(
       (id: string, to: string, repositories: ReadonlyArray<RepositoryRow>) =>
         tx(

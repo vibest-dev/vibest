@@ -1,5 +1,5 @@
 {
-  "protocol": 10,
+  "protocol": 11,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -3670,9 +3670,6 @@
                 "$ref": "#/$defs/NotInRepositoryEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
                 "$ref": "#/$defs/LaunchFailedEncoded"
               },
               {
@@ -3769,33 +3766,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -8455,9 +8425,6 @@
                 "$ref": "#/$defs/NotInRepositoryEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
                 "$ref": "#/$defs/LaunchFailedEncoded"
               }
             ]
@@ -8539,33 +8506,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -8971,9 +8911,6 @@
                 "$ref": "#/$defs/NotInRepositoryEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
                 "$ref": "#/$defs/RuntimeUnreachableEncoded"
               },
               {
@@ -9070,33 +9007,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -9382,9 +9292,6 @@
               },
               {
                 "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectMovedEncoded"
               }
             ]
           },
@@ -9442,33 +9349,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -9634,9 +9514,6 @@
               },
               {
                 "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectMovedEncoded"
               }
             ]
           },
@@ -9697,30 +9574,262 @@
             ],
             "additionalProperties": true
           },
-          "ProjectMovedEncoded": {
+          "InvalidCallerEncoded": {
             "type": "object",
             "properties": {
               "_tag": {
                 "type": "string",
                 "enum": [
-                  "ProjectMoved"
+                  "InvalidCaller"
                 ]
               },
-              "projectId": {
+              "method": {
                 "type": "string"
               },
-              "from": {
-                "type": "string"
-              },
-              "to": {
+              "message": {
                 "type": "string"
               }
             },
             "required": [
               "_tag",
-              "projectId",
-              "from",
-              "to"
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Project.Move": {
+      "access": "cli",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "repaired": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "manual": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "projectId",
+          "directory",
+          "from",
+          "repaired",
+          "manual"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NotInRepositoryEncoded"
+              },
+              {
+                "$ref": "#/$defs/MoveRefusedEncoded"
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NotInRepositoryEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NotInRepository"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "path"
+            ],
+            "additionalProperties": true
+          },
+          "MoveRefusedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MoveRefused"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
             ],
             "additionalProperties": true
           },
@@ -9845,20 +9954,9 @@
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "move": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": true
+        "not": {
+          "type": "null"
+        }
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9869,52 +9967,6 @@
           },
           "directory": {
             "type": "string"
-          },
-          "moved": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "from": {
-                    "type": "string"
-                  },
-                  "repaired": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "manual": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "required": [
-                  "from",
-                  "repaired",
-                  "manual"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "candidates": {
-            "anyOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -9933,9 +9985,6 @@
               },
               {
                 "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectMovedEncoded"
               }
             ]
           },
@@ -9993,33 +10042,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -10202,9 +10224,6 @@
                 "$ref": "#/$defs/NotInRepositoryEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
                 "$ref": "#/$defs/RuntimeUnreachableEncoded"
               },
               {
@@ -10289,33 +10308,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -10506,9 +10498,6 @@
               },
               {
                 "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectMovedEncoded"
               }
             ]
           },
@@ -10566,33 +10555,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -10935,9 +10897,6 @@
                 "$ref": "#/$defs/NotInRepositoryEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
                 "$ref": "#/$defs/NoHarnessChosenEncoded"
               },
               {
@@ -11037,33 +10996,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -11388,9 +11320,6 @@
                 "$ref": "#/$defs/NotInRepositoryEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
                 "$ref": "#/$defs/RuntimeUnreachableEncoded"
               },
               {
@@ -11458,33 +11387,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },
@@ -13789,9 +13691,6 @@
                 "$ref": "#/$defs/NotInRepositoryEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
                 "$ref": "#/$defs/NoCallingSessionEncoded"
               },
               {
@@ -14136,33 +14035,6 @@
             "required": [
               "_tag",
               "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
             ],
             "additionalProperties": true
           },

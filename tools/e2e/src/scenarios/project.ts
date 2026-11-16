@@ -159,7 +159,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "P7",
     title:
-      "a moved checkout: other commands name both places; vibest asks [Y/n], y keeps the project id, its repository path and memories, and repairs the worktree vibest run made (the answering vibest names a runtime that does not exist, so no harness starts)",
+      "a moved checkout: vibest project move <old directory> keeps the project id, its repository path, memories and sessions at the new place, and repairs the worktree vibest run made; an unknown old directory is refused",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const sh = async (cwd: string, ...argv: Array<string>) => {
@@ -203,20 +203,19 @@ const checks: ReadonlyArray<Check> = [
 
       await fs.rename(old, path.join(w.root, "p7", "moved"))
       const moved = await fs.realpath(path.join(w.root, "p7", "moved"))
-      const refused = await w.vibest(["project", "info"], { cwd: moved })
+      const unknown = await w.vibest(["project", "move", path.join(w.root, "p7", "nowhere")], { cwd: moved })
       expect(
-        refused.code !== 0 && refused.stderr.includes(old) && refused.stderr.includes(moved),
-        `project info in the moved checkout: ${refused.code} ${refused.stderr}${refused.stdout}`,
+        unknown.code !== 0 && unknown.stderr.includes("no project is recorded at"),
+        `project move of an unknown directory: ${unknown.code} ${unknown.stderr}${unknown.stdout}`,
       )
-      const missingRuntime = "e2e-none"
-      const r = await w.tty(["--headless", "--runtime", missingRuntime], "y\n", {
-        cwd: moved,
-        timeoutMs: 60_000,
-      })
-      const out = `${r.stdout}${r.stderr}`
-      expect(out.includes(`The project moved from ${old} to here, move it? [Y/n]`), `no question: ${out}`)
-      expect(out.includes(`moved the project from ${old} to ${moved}`), `not moved: ${out}`)
-      expect(!out.includes("a worktree of yours"), `vibest's own worktree was left to the user: ${out}`)
+      const done = await w.vibest(["project", "move", old], { cwd: moved })
+      expect(done.code === 0, `project move: ${done.code} ${done.stderr}`)
+      expect(!done.stderr.includes("a worktree of yours"), `vibest's own worktree was left to the user: ${done.stderr}`)
+      const again = await w.vibest(["project", "move", old], { cwd: moved })
+      expect(
+        again.code !== 0 && again.stderr.includes("no project is recorded at"),
+        `a second project move: ${again.code} ${again.stderr}${again.stdout}`,
+      )
       const after = row<{ id: string }>(w, "SELECT project_id AS id FROM project_repository WHERE path = ?", moved)
       expect(after?.id === project!.id, `the project at ${moved} is ${after?.id}, was ${project!.id}`)
       expect(
@@ -225,6 +224,11 @@ const checks: ReadonlyArray<Check> = [
       )
       const now = await w.json<Info>(["project", "info"], { cwd: moved })
       expect(now.directory === info.directory, `the project folder is now ${now.directory}, was ${info.directory}`)
+      const listed = (await w.json<{ sessions: Array<{ worktree: string }> }>(["ls", "--all"], { cwd: moved })).sessions
+      expect(
+        listed.some((s) => s.worktree === moved),
+        `no session at the new place: ${JSON.stringify(listed)}`,
+      )
       const kept = await fs.readFile(path.join(now.memories, "a.md"), "utf8")
       expect(kept.includes("kept across the move"), `memories after the move: ${kept}`)
       await sh(vibestOwnWorktree, "git", "status", "--short")

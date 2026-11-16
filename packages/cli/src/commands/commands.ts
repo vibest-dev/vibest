@@ -264,6 +264,11 @@ const project = Spec.make("project", {
         "Record a checkout as a project without starting an entry session, so another machine's vibestd can run agents in it",
       params: { directory: Argument.String("directory").pipe(Argument.withDefault(".")) },
     }),
+    Spec.make("move", {
+      description:
+        "Run inside the repository at its new place: the project that was recorded at the old directory continues here, with its id, memories and sessions. Only for a directory that no longer exists; vibest never detects a move by itself. Prints `git worktree repair` for each worktree of yours outside vibest's worktrees",
+      params: { from: Argument.String("old-directory") },
+    }),
     Spec.make("info", {
       description: "The paths of the project folder, its preferences.md, docs, memories and artifacts",
     }),
