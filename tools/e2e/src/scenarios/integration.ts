@@ -15,19 +15,7 @@ import {
   subagentFolder,
   text,
 } from "../fake-model.ts"
-import {
-  agentName,
-  compiled,
-  expect,
-  harnesses,
-  herdr,
-  row,
-  rows,
-  SESSIONS,
-  Skip,
-  until,
-  type World,
-} from "../world.ts"
+import { paneOf, compiled, expect, harnesses, herdr, row, rows, SESSIONS, Skip, until, type World } from "../world.ts"
 import { addCursorPlugin } from "../world/plugins.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
@@ -407,7 +395,7 @@ const checks: ReadonlyArray<Check> = [
           await w.ok(["send", id, HOLD])
           await until("the held execution at the model", () => held === 1, 60_000)
           await until("the held execution open", settled("open"), 60_000)
-          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
+          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", paneOf(w, id)!, "esc"], {
             env: { HERDR_SOCKET_PATH: socket },
           })
           expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)

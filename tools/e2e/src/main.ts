@@ -94,8 +94,8 @@ if (jobs !== undefined && !(Number.isInteger(jobs) && jobs > 0)) {
   process.exit(1)
 }
 const tier = valueOf("--tier") ?? "gate"
-if (!["gate", "slow", "agent", "all"].includes(tier)) {
-  console.error("--tier is gate, slow, agent or all")
+if (!["gate", "agent", "all"].includes(tier)) {
+  console.error("--tier is gate, agent or all")
   process.exit(1)
 }
 const elsewhere = (valueOf("--elsewhere") ?? "").split(",").filter(Boolean)

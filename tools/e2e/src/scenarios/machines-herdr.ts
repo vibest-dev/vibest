@@ -4,7 +4,7 @@ import path from "node:path"
 import { note } from "../../../reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { agentName, binary, expect, readDb, row, Skip, until, type World } from "../world.ts"
+import { binary, expect, herdrPane, readDb, row, Skip, until, type World } from "../world.ts"
 import { fakeSsh, sh, stopVibestd, subModel } from "./machines.ts"
 
 type Listed = {
@@ -253,7 +253,12 @@ const checks: ReadonlyArray<Check> = [
           `B's rows: ${JSON.stringify(onB.map((r) => [r.id, r.agent]))}`,
         )
         expect(onB.length === 2, `the refused run left a session on B: ${onB.length}`)
-        const name = agentName(bRow!.id)
+        const name = herdrPane(
+          s.bDb<{ terminal: string }>(
+            "SELECT terminal FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+            bRow!.id,
+          )?.terminal,
+        )!
         const shown = async () =>
           (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
             r.id.startsWith(printed.slice(0, 11)),
@@ -267,7 +272,7 @@ const checks: ReadonlyArray<Check> = [
           },
           60_000,
         )
-        const pattern = new RegExp(`^${s.sessions.b}/w\\d+:p\\d+/${name}@${label}$`)
+        const pattern = new RegExp(`^${s.sessions.b}/${name}@${label}$`)
         expect(pattern.test(first?.address?.id ?? ""), `A's row: ${JSON.stringify(first)}`)
         const got = await s.herdrA("--machine", label, "agent", "get", name)
         await w.writeEvidence(path.join(evidence, "M7-agent-get.txt"), `${got.code}\n${got.stdout}${got.stderr}`)
@@ -310,7 +315,7 @@ const checks: ReadonlyArray<Check> = [
             const row = (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
               r.id.startsWith(again.slice(0, 11)),
             )
-            return new RegExp(`^${s!.sessions.b}/w\\d+:p\\d+/s-[0-9a-f]+@${label}$`).test(row?.address?.id ?? "")
+            return new RegExp(`^${s!.sessions.b}/w\\d+:p\\d+@${label}$`).test(row?.address?.id ?? "")
           },
           60_000,
         )
@@ -325,7 +330,18 @@ const checks: ReadonlyArray<Check> = [
         const bAgain = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
           again.slice(3).startsWith(r.id.slice(0, 8)),
         )
-        const reached = await s.herdrA("--machine", label, "agent", "get", agentName(bAgain!.id))
+        const reached = await s.herdrA(
+          "--machine",
+          label,
+          "agent",
+          "get",
+          herdrPane(
+            s.bDb<{ terminal: string }>(
+              "SELECT terminal FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+              bAgain!.id,
+            )?.terminal,
+          )!,
+        )
         await w.writeEvidence(
           path.join(evidence, "M7-agent-get-restarted.txt"),
           `${reached.code}\n${reached.stdout}${reached.stderr}`,

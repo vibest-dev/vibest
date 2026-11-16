@@ -23,7 +23,7 @@ import {
   text,
 } from "../fake-model.ts"
 import {
-  agentName,
+  paneOf,
   alive,
   replyOf,
   expect,
@@ -41,8 +41,6 @@ import {
 } from "../world.ts"
 
 type Entry = { id: string; agent: string }
-
-const HERDR_AGENT_START_TIMEOUT_MS = 120_000
 
 export const project = async (w: World, name: string) => {
   const repo = path.join(w.root, name)
@@ -229,7 +227,7 @@ export const curl = async (
   return { status: Number(r.stdout.slice(at + 1)), body: JSON.parse(r.stdout.slice(0, at) || "null") as unknown }
 }
 
-const heldSubagent = async (w: World, pastWindow: boolean) => {
+const heldSubagent = async (w: World) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   const model = heldModel()
   const session = `${w.herdrSession}-held`
@@ -253,25 +251,19 @@ const heldSubagent = async (w: World, pastWindow: boolean) => {
         }),
       ) as { id: string }
     ).id
-    const started = Date.now()
     await until("the subagent's execution held by the model", () => model.held() > 0, 60_000)
-    const named = async () =>
-      ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
-        (a) => a.name === agentName(sub),
+    const found = async () =>
+      ((await herdr(socket, "agent.list", {})).agents as Array<{ pane_id?: string; agent?: string | null }>).some(
+        (a) => a.pane_id === paneOf(w, sub) && a.agent === "pi",
       )
     const exited = () =>
       row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, sub)?.e ?? null
     const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
     const kept = async () => {
       expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
-      expect(await named(), `herdr no longer names the subagent ${agentName(sub)}; vibestd.log:\n${await log()}`)
+      expect(await found(), `herdr no longer finds the subagent in its pane; vibestd.log:\n${await log()}`)
     }
-    if (pastWindow)
-      while (Date.now() - started < HERDR_AGENT_START_TIMEOUT_MS + 15_000) {
-        await Bun.sleep(5_000)
-        await kept()
-      }
-    else {
+    {
       const terminal = () =>
         (
           JSON.parse(
@@ -629,13 +621,13 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S18",
     title:
-      "a Pi subagent whose first execution is still held already has its terminal (herdr's agent.start resolved before the execution ends): herdr names it s-<id>, vibest peek reads it, no exit is recorded, and its result arrives",
-    run: (w) => heldSubagent(w, false),
+      "a Pi subagent whose first execution is still held already has its terminal: herdr finds it in its pane, vibest peek reads it, no exit is recorded, and its result arrives",
+    run: (w) => heldSubagent(w),
   },
   {
     id: "S20",
     title:
-      "ids: vibest run answers a UUID, herdr names the agent s-<30 hex>, result takes 8 characters and peek 12 (peek prints the terminal, at most N lines with --lines, and refuses an unknown id), and the system prompt is $TMPDIR/vibest/<id>/system-prompt.md",
+      "ids: vibest run answers a UUID, herdr finds the agent in its pane, result takes 8 characters and peek 12 (peek prints the terminal, at most N lines with --lines, and refuses an unknown id), and the system prompt is $TMPDIR/vibest/<id>/system-prompt.md",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
@@ -663,10 +655,10 @@ const checks: ReadonlyArray<Check> = [
         ).id
         expect(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(sub), `run answered ${sub}`)
         await until(
-          `herdr names ${agentName(sub)}`,
+          "herdr finds the subagent in its pane",
           async () =>
-            ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
-              (a) => a.name === agentName(sub),
+            ((await herdr(socket, "agent.list", {})).agents as Array<{ pane_id?: string; agent?: string | null }>).some(
+              (a) => a.pane_id === paneOf(w, sub) && a.agent === "pi",
             ),
           60_000,
         )
@@ -751,13 +743,4 @@ const checks: ReadonlyArray<Check> = [
   },
 ]
 
-export default [
-  ...checks,
-  {
-    id: "S18-slow",
-    tier: "slow",
-    title:
-      "a Pi subagent whose first execution outlasts herdr's 120 s agent.start window keeps its terminal: herdr still names it s-<id>, vibest peek reads it, no exit is recorded, and its result arrives",
-    run: (w) => heldSubagent(w, true),
-  } satisfies Check,
-]
+export default checks

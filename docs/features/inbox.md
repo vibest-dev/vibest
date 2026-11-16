@@ -51,7 +51,7 @@ arrives once the execution it interrupted ends; delivery continues after `vibest
 
 ## S18. A long first execution keeps its terminal
 
-A session whose first execution outlasts herdr's start window keeps its terminal: no false exit is recorded, `vibest peek`
+A session whose first execution is still running already has its terminal: no false exit is recorded, `vibest peek`
 reads it, and its reply can be read.
 
 ## S19. Pi under herdr's own Pi hook
@@ -91,6 +91,11 @@ is told so in a notice that holds the message.
 
 When a session's execution ends in an error, the execution is `failed` with its failure, and the session's creator gets exactly one
 notice that carries the failure, typed into the entry session once.
+
+## S56. A first task arrives whole in the launch argv
+
+A subagent's first task is in its harness's launch arguments, multi-line and with shell characters as written: its
+execution starts before its process is placed, the model is asked it once, and it completes.
 
 ## S55. A message says who it is from
 

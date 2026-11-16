@@ -1,6 +1,6 @@
 import type { World } from "./world.ts"
 
-export type Tier = "gate" | "slow" | "agent"
+export type Tier = "gate" | "agent"
 
 export interface Check {
   readonly id: string
