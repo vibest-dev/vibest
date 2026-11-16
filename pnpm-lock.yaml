@@ -433,6 +433,16 @@ importers:
       effect-herdr-sdk:
         specifier: workspace:*
         version: link:../effect-herdr-sdk
+    devDependencies:
+      '@vibest/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@vibest/runtime-herdr':
+        specifier: workspace:*
+        version: link:../runtime-herdr
+      '@vibest/runtime-herdr-core':
+        specifier: workspace:*
+        version: link:../runtime-herdr-core
 
   packages/plugin:
     dependencies:
@@ -540,25 +550,6 @@ importers:
       effect:
         specifier: 4.0.2
         version: 4.0.2
-    devDependencies:
-      '@effect/platform-bun':
-        specifier: 'catalog:'
-        version: 4.0.2(effect@4.0.2)
-      '@effect/sql-sqlite-bun':
-        specifier: 'catalog:'
-        version: 4.0.2(effect@4.0.2)
-      '@vibest/platform-bun':
-        specifier: workspace:*
-        version: link:../platform-bun
-      '@vibest/runtime-herdr':
-        specifier: workspace:*
-        version: link:../runtime-herdr
-      '@vibest/runtime-herdr-core':
-        specifier: workspace:*
-        version: link:../runtime-herdr-core
-      effect-herdr-sdk:
-        specifier: workspace:*
-        version: link:../effect-herdr-sdk
 
   tools/bench:
     dependencies:
