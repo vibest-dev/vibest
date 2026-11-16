@@ -48,4 +48,14 @@ describe("@vibest/cursor", () => {
     })
     assert.strictEqual(run("preToolUse", { ...agent, FAKE_EXIT: "1" }).code, 2)
   })
+
+  it("the session start reports the event as a prompt, so its conversation is recorded, and then ready", () => {
+    const hooks = JSON.parse(files["hooks/hooks.json"]!).hooks as Record<string, Array<{ command: string }>>
+    assert.deepStrictEqual(
+      hooks.sessionStart!.map((h) => h.command),
+      ["sh ./hooks/vibest.sh prompt", "sh ./hooks/vibest.sh ready"],
+    )
+    const start = '{"hook_event_name":"sessionStart","conversation_id":"c1"}'
+    assert.strictEqual(run("sessionStart", agent, start).calls, `integration prompt --harness cursor <${start}>`)
+  })
 })

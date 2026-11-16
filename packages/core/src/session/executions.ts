@@ -46,16 +46,20 @@ export const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const { track } = yield* SessionLive.Service
 
+  const startsNewConversation = (id: string) =>
+    Effect.map(db.session.getSession(id), (session) => (session?.process?.conversation ?? null) === null)
+
   const awaitReady = Effect.fn("Executions.awaitReady")(
     (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
       Effect.gen(function* () {
         const reports = adapter.ready === "integration"
-        if (h.state === undefined && !reports) return "unknown" as AgentState
+        const waitsForReport = reports || (adapter.readyOnStart === "integration" && (yield* startsNewConversation(id)))
+        if (h.state === undefined && !waitsForReport) return "unknown" as AgentState
         const step = adapter.startup ? yield* adapter.startup : undefined
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
           const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-          const ready = (yield* db.session.readyAt(id)) !== undefined || (!reports && usable(seen, adapter))
+          const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && usable(seen, adapter))
           return { seen, ready }
         })
         return yield* look.pipe(
@@ -199,6 +203,9 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(r.blockedNotified, false)
     yield* db.session.setStatus(session.id, state)
     const send = Ref.set(r.prompting, true).pipe(
+      Effect.andThen(
+        adapter.clearKeys === undefined ? Effect.void : h.send(terminal, { keys: [...adapter.clearKeys] }),
+      ),
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )

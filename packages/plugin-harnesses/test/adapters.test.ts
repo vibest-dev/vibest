@@ -92,6 +92,10 @@ describe("HarnessAdapter", () => {
     assert.notInclude(dashLeadingArgs, "--yolo")
   })
 
+  it("cursor sessions start with --force, so Cursor's own approval dialog never holds a vibest session", () => {
+    assert.include(ADAPTERS.cursor.launchArgs(input), "--force")
+  })
+
   it("cursor reports its execution end at its response; its stop hook is not one", () => {
     const executionEnd = ADAPTERS.cursor.executionEnd!
     const reply = { hook_event_name: "afterAgentResponse", text: "done" }

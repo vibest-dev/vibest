@@ -173,14 +173,12 @@ export const piShadow = async (
   return dir
 }
 
-export const cursorShadow = async (dir: string, profile: Profile, vibest: string, from: UserPaths = user) => {
+export const cursorShadow = async (dir: string, profile: Profile, from: UserPaths = user) => {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   const own = profile === "user" ? pick(await readJson(from.cursorConfig), CURSOR_BEHAVIOUR) : {}
   await writeJson(
     path.join(dir, "cli-config.json"),
-    Object.keys(own).length > 0
-      ? own
-      : { version: 1, permissions: { allow: [`Shell(${vibest} send)`, "Shell(vibest send)"], deny: [] } },
+    Object.keys(own).length > 0 ? own : { version: 1, permissions: { allow: [], deny: [] } },
   )
   return dir
 }

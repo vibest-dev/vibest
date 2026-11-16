@@ -51,13 +51,42 @@ reaches the model, and reading in its own Project folder is allowed.
 
 A real cursor-agent on the user's login reports to vibestd on herdr and on herdr-core: its first task is typed only
 after its plugin reported ready, `vibest ls` shows it working during an execution and idle after it, `vibest result` carries
-the reply, `vibest interrupt` ends the execution as interrupted with no notice, and the plugin never writes to the
-terminal.
+the reply, a message sent while the user's unsent text sits in its input box clears that text and is delivered, `vibest
+interrupt` ends the execution as interrupted with no notice (also when it lands right after vibest typed a message, and
+the next message is then delivered alone), and the plugin never writes to the terminal.
+
+Checks `I10-herdr` and `I10-hc` (tier `agent`) script this on the user's Cursor login, and record which hook events
+Cursor dispatched and its screen in each input-box state.
+
+Known limits, from Cursor itself: results come only from its response, so an execution it ends without one (an error,
+Ctrl+C) is `lost` on herdr and stays open on herdr-core until the next response or `vibest interrupt`; a resumed Cursor
+has no ready report; it never shows as blocked on herdr-core.
 
 ## I11. Another vibest first on PATH
 
 When another `vibest` comes first on PATH, the integrations still reach the vibest that started them: a Pi entry session
 reports ready, Pi and Claude subagents deliver their messages, an entry session restarts, and the other vibest never runs.
+
+## I12. Cursor never waits on its own approval dialog
+
+A Cursor session vibest started runs shell commands without Cursor asking "Run this command?", even on Cursor's default
+`allowlist` approval mode with no allow rule: its `vibest send` to the session that started it arrives, and the session
+is never blocked. vibest's guard still refuses what vibest forbids: asked to run herdr, herdr does not run.
+
+## I13. A Cursor session resumes from its start
+
+A Cursor session's conversation is recorded when Cursor starts it, before any reply. If its pane is closed before a
+first reply, `vibest send` reopens it on that conversation and the reply arrives; closed again after a reply, the next
+`vibest send` resumes it too.
+
+## I14. A Cursor entry session takes messages
+
+With Cursor as the entry session (`vibest --harness cursor`), on herdr and on herdr-core, a message sent to it while it
+is idle with an empty input box is typed into Cursor and answered as an execution of the entry session. A message sent
+while the user's unsent text sits in the box clears that text and is typed and answered alone. A message sent while Cursor works on a prompt the user typed in its pane is typed
+only after that work ends, and each reply is on its own execution.
+
+Checks `I14-herdr` and `I14-hc` (tier `agent`) script this on the user's Cursor login.
 
 ## R6. Pi's guard
 

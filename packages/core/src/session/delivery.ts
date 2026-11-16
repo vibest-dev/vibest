@@ -154,7 +154,7 @@ export const make = Effect.gen(function* () {
     const session = yield* getRow(id)
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
     if (
-      (session.entry && !Harnesses.runtimeLifecycle(harnesses.find(harnessIdOf(session)))) ||
+      (session.entry && inbox.pulls(harnessIdOf(session))) ||
       executionStateOf(session) === "open" ||
       session.status === "blocked" ||
       ((session.process?.placedAt ?? null) === null && exitedAt(session) === null) ||
@@ -340,7 +340,8 @@ export const make = Effect.gen(function* () {
   ) {
     const now = at ?? (yield* Clock.currentTimeMillis)
     const prompting = yield* Ref.get((yield* sessionLive.track(id)).prompting)
-    yield* db.session.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
+    const activity = text.trim() === ""
+    yield* db.session.startObserved(id, prompting || activity ? undefined : text, now, process, !prompting && activity)
   })
 
   const typeTaken = Effect.fn("Delivery.typeTaken")(function* (id: string, execution: number) {

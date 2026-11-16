@@ -253,6 +253,17 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Added
 
+- Harness definitions take `readyOnStart: "integration"` (plugin authors): a process that starts a new conversation
+  waits for the integration's ready report even when its `ready` is `runtime`. Cursor uses it, so on herdr its first
+  task is no longer typed before cursor-agent has drawn its input box.
+- A Cursor entry session takes queued messages: an entry session is skipped by typed delivery only when its harness
+  pulls its own inbox (Pi, Claude), not when its harness reports its execution ends.
+- Harness definitions take `clearKeys` (plugin authors): vibestd sends them right before each message it types, so the
+  input box is empty first, whatever it held. Cursor's are `ctrl+u`: a draft left in a Cursor session's box, or a
+  prompt Cursor drew back after an interrupt, is cleared when the next message is typed.
+- A harness report of activity with no prompt text (Cursor's thought and tool reports) opens an execution with no input
+  when none is open, on herdr-core too, so a message sent while a prompt the user typed in a Cursor pane is at work
+  waits for its response instead of being typed in.
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
 - **Antigravity (`agy`) is a harness plugin**: add the folder `harnesses/agy` of the install directory to `plugins` in
   `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an
@@ -261,6 +272,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Changed
 
+- Cursor sessions start with `--force`: Cursor no longer asks "Run this command?" before a shell call in a session
+  vibest started, whatever approval mode the user set for Cursor; vibest's guard still refuses what vibest forbids
+  (herdr, another project's folder).
 - vibestd writes `vibestd.log` itself. A foreground vibestd prints that path, then its standard output and error are the file. When the file is over 10 MiB, the process that takes the start lock keeps the last 5 MiB, from the next line, and does not trim again until the next start. A start that finds vibestd already running does not trim.
 - The entry session's row in `vibest ls` (and `--json`) now shows the git state of its directory and the repository
   root git reports for it, like any session working in that directory; it used to show no git state and its directory

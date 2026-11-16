@@ -138,8 +138,18 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - Core follows each Agent with `events` and `state` when present; it never polls `process`. When an execution ends (state
   idle after working, or the process exited), core takes the reported execution end and delivers the result. An execution end
   vibestd had not written when it stopped is lost; reconciliation records that execution lost.
-- Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its execution
-  ends loses the execution, as today.
+- Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
+  `runtime`, the ready report or the runtime showing the terminal settled. `readyOnStart: "integration"` makes a process
+  that starts a new conversation wait for the ready report even when the runtime already shows it settled: a runtime can
+  call a terminal idle before the harness has drawn its input box, and text typed then goes to the shell. A resumed
+  process (one that starts on a recorded conversation) keeps `ready`, for a harness that reports nothing when it
+  resumes (Cursor's `sessionStart` runs only for a new conversation). A process that exits before its execution ends
+  loses the execution, as today.
+- Empty input box before typing: when a harness definition gives `clearKeys`, vibestd sends them right before it types
+  a message (a first task, delivered messages, a retype), whatever the box holds: a draft the user left there is
+  cleared, as is a cancelled prompt the harness drew back after an interrupt (Cursor does when the interrupt lands
+  before it starts working). A harness that cannot take messages any other way trades the user's unsent draft for
+  messages that always arrive. Cursor's `clearKeys` is `ctrl+u`.
 
 ### Terminal status ownership
 
@@ -152,12 +162,22 @@ Pi UI widget kinds describe how a prompt is drawn, not why it blocks, so vibest 
 question or auth; an unknown blocked reason would omit kind, and native reports are left unchanged.
 
 Cursor writes no terminal status. Its hooks run detached from the terminal (no `/dev/tty`), so its plugin reports to
-vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types the first task only then, since herdr-core
-has no status for Cursor), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
+vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types a new session's first task only then, on
+herdr too: `readyOnStart`), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
 also hooks it) are an execution start, which vibestd shows as working, and `afterAgentResponse` is the execution end, shown as
-idle. Cursor 2026.11.05 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
+idle. Cursor 2026.11.13 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
 when user or project hooks also have one. It reports no permission/question/auth waits, so vibestd never shows it
-blocked on herdr-core. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
+blocked on herdr-core. What follows from that on herdr-core, which has no state of its own for Cursor:
+
+- An execution Cursor ends without a response (an error, Ctrl+C) stays open until the next response or
+  `vibest interrupt`; on herdr the runtime's idle makes it `lost` after 10 s.
+- A resumed Cursor (`--resume` runs no `sessionStart`) has no ready signal: the first message after a resume is typed
+  without waiting for one.
+- A prompt a person typed in a Cursor pane opens an execution at its first thought or tool report (a report with no
+  prompt text, `userPrompt` giving `{ text: "" }`, opens an execution with no input when none is open, on any runtime),
+  so a message sent meanwhile waits for that execution's end, which the next response closes. A message sent in the
+  short gap between the submit and that first report is still typed into the pane while Cursor works on the prompt; a prompt the person stopped with Ctrl+C gives no end, so the message waits
+  until the next response or `vibest interrupt`. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
 Antigravity (`agy`) has no hooks vibest can load for one session, only a session-only `--settings` JSON, so vibest launches it
 with a `statusLine` command (`harnesses/agy/status.sh`, `stack_with_default`). agy runs it on every state change with the state as
