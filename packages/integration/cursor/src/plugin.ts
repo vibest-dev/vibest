@@ -1,7 +1,7 @@
 import pkg from "../package.json" with { type: "json" }
 
 export const HOOK = `#!/bin/sh
-# @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`ready\` at the session start, \`prompt\` when an execution starts or works, \`stop\` at its response.
+# @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`prompt\` and \`ready\` at the session start, \`prompt\` when an execution starts or works, \`stop\` at its response.
 # The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
 # cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
 vibest() {
@@ -45,7 +45,7 @@ export const files: Readonly<Record<string, string>> = {
     {
       version: 1,
       hooks: {
-        sessionStart: [hook("ready")],
+        sessionStart: [hook("prompt"), hook("ready")],
         preToolUse: [{ ...hook("guard"), failClosed: true }],
         beforeSubmitPrompt: [hook("prompt")],
         afterAgentThought: [hook("prompt")],

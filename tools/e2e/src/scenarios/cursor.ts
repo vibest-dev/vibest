@@ -322,6 +322,76 @@ const noApprovalDialog: Check = {
   },
 }
 
-const checks: ReadonlyArray<Check> = [reports("herdr"), reports("hc"), noApprovalDialog]
+const conversationAtStart: Check = {
+  id: "I13",
+  tier: "agent",
+  title:
+    "Cursor (real model) on herdr: the session's conversation is recorded at its session start; its pane closed before any reply, a vibest send reopens it on that conversation and the reply arrives; closed again after a reply, the next send resumes it too",
+  run: async (w) => {
+    const c = await cursorWorld(w, "herdr", "i13")
+    const ids: Array<string> = []
+    const fact = (id: string, type: string) =>
+      rows<{ at: number; data: string }>(
+        w,
+        "SELECT at, data FROM event WHERE aggregate = ? AND type = ? ORDER BY seq",
+        id,
+        type,
+      )
+    const closePane = async (id: string) => {
+      const ended = fact(id, "process.ended").length
+      await herdr(c.herdrSocket, "pane.close", { pane_id: c.terminalOf(id) })
+      await until("the closed pane seen exited", () => fact(id, "process.ended").length > ended, 30_000)
+    }
+    const replied = (id: string, marker: string) =>
+      until(
+        `the reply ${marker}`,
+        () => c.executions(id).some((x) => x.outcome === "completed" && (x.reply ?? "").includes(marker)),
+        240_000,
+      ).catch(async (e: Error) => {
+        throw new Error(`${e.message}; executions ${JSON.stringify(c.executions(id))}\n${(await c.log()).slice(-3000)}`)
+      })
+    try {
+      const id = await c.start("Run this shell command exactly: sleep 90. Then reply with exactly: i13-first")
+      ids.push(id)
+      await until("the session start reported", () => fact(id, "process.ready").length > 0, 120_000)
+      const ready = fact(id, "process.ready")[0]!
+      const noted = fact(id, "process.conversation")
+      expect(
+        noted.length > 0 && noted[0]!.at <= ready.at,
+        `the conversation was not recorded at the session start: ready ${JSON.stringify(ready)}, conversation ${JSON.stringify(noted)}`,
+      )
+      const conversation = (JSON.parse(noted[0]!.data) as { conversation: string }).conversation
+      await closePane(id)
+      expect(
+        !c.executions(id).some((x) => x.outcome === "completed"),
+        `a reply came before the pane closed: ${JSON.stringify(c.executions(id))}`,
+      )
+      await w.ok(["send", id, "--", "Reply with exactly: i13-second"], { cwd: c.repo })
+      await replied(id, "i13-second")
+      const resumed = fact(id, "process.conversation").map(
+        (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
+      )
+      expect(
+        resumed.every((r) => r === conversation),
+        `the reopened Cursor is in another conversation: ${conversation} then ${resumed.join(", ")}`,
+      )
+      await closePane(id)
+      await w.ok(["send", id, "--", "Reply with exactly: i13-third"], { cwd: c.repo })
+      await replied(id, "i13-third")
+      const third = fact(id, "process.conversation").map(
+        (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
+      )
+      expect(
+        third.every((r) => r === conversation),
+        `conversations: ${third.join(", ")}`,
+      )
+      expect(fact(id, "process.started").length === 3, `processes: ${fact(id, "process.started").length}`)
+    } finally {
+      await c.close(ids)
+    }
+  },
+}
+
+const checks: ReadonlyArray<Check> = [reports("herdr"), reports("hc"), noApprovalDialog, conversationAtStart]
 
 export default checks

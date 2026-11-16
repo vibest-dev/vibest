@@ -68,6 +68,12 @@ A Cursor session vibest started runs shell commands without Cursor asking "Run t
 `allowlist` approval mode with no allow rule: its `vibest send` to the session that started it arrives, and the session
 is never blocked. vibest's guard still refuses what vibest forbids: asked to run herdr, herdr does not run.
 
+## I13. A Cursor session resumes from its start
+
+A Cursor session's conversation is recorded when Cursor starts it, before any reply. If its pane is closed before a
+first reply, `vibest send` reopens it on that conversation and the reply arrives; closed again after a reply, the next
+`vibest send` resumes it too.
+
 ## R6. Pi's guard
 
 Pi applies the same guard rules inside vibest's extension.
