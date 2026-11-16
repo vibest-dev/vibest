@@ -257,7 +257,9 @@ export const make = Effect.gen(function* () {
           })
     const taken = Effect.gen(function* () {
       if ((yield* db.session.openExecution(session.id)) !== execution) return true
-      return yield* pickupNow(h, session, terminal, execution)
+      const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
+      if (state === "working") return yield* pickedUp(session, execution, state)
+      return yield* db.session.executionAccepted(session.id)
     })
     const took = yield* taken.pipe(
       Effect.tap((done) => (done ? Effect.void : answer)),
