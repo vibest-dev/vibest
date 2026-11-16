@@ -13,6 +13,7 @@ const providerModel = (provider: string | null, model: string | null) =>
   model ? [...opt("--provider", provider), "--model", model] : []
 
 export const PI: HarnessDefinition = {
+  delivery: "typed",
   id: "pi",
   binary: "pi",
   ownSessionId: true,
@@ -45,6 +46,7 @@ const noProvider = (harness: string) => (provider: string | null) =>
   provider ? `${harness} has no provider option` : undefined
 
 export const CLAUDE: HarnessDefinition = {
+  delivery: "typed",
   id: "claude",
   binary: "claude",
   ownSessionId: true,
@@ -87,6 +89,7 @@ export const CLAUDE: HarnessDefinition = {
 }
 
 export const CURSOR: HarnessDefinition = {
+  delivery: "typed",
   id: "cursor",
   binary: "cursor-agent",
   ownSessionId: false,
@@ -116,20 +119,17 @@ export const CURSOR: HarnessDefinition = {
   },
 }
 
-export const RUNTIME_ONLY: HarnessDefinition = {
-  id: "runtime-only",
-  binary: "runtime-only",
-  ownSessionId: false,
-  systemPromptInPrompt: true,
-  interruptKey: "esc",
-  replyField: "text",
-  ready: "runtime",
-  launchArgs: () => [],
-  models: { args: () => [], answer: () => undefined },
-}
+export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", delivery: "pull" }
+export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", delivery: "pull" }
 
-export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", inbox: "subscribe" }
-export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", inbox: "poll" }
+const { readyOnStart: _readyOnStart, ...cursorAtStart } = CURSOR
+
+export const FIRST_IN_ARGV: HarnessDefinition = {
+  ...cursorAtStart,
+  id: "first",
+  binary: "first",
+  firstInput: (text) => ["--first", text],
+}
 
 export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
 

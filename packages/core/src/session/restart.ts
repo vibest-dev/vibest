@@ -100,7 +100,7 @@ export const make = Effect.gen(function* () {
   const version = (yield* App.Service).version
   const { awaitReady, prompt } = yield* Executions.Service
   const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
-  const { launchArgv } = yield* Placement.Service
+  const { launching } = yield* Placement.Service
   const reconcile = yield* Reconcile.Service
   const vibestCommand = yield* VibestCommand
 
@@ -125,7 +125,10 @@ export const make = Effect.gen(function* () {
           ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
         }),
       })
-      return restartArgv(command)
+      return (process: number | undefined) =>
+        restartArgv(
+          process === undefined ? command : { ...command, env: { ...command.env, VIBEST_PROCESS: String(process) } },
+        )
     }).pipe(
       Effect.provideService(Agents.Service, agents),
       Effect.provideService(Harness.Service, harness),
@@ -146,8 +149,8 @@ export const make = Effect.gen(function* () {
     readonly pid: number | undefined
     readonly harnessSessionId: string | null
     readonly argv: Effect.Effect<
-      ReadonlyArray<string>,
-      Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launchArgv>>
+      (process: number | undefined) => ReadonlyArray<string>,
+      Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launching>>
     >
     readonly liveNow: LiveNow
     readonly hint: string
@@ -200,13 +203,15 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* restarting.mark(id)
           const sent = yield* processes.terminate(pid)
-          if (sent === "denied") yield* restarting.clear(id)
-          else yield* db.session.restartProcess(id)
-          return sent
+          if (sent === "denied") {
+            yield* restarting.clear(id)
+            return { sent, process: undefined }
+          }
+          return { sent, process: yield* db.session.restartProcess(id) }
         }),
       )
-      if (signalled === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
-      const ran = yield* h.run!(t.terminal, argv).pipe(Effect.exit)
+      if (signalled.sent === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
+      const ran = yield* h.run!(t.terminal, argv(signalled.process)).pipe(Effect.exit)
       const cameBack = yield* Effect.scoped(
         Effect.gen(function* () {
           const started = yield* startedAgain(id, t.liveNow).pipe(Effect.forkScoped)
@@ -233,7 +238,8 @@ export const make = Effect.gen(function* () {
     )
   }
 
-  const againArgv = (session: SessionRow) => launchArgv(session, (session.process?.conversation ?? null) !== null)
+  const againArgv = (session: SessionRow) =>
+    Effect.map(launching(session, (session.process?.conversation ?? null) !== null), (plan) => () => plan.argv)
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {

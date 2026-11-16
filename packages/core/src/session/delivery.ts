@@ -33,7 +33,16 @@ import { Harnesses } from "../harnesses.ts"
 import { Inbox, text as inboxText } from "../inbox.ts"
 import { errorMessage } from "../plugin.ts"
 import * as Reactor from "../reactor.ts"
-import { alive, agentState, type Runtime, Runtimes, RuntimeError, stateOf, type Terminal } from "../runtimes.ts"
+import {
+  alive,
+  agentState,
+  type Runtime,
+  Runtimes,
+  RuntimeError,
+  sessionState,
+  stateOf,
+  type Terminal,
+} from "../runtimes.ts"
 import { busy, Executions, STOP_WAIT } from "./executions.ts"
 import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
@@ -60,7 +69,7 @@ export const make = Effect.gen(function* () {
   const locks = yield* SessionLocks.Service
   const { prompt, interruptAgent } = yield* Executions.Service
   const exits = yield* Exits.Service
-  const { worktreeOf, handTask, resume } = yield* Placement.Service
+  const { worktreeOf, notice, resume, taskInput } = yield* Placement.Service
   const reactor = yield* Reactor.make
   const { locked } = locks
   const { undelivered } = inbox
@@ -69,9 +78,21 @@ export const make = Effect.gen(function* () {
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
+    hand: (
+      text: string,
+      onHandover: Effect.Effect<void>,
+    ) => Effect.Effect<
+      string | undefined,
+      Effect.Error<ReturnType<typeof prompt>> | Effect.Error<ReturnType<typeof resume>>
+    > = (text, onHandover) => prompt(h, session, terminal, text, onHandover),
   ) {
     const task = yield* db.inbox.untakenTask(session.id)
-    if (task !== undefined) return yield* handTask(h, session, terminal, task)
+    if (task !== undefined) {
+      const first = yield* taskInput(session, task)
+      const notStarted = yield* hand(first.text, first.onHandover)
+      if (notStarted) yield* notice(session, notStarted)
+      return
+    }
     if (inbox.pulls(harnessIdOf(session))) return
     const pending = yield* db.inbox.pendingInbox(session.id)
     if (pending.length === 0) return
@@ -79,10 +100,7 @@ export const make = Effect.gen(function* () {
     const ids = batch.map((r) => r.id)
     const claimed: Array<number> = []
     let handedInto: number | undefined
-    yield* prompt(
-      h,
-      session,
-      terminal,
+    yield* hand(
       batch.map((r) => r.message).join("\n\n"),
       Effect.flatMap(db.session.openExecution(session.id), (execution) =>
         db.inbox.claim(session.id, ids).pipe(
@@ -109,23 +127,25 @@ export const make = Effect.gen(function* () {
       ),
       Effect.catchTags({
         RuntimeError: (e) =>
-          e.code === "unreachable"
-            ? db.inbox.pendingInbox(session.id).pipe(
-                Effect.flatMap((pending) =>
-                  pending.some((r) => claimed.includes(r.id))
-                    ? Effect.fail(e)
-                    : undelivered(
-                        session,
-                        batch.filter((r) => claimed.includes(r.id)),
-                        `the connection to ${runtimeOf(session)} broke after the message was handed over (${e.message}); it may have reached the session`,
-                      ),
+          claimed.length === 0
+            ? Effect.fail(e)
+            : e.code === "unreachable"
+              ? db.inbox.pendingInbox(session.id).pipe(
+                  Effect.flatMap((pending) =>
+                    pending.some((r) => claimed.includes(r.id))
+                      ? Effect.fail(e)
+                      : undelivered(
+                          session,
+                          batch.filter((r) => claimed.includes(r.id)),
+                          `the connection to ${runtimeOf(session)} broke after the message was handed over (${e.message}); it may have reached the session`,
+                        ),
+                  ),
+                )
+              : undelivered(
+                  session,
+                  batch.filter((r) => claimed.includes(r.id)),
+                  e.message,
                 ),
-              )
-            : undelivered(
-                session,
-                batch.filter((r) => claimed.includes(r.id)),
-                e.message,
-              ),
         NotReady: (e) => {
           const rows = batch.filter((r) => claimed.includes(r.id))
           if (rows.length > 0) return undelivered(session, rows, e.message)
@@ -174,6 +194,10 @@ export const make = Effect.gen(function* () {
           id,
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
+      if (!inbox.pulls(harnessIdOf(session)))
+        return yield* deliverQueued(h, session, terminal, (text, onHandover) =>
+          resume(h, session, { text, onHandover }),
+        )
       yield* resume(h, session)
     }
     const fresh = (yield* db.session.getSession(id)) ?? session
@@ -311,17 +335,16 @@ export const make = Effect.gen(function* () {
           return {
             message: `${id} is not working; its execution had already finished and its reply is recorded`,
           }
-        const state = stateOf(yield* agentState(h, terminal))
-        const runtimeKnows = state !== undefined && state !== "unknown"
-        const started = yield* db.session.executionAccepted(id)
-        if (!started && runtimeKnows && !busy(state)) return { message: `${id} is not working; nothing to interrupt` }
+        const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
+        if (!(yield* db.session.executionAccepted(id)) && !busy(state))
+          return { message: `${id} is not working; nothing to interrupt` }
         if (!(yield* interruptAgent(h, session, terminal)))
           return yield* new SessionBusy({
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
         const closed = yield* db.session.closeExecution(id, execution, "interrupted")
-        if (closed && !runtimeKnows) yield* db.session.setStatus(id, "idle")
+        if (closed) yield* db.session.setStatus(id, "idle")
         const last = closed ? undefined : yield* db.session.latestReply(id)
         if (!closed && !(last?.execution === execution && last.status === "interrupted"))
           return {

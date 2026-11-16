@@ -102,7 +102,7 @@ export const claude: Harness.HarnessDefinition = {
   interruptKey: "esc",
   startup: claudeStartup,
   replyField: "last_assistant_message",
-  inbox: "poll",
+  delivery: "pull",
   ready: "integration",
   checkProvider: noProvider("claude"),
   launchArgs: (i) => [

@@ -20,7 +20,16 @@ import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
-import { agentState, alive, paneTail, peekHint, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
+import {
+  agentState,
+  alive,
+  paneTail,
+  peekHint,
+  reportedWhenUnknown,
+  Runtimes,
+  stateOf,
+  type Terminal,
+} from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
 import { CONFIRM_TIMEOUT } from "./executions.ts"
@@ -64,12 +73,6 @@ export const make = Effect.gen(function* () {
         yield* sessionLive.forget(id)
       }),
     )
-  const observeRuntimeWork = (session: SessionRow) =>
-    Effect.gen(function* () {
-      if (!Harnesses.runtimeLifecycle(harnesses.find(harnessIdOf(session)))) return
-      yield* db.session.startObserved(session.id, undefined, yield* Clock.currentTimeMillis, undefined, true)
-    })
-
   const check = Effect.fn("Reconcile.check")(function* (id: string) {
     const session = yield* db.session.getSession(id)
     if (!session || archived(session)) return
@@ -112,10 +115,9 @@ export const make = Effect.gen(function* () {
         yield* db.session.noteConversation(id, sessionId)
     }
 
-    const s = state ?? "unknown"
+    const s = stateOf(reportedWhenUnknown(state ?? "unknown", session.status)) ?? "unknown"
     if (!open) {
-      if (s === "working") yield* observeRuntimeWork(session)
-      else if (s !== "blocked") yield* deliverQueued(h, session, terminal)
+      if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
       return
     }
     const worked = yield* db.session.executionTaken(id)
@@ -150,10 +152,6 @@ export const make = Effect.gen(function* () {
     }
     yield* Ref.set(r.blockedNotified, false)
     if (!ended) return yield* Ref.set(r.endedAt, undefined)
-    if (Harnesses.runtimeLifecycle(harnesses.find(harnessIdOf(session)))) {
-      if (execution !== undefined) yield* db.session.closeExecution(id, execution, "completed")
-      return
-    }
     const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
     const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
     if (grace > 0) return yield* reactor.arm(`grace:${id}`, Duration.millis(grace), checkSession(id))
@@ -181,7 +179,6 @@ export const make = Effect.gen(function* () {
       const session = working ? yield* db.session.getSession(id) : undefined
       const execution = session && !inbox.pulls(harnessIdOf(session)) ? yield* db.session.openExecution(id) : undefined
       if (execution !== undefined) yield* db.session.acceptExecution(id, execution)
-      else if (session) yield* observeRuntimeWork(session)
       yield* wakes.wake(id, undefined)
     })
 

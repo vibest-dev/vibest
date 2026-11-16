@@ -429,7 +429,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   (yield* canResumeConversation(entryId, conversation))
                     ? conversation
                     : undefined
-                yield* startProcess(
+                const process = yield* startProcess(
                   entryId,
                   {
                     harness,
@@ -453,7 +453,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   })
                 yield* afterCommit(() => void moving.delete(project))
                 if (!movingHere || fresh) yield* dropWaiting(project)
-                return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project }
+                return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project, process }
               }),
             )
           }).pipe(Effect.orDie),
@@ -547,10 +547,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(
           Effect.gen(function* () {
             const { current, conversation } = yield* conversationOf(id)
-            if (current === undefined) return
+            if (current === undefined) return undefined
             yield* endProcess(id, "restart")
             const { resume: _, pid: __, ...start } = current.start
-            yield* startProcess(id, { ...start, ...(conversation ? { resume: conversation } : {}) })
+            return yield* startProcess(id, { ...start, ...(conversation ? { resume: conversation } : {}) })
           }),
         ).pipe(Effect.orDie),
       ),

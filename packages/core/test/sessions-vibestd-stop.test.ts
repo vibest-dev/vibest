@@ -140,7 +140,7 @@ describe.concurrent("after a vibestd stop", () => {
         }),
       )
     }),
-    { hooked: ["pi"], harnesses: [{ ...PI, inbox: "subscribe" }, CLAUDE, CURSOR] },
+    { hooked: ["pi"], harnesses: [{ ...PI, delivery: "pull" }, CLAUDE, CURSOR] },
   )
 
   const waitingForReady = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>

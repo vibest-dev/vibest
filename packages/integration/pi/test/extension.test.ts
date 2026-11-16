@@ -54,7 +54,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   },
 }))
 
-const pulling = () => testLayer({ harnesses: [{ ...PI, inbox: "subscribe" as const }, CLAUDE, CURSOR] })
+const pulling = () => testLayer({ harnesses: [{ ...PI, delivery: "pull" as const }, CLAUDE, CURSOR] })
 
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),

@@ -34,7 +34,7 @@ import { VERSION } from "../src/version.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () =>
-    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...PI, inbox: "subscribe" }, CLAUDE, CURSOR] }))),
+    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...PI, delivery: "pull" }, CLAUDE, CURSOR] }))),
   )
 
 describe("vibest update's plan for vibestd", () => {
@@ -254,12 +254,16 @@ describe("restart in place", () => {
         noticeEnvelope(continueText(VERSION)),
         "the continuation is typed into the execution it continues",
       )
-      const entryArgv = (yield* herdr.callsTo("run")).map((c) => c.argv).find((argv) => argv[0] === "env")
+      const entryArgv = (yield* herdr.callsTo("run"))
+        .map((c) => c.argv)
+        .find((argv) => argv[0] === "env" && argv.includes(`VIBEST_SESSION_ID=${entryId}`))
       assert.ok(entryArgv, "the entry session is restarted by typing env")
       assert.ok(entryArgv!.includes(`VIBEST_SESSION_ID=${entryId}`))
+      assert.ok(entryArgv!.includes(`VIBEST_PROCESS=${yield* db.session.currentProcessId(entryId)}`))
       assert.ok(entryArgv!.includes("pi"))
       const identity = new Set([
         "VIBEST_SESSION_ID",
+        "VIBEST_PROCESS",
         "VIBEST_PROJECT_ID",
         "VIBEST_PROJECT_DIR",
         "VIBEST_AGENT",

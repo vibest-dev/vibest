@@ -48,14 +48,30 @@ export const hookEvents = async (w: World) =>
       const space = line.indexOf(" ")
       const action = line.slice(0, space)
       try {
-        const event = JSON.parse(line.slice(space + 1)) as { hook_event_name?: string; conversation_id?: string }
-        return { action, event: event.hook_event_name ?? "?", conversation: event.conversation_id }
+        const event = JSON.parse(line.slice(space + 1)) as {
+          hook_event_name?: string
+          conversation_id?: string
+          text?: string
+        }
+        return { action, event: event.hook_event_name ?? "?", conversation: event.conversation_id, text: event.text }
       } catch {
-        return { action, event: "?", conversation: undefined }
+        return { action, event: "?", conversation: undefined, text: undefined }
       }
     })
 
-const hcKey = (c: string) =>
+const hookEvidence = async (w: World, file: string) =>
+  w.writeEvidence(
+    file,
+    `${JSON.stringify(
+      (await hookEvents(w)).map((e) =>
+        [e.action, e.event, ...(e.text === undefined ? [] : [JSON.stringify(e.text.slice(0, 60))])].join(" "),
+      ),
+      null,
+      1,
+    )}\n`,
+  )
+
+export const hcKey = (c: string) =>
   c === " " ? "space" : c === ":" ? "shift+;" : /[A-Z]/.test(c) ? `shift+${c.toLowerCase()}` : c
 
 export const cursorWorld = async (w: World, runtime: Runtime, name: string, entry: "pi" | "cursor" = "pi") => {
@@ -295,14 +311,7 @@ const reports = (runtime: Runtime): Check => ({
       )
     } finally {
       await w.writeEvidence(path.join(evidence, `I10-${runtime}-screens.txt`), `${screens.join("\n")}\n`)
-      await w.writeEvidence(
-        path.join(evidence, `I10-${runtime}-hooks.json`),
-        `${JSON.stringify(
-          (await hookEvents(w)).map((e) => `${e.action} ${e.event}`),
-          null,
-          1,
-        )}\n`,
-      )
+      await hookEvidence(w, path.join(evidence, `I10-${runtime}-hooks.json`))
       await c.close(ids)
     }
   },
@@ -515,6 +524,7 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
       )
     } finally {
       await w.writeEvidence(path.join(evidence, `I14-${runtime}-screens.txt`), `${screens.join("\n")}\n`)
+      await hookEvidence(w, path.join(evidence, `I14-${runtime}-hooks.json`))
       await c.close([])
     }
   },

@@ -36,6 +36,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
       readonly sessionId: string
       readonly harnessSessionId: string | null
       readonly projectId: string
+      readonly process?: number | undefined
       readonly runtime?: string | undefined
     },
     E,
@@ -80,6 +81,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     VIBEST_SESSION_ID: saved.sessionId,
     VIBEST_PROJECT_ID: saved.projectId,
     VIBEST_PROJECT_DIR: layout.project(saved.projectId),
+    ...(saved.process !== undefined ? { VIBEST_PROCESS: String(saved.process) } : {}),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
   return {
@@ -102,6 +104,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
 
 export const IDENTITY_ENV = [
   "VIBEST_SESSION_ID",
+  "VIBEST_PROCESS",
   "VIBEST_PROJECT_ID",
   "VIBEST_PROJECT_DIR",
   "VIBEST_HARNESS",

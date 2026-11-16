@@ -333,6 +333,7 @@ const make = Effect.gen(function* () {
               readonly sessionId: string
               readonly harnessSessionId: string | null
               readonly projectId: string
+              readonly process: number
               readonly runtime: string
             }
           | undefined

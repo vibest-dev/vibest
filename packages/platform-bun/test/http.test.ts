@@ -27,7 +27,7 @@ import {
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () =>
-    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...CLAUDE, inbox: "poll" }, PI, CURSOR] }))),
+    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...CLAUDE, delivery: "pull" }, PI, CURSOR] }))),
   )
 
 const project = Effect.gen(function* () {

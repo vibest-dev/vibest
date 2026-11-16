@@ -80,7 +80,7 @@ export const layer = Layer.effect(
     const harnesses = yield* Harnesses.Service
     const reactor = yield* Reactor.make
 
-    const pulls = (harnessId: string) => harnesses.find(harnessId)?.inbox !== undefined
+    const pulls = (harnessId: string) => harnesses.find(harnessId)?.delivery === "pull"
 
     const handedOver = new Set<string>()
     const handedKey = (sessionId: string | undefined, execution: number) => `${sessionId}:${execution}`

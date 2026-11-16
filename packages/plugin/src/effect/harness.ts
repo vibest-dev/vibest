@@ -52,10 +52,11 @@ export interface HarnessDefinition {
   readonly systemPromptInPrompt: boolean
   readonly interruptKey: string
   readonly replyField: "text" | "last_assistant_message"
-  readonly inbox?: "subscribe" | "poll"
+  readonly delivery: "typed" | "pull"
   readonly ready: "integration" | "runtime"
   readonly readyOnStart?: "integration"
   readonly clearKeys?: ReadonlyArray<string>
+  readonly firstInput?: (text: string) => ReadonlyArray<string>
   readonly startup?: Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
   readonly checkProvider?: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
@@ -63,6 +64,7 @@ export interface HarnessDefinition {
   readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
   readonly subscription?: (home: string, binary: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => unknown
+  readonly guardCall?: (event: HarnessEvent) => HarnessEvent | undefined
   readonly executionEnd?: (event: HarnessEvent) => { readonly end: Readonly<Record<string, unknown>> } | undefined
   readonly userPrompt?: (
     event: HarnessEvent,

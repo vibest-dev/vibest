@@ -55,8 +55,8 @@ export const make = Effect.gen(function* () {
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
   const processes = yield* Processes.Service
-  const { prompt, finish } = yield* Executions.Service
-  const { openTerminal, show, locate, launchArgv, systemPromptOf } = yield* Placement.Service
+  const { finish } = yield* Executions.Service
+  const { openTerminal, show, locate, launching, taskInput } = yield* Placement.Service
 
   const exited = (id: string, reason: ProcessEndReason) =>
     Effect.andThen(db.session.setStatus(id, "unknown"), db.session.endProcess(id, reason))
@@ -275,11 +275,22 @@ export const make = Effect.gen(function* () {
                 conversation: harnessSessionId,
               },
       }
-      const argv = yield* launchArgv(nextRow, false)
+      const plan = yield* launching(nextRow, false, yield* taskInput(nextRow, next.prompt))
       if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
       const placed = inPlace
-        ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
-        : yield* openTerminal(h, undefined, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
+        ? yield* plan
+            .starting(Effect.andThen(plan.beforeStart, h.run!(terminal!, plan.argv)))
+            .pipe(Effect.as(terminal!), Effect.exit)
+        : yield* plan
+            .starting(
+              openTerminal(h, undefined, nextRow, {
+                project: root,
+                cwd,
+                argv: plan.argv,
+                beforeStart: plan.beforeStart,
+              }),
+            )
+            .pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         const failed = Cause.squash(placed.cause)
         const startDeath = failed instanceof RuntimeError && failed.code === "failed"
@@ -299,10 +310,7 @@ export const make = Effect.gen(function* () {
       if (inPlace) running = "mine"
       else owns = true
       row = (yield* db.session.getSession(row.id))!
-      const text = (yield* harnesses.get(harnessIdOf(row))).systemPromptInPrompt
-        ? `${yield* systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
-        : next.prompt
-      const prompted = yield* prompt(h, row, terminal, text, db.inbox.linkTask(row.id)).pipe(Effect.exit)
+      const prompted = yield* plan.deliver(h, row, terminal).pipe(Effect.exit)
       if (Exit.isFailure(prompted) || prompted.value !== undefined) {
         skip(next.harness, "not_confirmed")
         continue

@@ -9,6 +9,7 @@ import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
+  sessionState,
   type AgentState,
   paneTail,
   peekHint,
@@ -35,9 +36,6 @@ export const busyOf = (seen: AgentSeen) => {
 
 const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 
-const usable = (seen: AgentSeen, adapter: HarnessDefinition) =>
-  Harnesses.runtimeLifecycle(adapter) ? seen === "idle" : settled(seen)
-
 const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
 
 export const make = Effect.gen(function* () {
@@ -45,6 +43,9 @@ export const make = Effect.gen(function* () {
   const harnesses = yield* Harnesses.Service
   const bus = yield* Bus.Service
   const { track } = yield* SessionLive.Service
+
+  const reportedStatus = (id: string) =>
+    Effect.map(db.session.getSession(id), (session) => session?.status ?? "unknown")
 
   const startsNewConversation = (id: string) =>
     Effect.map(db.session.getSession(id), (session) => (session?.process?.conversation ?? null) === null)
@@ -54,18 +55,16 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const reports = adapter.ready === "integration"
         const waitsForReport = reports || (adapter.readyOnStart === "integration" && (yield* startsNewConversation(id)))
-        if (h.state === undefined && !waitsForReport) return "unknown" as AgentState
         const step = adapter.startup ? yield* adapter.startup : undefined
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
-          const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-          const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && usable(seen, adapter))
+          const seen = yield* sessionState(h, terminal, reportedStatus(id))
+          const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && seen === "idle")
           return { seen, ready }
         })
         return yield* look.pipe(
           Effect.flatMap((now) => {
-            if (now.ready || step === undefined || (settled(now.seen) && !Harnesses.runtimeLifecycle(adapter)))
-              return Effect.succeed(now)
+            if (now.ready || step === undefined) return Effect.succeed(now)
             return step({
               screen,
               sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
@@ -101,7 +100,7 @@ export const make = Effect.gen(function* () {
 
   const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
     Effect.gen(function* () {
-      const state = stateOf(yield* agentState(h, terminal))
+      const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
       if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
       return yield* db.session.executionAccepted(session.id)
     })
@@ -224,11 +223,6 @@ export const make = Effect.gen(function* () {
       ),
     )
     if (delivered) return undefined
-    if (state === "unknown" && adapter.ready === "runtime") {
-      yield* db.session.acceptExecution(session.id, execution)
-      yield* db.session.setStatus(session.id, "working")
-      return undefined
-    }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
     const confirm = confirmed(h, session, terminal, execution, subscription)
     if (yield* confirm) return undefined
@@ -244,6 +238,42 @@ export const make = Effect.gen(function* () {
     return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
   }, Effect.scoped)
 
+  const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
+    const { execution } = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(id, at))
+    yield* onHandover
+    return execution
+  })
+
+  const launched = Effect.fn("Executions.launched")(function* (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+    execution: number,
+  ) {
+    const adapter = yield* harnesses.get(harnessIdOf(session))
+    const step = adapter.startup ? yield* adapter.startup : undefined
+    const answer =
+      step === undefined
+        ? Effect.void
+        : step({
+            screen: h.read(terminal, 40).pipe(Effect.orElseSucceed(() => "")),
+            sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
+          })
+    const taken = Effect.gen(function* () {
+      if ((yield* db.session.openExecution(session.id)) !== execution) return true
+      return yield* db.session.executionAccepted(session.id)
+    })
+    const took = yield* taken.pipe(
+      Effect.tap((done) => (done ? Effect.void : answer)),
+      Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
+      Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
+    )
+    if (took) return undefined
+    yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
+    yield* db.session.closeExecution(session.id, execution, "not_started")
+    return `task_not_started: ${session.id} did not start working on the message it was started with; ${peekHint(session.id)}`
+  })
+
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
     yield* db.session.endExecution(
       session.id,
@@ -252,7 +282,7 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish }
+  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, openFirst, launched, finish }
 })
 
 export type Interface = Effect.Success<typeof make>

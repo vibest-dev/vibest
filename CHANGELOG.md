@@ -7,6 +7,12 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Harness definitions declare `delivery`** (plugin authors): the optional `inbox?: "subscribe" | "poll"` is replaced
+  by a required `delivery: "typed" | "pull"`. `pull`: the harness's own integration fetches its inbox (how is its own
+  business); `typed`: vibestd types each message into its terminal through the runtime. A definition without it no
+  longer type-checks, and nothing is inferred from a missing field. Migrate `inbox: "poll"` or `inbox: "subscribe"` to
+  `delivery: "pull"`, and add `delivery: "typed"` to a definition that had no `inbox`. Behaviour does not change.
+
 - **Moving a project is only an explicit command** (users; RPC clients of `Project.Open`): `vibest` in a checkout with
   no project is always a new project; it no longer looks for a project of the same git remote whose directory is gone,
   and no longer asks `The project moved from X to here, move it? [Y/n]`. `Project.Open` has no `move` payload and no
@@ -266,12 +272,23 @@ release. Each release lists what broke, who is affected and how to migrate under
   waits for its response instead of being typed in.
 - `vibest harness ls --machine <name>` lists the harnesses of another machine, asked of that machine each time.
 - **Antigravity (`agy`) is a harness plugin**: add the folder `harnesses/agy` of the install directory to `plugins` in
-  `~/.vibest/vibest.json`. It runs on the runtime's state (a harness whose definition has no `executionEnd` completes an
-  execution when the runtime reports idle, with no reply text) and has no vibest pre-tool guard. For plugin authors,
+  `~/.vibest/vibest.json`. vibest adds that folder with `agy --add-dir`, and agy loads its workspace plugin: hooks report
+  the conversation, the execution start and its end (no reply text: agy's `Stop` carries none), and vibest's guard checks
+  agy's tool calls. vibest writes nothing to the terminal for agy. For plugin authors,
   `HarnessDefinition.subscription` is now called with the definition's `binary` as its second argument.
+- Harness definitions take `guardCall(event)` (plugin authors): it turns a harness's own pre-tool event into the shape
+  vibest's guard reads (`tool_name`, `tool_input`, `cwd`); `undefined` lets a tool the guard has no rule for through.
+  agy uses it.
+- Harness definitions take `firstInput(text)` (plugin authors): a starting process (a new session, or a resume of an
+  exited one with queued messages, or a usage-limit move) gets its first message as these launch arguments instead of typed text, and the
+  harness's report of it accepts the execution. agy uses `--prompt-interactive`, so agy runs on herdr-core, which has
+  no state for it.
 
 ### Changed
 
+- Entry sessions get `VIBEST_PROCESS` like every session vibestd opens a terminal for, and an entry session restarted
+  in place gets the new process's. Before, an entry session had none, so agy's reports after a new conversation in
+  the same entry session (the harness switched away and back, or a conversation that cannot be resumed) were dropped.
 - Cursor sessions start with `--force`: Cursor no longer asks "Run this command?" before a shell call in a session
   vibest started, whatever approval mode the user set for Cursor; vibest's guard still refuses what vibest forbids
   (herdr, another project's folder).

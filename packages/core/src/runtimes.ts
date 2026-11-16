@@ -164,6 +164,9 @@ export type AgentSeen = AgentState | "absent"
 
 export const stateOf = (seen: AgentSeen): AgentState | undefined => (seen === "absent" ? undefined : seen)
 
+export const reportedWhenUnknown = (seen: AgentSeen, reported: AgentState | "done"): AgentSeen =>
+  seen !== "unknown" ? seen : reported === "done" ? "idle" : reported
+
 export const agentState = Effect.fn("Runtimes.agentState")(
   (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
     h.state === undefined
@@ -180,6 +183,11 @@ export const agentState = Effect.fn("Runtimes.agentState")(
             ),
           ),
 )
+
+export const sessionState = (h: Runtime, terminal: Terminal, reported: Effect.Effect<AgentState | "done">) =>
+  agentState(h, terminal).pipe(
+    Effect.flatMap((seen) => Effect.map(reported, (status) => reportedWhenUnknown(seen, status))),
+  )
 
 export const alive = Effect.fn("Runtimes.alive")((h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
   h.process(terminal).pipe(

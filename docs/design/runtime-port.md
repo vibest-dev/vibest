@@ -138,9 +138,31 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - Core follows each Agent with `events` and `state` when present; it never polls `process`. When an execution ends (state
   idle after working, or the process exited), core takes the reported execution end and delivers the result. An execution end
   vibestd had not written when it stopped is lost; reconciliation records that execution lost.
+- One state read for every harness: a session's state is the runtime's (`state`) when the runtime knows it, else the
+  `status` the harness's reports wrote (`working` at an execution start or activity, `idle` at its end). Readiness, the
+  pickup check after typing, reconciliation and interrupt all read it the same way (`Runtimes.sessionState`), so a
+  runtime with no status for a harness (herdr-core) needs no harness-specific branch: a typed message is accepted by
+  the harness's report of it, never by the runtime not knowing.
+- First input in the launch argv: a harness definition with `firstInput` gets a starting process's first message (a
+  new session's task, the queued messages that resume an exited one, or the task a usage-limit move carries, in a new
+  terminal or in place) as launch arguments instead of typed text. Every start goes through one function
+  (`Placement.launching`): it builds the argv and, for a first input, opens the execution and hands the message to it
+  after the process is recorded and before it starts, so a report the harness sends at once finds it. If that start fails (the terminal does not open, or the in-place start fails), the execution it opened is closed
+  `not_started` unless the harness already ended it, so a later message resumes the session again. vibestd then
+  waits for the harness's report to accept it, answering the definition's startup dialogs meanwhile; no report within
+  the ready timeout ends it `not_started`. agy uses it (`--prompt-interactive`): agy reports nothing before its first
+  input, so on a runtime with no state for it nothing else could say it is ready. An in-place restart carries no
+  message. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
+  the system prompt in a prompt) does not go through `Placement.launching`: it is queued and typed, so agy as the entry
+  session on herdr-core waits the ready timeout and fails `NotReady`.
+- Every start in a new terminal names its process: `VIBEST_PROCESS` (the process row id) is in the environment of every
+  terminal vibestd opens, entry sessions included, and an entry session restarted in place types it with its other
+  identity variables. A plugin that keeps state per process (agy's root conversation) needs no special case. A
+  subagent started again in its own pane (a restart, a usage-limit move in place) keeps the pane's earlier value:
+  herdr starts it as a named agent from its bare argv, which carries no environment.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
-  `runtime`, the ready report or the runtime showing the terminal settled. `readyOnStart: "integration"` makes a process
-  that starts a new conversation wait for the ready report even when the runtime already shows it settled: a runtime can
+  `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). `readyOnStart: "integration"` makes a process
+  that starts a new conversation wait for the ready report even when the runtime already shows it idle: a runtime can
   call a terminal idle before the harness has drawn its input box, and text typed then goes to the shell. A resumed
   process (one that starts on a recorded conversation) keeps `ready`, for a harness that reports nothing when it
   resumes (Cursor's `sessionStart` runs only for a new conversation). A process that exits before its execution ends
@@ -179,16 +201,28 @@ blocked on herdr-core. What follows from that on herdr-core, which has no state 
   short gap between the submit and that first report is still typed into the pane while Cursor works on the prompt; a prompt the person stopped with Ctrl+C gives no end, so the message waits
   until the next response or `vibest interrupt`. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
-Antigravity (`agy`) has no hooks vibest can load for one session, only a session-only `--settings` JSON, so vibest launches it
-with a `statusLine` command (`harnesses/agy/status.sh`, `stack_with_default`). agy runs it on every state change with the state as
-JSON on stdin; it prints nothing, writes OSC 7501 to `/dev/tty` (`working` for working and tool use, `blocked:kind=permission` while
-a tool confirmation shows, `blocked:kind=auth` while signing in, `blocked` while reviewing, `idle`, `error`; `initializing` reports
-nothing) and, once, passes the first non-empty `conversation_id` to `vibest integration prompt --harness agy`, the only way vibestd
-learns what to resume with `--conversation`. Classic herdr recognises the `agy` process and detects its state from the screen, so
-runtime-herdr starts `agy` as herdr's `agy` agent; a wrapper binary such as `agyx` goes through the typed shell path and is still
-recognised by its process name. A session-only status line replaces a status line the user configured, in that process only; vibest
-reads no agy settings to merge it. herdr-core maps `error` to `idle`, so an agy error completes the execution like an answer.
-There is no pre-tool guard in agy: it has no launch-scoped hook loader.
+Antigravity (`agy`) loads a workspace plugin from a folder added with `--add-dir`: vibest adds the install's `harnesses/agy`
+folder, whose `.agents/plugins/vibest/` holds `plugin.json`, `hooks.json`, `hook.sh` and the builtin skills. Its hooks run
+`hook.sh` with the plugin root as working directory: `SessionStart` (agy runs it after the first input, with the
+`conversationId`) and `PreInvocation` (before each model call) go to `vibest integration prompt --harness agy`, which records
+the conversation and opens or accepts the execution as working; `Stop` goes to `vibest integration stop --harness agy`, the
+execution end, `failed` when agy names an `error`, with no reply text (agy's `Stop` carries none; `vibest peek` shows the
+answer). Hooks carry no marker for agy's own subagents, which run their own conversations in the same process: `hook.sh`
+forwards `prompt` and `stop` only for the first conversation the process reports (kept in
+`$TMPDIR/vibest-agy-<session>-<process>`). agy fires no `Stop` when the person presses Esc; on herdr the execution then
+becomes `lost` after 10 s of idle, on herdr-core it stays open until the next `Stop` or `vibest interrupt`. vibest writes
+nothing to the terminal for agy and sets no `--settings`: classic herdr detects agy's state from its screen (it finds agy by
+process name: vibest types agy's command line, since herdr's `agent.start` refuses an argument with a line break and
+agy's first message is one), and on herdr-core the session's state is the one its hooks
+last reported. The added folder shows in agy's workspace list and the agent can read it, as Claude's `--plugin-dir`
+files. `PreToolUse` goes to `vibest integration guard --harness agy`; the definition's `guardCall` turns agy's tool call
+into the guard's shape (`run_command` as `Bash`, `read_file` as `Read`, `write_file` as `Write`, `edit_file` as `Edit`,
+and the older names agy documents), and `deny` stops the call (agy shows the reason only in the expanded tool row). A
+failed `vibest` answers `deny` from `hook.sh`, but the guard is fail-open where agy is: a hook agy cannot start, or one
+that passes its 30 s timeout, is skipped and the tool runs; and sessions run with `--dangerously-skip-permissions`, so
+nothing else asks first. agy's `clearKeys` are `ctrl+e` and then `ctrl+u` 40 times: `ctrl+u` empties the line before the
+cursor and, at a line's start, joins it to the line above, so this empties a box of up to 20 lines whose cursor is on its
+last line (a long paste is one `[Pasted text]` line); Esc and Ctrl+C leave agy's box as it is.
 
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,

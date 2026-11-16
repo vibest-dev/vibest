@@ -2,7 +2,19 @@ import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { NoSuchSession, type HarnessUnavailable } from "@vibest/schema/session"
-import { Cause, Context, Data, Effect, Exit, FileSystem, Layer, Path, type PlatformError, type Scope } from "effect"
+import {
+  Cause,
+  Context,
+  Data,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Path,
+  type PlatformError,
+  Ref,
+  type Scope,
+} from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { Agents } from "../agents.ts"
@@ -43,6 +55,11 @@ export const runtimeEnv = (runtime: string, address: { readonly machine: string;
 
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
 
+export interface FirstInput {
+  readonly text: string
+  readonly onHandover: Effect.Effect<void>
+}
+
 export type LaunchOptions = {
   readonly splitFrom?: string | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
@@ -67,7 +84,7 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const git = yield* Git.Service
   const vibest = yield* VibestCommand
-  const { prompt } = yield* Executions.Service
+  const { prompt, openFirst, launched } = yield* Executions.Service
 
   const provided = <A, E>(
     effect: Effect.Effect<
@@ -126,7 +143,11 @@ export const make = Effect.gen(function* () {
     })
   }, provided)
 
-  const launchArgv = Effect.fn("Placement.launchArgv")(function* (session: SessionRow, resume: boolean) {
+  const launchArgv = Effect.fn("Placement.launchArgv")(function* (
+    session: SessionRow,
+    resume: boolean,
+    first?: string,
+  ) {
     const file = yield* systemPromptOf(session).pipe(Effect.flatMap((text) => writeSystemPrompt(session.id, text)))
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const pluginDir = yield* harness.plugin(adapter.id)
@@ -146,7 +167,42 @@ export const make = Effect.gen(function* () {
         vibest,
         env: vibestEnv(session),
       }),
+      ...(first === undefined || adapter.firstInput === undefined ? [] : adapter.firstInput(first)),
     ]
+  }, provided)
+
+  const firstText = Effect.fn("Placement.firstText")(function* (session: SessionRow, task: string) {
+    return (yield* harnesses.get(harnessIdOf(session))).systemPromptInPrompt
+      ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
+      : task
+  }, provided)
+
+  const taskInput = (session: SessionRow, task: string) =>
+    Effect.map(firstText(session, task), (text): FirstInput => ({ text, onHandover: db.inbox.linkTask(session.id) }))
+
+  const launching = Effect.fn("Placement.launching")(function* (
+    session: SessionRow,
+    resume: boolean,
+    first?: FirstInput,
+  ) {
+    const inArgv = first !== undefined && (yield* harnesses.get(harnessIdOf(session))).firstInput !== undefined
+    const argv = yield* launchArgv(session, resume, inArgv ? first.text : undefined)
+    const execution = yield* Ref.make<number | undefined>(undefined)
+    const beforeStart = inArgv
+      ? Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
+      : Effect.void
+    const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
+      Effect.gen(function* () {
+        if (first === undefined) return undefined
+        const opened = yield* Ref.get(execution)
+        if (opened !== undefined) return yield* launched(h, row, terminal, opened)
+        return yield* prompt(h, row, terminal, first.text, first.onHandover)
+      })
+    const abandoned = Effect.flatMap(Ref.get(execution), (opened) =>
+      opened === undefined ? Effect.void : db.session.closeExecution(session.id, opened, "not_started"),
+    )
+    const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError(() => abandoned))
+    return { argv, beforeStart, starting, deliver }
   }, provided)
 
   const handTask = Effect.fn("Placement.handTask")(function* (
@@ -155,18 +211,10 @@ export const make = Effect.gen(function* () {
     terminal: Terminal,
     task: string,
   ) {
-    const first = (yield* harnesses.get(harnessIdOf(session))).systemPromptInPrompt
-      ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
-      : task
-    const notStarted = yield* prompt(h, session, terminal, first, db.inbox.linkTask(session.id))
+    const { text, onHandover } = yield* taskInput(session, task)
+    const notStarted = yield* prompt(h, session, terminal, text, onHandover)
     if (notStarted) yield* notice(session, notStarted)
   }, provided)
-
-  const afterOpen = (h: Runtime, session: SessionRow, terminal: Terminal, root: string, firstPrompt: string) =>
-    Effect.gen(function* () {
-      yield* show(h, session, terminal, root)
-      yield* handTask(h, session, terminal, firstPrompt)
-    })
 
   const projectName = (root: string) =>
     repositoryDirectoryName(root).pipe(
@@ -225,11 +273,13 @@ export const make = Effect.gen(function* () {
       readonly split?: boolean | undefined
       readonly env?: Readonly<Record<string, string>> | undefined
       readonly endedByCaller?: boolean
+      readonly beforeStart?: Effect.Effect<void>
     },
   ) {
     const near = input.near !== undefined ? input.near : yield* nearCreator(session, h.id)
     const remote = yield* db.session.startedByPeer(session.id)
     yield* db.session.startProcess(session.id, startOf(session))
+    if (input.beforeStart !== undefined) yield* input.beforeStart
     const started = yield* db.session.currentProcessId(session.id)
     const opened = yield* h
       .open({
@@ -312,21 +362,26 @@ export const make = Effect.gen(function* () {
     }
     if (!folders) yield* copyIncluded(root, worktree)
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
-    const argv = yield* launchArgv(session, false)
+    const plan = yield* launching(session, false, yield* taskInput(session, firstPrompt))
     const terminal = yield* openOrMove(
-      openTerminal(h, target, session, {
-        project: root,
-        cwd: worktree,
-        argv,
-        env,
-        endedByCaller: true,
-        ...(near !== undefined ? { near } : {}),
-        ...(sharedFrom !== undefined ? { split: true } : {}),
-      }),
+      plan.starting(
+        openTerminal(h, target, session, {
+          project: root,
+          cwd: worktree,
+          argv: plan.argv,
+          beforeStart: plan.beforeStart,
+          env,
+          endedByCaller: true,
+          ...(near !== undefined ? { near } : {}),
+          ...(sharedFrom !== undefined ? { split: true } : {}),
+        }),
+      ),
     )
     if ("limited" in terminal)
       return { _tag: "Limited", input: firstPrompt, error: terminal.limited } satisfies LaunchOutcome
-    yield* afterOpen(h, session, terminal.terminal, root, firstPrompt)
+    yield* show(h, session, terminal.terminal, root)
+    const notStarted = yield* plan.deliver(h, session, terminal.terminal)
+    if (notStarted) yield* notice(session, notStarted)
     return { _tag: "Started" } satisfies LaunchOutcome
   }, Effect.scoped)
   const launchFailed = Effect.fn("Placement.launchFailed")(function* (
@@ -397,15 +452,16 @@ export const make = Effect.gen(function* () {
   }, provided)
 
   const resume = Effect.fn("Placement.resume")(
-    function* (h: Runtime, session: SessionRow) {
+    function* (h: Runtime, session: SessionRow, first?: FirstInput) {
       const { root, cwd } = yield* locate(session)
-      const terminal = yield* undoOnFailure(
-        launchArgv(session, true).pipe(
-          Effect.flatMap((argv) => openTerminal(h, undefined, session, { project: root, cwd, argv })),
-        ),
-        (terminal) => h.close(terminal).pipe(Effect.ignore),
+      const plan = yield* launching(session, true, first)
+      const terminal = yield* plan.starting(
+        undoOnFailure(
+          openTerminal(h, undefined, session, { project: root, cwd, argv: plan.argv, beforeStart: plan.beforeStart }),
+          (terminal) => h.close(terminal).pipe(Effect.ignore),
+        ).pipe(Effect.tap((terminal) => show(h, session, terminal, root))),
       )
-      yield* show(h, session, terminal, root)
+      return yield* plan.deliver(h, session, terminal)
     },
     Effect.scoped,
     provided,
@@ -432,7 +488,8 @@ export const make = Effect.gen(function* () {
     notice,
     worktreeOf,
     systemPromptOf,
-    launchArgv,
+    launching,
+    taskInput,
     handTask,
     launch,
     launchFailed,

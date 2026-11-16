@@ -309,7 +309,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* leave
       assert.lengthOf((yield* inbox.take(sessionId, undefined))!.ids, 1)
     }),
-    { harnesses: [{ ...CLAUDE, inbox: "poll" }, PI, CURSOR] },
+    { harnesses: [{ ...CLAUDE, delivery: "pull" }, PI, CURSOR] },
   )
 
   test(

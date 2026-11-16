@@ -1,7 +1,11 @@
 import pkg from "../package.json" with { type: "json" }
 
-export const STATUS = `#!/bin/sh
-# @vibest/agy ${pkg.version}: agy runs this as its session-only status line. Its state goes to the terminal as OSC 7501, its conversation id to \`vibest integration prompt\`.
+export const PLUGIN = ".agents/plugins/vibest"
+
+export const HOOK = `#!/bin/sh
+# @vibest/agy ${pkg.version}: \`vibest integration guard\` before a tool call, \`prompt\` at a conversation's start and before each model call, \`stop\` at its end.
+# The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
+# cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
 vibest() {
   case "\${VIBEST_COMMAND:-}" in
     *'\\'*) ;;
@@ -21,31 +25,49 @@ vibest() {
   esac
   command vibest "$@"
 }
-input=$(cat | tr '\\n' ' ')
-field() { printf '%s' "$input" | sed -n "s/.*\\"$1\\" *: *\\"\\([^\\"]*\\)\\".*/\\1/p"; }
-state=$(field agent_state)
-conversation=$(field conversation_id)
-case "$input" in
-  *'"tool_confirmation_pending": true'* | *'"tool_confirmation_pending":true'*) state=permission ;;
+log="\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log"
+# Hooks carry no subagent marker: the first conversation this process reports is its own; agy's subagents are not.
+own_conversation() {
+  conversation=$(printf '%s' "$input" | tr '\\n' ' ' | sed -n 's/.*"conversationId" *: *"\\([^"]*\\)".*/\\1/p')
+  [ -n "$conversation" ] || return 1
+  seen="\${TMPDIR:-/tmp}/vibest-agy-$VIBEST_SESSION_ID-$VIBEST_PROCESS"
+  [ -s "$seen" ] || printf '%s' "$conversation" >"$seen"
+  [ "$(cat "$seen")" = "$conversation" ]
+}
+case "\${1:-}" in
+  guard)
+    if [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; echo '{"decision":"allow"}'; exit 0; fi
+    # agy runs a tool whose hook fails or times out: a failed check answers deny itself.
+    vibest integration guard --harness agy 2>>"$log" ||
+      echo '{"decision":"deny","reason":"vibest integration guard failed; the tool call is refused."}'
+    ;;
+  prompt | stop)
+    input=$(cat)
+    if [ -n "\${VIBEST_SESSION_ID:-}" ] && own_conversation; then
+      printf '%s' "$input" | vibest integration "$1" --harness agy >/dev/null 2>>"$log"
+    fi
+    if [ "$1" = stop ]; then echo '{"decision":"allow"}'; else echo '{}'; fi
+    ;;
 esac
-case "$state" in
-  working | tool_use) report=working ;;
-  permission) report=blocked:kind=permission ;;
-  authenticating) report=blocked:kind=auth ;;
-  reviewing) report=blocked ;;
-  idle) report=idle ;;
-  error) report=error ;;
-  *) report= ;;
-esac
-if [ -n "$report" ]; then printf '\\033]7501;state=%s\\033\\\\' "$report" 2>/dev/null >/dev/tty || :; fi
-if [ -n "$conversation" ] && [ -n "\${VIBEST_SESSION_ID:-}" ]; then
-  seen="\${TMPDIR:-/tmp}/vibest-agy-$VIBEST_SESSION_ID-\${VIBEST_PROCESS:-0}"
-  if [ "$(cat "$seen" 2>/dev/null)" != "$conversation" ]; then
-    printf '%s' "$input" | vibest integration prompt --harness agy >/dev/null 2>>"\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log" &&
-      printf '%s' "$conversation" >"$seen"
-  fi
-fi
 exit 0
 `
 
-export const files: Readonly<Record<string, string>> = { "status.sh": STATUS }
+const hook = (action: string) => [{ type: "command", command: `sh ./hook.sh ${action}`, timeout: 30 }]
+
+export const files: Readonly<Record<string, string>> = {
+  [`${PLUGIN}/plugin.json`]: `${JSON.stringify({ name: "vibest", version: pkg.version, description: pkg.description }, null, 2)}\n`,
+  [`${PLUGIN}/hooks.json`]: `${JSON.stringify(
+    {
+      vibest: {
+        enabled: true,
+        SessionStart: hook("prompt"),
+        PreInvocation: hook("prompt"),
+        Stop: hook("stop"),
+        PreToolUse: [{ matcher: "", hooks: hook("guard") }],
+      },
+    },
+    null,
+    2,
+  )}\n`,
+  [`${PLUGIN}/hook.sh`]: HOOK,
+}

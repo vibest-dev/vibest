@@ -8,7 +8,7 @@ const windowName = (group: string, window: string) => `${group} ${window}`
 export const agyLimits = (usage: unknown): ReadonlyArray<SubscriptionLimit> => {
   const groups = record(record(record(usage)?.command)?.data)?.groups
   if (!Array.isArray(groups)) return []
-  return groups.flatMap((group) => {
+  const windows = groups.map((group) => {
     const name = record(group)?.name
     const buckets = record(group)?.buckets
     if (typeof name !== "string" || !Array.isArray(buckets)) return []
@@ -20,12 +20,17 @@ export const agyLimits = (usage: unknown): ReadonlyArray<SubscriptionLimit> => {
         {
           window: windowName(name, b.window),
           percent: Math.round((1 - b.remaining_fraction) * 100),
-          status: b.remaining_fraction <= 0 ? ("limited" as const) : ("available" as const),
+          exhausted: b.remaining_fraction <= 0,
           resetTime: Number.isNaN(reset) ? null : reset,
         },
       ]
     })
   })
+  const noneLeft = windows.every((group) => group.some((window) => window.exhausted))
+  return windows.flat().map(({ exhausted, ...window }) => ({
+    ...window,
+    status: noneLeft && exhausted ? ("limited" as const) : ("available" as const),
+  }))
 }
 
 export const agySubscription = (spawner: Spawner) => (home: string, binary: string) =>

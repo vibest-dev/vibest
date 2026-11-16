@@ -14,7 +14,7 @@ for (const harness of ["pi", "claude", "cursor", "agy"]) {
   )
   if (exitCode !== 0) process.exit(exitCode)
   const skills = path.join(integration, harness, harness === "pi" ? "src/skills" : "skills")
-  if (harness === "agy") continue
+  const skillsOut = path.join(outdir, harness, harness === "agy" ? ".agents/plugins/vibest/skills" : "skills")
   const names = fs
     .readdirSync(skills, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skills, entry.name, "SKILL.md")))
@@ -22,7 +22,7 @@ for (const harness of ["pi", "claude", "cursor", "agy"]) {
     .sort()
   if (names.length === 0) throw new Error(`no skills in ${skills}`)
   for (const name of names) {
-    fs.cpSync(path.join(skills, name), path.join(outdir, harness, "skills", name), {
+    fs.cpSync(path.join(skills, name), path.join(skillsOut, name), {
       recursive: true,
       dereference: true,
     })

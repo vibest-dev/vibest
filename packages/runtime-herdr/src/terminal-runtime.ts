@@ -85,7 +85,6 @@ const HERDR_AGENT_KIND_BY_BINARY: Readonly<Record<string, string>> = {
   pi: "pi",
   claude: "claude",
   "cursor-agent": "cursor",
-  agy: "agy",
 }
 const agentKindOf = (binary: string): string | undefined => {
   const name = binary.slice(binary.lastIndexOf("/") + 1)

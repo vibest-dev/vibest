@@ -29,16 +29,31 @@ const launchInput: Parameters<Harness.HarnessDefinition["launchArgs"]>[0] = {
 describe("HarnessAdapter", () => {
   const input = launchInput
 
-  it("agy resumes by conversation id and loads its status line for this session only", () => {
-    const args = agy.launchArgs({ ...input, resume: true, sessionId: "conv-1", pluginDir: "/opt/it's" })
-    assert.deepStrictEqual(args.slice(0, 2), ["--conversation", "conv-1"])
-    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!)
-    assert.deepStrictEqual(settings.statusLine, {
-      type: "command",
-      command: "sh '/opt/it'\\''s/status.sh'",
-      stack_with_default: true,
+  it("agy's execution ends at the Stop of a turn that does not continue, failed when agy names an error", () => {
+    const stop = { hookEventName: "Stop", conversationId: "c1", continuationActive: false, error: "" }
+    assert.deepStrictEqual(agy.executionEnd!(stop), { end: { text: "", conversation_id: "c1" } })
+    assert.deepStrictEqual(agy.executionEnd!({ ...stop, error: "quota" }), {
+      end: { text: "", conversation_id: "c1", error: "quota" },
     })
-    assert.notInclude(agy.launchArgs(input), "--conversation")
+    assert.isUndefined(agy.executionEnd!({ ...stop, continuationActive: true }))
+    assert.isUndefined(agy.executionEnd!({ hookEventName: "PreInvocation", conversationId: "c1" }))
+  })
+
+  it("agy's tool calls reach the guard in the shape it reads; a tool it has no rule for is not asked", () => {
+    const call = (name: string, args: Record<string, unknown>) =>
+      agy.guardCall!({ cwd: "/w", toolCall: { name, args } })
+    assert.deepStrictEqual(call("run_command", { CommandLine: "ls", Cwd: "/w/sub" }), {
+      cwd: "/w",
+      tool_name: "Bash",
+      tool_input: { command: "ls", cwd: "/w/sub" },
+    })
+    assert.deepStrictEqual(call("read_file", { Path: "/w/a.txt" }), {
+      cwd: "/w",
+      tool_name: "Read",
+      tool_input: { path: "/w/a.txt" },
+    })
+    assert.deepStrictEqual(call("edit_file", { Path: "/w/b.txt", Target: "hi", Replacement: "bye" })?.tool_name, "Edit")
+    assert.isUndefined(call("invoke_subagent", { Prompt: "x" }))
   })
 
   it("agy lists models from the JSON the CLI prints after its progress line", () => {
@@ -55,7 +70,7 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(agyModels(["Fetching available models...", "Error: Please sign in to view available models."]))
   })
 
-  it("agy reads its usage windows as used percent with the reset time", () => {
+  it("agy reads its usage windows as used percent with the reset time; it is limited only when no model group has quota left", () => {
     const usage = {
       command: {
         data: {
@@ -71,6 +86,21 @@ describe("HarnessAdapter", () => {
         },
       },
     }
+    const claudeGroup = (left: number) => ({
+      name: "Claude Models",
+      buckets: [{ window: "5h", remaining_fraction: left }],
+    })
+    const withClaude = (left: number) => ({
+      command: { data: { groups: [...usage.command.data.groups, claudeGroup(left)] } },
+    })
+    assert.deepStrictEqual(
+      agyLimits(withClaude(0.5)).map((w) => w.status),
+      ["available", "available", "available"],
+    )
+    assert.deepStrictEqual(
+      agyLimits(withClaude(0)).map((w) => w.status),
+      ["available", "limited", "limited"],
+    )
     assert.deepStrictEqual(agyLimits(usage), [
       {
         window: "Gemini Models weekly",
