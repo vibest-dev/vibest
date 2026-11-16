@@ -154,7 +154,7 @@ export class World {
     for (const dir of [w.vibestHome, path.join(root, "tmp")]) await fsPromises.mkdir(dir, { mode: 0o700 })
     await claudeShadow(w.config.claude, profile)
     await fsPromises.mkdir(w.config.pi, { mode: 0o700 })
-    await cursorShadow(w.config.cursor, profile, binary)
+    await cursorShadow(w.config.cursor, profile)
     await zshKeepingHistoryInTheWorld(w.shellDir)
     await w.sh(root, ["git", "init", "-q", "--bare", w.origin])
     await w.sh(root, ["git", "init", "-q", "-b", "main", w.repository])

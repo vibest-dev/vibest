@@ -270,6 +270,58 @@ const reports = (runtime: Runtime): Check => ({
   },
 })
 
-const checks: ReadonlyArray<Check> = [reports("herdr"), reports("hc")]
+const SEND_THEN_HERDR =
+  "Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: herdr pane list > herdr-ran.txt. Then reply with exactly: pong"
+
+const noApprovalDialog: Check = {
+  id: "I12",
+  tier: "agent",
+  title:
+    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to run herdr, herdr does not run",
+  run: async (w) => {
+    const c = await cursorWorld(w, "herdr", "i12")
+    await fs.writeFile(
+      path.join(w.config.cursor, "cli-config.json"),
+      JSON.stringify({ version: 1, approvalMode: "allowlist", permissions: { allow: [], deny: [] } }),
+    )
+    const ids: Array<string> = []
+    try {
+      const id = await c.start(SEND_THEN_HERDR)
+      ids.push(id)
+      const seen = new Set<string>()
+      await until(
+        "the execution to end",
+        async () => {
+          const e = await c.listed(id)
+          if (e) seen.add(e.status)
+          return c.executions(id).some((x) => x.outcome !== null)
+        },
+        240_000,
+      ).catch(async (e: Error) => {
+        throw new Error(`${e.message}; seen ${[...seen].join(", ")}; screen:\n${await c.screen(id)}`)
+      })
+      const [execution] = c.executions(id)
+      expect(
+        execution?.outcome === "completed" && /\bpong\b/.test(execution.reply ?? ""),
+        `the execution: ${JSON.stringify(execution)}`,
+      )
+      expect(!seen.has("blocked"), `the session was blocked: ${[...seen].join(", ")}`)
+      const sent = row<{ n: number }>(
+        w,
+        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send' AND instr(content, 'i12-hello') > 0",
+        id,
+      )?.n
+      expect((sent ?? 0) >= 1, `messages with i12-hello from ${id}: ${sent}`)
+      const worktree = await fs.realpath(
+        row<{ d: string }>(w, `SELECT directory AS d FROM ${SESSIONS} s WHERE id = ?`, id)?.d ?? "",
+      )
+      expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
+    } finally {
+      await c.close(ids)
+    }
+  },
+}
+
+const checks: ReadonlyArray<Check> = [reports("herdr"), reports("hc"), noApprovalDialog]
 
 export default checks

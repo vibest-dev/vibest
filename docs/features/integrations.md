@@ -62,6 +62,12 @@ Cursor dispatched and its screen in each input-box state.
 When another `vibest` comes first on PATH, the integrations still reach the vibest that started them: a Pi entry session
 reports ready, Pi and Claude subagents deliver their messages, an entry session restarts, and the other vibest never runs.
 
+## I12. Cursor never waits on its own approval dialog
+
+A Cursor session vibest started runs shell commands without Cursor asking "Run this command?", even on Cursor's default
+`allowlist` approval mode with no allow rule: its `vibest send` to the session that started it arrives, and the session
+is never blocked. vibest's guard still refuses what vibest forbids: asked to run herdr, herdr does not run.
+
 ## R6. Pi's guard
 
 Pi applies the same guard rules inside vibest's extension.

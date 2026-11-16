@@ -58,7 +58,7 @@ describe("shadows", () => {
     }
     const from = await fakeHome({ ".cursor/cli-config.json": own })
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-out-"))
-    await cursorShadow(dir, "user", "/bin/vibest", from)
+    await cursorShadow(dir, "user", from)
     const copied = await read(path.join(dir, "cli-config.json"))
     const keys = Object.keys(copied).sort()
     expect(keys).toEqual(["approvalMode", "network", "permissions", "sandbox", "version"])

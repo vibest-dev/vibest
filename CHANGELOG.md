@@ -249,6 +249,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Changed
 
+- Cursor sessions start with `--force`: Cursor no longer asks "Run this command?" before a shell call in a session
+  vibest started, whatever approval mode the user set for Cursor; vibest's guard still refuses what vibest forbids
+  (herdr, another project's folder).
 - vibestd writes `vibestd.log` itself. A foreground vibestd prints that path, then its standard output and error are the file. When the file is over 10 MiB, the process that takes the start lock keeps the last 5 MiB, from the next line, and does not trim again until the next start. A start that finds vibestd already running does not trim.
 - The entry session's row in `vibest ls` (and `--json`) now shows the git state of its directory and the repository
   root git reports for it, like any session working in that directory; it used to show no git state and its directory

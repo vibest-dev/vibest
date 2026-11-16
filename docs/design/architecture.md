@@ -933,7 +933,9 @@ runs), under `--safe-mode` so no hooks or plugins run (`--bare` would skip OAuth
 root as the hook's working directory; `afterAgentResponse` carries the reply as `text`, `stop` only a status. The hook
 script acts only for a vibest session (`VIBEST_SESSION_ID`). The guard hook is fail-closed: a crash, timeout or missing answer
 refuses the call, which Cursor would otherwise let through, so the guard always answers explicitly; `allow` only lets the
-call go on to Cursor's own permission checks. Every hook input carries `conversation_id`. A resume is one argument,
+call go on to Cursor's own permission checks. Every Cursor session starts with `--force`, so Cursor's own approval
+dialog (its default `allowlist` mode asks before each shell call) never holds a session no person watches; vibest's
+guard still refuses what vibest forbids, before Cursor's approval. Every hook input carries `conversation_id`. A resume is one argument,
 `--resume=<id>`: `--resume` takes an optional value, so a separate id starting with `-` would read as a flag.
 
 **Pi: one extension.** vibest loads one extension per session for inbox delivery, execution reports, the guard and

@@ -54,6 +54,7 @@ export const cursor: Harness.HarnessDefinition = {
     "--add-dir",
     i.projectDir,
     "--trust",
+    "--force",
     "--plugin-dir",
     i.pluginDir,
     ...opt("--model", i.model),
