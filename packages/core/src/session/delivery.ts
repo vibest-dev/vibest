@@ -78,29 +78,31 @@ export const make = Effect.gen(function* () {
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
-    hand: (
+    hand?: (
       text: string,
       onHandover: Effect.Effect<void>,
     ) => Effect.Effect<
       string | undefined,
       Effect.Error<ReturnType<typeof prompt>> | Effect.Error<ReturnType<typeof resume>>
-    > = (text, onHandover) => prompt(h, session, terminal, text, onHandover),
+    >,
   ) {
+    const into =
+      hand ?? ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover))
     const task = yield* db.inbox.untakenTask(session.id)
     if (task !== undefined) {
       const first = yield* taskInput(session, task)
-      const notStarted = yield* hand(first.text, first.onHandover)
+      const notStarted = yield* into(first.text, first.onHandover)
       if (notStarted) yield* notice(session, notStarted)
       return
     }
-    if (inbox.pulls(harnessIdOf(session))) return
+    if (hand === undefined && inbox.pulls(harnessIdOf(session))) return
     const pending = yield* db.inbox.pendingInbox(session.id)
     if (pending.length === 0) return
     const batch = nextBatch(pending)
     const ids = batch.map((r) => r.id)
     const claimed: Array<number> = []
     let handedInto: number | undefined
-    yield* hand(
+    yield* into(
       batch.map((r) => r.message).join("\n\n"),
       Effect.flatMap(db.session.openExecution(session.id), (execution) =>
         db.inbox.claim(session.id, ids).pipe(
@@ -194,11 +196,7 @@ export const make = Effect.gen(function* () {
           id,
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
-      if (!inbox.pulls(harnessIdOf(session)))
-        return yield* deliverQueued(h, session, terminal, (text, onHandover) =>
-          resume(h, session, { text, onHandover }),
-        )
-      yield* resume(h, session)
+      return yield* deliverQueued(h, session, terminal, (text, onHandover) => resume(h, session, { text, onHandover }))
     }
     const fresh = (yield* db.session.getSession(id)) ?? session
     yield* deliverQueued(h, fresh, terminalOf(fresh))

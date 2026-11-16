@@ -1,3 +1,5 @@
+import fs from "node:fs"
+
 import { Runtime as R } from "@vibest/plugin/effect"
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
 
@@ -8,6 +10,21 @@ type RuntimeEvent = R.RuntimeEvent
 type AgentState = R.AgentState
 
 export const KIND = "herdr"
+
+const envPrefix = (argv: ReadonlyArray<string>) =>
+  argv[0] === "env" ? 1 + argv.slice(1).findIndex((part) => !/^[A-Z_]+=/.test(part)) : 0
+
+const withMessage = (argv: ReadonlyArray<string>) => {
+  const at = envPrefix(argv)
+  return argv[at] === "sh" && argv[at + 2]?.includes(`cat -- "$0"`) === true
+}
+
+const execed = (argv: ReadonlyArray<string>): Array<string> => {
+  const at = envPrefix(argv)
+  return withMessage(argv) ? [...argv.slice(at + 4), fs.readFileSync(argv[at + 3]!, "utf8")] : argv.slice(at)
+}
+
+const envPairs = (argv: ReadonlyArray<string>) => argv.slice(1, envPrefix(argv))
 
 export interface FakeAgent {
   readonly vibestSession?: string
@@ -47,7 +64,7 @@ export interface RuntimeCalls {
   readonly state: { readonly terminal: string }
   readonly session: { readonly terminal: string }
   readonly close: { readonly terminal: string }
-  readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string> }
+  readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string>; readonly env: ReadonlyArray<string> }
   readonly present: { readonly terminal: string; readonly info: Readonly<Record<string, string>> }
   readonly see: { readonly terminal: string; readonly finished: number }
   readonly focus: { readonly terminal: string }
@@ -225,6 +242,10 @@ export class FakeRuntime extends Context.Service<
 
       const reachable = yield* Ref.make(true)
       const skipPromptUpdates = yield* Ref.make(0)
+      const registers = (argv: ReadonlyArray<string>) =>
+        withMessage(argv) && !options.promptsIgnored
+          ? Ref.modify(skipPromptUpdates, (n) => [n === 0, n > 0 ? n - 1 : 0] as const)
+          : Effect.succeed(false)
 
       const addPane = (paneId: string, workspaceId: string, cwd: string) =>
         Effect.gen(function* () {
@@ -280,13 +301,19 @@ export class FakeRuntime extends Context.Service<
       const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
         call(
           "run",
-          { terminal: terminal.id, argv: [...argv] },
+          { terminal: terminal.id, argv: execed(argv), env: envPairs(argv) },
           terminal.id,
           Effect.gen(function* () {
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
             const record = HashMap.get(yield* Ref.get(agents), terminal.id)
             if (Option.isNone(record)) return
-            yield* updateAgent(terminal.id, (current) => ({ ...current, alive: true, status: "idle" }))
+            const working = yield* registers(argv)
+            yield* updateAgent(terminal.id, (current) => ({
+              ...current,
+              alive: true,
+              status: working ? "working" : "idle",
+              seq: working ? current.seq + 1 : current.seq,
+            }))
             const session = record.value.vibestSession
             if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
           }),
@@ -307,7 +334,7 @@ export class FakeRuntime extends Context.Service<
             {
               project: input.project,
               cwd: input.cwd,
-              argv: [...input.argv],
+              argv: execed(input.argv),
               env: { ...input.env },
               label: input.label,
               near: input.near?.id,
@@ -345,11 +372,12 @@ export class FakeRuntime extends Context.Service<
                   ? undefined
                   : HashMap.toEntries(yield* Ref.get(agents)).find(([, agent]) => agent.vibestSession === session)?.[1]
               const coordinator = session === undefined && input.argv.some((part) => part.includes("vibest"))
+              const working = yield* registers(input.argv)
               const started: FakeAgent = {
                 ...prior,
                 ...(session !== undefined ? { vibestSession: session } : {}),
-                status: coordinator ? "working" : "idle",
-                seq: 0,
+                status: coordinator || working ? "working" : "idle",
+                seq: working ? 1 : 0,
                 alive: true,
               }
               yield* Ref.update(agents, (map) => {

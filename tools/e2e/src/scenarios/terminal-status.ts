@@ -482,6 +482,7 @@ const checks: ReadonlyArray<Check> = [
           snapshot("HTTP 401 authentication_error", auth!)
           await w.writeEvidence(path.join(evidence, "T1-claude-auth.txt"), await hc("read", terminal()))
           await hc("kill", terminal())
+          await Bun.sleep(2000)
           for (const resolve of model.waiting.splice(0)) resolve("discard authentication retry")
           for (const [name, flag] of [
             ["title disabled", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1"],

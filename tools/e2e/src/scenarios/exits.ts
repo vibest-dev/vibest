@@ -167,13 +167,6 @@ const rpc = (socket: string, method: string, params: object, headers: ReadonlyAr
     sock.on("error", reject)
   })
 
-const untaken = (w: World, id: string) =>
-  row<{ n: number }>(
-    w,
-    "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'task' AND execution_id IS NULL",
-    id,
-  )?.n === 1
-
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 
 const killWindowTries = 5
@@ -284,17 +277,25 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S24",
     title:
-      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent is stopped, curl takes for it): the next vibestd ends that execution not_started, fails the row once with one notice, and does not deliver it again",
+      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent and its pane's shell are stopped, so the shell keeps no job control over it, and curl takes for it): the next vibestd ends that execution not_started, fails the row once with one notice, and does not deliver it again",
     run: async (w) => {
       const p = await piProject(w, "s24")
+      let shell: number | undefined
       let stopped: number | undefined
       try {
         p.model.release()
         const sub = await p.runSub("first")
         await until("idle", () => p.idle(sub), 60_000)
-        stopped = p.pid(sub) ?? undefined
-        expect(stopped !== undefined, "the subagent has no pid")
-        process.kill(stopped!, "SIGSTOP")
+        const harness = p.pid(sub) ?? undefined
+        expect(harness !== undefined, "the subagent has no pid")
+        shell = Number(
+          Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(harness)])
+            .stdout.toString()
+            .trim(),
+        )
+        process.kill(shell, "SIGSTOP")
+        stopped = harness
+        process.kill(harness!, "SIGSTOP")
         const message = ask("cut")
         await p.vibestSend(sub, message)
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, sub)!.p
@@ -337,6 +338,7 @@ const checks: ReadonlyArray<Check> = [
         expect(copies?.n === 1, `the row exists ${copies?.n} times`)
       } finally {
         if (stopped !== undefined) process.kill(stopped, "SIGCONT")
+        if (shell !== undefined) process.kill(shell, "SIGCONT")
         await p.close()
       }
     },
@@ -424,40 +426,29 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S29",
     title:
-      "vibestd killed (kill -9) while a subagent's terminal waits for its harness to be ready (no execution open, the task not handed over): the next vibestd types the task once, as its first execution's input, and the one completed execution sends nothing",
+      "vibestd killed (kill -9) as soon as a subagent's terminal is placed: its task is in the launch argv, so the model is asked it once and it is the input of one execution, which ends; it sends nothing when it completed, and one notice to its creator when the harness's reports fell in the outage",
     run: async (w) => {
       const p = await piProject(w, "s29")
       try {
+        const daemon = await w.daemonPid()
+        const sub = await p.runSub("t1")
+        const placed = () =>
+          row<{ n: number }>(
+            w,
+            "SELECT count(*) AS n FROM process WHERE session_id = ? AND coalesce(terminal, '') != ''",
+            sub,
+          )?.n === 1
+        for (const deadline = Date.now() + 60_000; !placed(); await Bun.sleep(1))
+          expect(Date.now() < deadline, `${sub}: its terminal never opened`)
+        await w.killDaemon(daemon)
+        await p.startDaemon()
         p.model.release()
-        let sub = ""
-        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
-          const daemon = await w.daemonPid()
-          const id = await p.runSub(`t${attempt}`)
-          const placed = () =>
-            row<{ n: number }>(
-              w,
-              "SELECT count(*) AS n FROM process WHERE session_id = ? AND coalesce(terminal, '') != ''",
-              id,
-            )?.n === 1
-          const executions = () =>
-            row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", id)?.n
-          for (const deadline = Date.now() + 60_000; !placed(); await Bun.sleep(1))
-            expect(Date.now() < deadline, `${id}: its terminal never opened`)
-          await w.killDaemon(daemon)
-          if (untaken(w, id) && executions() === 0) sub = id
-          await p.startDaemon()
-          if (sub === "") await until(`${id} idle`, () => p.idle(id), 60_000)
-        }
-        expect(sub !== "", "every try handed the task over before vibestd was killed")
-        const task = `t${row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE session_id = ? AND kind = 'task'", sub)?.c.match(/done-t(\d+)/)?.[1]}`
-        await until(
-          "one completed execution",
-          () => p.executionEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed",
-          60_000,
-        )
+        await until("its one execution ended", () => p.executionEnds(sub) === 1, 60_000)
         await nothingMoreComesWithin(3_000)
-        expect(p.model.asked(task) === 1, `the task was asked ${p.model.asked(task)} times`)
-        expect(p.sent(sub) === 0, `${p.sent(sub)} rows sent by the session`)
+        expect(p.executionEnds(sub) === 1, `${p.executionEnds(sub)} executions ended`)
+        expect(p.model.asked("t1") === 1, `the task was asked ${p.model.asked("t1")} times`)
+        const told = p.lastEnd(sub)?.status === "completed" ? 0 : 1
+        expect(p.sent(sub) === told, `${p.sent(sub)} rows sent by the session, outcome ${p.lastEnd(sub)?.status}`)
         const input = row<{ n: number }>(
           w,
           `SELECT count(*) AS n FROM event e JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.inbox'

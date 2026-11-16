@@ -47,19 +47,15 @@ export const make = Effect.gen(function* () {
   const reportedStatus = (id: string) =>
     Effect.map(db.session.getSession(id), (session) => session?.status ?? "unknown")
 
-  const startsNewConversation = (id: string) =>
-    Effect.map(db.session.getSession(id), (session) => (session?.process?.conversation ?? null) === null)
-
   const awaitReady = Effect.fn("Executions.awaitReady")(
     (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
       Effect.gen(function* () {
         const reports = adapter.ready === "integration"
-        const waitsForReport = reports || (adapter.readyOnStart === "integration" && (yield* startsNewConversation(id)))
         const step = adapter.startup ? yield* adapter.startup : undefined
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
           const seen = yield* sessionState(h, terminal, reportedStatus(id))
-          const ready = (yield* db.session.readyAt(id)) !== undefined || (!waitsForReport && seen === "idle")
+          const ready = (yield* db.session.readyAt(id)) !== undefined || (!reports && seen === "idle")
           return { seen, ready }
         })
         return yield* look.pipe(
@@ -261,6 +257,8 @@ export const make = Effect.gen(function* () {
           })
     const taken = Effect.gen(function* () {
       if ((yield* db.session.openExecution(session.id)) !== execution) return true
+      const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
+      if (state === "working") return yield* pickedUp(session, execution, state)
       return yield* db.session.executionAccepted(session.id)
     })
     const took = yield* taken.pipe(

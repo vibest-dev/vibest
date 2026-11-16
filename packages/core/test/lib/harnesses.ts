@@ -21,6 +21,7 @@ export const PI: HarnessDefinition = {
   interruptKey: "esc",
   replyField: "text",
   ready: "integration",
+  firstInput: ["--"],
   launchArgs: (i) => [
     ...opt("--session-id", i.sessionId),
     "--append-system-prompt",
@@ -54,6 +55,7 @@ export const CLAUDE: HarnessDefinition = {
   interruptKey: "esc",
   replyField: "last_assistant_message",
   ready: "integration",
+  firstInput: ["--"],
   checkProvider: noProvider("claude"),
   launchArgs: (i) => [
     ...(i.sessionId === null ? [] : [i.resume ? "--resume" : "--session-id", i.sessionId]),
@@ -97,7 +99,7 @@ export const CURSOR: HarnessDefinition = {
   interruptKey: "ctrl+c",
   replyField: "text",
   ready: "runtime",
-  readyOnStart: "integration",
+  firstInput: ["--"],
   clearKeys: ["ctrl+u"],
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
@@ -122,13 +124,11 @@ export const CURSOR: HarnessDefinition = {
 export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", delivery: "pull" }
 export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", delivery: "pull" }
 
-const { readyOnStart: _readyOnStart, ...cursorAtStart } = CURSOR
-
 export const FIRST_IN_ARGV: HarnessDefinition = {
-  ...cursorAtStart,
+  ...CURSOR,
   id: "first",
   binary: "first",
-  firstInput: (text) => ["--first", text],
+  firstInput: ["--first"],
 }
 
 export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]

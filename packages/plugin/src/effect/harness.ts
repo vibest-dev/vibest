@@ -3,7 +3,7 @@ import type { Effect, Types } from "effect"
 
 import type { Transform } from "./registration.ts"
 
-interface LaunchInput {
+export interface LaunchInput {
   readonly worktree: string
   readonly projectDir: string
   readonly systemPromptFile: string
@@ -54,9 +54,8 @@ export interface HarnessDefinition {
   readonly replyField: "text" | "last_assistant_message"
   readonly delivery: "typed" | "pull"
   readonly ready: "integration" | "runtime"
-  readonly readyOnStart?: "integration"
   readonly clearKeys?: ReadonlyArray<string>
-  readonly firstInput?: (text: string) => ReadonlyArray<string>
+  readonly firstInput: ReadonlyArray<string>
   readonly startup?: Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
   readonly checkProvider?: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
@@ -80,3 +79,9 @@ export interface HarnessEditor {
 export interface HarnessDomain {
   readonly transform: Transform<HarnessEditor>
 }
+
+export const harnessArgv = (definition: HarnessDefinition, input: LaunchInput, message?: string) => [
+  definition.binary,
+  ...definition.launchArgs(input),
+  ...(message === undefined ? [] : [...definition.firstInput, message]),
+]

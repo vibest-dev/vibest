@@ -1,6 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
-import { ID, randomId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
 import { Cause, Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
@@ -81,16 +80,6 @@ export const failure = (
 
 const failWith = <A, R>(effect: Effect.Effect<A, HerdrFailure, R>) => effect.pipe(Effect.mapError(failure))
 
-const HERDR_AGENT_KIND_BY_BINARY: Readonly<Record<string, string>> = {
-  pi: "pi",
-  claude: "claude",
-  "cursor-agent": "cursor",
-}
-const agentKindOf = (binary: string): string | undefined => {
-  const name = binary.slice(binary.lastIndexOf("/") + 1)
-  return HERDR_AGENT_KIND_BY_BINARY[name]
-}
-
 export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
 
 export const processStillRunning = (
@@ -101,17 +90,11 @@ export const processStillRunning = (
   launchPending: boolean,
 ): boolean => launchPending || (info.foreground_processes ?? []).some((process) => process.pid !== info.shell_pid)
 
-const agentNameOf = (env: Readonly<Record<string, string>>) => {
-  const id = env["VIBEST_SESSION_ID"]
-  return id !== undefined && ID.test(id) ? agentName(id) : `vbt-${randomId().replaceAll("-", "").slice(0, 28)}`
-}
-
 const stateOf = (status: results.AgentStatus): AgentState => (status === "done" ? "idle" : status)
 
 const TICK = Schedule.spaced("500 millis")
 
 const OUTPUT_TIMEOUT = Duration.seconds(30)
-const BUSY_RETRIES = 40
 const READY_RETRIES = 60
 const INTERACTIVE_SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
 
@@ -296,38 +279,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return undefined
       })
 
-    const startAgent = (h: HerdrShape, name: string, kind: string, paneId: string, args: ReadonlyArray<string>) =>
-      h
-        .call("agent.start", {
-          name,
-          kind,
-          pane_id: paneId,
-          args: [...args],
-          timeout_ms: Duration.toMillis(Duration.seconds(120)),
-        })
-        .pipe(
-          Effect.retry({
-            while: (error) =>
-              error._tag === "HerdrError" &&
-              error.code === "agent_name_taken" &&
-              error.message.includes(`pane_id=${paneId} `),
-            times: BUSY_RETRIES,
-            schedule: TICK,
-          }),
-          failWith,
-        )
-        .pipe(
-          Effect.retry({ while: (error) => error.code === "busy", times: BUSY_RETRIES, schedule: TICK }),
-          Effect.mapError((error) =>
-            error.code === "failed"
-              ? new RuntimeApi.RuntimeError({
-                  code: error.code,
-                  message: `${error.message} (if herdr never saw ${kind} start, check \`herdr integration status\`)`,
-                })
-              : error,
-          ),
-        )
-
     const typeLine = (h: HerdrShape, paneId: string, argv: ReadonlyArray<string>) =>
       failWith(h.call("pane.send_text", { pane_id: paneId, text: argv.map(shellQuote).join(" ") })).pipe(
         Effect.andThen(failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))),
@@ -377,11 +328,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 label: input.label,
               }),
             )).root_pane.pane_id
-        const name = agentNameOf(input.env)
-        const kind = input.argv.length > 0 ? agentKindOf(input.argv[0]!) : undefined
-        const agent = kind !== undefined
-        if (agent) agentNameByPane.set(`${session}/${paneId}`, name)
-        else agentNameByPane.delete(`${session}/${paneId}`)
+        agentNameByPane.delete(`${session}/${paneId}`)
         const tabId = split ? undefined : (yield* failWith(h.call("pane.get", { pane_id: paneId }))).pane.tab_id
         const undo = () =>
           (tabId !== undefined
@@ -390,24 +337,20 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           ).pipe(Effect.ignore, Effect.asVoid)
         yield* Effect.catch(
           Effect.gen(function* () {
-            if (kind !== undefined) {
-              yield* startAgent(h, name, kind, paneId, input.argv.slice(1))
-            } else {
-              yield* failWith(
-                h.call("pane.wait_for_output", {
-                  pane_id: paneId,
-                  source: "visible",
-                  match: { type: "regex", value: "\\S" },
-                  timeout_ms: Duration.toMillis(OUTPUT_TIMEOUT),
-                }),
-              )
-              yield* typeLine(h, paneId, input.argv)
-            }
+            yield* failWith(
+              h.call("pane.wait_for_output", {
+                pane_id: paneId,
+                source: "visible",
+                match: { type: "regex", value: "\\S" },
+                timeout_ms: Duration.toMillis(OUTPUT_TIMEOUT),
+              }),
+            )
+            yield* typeLine(h, paneId, input.argv)
           }),
           (error) => undo().pipe(Effect.andThen(Effect.fail(error))),
         )
         yield* watch(session, paneId)
-        return terminalOf(session, paneId, agent === true ? name : undefined)
+        return terminalOf(session, paneId)
       })
 
     const at = (terminal: Terminal, method: string) => {
@@ -461,9 +404,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const h = yield* client(place.session)
         if ((yield* paneOf(h, place.paneId)) === undefined)
           return yield* new RuntimeApi.RuntimeError({ code: "not_found", message: `pane ${place.paneId} is gone` })
-        const kind = argv.length > 0 ? agentKindOf(argv[0]!) : undefined
-        if (kind !== undefined && place.name !== undefined)
-          return yield* startAgent(h, place.name, kind, place.paneId, argv.slice(1))
         const atShell = failWith(h.call("pane.process_info", { pane_id: place.paneId })).pipe(
           Effect.map((r) => {
             if (r.type !== "pane_process_info") return false

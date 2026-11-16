@@ -706,9 +706,9 @@ export const expectReplied = async (w: World, sub: string) => {
     "session.created",
     "process.started",
     "inbox.queued",
-    "process.placed",
     "execution.started",
     "inbox.moved",
+    "process.placed",
     "execution.ended",
   ])
   const task = row<{ status: string; execution: number | null }>(
@@ -808,7 +808,16 @@ export const copyEvidence = async (
   }
 }
 
-export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
+export const herdrPane = (terminal: string | null | undefined) => terminal?.split("/")[1]
+
+export const paneOf = (w: World, id: string) =>
+  herdrPane(
+    row<{ terminal: string | null }>(
+      w,
+      "SELECT terminal FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+      id,
+    )?.terminal,
+  )
 
 export const herdr = (socket: string, method: string, params: object) =>
   new Promise<Record<string, unknown>>((resolve, reject) => {

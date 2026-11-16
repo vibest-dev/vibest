@@ -1,3 +1,4 @@
+import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
@@ -12,6 +13,8 @@ import {
   SystemPromptDirUnsafe,
   systemPrompt,
   systemPromptRoot,
+  withTask,
+  writeFirstInput,
   writeSystemPrompt,
 } from "./system-prompt.ts"
 
@@ -38,10 +41,12 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
       readonly projectId: string
       readonly process?: number | undefined
       readonly runtime?: string | undefined
+      readonly firstInput?: string | undefined
     },
     E,
     R
   >
+  readonly message?: string | undefined
 }) {
   const definition = yield* definitionOf(input.agent)
   const adapter = yield* (yield* Harnesses.Service).get(input.harness)
@@ -60,19 +65,15 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     VIBEST_COMMAND: encodeCommand(vibest),
   }
   const saved = yield* input.session
-  const systemPromptFile = yield* unsafeOnly(
-    writeSystemPrompt(
-      saved.sessionId,
-      systemPrompt({
-        system: definition.system,
-        id: saved.sessionId,
-        checkout: true,
-        projectDir: layout.project(saved.projectId),
-        vibest,
-        ...(yield* projectText(layout.project(saved.projectId))),
-      }),
-    ),
-  )
+  const promptText = systemPrompt({
+    system: definition.system,
+    id: saved.sessionId,
+    checkout: true,
+    projectDir: layout.project(saved.projectId),
+    vibest,
+    ...(yield* projectText(layout.project(saved.projectId))),
+  })
+  const systemPromptFile = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, promptText))
   yield* (yield* FileSystem.FileSystem)
     .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
     .pipe(Effect.ignore)
@@ -84,9 +85,10 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     ...(saved.process !== undefined ? { VIBEST_PROCESS: String(saved.process) } : {}),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
-  return {
-    file: adapter.binary,
-    args: adapter.launchArgs({
+  const message = input.message ?? (saved.firstInput === undefined ? undefined : withTask(promptText, saved.firstInput))
+  const argv = PluginHarness.harnessArgv(
+    adapter,
+    {
       worktree: input.root,
       projectDir: layout.project(saved.projectId),
       systemPromptFile,
@@ -97,7 +99,16 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
       pluginDir,
       vibest,
       env: commandEnv,
-    }),
+    },
+    message,
+  )
+  const [file, ...args] =
+    message === undefined
+      ? argv
+      : messageFromFile(argv.slice(0, -1), yield* unsafeOnly(writeFirstInput(saved.sessionId, message)))
+  return {
+    file: file!,
+    args,
     env: commandEnv,
   }
 })
@@ -119,7 +130,17 @@ export const identityPairs = (env: Readonly<Record<string, string>>) =>
     return value === undefined ? [] : [`${key}=${value}`]
   })
 
-export const restartArgv = (command: {
+const MESSAGE_FROM_FILE = 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"'
+
+export const messageFromFile = (argv: ReadonlyArray<string>, file: string) => [
+  "sh",
+  "-c",
+  MESSAGE_FROM_FILE,
+  file,
+  ...argv,
+]
+
+export const launchLine = (command: {
   readonly file: string
   readonly args: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>

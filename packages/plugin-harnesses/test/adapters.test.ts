@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { Harness } from "@vibest/plugin/effect"
+import { Harness } from "@vibest/plugin/effect"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
@@ -28,6 +28,32 @@ const launchInput: Parameters<Harness.HarnessDefinition["launchArgs"]>[0] = {
 
 describe("HarnessAdapter", () => {
   const input = launchInput
+  const message = "the task\non two lines"
+
+  it("cursor's launch ends with -- and the message after every option, so no option that takes several values swallows it", () => {
+    for (const resume of [false, true])
+      assert.deepStrictEqual(Harness.harnessArgv(cursor, { ...input, model: "m", resume }, message).slice(-2), [
+        "--",
+        message,
+      ])
+  })
+
+  it("claude's and pi's launch end with -- and the message, so --allowedTools or --add-dir never takes it, new or resumed", () => {
+    for (const harness of [claude, pi])
+      for (const resume of [false, true])
+        assert.deepStrictEqual(Harness.harnessArgv(harness, { ...input, model: "m", resume }, message).slice(-2), [
+          "--",
+          message,
+        ])
+  })
+
+  it("agy's launch ends with --prompt-interactive and the message, after every option, new or resumed", () => {
+    for (const resume of [false, true])
+      assert.deepStrictEqual(Harness.harnessArgv(agy, { ...input, model: "m", resume }, message).slice(-2), [
+        "--prompt-interactive",
+        message,
+      ])
+  })
 
   it("agy's execution ends at the Stop of a turn that does not continue, failed when agy names an error", () => {
     const stop = { hookEventName: "Stop", conversationId: "c1", continuationActive: false, error: "" }

@@ -158,6 +158,7 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
 export const heldModel = () => {
   const held: Array<() => void> = []
   const requestsPerTask = new Map<string, number>()
+  const promptOfTask = new Map<string, string>()
   let released = false
   const server = Bun.serve({
     port: 0,
@@ -172,6 +173,7 @@ export const heldModel = () => {
       const task = creatorIn(system) === undefined && last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
       if (!task) return new Response(reply("ok"), { headers: sseHeaders })
       requestsPerTask.set(task[1]!, (requestsPerTask.get(task[1]!) ?? 0) + 1)
+      promptOfTask.set(task[1]!, last)
       const answer = reply(`done-${task[1]}\nstatus: completed`)
       if (released) return new Response(answer, { headers: sseHeaders })
       return new Response(
@@ -193,6 +195,7 @@ export const heldModel = () => {
   return {
     held: () => held.length,
     asked: (task: string) => requestsPerTask.get(task) ?? 0,
+    promptOf: (task: string) => promptOfTask.get(task),
     releaseOne: () => {
       held.shift()?.()
     },

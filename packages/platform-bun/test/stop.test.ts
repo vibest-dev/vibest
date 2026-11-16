@@ -90,7 +90,7 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     if (harness === "claude") yield* db.session.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
-    yield* until(db.session.getSession(worker), (w) => (w ? executionStateOf(w) : undefined) === "open")
+    yield* until(db.session.executionAccepted(worker), (accepted) => accepted)
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.session.projectOfSession(sessionId))! }
   })
 
@@ -222,7 +222,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         harness: "pi",
         prompt: "work",
       })
-      yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
+      yield* until(herdr.callsTo("open"), (calls) => calls.some((c) => c.argv.at(-1)?.includes("work") === true))
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       const piExtensionHook = (call: "Prompt", event: object) =>
@@ -276,7 +276,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         harness: "pi",
         prompt: "work",
       })
-      yield* until(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)

@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { exitedAt, archived, executionStateOf } from "@vibest/core/database/db-rows"
+import { exitedAt, archived } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
 import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
@@ -183,7 +183,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* letForkedArchiveRun
       assert.isFalse(yield* archivedRow(b.db, b.id))
       yield* b.sessions.send(b.id, "the first one")
-      yield* until(b.db.session.getSession(b.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(b.db.session.executionAccepted(b.id), (accepted) => accepted)
       yield* finishExecution(b, "status: completed")
       yield* until(archivedRow(b.db, b.id), (x) => x)
     }),

@@ -361,6 +361,44 @@ const sendChecks: ReadonlyArray<Check> = [
 
 const checks: ReadonlyArray<Check> = [
   {
+    id: "S56",
+    title:
+      "a Pi subagent's multi-line task reaches its model whole, through its launch argv: its execution starts before its process is placed, the model is asked it once, and it completes",
+    run: async (w) => {
+      needs()
+      const entryModel = heldModel()
+      entryModel.release()
+      const model = heldModel()
+      model.release()
+      let session = ""
+      try {
+        const m = await piEntry(w, "argv", entryModel.url)
+        session = m.session
+        const tail = "and this line, after a 'quote' and a $dollar, arrives too"
+        const sub = await runSub(w, m.repo, session, model.url, "pi-argv-sub", `${ask("argv")}\n\n${tail}`)
+        await until("the task's reply", async () => (await replyOf(w, sub, m.repo)).includes("done-argv"), 90_000)
+        expect(model.asked("argv") === 1, `the model was asked the task ${model.asked("argv")} times`)
+        expect(
+          model.promptOf("argv")?.includes(tail) === true,
+          `the model got the task cut: ${JSON.stringify(model.promptOf("argv"))}`,
+        )
+        const seqOf = (type: string) =>
+          row<{ seq: number }>(w, "SELECT min(seq) AS seq FROM event WHERE aggregate = ? AND type = ?", sub, type)?.seq
+        const started = seqOf("execution.started")
+        const placed = seqOf("process.placed")
+        expect(
+          started !== undefined && placed !== undefined && started < placed,
+          `execution.started at ${started}, process.placed at ${placed}`,
+        )
+        expect(executionStarts(w, sub) === 1, `${executionStarts(w, sub)} executions, not one`)
+      } finally {
+        entryModel.stop()
+        model.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
     id: "S2",
     covers: ["S54"],
     title:

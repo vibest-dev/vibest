@@ -1,3 +1,4 @@
+import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
@@ -35,7 +36,7 @@ import { Git } from "../git.ts"
 import { encodeCommand, Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
-import { definitionIn } from "../launch.ts"
+import { definitionIn, launchLine, messageFromFile } from "../launch.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
@@ -44,7 +45,14 @@ import {
 } from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
-import { projectText, removeSystemPrompt, systemPrompt, writeSystemPrompt } from "../system-prompt.ts"
+import {
+  projectText,
+  removeSystemPrompt,
+  systemPrompt,
+  withTask,
+  writeFirstInput,
+  writeSystemPrompt,
+} from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
 
@@ -68,7 +76,7 @@ export type LaunchOptions = {
 
 export type LaunchOutcome =
   | { readonly _tag: "Started" }
-  | { readonly _tag: "Limited"; readonly input: string; readonly error: string }
+  | { readonly _tag: "Limited"; readonly input: string; readonly error: string; readonly execution: number }
   | { readonly _tag: "Failed" }
 
 export const make = Effect.gen(function* () {
@@ -153,9 +161,9 @@ export const make = Effect.gen(function* () {
     const pluginDir = yield* harness.plugin(adapter.id)
     const id = session.process?.conversation ?? null
     const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
-    return [
-      adapter.binary,
-      ...adapter.launchArgs({
+    const argv = PluginHarness.harnessArgv(
+      adapter,
+      {
         worktree: yield* worktreeOf(session),
         projectDir: layout.project(session.projectId),
         systemPromptFile: file,
@@ -166,14 +174,16 @@ export const make = Effect.gen(function* () {
         pluginDir,
         vibest,
         env: vibestEnv(session),
-      }),
-      ...(first === undefined || adapter.firstInput === undefined ? [] : adapter.firstInput(first)),
-    ]
+      },
+      first,
+    )
+    if (first === undefined) return argv
+    return messageFromFile(argv.slice(0, -1), yield* writeFirstInput(session.id, first))
   }, provided)
 
   const firstText = Effect.fn("Placement.firstText")(function* (session: SessionRow, task: string) {
     return (yield* harnesses.get(harnessIdOf(session))).systemPromptInPrompt
-      ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
+      ? withTask(yield* systemPromptOf(session), task)
       : task
   }, provided)
 
@@ -185,24 +195,22 @@ export const make = Effect.gen(function* () {
     resume: boolean,
     first?: FirstInput,
   ) {
-    const inArgv = first !== undefined && (yield* harnesses.get(harnessIdOf(session))).firstInput !== undefined
-    const argv = yield* launchArgv(session, resume, inArgv ? first.text : undefined)
+    const [file, ...args] = yield* launchArgv(session, resume, first?.text)
+    const argv = (process: number | undefined) => launchLine({ file: file!, args, env: vibestEnv(session, process) })
     const execution = yield* Ref.make<number | undefined>(undefined)
-    const beforeStart = inArgv
-      ? Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
-      : Effect.void
+    const beforeStart =
+      first === undefined
+        ? Effect.void
+        : Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
     const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
-      Effect.gen(function* () {
-        if (first === undefined) return undefined
-        const opened = yield* Ref.get(execution)
-        if (opened !== undefined) return yield* launched(h, row, terminal, opened)
-        return yield* prompt(h, row, terminal, first.text, first.onHandover)
-      })
+      Effect.flatMap(Ref.get(execution), (opened) =>
+        opened === undefined ? Effect.succeed(undefined) : launched(h, row, terminal, opened),
+      )
     const abandoned = Effect.flatMap(Ref.get(execution), (opened) =>
       opened === undefined ? Effect.void : db.session.closeExecution(session.id, opened, "not_started"),
     )
     const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError(() => abandoned))
-    return { argv, beforeStart, starting, deliver }
+    return { argv, beforeStart, starting, deliver, opened: Ref.get(execution) }
   }, provided)
 
   const handTask = Effect.fn("Placement.handTask")(function* (
@@ -268,7 +276,7 @@ export const make = Effect.gen(function* () {
     input: {
       readonly project: string
       readonly cwd: string
-      readonly argv: ReadonlyArray<string>
+      readonly argv: (process: number | undefined) => ReadonlyArray<string>
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
       readonly env?: Readonly<Record<string, string>> | undefined
@@ -285,7 +293,7 @@ export const make = Effect.gen(function* () {
       .open({
         project: input.project,
         cwd: input.cwd,
-        argv: input.argv,
+        argv: input.argv(started),
         env: { ...input.env, ...vibestEnv(session, started) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
@@ -378,7 +386,12 @@ export const make = Effect.gen(function* () {
       ),
     )
     if ("limited" in terminal)
-      return { _tag: "Limited", input: firstPrompt, error: terminal.limited } satisfies LaunchOutcome
+      return {
+        _tag: "Limited",
+        input: firstPrompt,
+        error: terminal.limited,
+        execution: (yield* plan.opened) ?? 0,
+      } satisfies LaunchOutcome
     yield* show(h, session, terminal.terminal, root)
     const notStarted = yield* plan.deliver(h, session, terminal.terminal)
     if (notStarted) yield* notice(session, notStarted)

@@ -64,6 +64,7 @@ export const pi: Harness.HarnessDefinition = {
   interruptKey: "esc",
   replyField: "text",
   delivery: "pull",
+  firstInput: ["--"],
   ready: "integration",
   checkProvider: () => undefined,
   launchArgs: (i) => [

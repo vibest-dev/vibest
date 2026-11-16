@@ -88,7 +88,7 @@ and `integration stop` ends cleanly. Pi only: the entry session TUI (tool groups
 
 ## 3. Runner
 
-`tools/e2e` (Bun, private package): `pnpm e2e [area | id …] [--tier gate|slow|agent|all] [--jobs N] [--no-cache]
+`tools/e2e` (Bun, private package): `pnpm e2e [area | id …] [--tier gate|agent|all] [--jobs N] [--no-cache]
 [--strict]`. Each check runs in a World of its own, so a check passes alone or not at all.
 
 - **Pool.** Checks run in parallel in a pool shared by every worktree and every `pnpm e2e` on the machine: its slots are
@@ -98,7 +98,7 @@ and `integration stop` ends cleanly. Pi only: the entry session TUI (tool groups
   first, by the duration each last took (`vibest-e2e/timings.json`).
 - **Flaky under load.** A failed check is run again alone. If it then passes it is reported `flaky-under-load`, which
   still fails the run.
-- **Tiers.** `gate` (the default), `slow` (S18-slow, herdr's full 120 s window) and `agent` (I5: a real model; an agent
+- **Tiers.** `gate` (the default) and `agent` (I5: a real model; an agent
   runs it and attaches the evidence). An id named on the command line runs whatever its tier. A check that merges
   others names them (`covers`), and naming a covered id runs it: D1 covers D2–D4, H1 covers H2 and H3, I7 covers I4, S15
   covers S11. Naming T1 runs T1-claude and T1-pi.
@@ -163,10 +163,8 @@ What the checks that drive real herdr panes rely on:
   enter again.
 - Claude refuses a standalone `sleep`: to keep an entry session busy, the check has its execution wait in a Bash call for a file
   the check creates.
-- herdr drops a started agent's name when it is not marked ready within `agent.start`'s 120 s, and refuses
-  `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19). S18 proves in
-  the gate that `agent.start` has resolved (the terminal is recorded) while the first execution is still held; S18-slow
-  waits the window out.
+- herdr refuses `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S19).
+  vibest never uses `agent.start`: herdr finds a harness by the process its typed line execs, in that pane (S18).
 - With herdr's own Pi hook installed (`herdr integration install pi`), herdr reads Pi's state from the hook alone, and an
   idle Pi sends it nothing more (S19).
 - Pi can open more than one model stream for one execution: a check that holds the model releases every stream held at
