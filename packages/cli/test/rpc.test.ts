@@ -949,4 +949,37 @@ describe("vibest.sock", () => {
     }),
     { missingBinary: ["cursor"] },
   )
+
+  test(
+    "an entry launch whose typing fails leaves no open execution: the next start runs its first input",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const sql = yield* SqlClient.SqlClient
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const launch = Effect.flatMap(client, (c) =>
+        asCli(c, repo).Launch({
+          agent: "coordinator",
+          callerEnv: {},
+          argv: ["/bin/vibest", "--harness", "cursor"],
+          focus: false,
+          runtime: "herdr",
+        }),
+      )
+      const held = yield* herdr.hold("run")
+      const failing = yield* Effect.forkChild(Effect.flip(launch))
+      yield* held.reached
+      yield* held.release("failed")
+      assert.strictEqual((yield* Fiber.join(failing))._tag, "LaunchFailed")
+      yield* launch
+      const id = (yield* db.session.entryOf(projectId))!.id
+      const executions = yield* sql<{ outcome: string | null }>`SELECT outcome FROM execution
+        WHERE session_id = ${id} ORDER BY id`
+      assert.deepStrictEqual(
+        executions.map((e) => e.outcome),
+        ["not_started", null],
+      )
+    }),
+  )
 })

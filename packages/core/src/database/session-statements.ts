@@ -145,6 +145,10 @@ export const statements = Effect.gen(function* () {
   const startExecution = (sessionId: string, at: number, typed?: string) =>
     Effect.gen(function* () {
       const process = yield* currentProcessId(sessionId)
+      const left = yield* sql<{ id: number }>`SELECT id FROM execution
+        WHERE session_id = ${sessionId} AND outcome IS NULL AND process_id IS NOT ${process ?? null}`
+      for (const { id } of left)
+        yield* publish(ExecutionEnded, { sessionId, at, data: { execution: id, outcome: "not_started" } })
       return yield* publish(ExecutionStarted, {
         sessionId,
         at,
