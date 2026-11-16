@@ -145,7 +145,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   the harness's report of it, never by the runtime not knowing.
 - First input in the launch argv: a harness definition with `firstInput` gets a starting process's first message (a
   new session's task, the queued messages that resume an exited one, or the task a usage-limit move carries, in a new
-  terminal or in place) as launch arguments instead of typed text. Every start goes through one function
+  terminal or in place) as launch arguments instead of typed text. `Harness.harnessArgv` (`@vibest/plugin`) is the only
+  place that joins a definition's arguments and a message: always `[binary, ...launchArgs, ...firstInput, message]`,
+  so no option that takes several values can swallow the message. Core writes the message to `first-input.md` beside
+  the session's `system-prompt.md` and launches one line without control characters,
+  `sh -c 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"' <first-input.md> <binary> <args...> <firstInput...>`: `exec`
+  leaves the harness as the process, and a multi-line message reaches it on every runtime. Every start goes through one function
   (`Placement.launching`): it builds the argv and, for a first input, opens the execution and hands the message to it
   after the process is recorded and before it starts, so a report the harness sends at once finds it. If that start fails (the terminal does not open, or the in-place start fails), the execution it opened is closed
   `not_started` unless the harness already ended it, so a later message resumes the session again. vibestd then

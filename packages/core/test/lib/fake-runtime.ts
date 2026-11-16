@@ -1,3 +1,5 @@
+import fs from "node:fs"
+
 import { Runtime as R } from "@vibest/plugin/effect"
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
 
@@ -8,6 +10,11 @@ type RuntimeEvent = R.RuntimeEvent
 type AgentState = R.AgentState
 
 export const KIND = "herdr"
+
+const execed = (argv: ReadonlyArray<string>): Array<string> =>
+  argv[0] === "sh" && argv[2]?.includes(`cat -- "$0"`)
+    ? [...argv.slice(4), fs.readFileSync(argv[3]!, "utf8")]
+    : [...argv]
 
 export interface FakeAgent {
   readonly vibestSession?: string
@@ -280,7 +287,7 @@ export class FakeRuntime extends Context.Service<
       const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
         call(
           "run",
-          { terminal: terminal.id, argv: [...argv] },
+          { terminal: terminal.id, argv: execed(argv) },
           terminal.id,
           Effect.gen(function* () {
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
@@ -307,7 +314,7 @@ export class FakeRuntime extends Context.Service<
             {
               project: input.project,
               cwd: input.cwd,
-              argv: [...input.argv],
+              argv: execed(input.argv),
               env: { ...input.env },
               label: input.label,
               near: input.near?.id,

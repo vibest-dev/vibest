@@ -1,3 +1,4 @@
+import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
@@ -35,7 +36,7 @@ import { Git } from "../git.ts"
 import { encodeCommand, Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
-import { definitionIn } from "../launch.ts"
+import { definitionIn, messageFromFile } from "../launch.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
@@ -44,7 +45,7 @@ import {
 } from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
-import { projectText, removeSystemPrompt, systemPrompt, writeSystemPrompt } from "../system-prompt.ts"
+import { projectText, removeSystemPrompt, systemPrompt, writeFirstInput, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
 
@@ -153,9 +154,9 @@ export const make = Effect.gen(function* () {
     const pluginDir = yield* harness.plugin(adapter.id)
     const id = session.process?.conversation ?? null
     const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
-    return [
-      adapter.binary,
-      ...adapter.launchArgs({
+    const argv = PluginHarness.harnessArgv(
+      adapter,
+      {
         worktree: yield* worktreeOf(session),
         projectDir: layout.project(session.projectId),
         systemPromptFile: file,
@@ -166,9 +167,11 @@ export const make = Effect.gen(function* () {
         pluginDir,
         vibest,
         env: vibestEnv(session),
-      }),
-      ...(first === undefined || adapter.firstInput === undefined ? [] : adapter.firstInput(first)),
-    ]
+      },
+      first,
+    )
+    if (first === undefined) return argv
+    return messageFromFile(argv.slice(0, -1), yield* writeFirstInput(session.id, first))
   }, provided)
 
   const firstText = Effect.fn("Placement.firstText")(function* (session: SessionRow, task: string) {

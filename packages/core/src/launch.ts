@@ -1,3 +1,4 @@
+import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
@@ -84,20 +85,21 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     ...(saved.process !== undefined ? { VIBEST_PROCESS: String(saved.process) } : {}),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
+  const [file, ...args] = PluginHarness.harnessArgv(adapter, {
+    worktree: input.root,
+    projectDir: layout.project(saved.projectId),
+    systemPromptFile,
+    provider: input.provider,
+    model: input.model,
+    sessionId: saved.harnessSessionId,
+    resume: saved.harnessSessionId !== null,
+    pluginDir,
+    vibest,
+    env: commandEnv,
+  })
   return {
-    file: adapter.binary,
-    args: adapter.launchArgs({
-      worktree: input.root,
-      projectDir: layout.project(saved.projectId),
-      systemPromptFile,
-      provider: input.provider,
-      model: input.model,
-      sessionId: saved.harnessSessionId,
-      resume: saved.harnessSessionId !== null,
-      pluginDir,
-      vibest,
-      env: commandEnv,
-    }),
+    file: file!,
+    args,
     env: commandEnv,
   }
 })
@@ -118,6 +120,16 @@ export const identityPairs = (env: Readonly<Record<string, string>>) =>
     const value = env[key]
     return value === undefined ? [] : [`${key}=${value}`]
   })
+
+const MESSAGE_FROM_FILE = 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"'
+
+export const messageFromFile = (argv: ReadonlyArray<string>, file: string) => [
+  "sh",
+  "-c",
+  MESSAGE_FROM_FILE,
+  file,
+  ...argv,
+]
 
 export const restartArgv = (command: {
   readonly file: string

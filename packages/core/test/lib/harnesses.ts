@@ -128,7 +128,7 @@ export const FIRST_IN_ARGV: HarnessDefinition = {
   ...cursorAtStart,
   id: "first",
   binary: "first",
-  firstInput: (text) => ["--first", text],
+  firstInput: ["--first"],
 }
 
 export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]

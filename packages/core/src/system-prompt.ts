@@ -60,6 +60,13 @@ export const writeSystemPrompt = Effect.fn("writeSystemPrompt")(function* (id: s
   return file
 })
 
+export const writeFirstInput = Effect.fn("writeFirstInput")(function* (id: string, text: string) {
+  const path = yield* Path.Path
+  const file = path.join(yield* systemPromptRoot, id, "first-input.md")
+  yield* writeAtomic(file, text)
+  return file
+})
+
 export const removeSystemPrompt = (id: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
