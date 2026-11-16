@@ -182,16 +182,16 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "a process still in the worktree: not removed, worktree and rules kept, Send refused; once it exits, vibest rm again finishes",
+    "a process still in the worktree: the archive finishes with the worktree and rules kept, Send refused; once it exits, vibest rm again removes them",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const fake = yield* FakeProcesses
       const { id, sessions, db, herdr, worktree, rules } = yield* idleSession
       yield* fake.setCwdUsers([4242])
       const out = (yield* removeAdvancingClock(sessions, id))!
-      assert.deepInclude(out, { processes: "alive", pane: "closed", worktree: "kept" })
+      assert.deepInclude(out, { processes: "exited", pane: "closed", worktree: "kept" })
       assert.include(out.reasons.join("\n"), "process 4242 has its working directory in it")
-      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
       assert.isTrue(yield* fs.exists(worktree))
       assert.isTrue(yield* fs.exists(rules))
       assert.strictEqual(
@@ -199,12 +199,10 @@ describe.concurrent("vibest rm: process proof", () => {
         `${id} was archived; run a new session`,
       )
       yield* sessions.check(id)
-      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
 
       yield* fake.setCwdUsers([])
       assert.deepInclude(yield* sessions.remove(id), { processes: "exited", worktree: "removed", reasons: [] })
-      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
       assert.isFalse(yield* fs.exists(rules))
     }),
   )
@@ -218,7 +216,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const before = yield* fake.cwdListings
       const [out] = yield* removeTimingCwd(b.sessions, b.id)
       assert.deepInclude(out!, {
-        processes: "alive",
+        processes: "exited",
         worktree: "kept",
         reasons: ["worktree kept: process 4242 has its working directory in it"],
       })
@@ -271,11 +269,12 @@ describe.concurrent("vibest rm: process proof", () => {
       const kept = (yield* removeAdvancingClock(staying.sessions, staying.id))!
       assert.deepInclude(kept, { processes: "alive", pane: "closed", worktree: "kept" })
       assert.include(kept.reasons.join("\n"), `process ${stuck} has its working directory in it`)
+      assert.include(kept.reasons.join("\n"), `process ${stuck} of ${staying.id} still runs after its terminal closed`)
     }),
   )
 
   test(
-    "a listing that never returns: kept after 10 s as unfinished, never read as empty",
+    "a listing that never returns: the worktree is kept after 10 s, never read as empty",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const fake = yield* FakeProcesses
@@ -283,7 +282,7 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* fake.holdCwd()
       const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, {
-        processes: "unknown",
+        processes: "exited",
         worktree: "kept",
         reasons: ["worktree kept: vibest could not finish listing this user's processes working in it within 10s"],
       })

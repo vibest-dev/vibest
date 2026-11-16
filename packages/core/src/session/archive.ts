@@ -216,7 +216,7 @@ export const make = Effect.gen(function* () {
         if (out.processes !== "exited")
           yield* notice(
             session,
-            `${id} was being archived when vibestd stopped: its terminal was ${out.pane === "kept" ? "not closed" : "closed"}, but its processes are ${out.processes === "alive" ? "still working in its worktree" : "not confirmed gone"}; run vibest archive ${id} again to check.`,
+            `${id} is archived, but ${out.pane === "kept" ? "its terminal could not be closed" : "its processes are not confirmed gone"}; run vibest archive ${id} again to check.`,
           )
       }),
     ).pipe(logged(`archive ${id}`)),
