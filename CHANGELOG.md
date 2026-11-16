@@ -7,6 +7,12 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Harness definitions declare `delivery`** (plugin authors): the optional `inbox?: "subscribe" | "poll"` is replaced
+  by a required `delivery: "typed" | "pull"`. `pull`: the harness's own integration fetches its inbox (how is its own
+  business); `typed`: vibestd types each message into its terminal through the runtime. A definition without it no
+  longer type-checks, and nothing is inferred from a missing field. Migrate `inbox: "poll"` or `inbox: "subscribe"` to
+  `delivery: "pull"`, and add `delivery: "typed"` to a definition that had no `inbox`. Behaviour does not change.
+
 - **Moving a project is only an explicit command** (users; RPC clients of `Project.Open`): `vibest` in a checkout with
   no project is always a new project; it no longer looks for a project of the same git remote whose directory is gone,
   and no longer asks `The project moved from X to here, move it? [Y/n]`. `Project.Open` has no `move` payload and no

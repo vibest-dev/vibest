@@ -37,6 +37,7 @@ export const cursor: Harness.HarnessDefinition = {
   id: "cursor",
   binary: "cursor-agent",
   checkEnvironment: cursorEnvironment,
+  delivery: "typed",
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",

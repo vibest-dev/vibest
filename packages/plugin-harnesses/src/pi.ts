@@ -63,7 +63,7 @@ export const pi: Harness.HarnessDefinition = {
   systemPromptInPrompt: false,
   interruptKey: "esc",
   replyField: "text",
-  inbox: "subscribe",
+  delivery: "pull",
   ready: "integration",
   checkProvider: () => undefined,
   launchArgs: (i) => [

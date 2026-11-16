@@ -34,7 +34,7 @@ import { VERSION } from "../src/version.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () =>
-    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...PI, inbox: "subscribe" }, CLAUDE, CURSOR] }))),
+    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...PI, delivery: "pull" }, CLAUDE, CURSOR] }))),
   )
 
 describe("vibest update's plan for vibestd", () => {

@@ -324,8 +324,9 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - **Inbox.** One lock per receiver; read, mark `delivering`, deliver, mark `delivered` only on success. Consecutive
   Messages from one sender are delivered as one. Triggers: on write, on the receiver's status event, a 10 s
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
-- **Pull or type is a property of the harness.** A harness whose adapter declares `inbox` (`poll` for the Claude plugin
-  over HTTP on `vibest-http.sock`, `subscribe` for the Pi extension's subscription stream) pulls; the integration asks
+- **Pull or type is a property of the harness.** Every harness definition declares `delivery`: `pull` (Claude, Pi) or
+  `typed` (Cursor, agy). Core reads only that field. How a pulling adapter fetches is its own business (the Claude
+  plugin polls over HTTP on `vibest-http.sock`, the Pi extension follows its subscription stream); the integration asks
   for the next batch with `take` only while its session is idle, and the subscription stream carries only a wake-up.
   Any other harness is typed through herdr `agent.prompt`. Entry sessions and spawned sessions follow the same rule.
   `take` runs in one transaction: with an execution open it answers empty; otherwise it opens the execution, marks the

@@ -75,6 +75,7 @@ const LINE_KILLS = 40
 export const agy: Harness.HarnessDefinition = {
   id: "agy",
   binary: "agy",
+  delivery: "typed",
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "esc",

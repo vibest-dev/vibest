@@ -52,7 +52,7 @@ export interface HarnessDefinition {
   readonly systemPromptInPrompt: boolean
   readonly interruptKey: string
   readonly replyField: "text" | "last_assistant_message"
-  readonly inbox?: "subscribe" | "poll"
+  readonly delivery: "typed" | "pull"
   readonly ready: "integration" | "runtime"
   readonly readyOnStart?: "integration"
   readonly clearKeys?: ReadonlyArray<string>

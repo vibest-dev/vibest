@@ -13,6 +13,7 @@ const providerModel = (provider: string | null, model: string | null) =>
   model ? [...opt("--provider", provider), "--model", model] : []
 
 export const PI: HarnessDefinition = {
+  delivery: "typed",
   id: "pi",
   binary: "pi",
   ownSessionId: true,
@@ -45,6 +46,7 @@ const noProvider = (harness: string) => (provider: string | null) =>
   provider ? `${harness} has no provider option` : undefined
 
 export const CLAUDE: HarnessDefinition = {
+  delivery: "typed",
   id: "claude",
   binary: "claude",
   ownSessionId: true,
@@ -87,6 +89,7 @@ export const CLAUDE: HarnessDefinition = {
 }
 
 export const CURSOR: HarnessDefinition = {
+  delivery: "typed",
   id: "cursor",
   binary: "cursor-agent",
   ownSessionId: false,
@@ -116,8 +119,8 @@ export const CURSOR: HarnessDefinition = {
   },
 }
 
-export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", inbox: "subscribe" }
-export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", inbox: "poll" }
+export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", delivery: "pull" }
+export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", delivery: "pull" }
 
 const { readyOnStart: _readyOnStart, ...cursorAtStart } = CURSOR
 
