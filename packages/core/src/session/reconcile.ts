@@ -64,6 +64,12 @@ export const make = Effect.gen(function* () {
         yield* sessionLive.forget(id)
       }),
     )
+  const observeRuntimeWork = (session: SessionRow) =>
+    Effect.gen(function* () {
+      if (!Harnesses.runtimeLifecycle(harnesses.find(harnessIdOf(session)))) return
+      yield* db.session.startObserved(session.id, undefined, yield* Clock.currentTimeMillis, undefined, true)
+    })
+
   const check = Effect.fn("Reconcile.check")(function* (id: string) {
     const session = yield* db.session.getSession(id)
     if (!session || archived(session)) return
@@ -108,7 +114,8 @@ export const make = Effect.gen(function* () {
 
     const s = state ?? "unknown"
     if (!open) {
-      if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
+      if (s === "working") yield* observeRuntimeWork(session)
+      else if (s !== "blocked") yield* deliverQueued(h, session, terminal)
       return
     }
     const worked = yield* db.session.executionTaken(id)
@@ -174,8 +181,7 @@ export const make = Effect.gen(function* () {
       const session = working ? yield* db.session.getSession(id) : undefined
       const execution = session && !inbox.pulls(harnessIdOf(session)) ? yield* db.session.openExecution(id) : undefined
       if (execution !== undefined) yield* db.session.acceptExecution(id, execution)
-      else if (session && Harnesses.runtimeLifecycle(harnesses.find(harnessIdOf(session))))
-        yield* db.session.startObserved(id, undefined, yield* Clock.currentTimeMillis, undefined, true)
+      else if (session) yield* observeRuntimeWork(session)
       yield* wakes.wake(id, undefined)
     })
 
