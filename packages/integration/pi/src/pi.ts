@@ -37,7 +37,6 @@ export class Pi extends Context.Service<
       f: (event: Events[K]["event"], ctx: ExtensionContext) => Effect.Effect<Events[K]["result"], E, R>,
     ) => Effect.Effect<void, never, R | Scope.Scope>
     readonly sendMessage: (...args: Parameters<ExtensionAPI["sendMessage"]>) => Effect.Effect<void>
-    readonly load: (factory: (api: ExtensionAPI) => void) => Effect.Effect<void>
   }
 >()("@vibest/pi/Pi") {
   static readonly layer = (api: ExtensionAPI) =>
@@ -60,7 +59,6 @@ export class Pi extends Context.Service<
             )
           }),
         sendMessage: (...args) => Effect.sync(() => api.sendMessage(...args)),
-        load: (factory) => Effect.sync(() => factory(api)),
       }),
     )
 

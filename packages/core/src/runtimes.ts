@@ -1,14 +1,15 @@
-import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
+import { reconnectSchedule } from "@vibest/plugin/effect"
+import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
-import { Cause, Context, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, Stream } from "effect"
 
-import { Bus, type LiveEvent } from "./bus.ts"
+import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
-import { messageOf } from "./plugin-sources.ts"
-import * as Registry from "./registry.ts"
+import type { HostEnv as HostEnvShape, RuntimesShape } from "./plugin/domains.ts"
+import * as Registry from "./plugin/registry.ts"
 
-export { NoRuntime }
+export * as Runtimes from "./runtimes.ts"
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
@@ -18,26 +19,24 @@ export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 export const RuntimeError = VibestPlugin.Runtime.RuntimeError
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 
-export type { RuntimesShape }
-
 export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
 
-const live = (runtime: string, event: RuntimeEvent): LiveEvent => {
+const live = (runtime: string, event: RuntimeEvent): Signal => {
   switch (event.type) {
     case "state":
-      return { type: "live.state", runtime, terminal: addressOf(event.terminal), state: event.state }
+      return { type: "terminal.state", runtime, terminal: addressOf(event.terminal), state: event.state }
     case "exited":
-      return { type: "live.exited", runtime, terminal: addressOf(event.terminal) }
+      return { type: "terminal.exited", runtime, terminal: addressOf(event.terminal) }
     case "seen":
-      return { type: "live.seen", runtime, terminal: addressOf(event.terminal) }
+      return { type: "terminal.seen", runtime, terminal: addressOf(event.terminal) }
     case "reset":
-      return { type: "live.reset", runtime, machine: "local" }
+      return { type: "runtime.reset", runtime, machine: "local" }
   }
 }
 
-export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {
-  static readonly node = LayerNode.unbound(HostEnv)
-}
+export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {}
+
+export const hostEnvNode = LayerNode.unbound(HostEnv)
 
 const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
   new NoRuntime({
@@ -49,41 +48,47 @@ const sameMembers = (a: Runtime, b: Runtime) => {
   return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
 }
 
-export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Scope> = Effect.gen(function* () {
-  const bus = yield* Bus
+const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
+
+export const make: Effect.Effect<RuntimesShape, never, Bus.Service | HostEnv | Scope.Scope> = Effect.gen(function* () {
+  const bus = yield* Bus.Service
   const env = yield* HostEnv
-  const own = yield* Effect.scope
-  const merging = new Map<string, { readonly runtime: Runtime; readonly fiber: Fiber.Fiber<void> }>()
+  const followers = yield* FiberMap.make<string>()
+  const defined = new Map<string, Runtime>()
   const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
+  const follow = (runtime: Runtime) =>
+    runtime.events.pipe(
+      Stream.tap((event) => bus.observe(live(runtime.id, event))),
+      Stream.filter((event) => event.type === "reset"),
+      Stream.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Stream.failCause(cause)
+          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended`, cause)).pipe(
+              Stream.drain,
+              Stream.concat(Stream.fail("reconnect")),
+            ),
+      ),
+      Stream.retry(RESUBSCRIBE_BACKOFF),
+      Stream.runDrain,
+      Effect.orDie,
+    )
   const reconcile = (list: ReadonlyArray<Runtime>) =>
     Effect.gen(function* () {
-      for (const [id, entry] of merging) {
-        const next = list.find((runtime) => runtime.id === id)
-        if (next !== undefined && sameMembers(next, entry.runtime)) continue
-        merging.delete(id)
-        yield* Fiber.interrupt(entry.fiber)
+      for (const [id, runtime] of defined) {
+        const next = list.find((candidate) => candidate.id === id)
+        if (next !== undefined && sameMembers(next, runtime)) continue
+        defined.delete(id)
+        yield* FiberMap.remove(followers, id)
       }
       const fresh: Array<string> = []
       for (const runtime of list) {
-        const kept = merging.get(runtime.id)
-        if (kept !== undefined) {
-          merging.set(runtime.id, { runtime, fiber: kept.fiber })
+        if (defined.has(runtime.id)) {
+          defined.set(runtime.id, runtime)
           continue
         }
         fresh.push(runtime.id)
-        const fiber = yield* runtime.events.pipe(
-          Stream.runForEach((event) => bus.observe(live(runtime.id, event))),
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(
-                  Effect.andThen(bus.observe({ type: "live.reset", runtime: runtime.id, machine: "local" })),
-                ),
-          ),
-          Effect.forkIn(own),
-        )
-        merging.set(runtime.id, { runtime, fiber })
-        yield* bus.observe({ type: "live.reset", runtime: runtime.id, machine: "local" })
+        defined.set(runtime.id, runtime)
+        yield* FiberMap.run(followers, runtime.id, follow(runtime))
       }
       env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
       if (fresh.length > 0) yield* PubSub.publish(added, fresh)
@@ -92,15 +97,15 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   const all = Effect.sync(() => registry.get())
   return {
     transform: registry.transform,
-    reload: registry.reload,
     all,
     find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
-    route: (id) =>
+    route: Effect.fn("Runtimes.route")((id) =>
       Effect.suspend(() => {
         const loaded = registry.get()
         const found = loaded.find((runtime) => runtime.id === id)
         return found === undefined ? Effect.fail(notLoaded(id, loaded)) : Effect.succeed(found)
       }),
+    ),
     statuses: Effect.suspend(() =>
       Effect.forEach(
         registry.get(),
@@ -108,7 +113,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
         { concurrency: "unbounded" },
       ),
     ),
-    online: (runtime) =>
+    online: Effect.fn("Runtimes.online")((runtime) =>
       runtime.status().pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
@@ -129,6 +134,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
               ),
         ),
       ),
+    ),
     added: Stream.fromPubSub(added),
     callers: Effect.sync(() =>
       registry.get().flatMap((runtime) =>
@@ -146,48 +152,54 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   }
 })
 
-export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest/Runtimes") {
-  static readonly layer = Layer.effect(Runtimes, make)
+export type Interface = RuntimesShape
 
-  static readonly node = LayerNode.make({ service: Runtimes, layer: Runtimes.layer, deps: [Bus.node, HostEnv.node] })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Runtimes") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [Bus.node, hostEnvNode] })
 
 export type AgentSeen = AgentState | "absent"
 
 export const stateOf = (seen: AgentSeen): AgentState | undefined => (seen === "absent" ? undefined : seen)
 
-export const agentState = (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
-  h.state === undefined
-    ? Effect.succeed("unknown")
-    : h
-        .state(terminal)
-        .pipe(
-          Effect.catchTag("RuntimeError", (error) =>
-            error.code === "not_found"
-              ? Effect.succeed("absent" as AgentSeen)
-              : error.code === "unreachable"
-                ? Effect.fail(error)
-                : Effect.succeed("unknown" as AgentSeen),
+export const agentState = Effect.fn("Runtimes.agentState")(
+  (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
+    h.state === undefined
+      ? Effect.succeed("unknown")
+      : h
+          .state(terminal)
+          .pipe(
+            Effect.catchTag("RuntimeError", (error) =>
+              error.code === "not_found"
+                ? Effect.succeed("absent" as AgentSeen)
+                : error.code === "unreachable"
+                  ? Effect.fail(error)
+                  : Effect.succeed("unknown" as AgentSeen),
+            ),
           ),
-        )
+)
 
-export const alive = (h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
+export const alive = Effect.fn("Runtimes.alive")((h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
   h.process(terminal).pipe(
     Effect.map((p) => p.running),
     Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.code !== "not_found")),
-  )
+  ),
+)
 
 export const peekHint = (id: string) => `to see its terminal, run: vibest peek ${id}`
 
-export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30) =>
+export const paneTail = Effect.fn("Runtimes.paneTail")((h: Runtime, terminal: Terminal | undefined, lines = 30) =>
   terminal
     ? h.read(terminal, lines).pipe(
         Effect.map((text) => text.trim()),
         Effect.orElseSucceed(() => ""),
       )
-    : Effect.succeed("")
+    : Effect.succeed(""),
+)
 
-export const runtimesHere = (runtimes: RuntimesShape) =>
+export const runtimesHere = Effect.fn("Runtimes.runtimesHere")((runtimes: RuntimesShape) =>
   Effect.flatMap(runtimes.statuses, (rows) =>
     Effect.forEach(
       rows,
@@ -203,22 +215,22 @@ export const runtimesHere = (runtimes: RuntimesShape) =>
         ),
       { concurrency: "unbounded" },
     ),
-  )
+  ),
+)
 
-export const machinesListing = (
-  runtimes: RuntimesShape,
-  harnesses: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
-  runtimes.statuses.pipe(
-    Effect.map((rows) => [
-      {
-        machine: "local",
-        runtimes: rows.map(({ runtime, status }) => ({
-          kind: runtime.id,
-          status: status.status,
-          ...("reason" in status ? { reason: status.reason } : {}),
-        })),
-        harnesses,
-      },
-    ]),
-  )
+export const machinesListing = Effect.fn("Runtimes.machinesListing")(
+  (runtimes: RuntimesShape, harnesses: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
+    runtimes.statuses.pipe(
+      Effect.map((rows) => [
+        {
+          machine: "local",
+          runtimes: rows.map(({ runtime, status }) => ({
+            kind: runtime.id,
+            status: status.status,
+            ...("reason" in status ? { reason: status.reason } : {}),
+          })),
+          harnesses,
+        },
+      ]),
+    ),
+)

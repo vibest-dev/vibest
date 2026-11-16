@@ -1,13 +1,24 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { Agents } from "@vibest/core/agents"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { check, shellBlock, splitCommand } from "@vibest/core/guard"
-import { Layout, VibestCommand } from "@vibest/core/paths"
+import type { RuntimesShape } from "@vibest/core/plugin/domains"
 import { Project } from "@vibest/core/project"
-import { type Runtime, Runtimes, type RuntimesShape } from "@vibest/core/runtimes"
+import { type Runtime, Runtimes } from "@vibest/core/runtimes"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
+import {
+  agentsLayer,
+  FakeGit,
+  HARNESSES,
+  harnessesLayer,
+  makeRepository,
+  runVibest,
+  tempDirectory,
+  testLayer,
+} from "@vibest/platform-bun/test/lib/fakes"
 import { Forbidden } from "@vibest/protocol/rpc"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { Host } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
 import {
@@ -25,23 +36,15 @@ import {
   Terminal,
 } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
-import { Command } from "effect/cli"
 import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import * as Cli from "../src/cli.ts"
-import {
-  agentsLayer,
-  FakeGit,
-  HARNESSES,
-  harnessesLayer,
-  makeRepository,
-  runVibest,
-  tempDirectory,
-  testLayer,
-} from "./fakes.ts"
+import { Commands, entryFlags } from "../src/commands/commands.ts"
+import { Runtime as CliRuntime } from "../src/framework/runtime.ts"
+import { Spec } from "../src/framework/spec.ts"
+import { Host as CliHost } from "../src/host.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const RUNTIME_PROGRAMS = new Set(["herdr"])
@@ -49,7 +52,7 @@ const bareGuard = (agent: string, tool: string, input: Record<string, unknown>) 
   guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, input, "/")
 const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAMS)
 const namedRuntimes = (ids: ReadonlyArray<string>) =>
-  Layer.succeed(Runtimes, {
+  Layer.succeed(Runtimes.Service, {
     all: Effect.succeed(ids.map((id) => ({ id }) as Runtime)),
   } as unknown as RuntimesShape)
 
@@ -604,7 +607,7 @@ layer(
 
   it.effect("a definition without a guard meets the floor only; a guard that throws is a refusal", () =>
     Effect.gen(function* () {
-      const agents = yield* Agents
+      const agents = yield* Agents.Service
       yield* agents.transform((editor) => {
         editor.add({ id: "plain", description: "no guard", system: "" })
         editor.add({
@@ -625,6 +628,16 @@ layer(
       assert.include(refused ?? "", "boom")
     }).pipe(Effect.scoped),
   )
+})
+
+const EntryCommands = Spec.make("vibest", {
+  params: entryFlags,
+  commands: [Spec.make("daemon", { commands: [Commands.commands.daemon.commands.restart] })],
+})
+
+const entryHandlers = CliRuntime.handlers(EntryCommands, {
+  $: () => import("../src/commands/handlers/default.ts"),
+  daemon: { restart: () => import("../src/commands/handlers/daemon/restart.ts") },
 })
 
 describe("wizard entry", () => {
@@ -654,12 +667,17 @@ describe("wizard entry", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* Command.runWith(
-          Cli.command(host, [], () => {
-            touched.exec = true
+        const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
+          version: "0.0.0-test",
+          extra: { after: "daemon", commands: [] },
+        }).pipe(
+          Effect.provideService(CliHost, {
+            daemon: host,
+            replacements: [],
+            exec: () => {
+              touched.exec = true
+            },
           }),
-          { version: "0.0.0-test" },
-        )(["--wizard"]).pipe(
           Effect.provideService(Terminal.Terminal, terminal),
           Effect.provideService(
             ChildProcessSpawner.ChildProcessSpawner,
@@ -672,7 +690,7 @@ describe("wizard entry", () => {
             touched.socket = true
             return Effect.die("socket")
           }),
-          Effect.provideService(VibestSocketConnector, () => {
+          Effect.provideService(VibestSocketConnector.Service, () => {
             touched.socket = true
             return Effect.die("socket")
           }),
@@ -684,7 +702,7 @@ describe("wizard entry", () => {
             }),
           ),
           Effect.provide(FileSystem.layerNoop({})),
-          Effect.provide(Stdio.layerTest({})),
+          Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--wizard"]) })),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
           Effect.provide(FetchHttpClient.layer),
@@ -731,17 +749,23 @@ describe("vibest --session inside herdr", () => {
             return () => Effect.die("host")
           },
         })
-        const exit = yield* Command.runWith(
-          Cli.command(host, [], () => {
-            touched.exec = true
+        const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
+          version: "0.0.0-test",
+          extra: { after: "daemon", commands: [] },
+        }).pipe(
+          Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--session", "other", "--in-parent", repo]) })),
+          Effect.provideService(CliHost, {
+            daemon: host,
+            replacements: [],
+            exec: () => {
+              touched.exec = true
+            },
           }),
-          { version: "0.0.0-test" },
-        )(["--session", "other", "--in-parent", repo]).pipe(
           Effect.provideService(SocketConnector, () => {
             touched.socket = true
             return Effect.die("herdr socket")
           }),
-          Effect.provideService(VibestSocketConnector, () => {
+          Effect.provideService(VibestSocketConnector.Service, () => {
             touched.socket = true
             return Effect.die("socket")
           }),
@@ -782,15 +806,17 @@ describe("vibest --session inside herdr", () => {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
-      const exit = yield* Command.runWith(
-        Cli.command(host, [], () => {}),
-        { version: "0.0.0-test" },
-      )(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
+      const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
+        version: "0.0.0-test",
+        extra: { after: "daemon", commands: [] },
+      }).pipe(
+        Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]) })),
+        Effect.provideService(CliHost, { daemon: host, replacements: [], exec: () => {} }),
         Effect.provideService(SocketConnector, () => {
           herdr.push("connect")
           return Effect.die("herdr")
         }),
-        Effect.provideService(VibestSocketConnector, () => Effect.die("socket")),
+        Effect.provideService(VibestSocketConnector.Service, () => Effect.die("socket")),
         Effect.provide(Platform.services),
         Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
         Effect.provide(Path.layer),
@@ -828,7 +854,7 @@ describe("vibest integration guard through vibestd", () => {
         const layout = yield* Layout
         const repo = yield* makeRepository
         const { id } = yield* spawnWorking(repo)
-        const identity = (yield* (yield* Db).sessionIdentity(id))!
+        const identity = (yield* (yield* Db.Service).session.sessionIdentity(id))!
         const guard = (command: string) =>
           runVibest(
             repo,

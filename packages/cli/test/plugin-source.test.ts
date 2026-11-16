@@ -20,18 +20,18 @@ it("a dependency is watched in the plugin package until it resolves, even while 
   await write(path.join(dir, "package.json"), JSON.stringify({ name: "e2e-packaged", exports: "./src/main.ts" }))
   await write(
     entry,
-    'import dep from "e2e-dep"\nimport { Effect } from "effect"\nimport { ChildProcess } from "effect/process"\nimport { Plugin } from "@vibest/plugin"\nexport default [dep, Effect, ChildProcess, Plugin]\n',
+    'import dep from "e2e-dep"\nimport { Effect } from "effect"\nimport { ChildProcess } from "effect/process"\nimport { Plugin } from "@vibest/plugin/effect"\nexport default [dep, Effect, ChildProcess, Plugin]\n',
   )
   assert.throws(() => Bun.resolveSync("e2e-dep", path.dirname(entry)))
-  assert.deepStrictEqual(Platform.plugins.graph(entry).unresolved.toSorted(), [
+  assert.deepStrictEqual(Platform.makePluginLoader().graph(entry).unresolved.toSorted(), [
     installed,
     path.join(dir, "src", "node_modules", "e2e-dep"),
   ])
 
   await write(path.join(installed, "package.json"), JSON.stringify({ name: "e2e-dep", exports: "./index.js" }))
-  assert.deepStrictEqual(Platform.plugins.graph(entry).unresolved, [installed])
+  assert.deepStrictEqual(Platform.makePluginLoader().graph(entry).unresolved, [installed])
   await write(path.join(installed, "index.js"), "export default 1\n")
-  assert.deepStrictEqual(Platform.plugins.graph(entry).unresolved, [])
+  assert.deepStrictEqual(Platform.makePluginLoader().graph(entry).unresolved, [])
   assert.strictEqual(Bun.resolveSync("e2e-dep", path.dirname(entry)), path.join(installed, "index.js"))
   await fs.rm(dir, { recursive: true })
 })

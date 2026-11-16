@@ -1,8 +1,8 @@
 # omac Plugin Architecture (Master Plan)
 
-Status: Draft, historical. Since vibest's hooks return values (CHANGELOG, "Plugin hooks return their decisions"),
-a callback no longer mutates the event: the rules below about one event mutated in place and diffed are replaced
-by `docs/design/architecture.md` §7, and the examples are updated. Master plan + phased PRs (§7), progress tracked in issue #7. Installation / configuration / loading / activation aligned with OpenCode V2; hook execution rules follow omac's own design (§5), addressing OpenCode's open issues.
+Status: Draft, historical. Since the hooks-mutate-event change (CHANGELOG, "Agent hooks change the event instead of returning a decision"),
+a callback changes its own deep copy of the event and core commits the changed fields when it succeeds within its
+deadline; the rules below are superseded by `docs/design/architecture.md` §7. Master plan + phased PRs (§7), progress tracked in issue #7. Installation / configuration / loading / activation aligned with OpenCode V2; hook execution rules follow omac's own design (§5), addressing OpenCode's open issues.
 Reference: OpenCode V2 (anomalyco/opencode `dev` @ e31136bdb, 2026-10-11, effect 4.0.1), local `/tmp/github.com/anomalyco/opencode`.
 
 First use case: A plugin intercepts session spawn to select harness and model based on task attributes (complexity, file paths, keywords, task type). A second use case: a plugin decides where a session restarts after a usage limit (`agent.fail`).
@@ -86,7 +86,7 @@ export interface AgentStartBefore {
   readonly parentSessionId: string | undefined                // who asked; undefined for the entry session
   readonly access: "read" | "write"
   readonly harnesses: ReadonlyArray<HarnessOption>            // every harness as preflight saw it
-  readonly subscriptions: ReadonlyArray<SubscriptionSnapshot> // logins and usage windows, per (harness, provider)
+  readonly subscriptions: ReadonlyArray<Subscription>         // logins and usage windows, per (harness, provider)
   readonly attempts: ReadonlyArray<Attempt>                   // earlier tries for this session
   prompt: string                                              // mutable: the session receives the final value
   harness: string | undefined                                 // mutable: the caller's preference on entry; validated post-hook by host (§5)
@@ -122,13 +122,14 @@ export default Plugin.define({
     ctx.agent.hook("start.before", (e) =>
       Effect.sync(() => {
         if (e.model) return // Don't override if already selected by coordinator or earlier plugin (convention)
-        if (/^(research|investigate)\b/i.test(e.prompt)) return { harness: "claude", model: "claude-haiku-5-5" }
-        if (/refactor|migrat/i.test(e.prompt))
-          return {
+        if (/^(research|investigate)\b/i.test(e.prompt))
+          Object.assign(e, { harness: "claude", model: "claude-haiku-5-5" })
+        else if (/refactor|migrat/i.test(e.prompt))
+          Object.assign(e, {
             harness: "claude",
             model: "claude-opus-5-5",
             prompt: `${e.prompt}\n\nRun the full test suite before reporting.`,
-          }
+          })
       }),
     ),
 })
@@ -154,7 +155,11 @@ import { Plugin } from "@omac/plugin"
 export default Plugin.define({
   id: "cheap-second",
   effect: (ctx) =>
-    ctx.agent.hook("fail", (e) => Effect.succeed(e.reason === "limited" ? { harness: "cursor" } : undefined)),
+    ctx.agent.hook("fail", (e) =>
+      Effect.sync(() => {
+        if (e.reason === "limited") e.move = { harness: "cursor" }
+      }),
+    ),
 })
 ```
 
@@ -199,7 +204,7 @@ Setup can use `Effect.acquireRelease` for resources (tied to plugin scope, relea
 
 ## 5. Execution Rules (omac's Own)
 
-- Trigger point: In `Sessions.spawn` (`packages/cli/src/sessions.ts`), resolve `repositoryRoot` to repo root first (moving `topLevel` before validation), run hooks immediately after, then run `checkProvider` / `available` / `integration` and row insertion. CLI `omac run` passes through `Server.Spawn` → `Sessions.spawn` (the former MCP `assign` / `handoff` did too; removed in #13), the sole trigger point. herdr session is resolved in `Server.Spawn` prior to hooks, which does not affect "rejection prevents pane launch".
+- Trigger point: In `Session.spawn` (`packages/cli/src/sessions.ts`), resolve `repositoryRoot` to repo root first (moving `topLevel` before validation), run hooks immediately after, then run `checkProvider` / `available` / `integration` and row insertion. CLI `omac run` passes through `Server.Spawn` → `Session.spawn` (the former MCP `assign` / `handoff` did too; removed in #13), the sole trigger point. herdr session is resolved in `Server.Spawn` prior to hooks, which does not affect "rejection prevents pane launch".
 - Every hook is `sequential`: callbacks run serially in the caller's fiber in §4 order (the default harness choice, `@vibest/plugin-harness-choice`, first, then the runtime plugins), before the session is admitted or its pane started (`agent.start.before`), or before the round ends on a limit (`agent.fail`). A usage-limit move runs `agent.start.before` once more for every candidate it is about to start, with the move's harness/provider/model and the session's earlier tries prefilled: a refusal there skips that candidate, and what the chain decides is what starts.
 - Two hooks are registered: `agent.start.before`, `agent.fail`. `ctx.agent.hook` with any other name (including the earlier `session.start.before`, `session.spawn` and `worker.spawn`, which have no alias) fails the plugin's setup with `unsupported hook "<name>"; supported: agent.start.before, agent.fail`, so a stale plain-JS plugin shows as `failed` in `omac plugins` instead of running.
 - Every callback mutates the one event in place: no per-callback copy, so a later plugin sees (and may overwrite) what an earlier one wrote, and a failed or timed-out callback's writes stand unless a later callback overwrites them. Host diffs top-level fields generically (no field whitelist), recording trace `{ plugin, hook, ms, outcome: "ok" | "refused" | "crashed" | "timeout", changes }`. Readonly fields enforced at compile time via TS `readonly`.

@@ -45,10 +45,13 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       await addCursorPlugin(w, harnesses)
       try {
-        const plugins = await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })
-        expect(
-          plugins.some((p) => p.id === "harness-cursor" && p.status === "active"),
-          JSON.stringify(plugins),
+        await until(
+          "harness-cursor active",
+          async () =>
+            (await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })).some(
+              (p) => p.id === "harness-cursor" && p.status === "active",
+            ),
+          30_000,
         )
         const models = await w.json<Models>(["harness", "models", "cursor"], { env })
         expect(
@@ -74,7 +77,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H8",
     title:
-      "Cursor is not built in: `vibest run cursor` from the entry session is refused saying no plugin provides it and how to add one; adding the shipped harnesses/cursor/plugin.js to vibest.json makes `cursor` appear in `harness list`",
+      "Cursor is not built in: `vibest run cursor` from the entry session is refused saying no plugin provides it and how to add one; adding the shipped harnesses/cursor folder to vibest.json makes `cursor` appear in `harness list`",
     run: async (w) => {
       await w.entry()
       const before = await w.viaEntry(["run", "cursor", "--", "hello"], { timeoutMs: 60_000 })

@@ -1,14 +1,14 @@
 import {
   CALLER_HEADER,
   MISMATCH_ACTION,
-  PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
   REPOSITORY_HEADER,
   sessionHeaders,
 } from "@vibest/protocol/protocol"
-import { DaemonIdentity, VibestRpcs, type Ping, VERSION } from "@vibest/protocol/rpc"
+import { DaemonIdentity, VibestRpcs, type Ping } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import {
   Cause,
   Config,
@@ -29,11 +29,12 @@ import { RpcClient, RpcSerialization } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
 
 import { SocketConnector } from "./socket-connector.ts"
-export { SocketConnector } from "./socket-connector.ts"
 
-export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
+export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector.Service
 
-export const DAEMON_START_TIMEOUT = Duration.seconds(10)
+export const SHUTDOWN_DEADLINE = Duration.seconds(10)
+export const SHUTDOWN_FLUSH = Duration.millis(1_500)
+export const DAEMON_START_TIMEOUT = Duration.sum(Duration.sum(SHUTDOWN_DEADLINE, SHUTDOWN_FLUSH), Duration.seconds(10))
 
 export class DaemonUnavailable extends Schema.TaggedError<DaemonUnavailable>()("DaemonUnavailable", {
   socket: Schema.String,
@@ -109,7 +110,7 @@ const fromEnv = Effect.gen(function* () {
     cwd: (yield* Path.Path).resolve("."),
   }
 }).pipe(
-  Effect.tapCause((cause) => Effect.logDebug(`session claim headers fell back to the request: ${Cause.pretty(cause)}`)),
+  Effect.tapCause((cause) => Effect.logDebug("session claim headers fell back to the request", cause)),
   Effect.orElseSucceed(() => ({})),
 )
 
@@ -142,7 +143,7 @@ export const connect = (socket: string) =>
   clientOver(
     Layer.effect(
       Socket.Socket,
-      Effect.flatMap(SocketConnector, (dial) => dial(socket)),
+      Effect.flatMap(SocketConnector.Service, (dial) => dial(socket)),
     ),
     { pingInterval: "1 minute", pingTimeout: "1 day" },
   )
@@ -200,7 +201,7 @@ export const awaitDaemon = (socket: string) =>
   )
 
 export const accepts = (socket: string) =>
-  Effect.flatMap(SocketConnector, (dial) => dial(socket)).pipe(
+  Effect.flatMap(SocketConnector.Service, (dial) => dial(socket)).pipe(
     Effect.flatMap((s) => s.reader),
     Effect.as(true),
     Effect.scoped,
@@ -213,7 +214,12 @@ export interface Needs {
   readonly method: string
 }
 
-export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArray<string>, needs?: Needs) => {
+export const incompatibleDaemon = (
+  socket: string,
+  ping: Ping,
+  client: { readonly version: string; readonly command: ReadonlyArray<string> },
+  needs?: Needs,
+) => {
   const lacks = needs !== undefined && ping.capabilities?.[needs.capability] !== true
   return ping.protocol === PROTOCOL && !lacks
     ? undefined
@@ -222,7 +228,7 @@ export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArr
         daemonVersion: ping.version,
         daemonProtocol: ping.protocol ?? null,
         daemon: { pid: ping.pid, instance: ping.instance, command: ping.command, startedAt: ping.startedAt },
-        client: { version: VERSION, command: self },
+        client,
         ...(ping.protocol === PROTOCOL && needs !== undefined ? { missing: needs.method } : {}),
       })
 }
@@ -277,9 +283,7 @@ export const spawnDaemon = (
 ) =>
   Effect.gen(function* () {
     const layout = yield* Layout
-    const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const log = path.join(layout.home, "vibestd.log")
     yield* Effect.gen(function* () {
       const handle = yield* spawner.spawn(
         ChildProcess.make(
@@ -289,7 +293,7 @@ export const spawnDaemon = (
             'mkdir -p "$1" && log=$2 && shift 2 && { "$@" >>"$log" 2>&1 & }',
             "sh",
             layout.home,
-            log,
+            layout.log,
             ...command,
             "daemon",
             "--foreground",
@@ -319,17 +323,16 @@ export const spawnDaemon = (
 
 export const startDaemon = Effect.gen(function* () {
   const layout = yield* Layout
-  const path = yield* Path.Path
   const fs = yield* FileSystem.FileSystem
-  const log = path.join(layout.home, "vibestd.log")
-  const logAt = yield* fs.stat(log).pipe(
+  const logAt = yield* fs.stat(layout.log).pipe(
     Effect.map((info) => Number(info.size)),
     Effect.orElseSucceed(() => 0),
   )
   yield* spawnDaemon(yield* VibestCommand)
   if (yield* awaitDaemon(layout.socket)) return
-  const bytes = yield* fs.readFile(log).pipe(Effect.orElseSucceed(() => new Uint8Array()))
-  const text = Array.from(bytes.subarray(logAt), (b) => String.fromCharCode(b)).join("")
+  const bytes = yield* fs.readFile(layout.log).pipe(Effect.orElseSucceed(() => new Uint8Array()))
+  const from = bytes.length < logAt ? 0 : logAt
+  const text = Array.from(bytes.subarray(from), (b) => String.fromCharCode(b)).join("")
   const tagged = text
     .split("\n")
     .map((line) => /^([A-Z][A-Za-z0-9]*): (.+)$/.exec(line.trim()))
@@ -337,36 +340,50 @@ export const startDaemon = Effect.gen(function* () {
     .at(-1)
   return yield* new DaemonUnavailable({
     socket: layout.socket,
-    message: tagged ? `${tagged[1]}: ${tagged[2]}` : `vibestd did not come up; see ${log}`,
+    message: tagged ? `${tagged[1]}: ${tagged[2]}` : `vibestd did not come up; see ${layout.log}`,
   })
 })
 
-export const withVibest = <A, E, R>(
-  claim: Claim,
-  f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
-  options?: { readonly start?: boolean; readonly needs?: Needs },
-) =>
-  Effect.gen(function* () {
-    const layout = yield* Layout
-    const up = yield* readPing(layout.socket)
-    if (Option.isNone(up)) {
-      if (options?.start === false)
+const withVibest =
+  (version: string) =>
+  <A, E, R>(
+    claim: Claim,
+    f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
+    options?: { readonly start?: boolean; readonly needs?: Needs },
+  ) =>
+    Effect.gen(function* () {
+      const layout = yield* Layout
+      const up = yield* readPing(layout.socket)
+      if (Option.isNone(up)) {
+        if (options?.start === false)
+          return yield* new DaemonUnavailable({
+            socket: layout.socket,
+            message: `vibestd is unreachable on ${layout.socket} (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon`,
+          })
+        yield* startDaemon
+      }
+      const ping = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* readPing(layout.socket))
+      if (ping === undefined)
         return yield* new DaemonUnavailable({
           socket: layout.socket,
-          message: `vibestd is unreachable on ${layout.socket} (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon`,
+          message: `vibestd did not answer Ping on ${layout.socket}`,
         })
-      yield* startDaemon
-    }
-    const ping = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* readPing(layout.socket))
-    if (ping === undefined)
-      return yield* new DaemonUnavailable({
-        socket: layout.socket,
-        message: `vibestd did not answer Ping on ${layout.socket}`,
-      })
-    const incompatible = incompatibleDaemon(layout.socket, ping, yield* VibestCommand, options?.needs)
-    if (incompatible) return yield* incompatible
-    return yield* RpcClient.withHeaders(
-      connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
-      yield* claimHeaders(claim),
-    )
-  }).pipe(Effect.scoped)
+      const incompatible = incompatibleDaemon(
+        layout.socket,
+        ping,
+        { version, command: yield* VibestCommand },
+        options?.needs,
+      )
+      if (incompatible) return yield* incompatible
+      return yield* RpcClient.withHeaders(
+        connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
+        yield* claimHeaders(claim),
+      )
+    }).pipe(Effect.scoped)
+
+export interface ClientOptions {
+  readonly version: string
+}
+
+export const makeClient = (options: ClientOptions) => ({ withVibest: withVibest(options.version) })
+export type VibestClients = ReturnType<typeof makeClient>

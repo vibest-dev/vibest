@@ -1,5 +1,6 @@
 import { describe } from "@effect/vitest"
-import { Db, executionStateOf } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
+import { executionStateOf } from "@vibest/core/database/db-rows"
 import { Effect } from "effect"
 
 import { FakeRuntime } from "./lib/fake-runtime.ts"
@@ -12,7 +13,7 @@ const options = { harnesses: [PI, RUNTIME_ONLY], statusEvents: true }
 
 const stateOf = (id: string) =>
   Effect.gen(function* () {
-    return executionStateOf((yield* (yield* Db).getSession(id))!)
+    return executionStateOf((yield* (yield* Db.Service).session.getSession(id))!)
   })
 
 describe.concurrent("a harness without an execution-end report", () => {

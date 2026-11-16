@@ -1,9 +1,7 @@
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 import { Effect, Ref, Schema } from "effect"
 
 import { findMessage, jsonLines, noProvider, opt, withConfigured } from "./models.ts"
-import { platform } from "./platform.ts"
-import { claudeSubscription } from "./subscriptions/claude.ts"
 
 const CLAUDE_MENUS = [
   { menu: "trust", pattern: /trust this folder/i, accept: /^\s*❯.*Yes, I trust this folder/im },
@@ -147,5 +145,4 @@ export const claude: Harness.HarnessDefinition = {
   },
   executionEnd: (event) =>
     event.hook_event_name !== "ExecutionComplete" ? undefined : { end: executionComplete(event) },
-  subscription: (home) => claudeSubscription(home).pipe(Effect.provide(platform)),
 }

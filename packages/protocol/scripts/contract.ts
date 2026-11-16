@@ -1,10 +1,11 @@
 import fs from "node:fs"
 import path from "node:path"
 
+import { PROTOCOL } from "@vibest/schema/version"
 import { Schema } from "effect"
 import { RpcSchema } from "effect/rpc"
 
-import { ACCESS, CAPABILITIES, PROTOCOL, VibestRpcs } from "../src/rpc.ts"
+import { ACCESS, CAPABILITIES, VibestRpcs } from "../src/rpc.ts"
 
 const CONTRACT_DIR = path.join(import.meta.dirname, "..", "contract")
 const RPC_JSON = path.join(CONTRACT_DIR, "rpc.json")

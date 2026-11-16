@@ -1,8 +1,9 @@
 import { assert, describe } from "@effect/vitest"
-import { Db, exitedAt, archived, executionStateOf } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
+import { exitedAt, archived, executionStateOf } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
+import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
-import { Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, Fiber, FileSystem } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -27,24 +28,36 @@ const withPulling = (options: TestOptions = {}): TestOptions => ({
   ...options,
   harnesses: [...HARNESSES, PULLING_PI, PULLING_CLAUDE],
 })
-const test: typeof plainTest = (name, program, options, touches) =>
-  plainTest(name, program, withPulling(options), touches)
+const test: typeof plainTest = (name, program, options) => plainTest(name, program, withPulling(options))
 const slowTest: typeof plainSlowTest = (name, program, options) => plainSlowTest(name, program, withPulling(options))
 
-let archiveStartedSignal: { readonly id: string; readonly done: Deferred.Deferred<void> } | undefined
-const gated: TestOptions = {
-  db: (db) => ({
-    ...db,
-    getSession: (id) =>
-      db.getSession(id).pipe(
-        Effect.tap(() => {
-          const gate = archiveStartedSignal?.id === id ? archiveStartedSignal : undefined
-          if (!gate) return Effect.void
-          archiveStartedSignal = undefined
-          return Deferred.succeed(gate.done, undefined)
-        }),
-      ),
-  }),
+const makeArchiveGate = () => {
+  let started: { readonly id: string; readonly done: Deferred.Deferred<void> } | undefined
+  const options: TestOptions = {
+    db: (db) => ({
+      ...db,
+      session: {
+        ...db.session,
+        getSession: (id) =>
+          db.session.getSession(id).pipe(
+            Effect.tap(() => {
+              const gate = started?.id === id ? started : undefined
+              if (!gate) return Effect.void
+              started = undefined
+              return Deferred.succeed(gate.done, undefined)
+            }),
+          ),
+      },
+    }),
+  }
+  const awaitStart = (id: string) =>
+    Deferred.make<void>().pipe(
+      Effect.map((done) => {
+        started = { id, done }
+        return Deferred.await(done)
+      }),
+    )
+  return { options, awaitStart }
 }
 
 describe.concurrent("vibest run --archive-on-idle", () => {
@@ -55,9 +68,9 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   ) =>
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
-      const db = yield* Db
-      const entry = yield* db.startEntry(
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const entry = yield* db.session.startEntry(
         yield* projectOf(repo),
         entryHarness,
         false,
@@ -69,17 +82,27 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       )
       yield* herdr.seedAgent("test/coord")
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), ...input, archive: true })
-      yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
+      yield* until(
+        db.session.getSession(id),
+        (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
+      )
       yield* sessions.check(id)
       yield* settled
-      return { id, sessions, db, herdr, entryId: entry.sessionId, projectId: (yield* db.getSession(id))!.projectId }
+      return {
+        id,
+        sessions,
+        db,
+        herdr,
+        entryId: entry.sessionId,
+        projectId: (yield* db.session.getSession(id))!.projectId,
+      }
     })
 
-  const askEntry = (w: { readonly id: string; readonly entryId: string; readonly db: Db["Service"] }) =>
-    w.db.insertSend(w.entryId, "a question", undefined, w.id)
+  const askEntry = (w: { readonly id: string; readonly entryId: string; readonly db: Db.Interface }) =>
+    w.db.inbox.insertSend(w.entryId, "a question", undefined, w.id)
 
   const finishExecution = (
-    w: { readonly id: string; readonly sessions: Sessions["Service"]; readonly herdr: FakeRuntime["Service"] },
+    w: { readonly id: string; readonly sessions: Session.Interface; readonly herdr: FakeRuntime["Service"] },
     text: string,
     error?: string,
   ) =>
@@ -91,12 +114,12 @@ describe.concurrent("vibest run --archive-on-idle", () => {
 
   const entryTakes = (w: { readonly entryId: string }) =>
     Effect.gen(function* () {
-      const inbox = yield* Inbox
+      const inbox = yield* Inbox.Service
       return yield* until(inbox.take(w.entryId, undefined), (taken) => taken !== undefined)
     })
 
-  const archivedRow = (db: Db["Service"], id: string) =>
-    db.getSession(id).pipe(Effect.map((w) => w !== undefined && archived(w)))
+  const archivedRow = (db: Db.Interface, id: string) =>
+    db.session.getSession(id).pipe(Effect.map((w) => w !== undefined && archived(w)))
   const letForkedArchiveRun = TestClock.withLive(Effect.sleep("100 millis"))
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
 
@@ -106,13 +129,13 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
       const w = yield* archiveSession(yield* makeRepository)
-      assert.isTrue(yield* (yield* SessionLive).archivesOnIdle(w.id))
+      assert.isTrue(yield* (yield* SessionLive.Service).archivesOnIdle(w.id))
       yield* askEntry(w)
       yield* finishExecution(w, "status: completed\nsummary: found it")
       yield* entryTakes(w)
       yield* until(archivedRow(w.db, w.id), (a) => a)
       yield* until(fs.exists(yield* sessionWorktree(w.id)), (e) => !e)
-      yield* until(w.db.getSession(w.id), (r) => exitedAt(r!) !== null)
+      yield* until(w.db.session.getSession(w.id), (r) => exitedAt(r!) !== null)
       yield* letForkedArchiveRun
       const rows = yield* sql<{
         kind: string
@@ -126,7 +149,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       )
       assert.strictEqual(rows[0]!.status, "delivered")
       assert.include(yield* replyOf(w.id), "found it")
-      assert.isNotNull(exitedAt((yield* w.db.getSession(w.id))!))
+      assert.isNotNull(exitedAt((yield* w.db.session.getSession(w.id))!))
     }),
   )
 
@@ -154,13 +177,13 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const b = yield* archiveSession(repo)
       yield* finishExecution(b, "status: failed\nsummary: tests fail", "model_error")
       yield* entryTakes(b)
-      const row = yield* b.db.latestInbox(b.id, "notice")
+      const row = yield* b.db.inbox.latestInbox(b.id, "notice")
       assert.strictEqual(row!.status, "delivered")
       assert.include(row!.message, "execution ended with an error: model_error")
       yield* letForkedArchiveRun
       assert.isFalse(yield* archivedRow(b.db, b.id))
       yield* b.sessions.send(b.id, "the first one")
-      yield* until(b.db.getSession(b.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
+      yield* until(b.db.session.getSession(b.id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* finishExecution(b, "status: completed")
       yield* until(archivedRow(b.db, b.id), (x) => x)
     }),
@@ -177,7 +200,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.isFalse(yield* archivedRow(w.db, w.id))
       yield* w.sessions.check(w.id)
-      yield* until(w.db.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
+      yield* until(w.db.inbox.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
     }),
   )
 
@@ -195,8 +218,8 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.isFalse(yield* archivedRow(w.db, w.id))
-      assert.lengthOf(yield* w.db.inboxWithStatus(w.id, "failed"), 0)
-      yield* until(w.db.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
+      assert.lengthOf(yield* w.db.inbox.inboxWithStatus(w.id, "failed"), 0)
+      yield* until(w.db.inbox.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
     }),
   )
 
@@ -218,12 +241,12 @@ describe.concurrent("vibest run --archive-on-idle", () => {
         (yield* w.herdr.callsTo("send")).filter((call) => call.keys !== undefined),
         [],
       )
-      const row = (yield* w.db.getSession(w.id))!
+      const row = (yield* w.db.session.getSession(w.id))!
       assert.isFalse(archived(row))
       assert.lengthOf(yield* w.herdr.callsTo("close"), 0)
       yield* w.herdr.endExecution(w.id)
       yield* w.sessions.send(w.id, "next")
-      yield* until(w.db.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
+      yield* until(w.db.inbox.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
     }),
   )
 
@@ -242,9 +265,9 @@ describe.concurrent("vibest run --archive-on-idle", () => {
         `${w.id} was archived; run a new session`,
       )
       yield* held.release()
-      yield* until(w.db.getSession(w.id), (r) => exitedAt(r!) !== null)
+      yield* until(w.db.session.getSession(w.id), (r) => exitedAt(r!) !== null)
       yield* letForkedArchiveRun
-      assert.deepStrictEqual(yield* w.db.inboxWithStatus(w.id, "failed"), [])
+      assert.deepStrictEqual(yield* w.db.inbox.inboxWithStatus(w.id, "failed"), [])
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
   )
@@ -254,17 +277,17 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const a = yield* archiveSession(repo)
-      assert.isDefined(yield* a.db.insertSend(a.id, "first"))
-      assert.isFalse(yield* a.db.archiveIfNoPending(a.id))
+      assert.isDefined(yield* a.db.inbox.insertSend(a.id, "first"))
+      assert.isFalse(yield* a.db.session.archiveIfNoPending(a.id))
       assert.isFalse(yield* archivedRow(a.db, a.id))
       const sender = yield* archiveSession(repo)
       yield* askEntry(sender)
       yield* finishExecution(sender, "status: completed")
-      assert.isFalse(yield* sender.db.archiveIfNoPending(sender.id))
+      assert.isFalse(yield* sender.db.session.archiveIfNoPending(sender.id))
       const b = yield* idleSession(repo)
-      assert.isTrue(yield* b.db.archiveIfNoPending(b.id))
-      assert.isUndefined(yield* b.db.insertSend(b.id, "late"))
-      assert.deepStrictEqual(yield* b.db.pendingInbox(b.id), [])
+      assert.isTrue(yield* b.db.session.archiveIfNoPending(b.id))
+      assert.isUndefined(yield* b.db.inbox.insertSend(b.id, "late"))
+      assert.deepStrictEqual(yield* b.db.inbox.pendingInbox(b.id), [])
     }),
   )
 
@@ -294,22 +317,16 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const check = yield* w.herdr.hold("state", w.id)
       const checking = yield* Effect.forkChild(w.sessions.check(w.id))
       yield* check.reached
-      const looked = yield* awaitArchiveStart(w.id)
+      const looked = yield* archiveGate.awaitStart(w.id)
       yield* entryTakes(w)
       assert.strictEqual((yield* lastSentBy(w.id))!.status, "delivered")
       yield* looked
-      yield* w.db.setStatus(w.id, "idle")
-      yield* w.db.endExecution(w.id, { outcome: "completed" }, undefined)
+      yield* w.db.session.setStatus(w.id, "idle")
+      yield* w.db.session.endExecution(w.id, { outcome: "completed" }, undefined)
       return { release: check.release().pipe(Effect.andThen(Fiber.join(checking))) }
     })
 
-  const awaitArchiveStart = (id: string) =>
-    Deferred.make<void>().pipe(
-      Effect.map((done) => {
-        archiveStartedSignal = { id, done }
-        return Deferred.await(done)
-      }),
-    )
+  const archiveGate = makeArchiveGate()
 
   const assertArchivesDone = (w: Effect.Success<ReturnType<typeof archiveSession>>) =>
     Effect.gen(function* () {
@@ -329,8 +346,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       assert.lengthOf(yield* w.herdr.callsTo("close"), 1)
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
-    gated,
-    true,
+    archiveGate.options,
   )
 
   test(
@@ -341,7 +357,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const owner = yield* archiveSession(repo)
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
       yield* until(
-        owner.db.getSession(id),
+        owner.db.session.getSession(id),
         (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
       yield* askEntry(owner)

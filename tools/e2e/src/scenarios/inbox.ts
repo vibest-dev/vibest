@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
+import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
 import {

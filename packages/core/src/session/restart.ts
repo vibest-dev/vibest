@@ -1,12 +1,13 @@
-import { PROTOCOL } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
-import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule, type Scope } from "effect"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import type { HarnessId } from "@vibest/schema/session"
+import { PROTOCOL } from "@vibest/schema/version"
+import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule } from "effect"
 
 import { Agents } from "../agents.ts"
-import { awaitEvent, Bus, type EngineEvent } from "../bus.ts"
+import { App } from "../app.ts"
+import { awaitEvent, Bus, type BusEvent } from "../bus.ts"
 import {
   archived,
-  Db,
   executionStateOf,
   harnessIdOf,
   pidOf,
@@ -15,22 +16,25 @@ import {
   runtimeOf,
   type SessionRow,
   terminalOf,
-} from "../db.ts"
+} from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
-import { Harness, type HarnessId, Harnesses } from "../harness.ts"
-import type { HarnessDefinition, HarnessesShape } from "../host.ts"
+import { PlatformNode } from "../effect/platform.ts"
+import { Harness } from "../harness.ts"
+import { Harnesses } from "../harnesses.ts"
 import { entryCommand, restartArgv } from "../launch.ts"
-import { Layout, VibestCommand } from "../paths.ts"
-import { errorMessage } from "../plugins.ts"
+import { errorMessage } from "../plugin.ts"
+import type { HarnessDefinition } from "../plugin/domains.ts"
 import { Processes } from "../processes.ts"
 import { noticeEnvelope } from "../replies.ts"
 import { agentState, type AgentSeen, peekHint, type Runtime, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
 import { Executions } from "./executions.ts"
-import { SessionLive } from "./live.ts"
+import { SessionLive, type Restarted } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement, runtimeEnv } from "./placement.ts"
 import { Reconcile } from "./reconcile.ts"
+
+export * as Restart from "./restart.ts"
 
 export interface Outdated {
   readonly id: string
@@ -40,13 +44,6 @@ export interface Outdated {
   readonly working: boolean
   readonly blocked: string | null
 }
-export interface Restarted {
-  readonly id: string
-  readonly projectId: string
-  readonly ok: boolean
-  readonly message: string
-}
-
 export const RESTART_TIMEOUT = Duration.seconds(60)
 export const AFTER_WAIT = Duration.seconds(10)
 export const RESTART_CONCURRENCY = 4
@@ -55,8 +52,7 @@ export const CONTINUE =
 
 export const continueText = (version: string) => `${CONTINUE} vibest is now ${version}.`
 
-export const current = (integration: { readonly version: string; readonly protocol: number } | undefined) =>
-  integration !== undefined && integration.version === VERSION && integration.protocol === PROTOCOL
+type Integration = { readonly version: string; readonly protocol: number }
 
 export const blockedOf = (
   adapter: HarnessDefinition | undefined,
@@ -82,55 +78,84 @@ type LiveNow = Effect.Effect<
   | {
       readonly pid?: number | undefined
       readonly ready?: number | undefined
-      readonly integration?: Parameters<typeof current>[0]
+      readonly integration?: Integration | undefined
     }
   | undefined
 >
 
-interface Target {
-  readonly id: string
-  readonly projectId: string
-  readonly label: string
-  readonly adapter: HarnessDefinition | undefined
-  readonly h: Runtime | undefined
-  readonly terminal: Terminal
-  readonly pid: number | undefined
-  readonly harnessSessionId: string | null
-  readonly interrupted: boolean
-  readonly argv: Effect.Effect<ReadonlyArray<string>, unknown>
-  readonly liveNow: LiveNow
-  readonly locked: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
-  readonly hint: string
-  readonly onBack: (h: Runtime) => Effect.Effect<Restarted, unknown>
-  readonly reconcile: Effect.Effect<void>
-}
+export const make = Effect.gen(function* () {
+  const db = yield* Db.Service
+  const runtimes = yield* Runtimes.Service
+  const harness = yield* Harness.Service
+  const harnesses = yield* Harnesses.Service
+  const agents = yield* Agents.Service
+  const layout = yield* Layout
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const processes = yield* Processes.Service
+  const { restarting } = yield* SessionLive.Service
+  const bus = yield* Bus.Service
+  const scope = yield* Effect.scope
+  const { locked } = yield* SessionLocks.Service
+  const version = (yield* App.Service).version
+  const { awaitReady, prompt } = yield* Executions.Service
+  const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
+  const { launchArgv } = yield* Placement.Service
+  const reconcile = yield* Reconcile.Service
+  const vibestCommand = yield* VibestCommand
 
-const sessionRestart = (deps: {
-  readonly db: Db["Service"]
-  readonly bus: Bus["Service"]
-  readonly runtimes: Runtimes["Service"]
-  readonly harnesses: Pick<HarnessesShape, "get" | "find">
-  readonly processes: Processes["Service"]
-  readonly restarting: SessionLive["Service"]["restarting"]
-  readonly scope: Scope.Scope
-  readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
-  readonly checkLater: (id: string) => Effect.Effect<void>
-  readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
-  readonly entryArgv: (entry: SessionRow) => Effect.Effect<ReadonlyArray<string>, unknown>
-  readonly awaitReady: (
-    h: Runtime,
-    terminal: Terminal,
-    adapter: HarnessDefinition,
-    id: string,
-  ) => Effect.Effect<unknown, unknown>
-  readonly prompt: (
-    h: Runtime,
-    session: SessionRow,
-    terminal: Terminal,
-    text: string,
-  ) => Effect.Effect<string | undefined, unknown>
-}) => {
-  const { db, runtimes, harnesses, processes } = deps
+  const entryArgv = (entry: SessionRow) =>
+    Effect.gen(function* () {
+      yield* db.session.patchLive(entry.id, { ready: null })
+      const root =
+        (yield* db.project.projectDirectory(entry.projectId)) || (yield* db.session.sessionDirectory(entry.id)) || ""
+      const savedId = entry.process?.conversation ?? null
+      const place = placedTerminal(entry)
+      const command = yield* entryCommand({
+        harness: harnessIdOf(entry),
+        agent: entry.agent,
+        root,
+        provider: entry.process?.provider ?? null,
+        model: entry.process?.model ?? null,
+        session: Effect.succeed({
+          sessionId: entry.id,
+          harnessSessionId:
+            savedId !== null && (yield* db.session.canResumeConversation(entry.id, savedId)) ? savedId : null,
+          projectId: entry.projectId,
+          ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
+        }),
+      })
+      return restartArgv(command)
+    }).pipe(
+      Effect.provideService(Agents.Service, agents),
+      Effect.provideService(Harness.Service, harness),
+      Effect.provideService(Harnesses.Service, harnesses),
+      Effect.provideService(Layout, layout),
+      Effect.provideService(VibestCommand, vibestCommand),
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    )
+
+  interface Target {
+    readonly id: string
+    readonly projectId: string
+    readonly label: string
+    readonly adapter: HarnessDefinition | undefined
+    readonly h: Runtime | undefined
+    readonly terminal: Terminal
+    readonly pid: number | undefined
+    readonly harnessSessionId: string | null
+    readonly argv: Effect.Effect<
+      ReadonlyArray<string>,
+      Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launchArgv>>
+    >
+    readonly liveNow: LiveNow
+    readonly hint: string
+    readonly onBack: (h: Runtime) => Effect.Effect<Restarted, Effect.Error<ReturnType<typeof prompt>>>
+  }
+
+  const current = (integration: Integration | undefined) =>
+    integration !== undefined && integration.version === version && integration.protocol === PROTOCOL
 
   const routed = (kind: string | null | undefined) =>
     kind ? runtimes.route(kind).pipe(Effect.orElseSucceed(() => undefined)) : Effect.succeed(undefined)
@@ -140,7 +165,7 @@ const sessionRestart = (deps: {
       Effect.map((live) => live?.pid !== undefined && live.ready !== undefined && current(live.integration)),
     )
     const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
-    const reported = (event: EngineEvent) => {
+    const reported = (event: BusEvent) => {
       if (event.type !== "process.ready" || event.sessionId !== id) return false
       const { pid, integration } = event.data
       if (typeof pid !== "number" || typeof integration !== "object" || integration === null) return false
@@ -158,7 +183,7 @@ const sessionRestart = (deps: {
             : Effect.succeed(Option.none()),
       RESTART_TIMEOUT,
       again,
-    ).pipe(Effect.provideService(Bus, deps.bus))
+    ).pipe(Effect.provideService(Bus.Service, bus))
   }
 
   const inPlace = (t: Target): Effect.Effect<Restarted> => {
@@ -171,12 +196,12 @@ const sessionRestart = (deps: {
       const adapter = t.adapter!
       const pid = t.pid!
       const argv = yield* t.argv
-      const signalled = yield* t.locked(
+      const signalled = yield* locked(id)(
         Effect.gen(function* () {
-          yield* deps.restarting.mark(id)
+          yield* restarting.mark(id)
           const sent = yield* processes.terminate(pid)
-          if (sent === "denied") yield* deps.restarting.clear(id)
-          else yield* db.restartProcess(id)
+          if (sent === "denied") yield* restarting.clear(id)
+          else yield* db.session.restartProcess(id)
           return sent
         }),
       )
@@ -185,14 +210,14 @@ const sessionRestart = (deps: {
       const cameBack = yield* Effect.scoped(
         Effect.gen(function* () {
           const started = yield* startedAgain(id, t.liveNow).pipe(Effect.forkScoped)
-          const ready = yield* deps.awaitReady(h, t.terminal, adapter, id).pipe(Effect.option, Effect.forkScoped)
+          const ready = yield* awaitReady(h, t.terminal, adapter, id).pipe(Effect.option, Effect.forkScoped)
           return (yield* Fiber.join(started)) && Option.isSome(yield* Fiber.join(ready))
         }),
       )
       const back = Exit.isSuccess(ran) && cameBack
-      return yield* t.locked(
+      return yield* locked(id)(
         Effect.gen(function* () {
-          yield* deps.restarting.clear(id)
+          yield* restarting.clear(id)
           if (!back)
             return failed(
               Exit.isFailure(ran)
@@ -203,16 +228,16 @@ const sessionRestart = (deps: {
         }),
       )
     }).pipe(
-      Effect.ensuring(deps.restarting.clear(id).pipe(Effect.andThen(t.reconcile))),
+      Effect.ensuring(restarting.clear(id).pipe(Effect.andThen(checkLater(id)))),
       Effect.catchCause((cause) => Effect.succeed(failed(`not restarted: ${errorMessage(cause)}`))),
     )
   }
 
-  const againArgv = (session: SessionRow) => deps.launchArgv(session, (session.process?.conversation ?? null) !== null)
+  const againArgv = (session: SessionRow) => launchArgv(session, (session.process?.conversation ?? null) !== null)
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
-      const session = yield* db.getSession(id)
+      const session = yield* db.session.getSession(id)
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
       const interrupted = executionStateOf(session) === "open"
@@ -225,21 +250,18 @@ const sessionRestart = (deps: {
         terminal: terminalOf(session),
         pid: pidOf(session),
         harnessSessionId: session.process?.conversation ?? null,
-        interrupted,
         argv: againArgv(session),
-        liveNow: db.getSession(id).pipe(Effect.map(reportedOf)),
-        locked: deps.locked(id),
-        reconcile: deps.checkLater(id),
+        liveNow: db.session.getSession(id).pipe(Effect.map(reportedOf)),
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {
             const projectId = session.projectId
             if (!interrupted) return { id, projectId, ok: true, message: `${id} restarted` }
-            const missed = yield* deps.prompt(
+            const missed = yield* prompt(
               h,
-              (yield* db.getSession(id)) ?? session,
+              (yield* db.session.getSession(id)) ?? session,
               terminalOf(session),
-              noticeEnvelope(continueText(VERSION)),
+              noticeEnvelope(continueText(version)),
             )
             return missed === undefined
               ? { id, projectId, ok: true, message: `${id} restarted; its interrupted execution continues` }
@@ -270,23 +292,20 @@ const sessionRestart = (deps: {
         terminal: place.address,
         pid: pidOf(entry),
         harnessSessionId: entry.process?.conversation ?? null,
-        interrupted,
-        argv: deps.entryArgv(entry),
+        argv: entryArgv(entry),
         liveNow: Effect.gen(function* () {
-          const row = yield* db.entryOf(projectId)
+          const row = yield* db.session.entryOf(projectId)
           return row?.id === id ? reportedOf(row) : undefined
         }),
-        locked: (effect) => effect,
-        reconcile: deps.checkLater(id),
         hint: "",
         onBack: (h) =>
           Effect.gen(function* () {
             if (!interrupted) return { id, projectId, ok: true, message: `${label} restarted` } satisfies Restarted
-            const row = yield* db.getSession(id)
+            const row = yield* db.session.getSession(id)
             const missed =
               row === undefined
                 ? "it is gone"
-                : yield* deps.prompt(h, row, place.address, noticeEnvelope(continueText(VERSION)))
+                : yield* prompt(h, row, place.address, noticeEnvelope(continueText(version)))
             return missed === undefined
               ? { id, projectId, ok: true, message: `${label} restarted; its interrupted execution continues` }
               : { id, projectId, ok: false, message: `${label} restarted, but ${missed}` }
@@ -307,7 +326,7 @@ const sessionRestart = (deps: {
   const reports = (harness: HarnessId) => harnesses.find(harness)?.ready === "integration"
 
   const outdated = Effect.gen(function* () {
-    const sessions = (yield* db.listSessions())
+    const sessions = (yield* db.session.listSessions())
       .filter(
         (row) =>
           !row.entry &&
@@ -327,7 +346,7 @@ const sessionRestart = (deps: {
         harnessSessionId: row.process?.conversation ?? null,
         working: Effect.succeed<boolean | undefined>(executionStateOf(row) === "open"),
       }))
-    const entries = (yield* db.entrySessions)
+    const entries = (yield* db.session.entrySessions)
       .filter((entry) => reports(harnessIdOf(entry)) && !current(entry.process?.integration ?? undefined))
       .map((entry) => ({
         id: entry.id,
@@ -363,20 +382,24 @@ const sessionRestart = (deps: {
     return listed
   })
 
-  const restart = (ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
+  const restartOwned = (id: string, working: boolean) =>
+    restarting.own(
+      id,
+      Effect.gen(function* () {
+        const entry = (yield* db.session.entrySessions).find((candidate) => candidate.id === id)
+        return yield* entry === undefined ? restartAgent(id) : restartEntry(entry, working)
+      }),
+    )
+
+  const restart = Effect.fn("Restart.restart")((ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
     Effect.gen(function* () {
-      const entries = (yield* db.entrySessions).filter((entry) => ids.includes(entry.id))
-      const outcomes = yield* Effect.forEach(
-        ids,
-        (id) => {
-          const entry = entries.find((candidate) => candidate.id === id)
-          return entry === undefined ? restartAgent(id) : restartEntry(entry, working.includes(id))
-        },
-        { concurrency: RESTART_CONCURRENCY },
-      )
+      const outcomes = yield* Effect.forEach(new Set(ids), (id) => restartOwned(id, working.includes(id)), {
+        concurrency: RESTART_CONCURRENCY,
+      })
       for (const o of outcomes) yield* o.ok ? Effect.logInfo(o.message) : Effect.logWarning(o.message)
       return outcomes
-    })
+    }),
+  )
 
   const runningTheCommand = (entry: SessionRow, command: number) => {
     const pid = pidOf(entry)
@@ -385,10 +408,10 @@ const sessionRestart = (deps: {
       : processes.tree(pid).pipe(Effect.map((tree) => tree?.includes(command) === true))
   }
 
-  const restartLater = (ids: ReadonlyArray<string>, after: number | undefined) =>
+  const restartLater = Effect.fn("Restart.restartLater")((ids: ReadonlyArray<string>, after: number | undefined) =>
     Effect.gen(function* () {
       const working: Array<string> = []
-      for (const entry of yield* db.entrySessions) {
+      for (const entry of yield* db.session.entrySessions) {
         if (!ids.includes(entry.id)) continue
         if (
           stateOf((yield* entryRunning(entry)) ?? "unknown") === "working" ||
@@ -405,102 +428,38 @@ const sessionRestart = (deps: {
                 Effect.repeat({ until: (l) => l !== "alive", schedule: UPDATE_CLI_EXIT_POLL }),
                 Effect.timeoutOption(AFTER_WAIT),
               )
-      yield* waited.pipe(Effect.andThen(restart(ids, working)), Effect.forkIn(deps.scope))
-    }).pipe(Effect.asVoid)
+      yield* waited.pipe(Effect.andThen(restart(ids, working)), Effect.forkIn(scope))
+    }).pipe(Effect.asVoid),
+  )
 
   return { outdated, restart, restartLater }
-}
-
-const make = Effect.gen(function* () {
-  const db = yield* Db
-  const runtimes = yield* Runtimes
-  const harness = yield* Harness
-  const harnesses = yield* Harnesses
-  const agents = yield* Agents
-  const layout = yield* Layout
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const processes = yield* Processes
-  const { restarting } = yield* SessionLive
-  const bus = yield* Bus
-  const scope = yield* Effect.scope
-  const { locked } = yield* SessionLocks
-  const { awaitReady, prompt } = yield* Executions
-  const { launchArgv } = yield* Placement
-  const reconcile = yield* Reconcile
-  const vibestCommand = yield* VibestCommand
-
-  const entryArgv = (entry: SessionRow) =>
-    Effect.gen(function* () {
-      yield* db.patchLive(entry.id, { ready: null })
-      const root = (yield* db.projectDirectory(entry.projectId)) || (yield* db.sessionDirectory(entry.id)) || ""
-      const savedId = entry.process?.conversation ?? null
-      const place = placedTerminal(entry)
-      const command = yield* entryCommand({
-        harness: harnessIdOf(entry),
-        agent: entry.agent,
-        root,
-        provider: entry.process?.provider ?? null,
-        model: entry.process?.model ?? null,
-        session: Effect.succeed({
-          sessionId: entry.id,
-          harnessSessionId: savedId !== null && (yield* db.canResumeConversation(entry.id, savedId)) ? savedId : null,
-          projectId: entry.projectId,
-          ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
-        }),
-      })
-      return restartArgv(command)
-    }).pipe(
-      Effect.provideService(Agents, agents),
-      Effect.provideService(Harness, harness),
-      Effect.provideService(Harnesses, harnesses),
-      Effect.provideService(Layout, layout),
-      Effect.provideService(VibestCommand, vibestCommand),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-    )
-
-  return sessionRestart({
-    db,
-    bus,
-    runtimes,
-    harnesses,
-    processes,
-    restarting,
-    scope,
-    locked: (id) => locked(id),
-    checkLater: (id) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid),
-    launchArgv,
-    entryArgv,
-    awaitReady,
-    prompt: (h, session, terminal, text) => prompt(h, session, terminal, text),
-  })
 })
 
-export class Restart extends Context.Service<Restart, Effect.Success<typeof make>>()("vibest/Restart") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Restart, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Restart") {}
 
-  static readonly node = LayerNode.make({
-    service: Restart,
-    layer: Restart.layer,
-    deps: [
-      Agents.node,
-      Bus.node,
-      Db.node,
-      Executions.node,
-      Harness.node,
-      Harnesses.node,
-      Placement.node,
-      Processes.node,
-      Reconcile.node,
-      Runtimes.node,
-      SessionLive.node,
-      SessionLocks.node,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    App.node,
+    Agents.node,
+    Bus.node,
+    Db.node,
+    Executions.node,
+    Harness.node,
+    Harnesses.node,
+    Placement.node,
+    Processes.node,
+    Reconcile.node,
+    Runtimes.node,
+    SessionLive.node,
+    SessionLocks.node,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

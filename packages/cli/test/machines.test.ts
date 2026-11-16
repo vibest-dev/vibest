@@ -5,25 +5,18 @@ import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { connectPipe, stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
-import { Db } from "@vibest/core/db"
-import { VibestdIdentity } from "@vibest/core/identity"
-import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/core/machines"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
+import { Identity } from "@vibest/core/identity"
 import { unwrapped } from "@vibest/core/replies"
-import { PEER_BY_USER, peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
-import { randomId } from "@vibest/schema/id"
-import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
-import { Cause, Clock, type Context, Duration, Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect"
-import { RpcClient } from "effect/rpc"
-import * as Socket from "effect/socket/Socket"
-import { SqlClient } from "effect/sql"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
-import { teardown } from "../src/cli.ts"
-import { pipeStdio } from "../src/connect.ts"
-import { callerPlugin, FakeGit, runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "./fakes.ts"
+import {
+  callerPlugin,
+  FakeGit,
+  runVibest,
+  tempDirectory,
+  until,
+  untilVirtual,
+  yieldToIo,
+} from "@vibest/platform-bun/test/lib/fakes"
 import {
   A_ENTRY,
   COMMIT,
@@ -36,19 +29,34 @@ import {
   repoStack,
   served,
   twoMachines,
-} from "./machines-fakes.ts"
+} from "@vibest/platform-bun/test/lib/machines-fakes"
+import { PEER_BY_USER, peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
+import { randomId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
+import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
+import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/server/machine/machines"
+import { Cause, Clock, type Context, Duration, Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect"
+import { RpcClient } from "effect/rpc"
+import * as Socket from "effect/socket/Socket"
+import { SqlClient } from "effect/sql"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
+
+import { teardown } from "../src/cli.ts"
+import { pipeStdio } from "../src/connect.ts"
 
 type Stack = Context.Context<Layer.Success<ReturnType<typeof served>>>
 
 const stack = (net: Net) =>
   Effect.gen(function* () {
-    const dial = yield* SocketConnector
+    const dial = yield* SocketConnector.Service
     const context: Stack = yield* Layer.build(served({ transport: net.transport(dial) }))
     const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
     const layout = yield* run(Layout)
     const raw = yield* connect(layout.socket)
     const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
-    return { context, run, layout, raw, cli, id: (yield* run(VibestdIdentity)).id }
+    return { context, run, layout, raw, cli, id: (yield* run(Identity.Service)).id }
   })
 
 const failureTag = <A, E>(exit: Exit.Exit<A, E>) =>
@@ -74,7 +82,7 @@ describe("the peer caller", () => {
   it.effect("Peer.Hello over a stdin and stdout pipe records the peer; only Hello is allowed before it", () =>
     Effect.gen(function* () {
       const layout = yield* Layout
-      const self = yield* VibestdIdentity
+      const self = yield* Identity.Service
       const client = yield* connectPipe(yield* overNodeSocket(layout.socket))
       const peer = randomId()
       const as = <A, E, R>(effect: Effect.Effect<A, E, R>) => RpcClient.withHeaders(effect, peerHeaders(peer))
@@ -100,7 +108,7 @@ describe("the peer caller", () => {
   it.effect("a Hello from this vibestd's own id records no peer", () =>
     Effect.gen(function* () {
       const layout = yield* Layout
-      const self = yield* VibestdIdentity
+      const self = yield* Identity.Service
       const client = yield* connect(layout.socket)
       const hello = yield* RpcClient.withHeaders(
         client["Peer.Hello"]({ id: self.id, name: "me", callsMe: "loop" }),
@@ -317,7 +325,8 @@ const outboxRows = Effect.flatMap(
     }>`SELECT peer_id, session_id FROM outbox ORDER BY created_at`,
 )
 
-const finish = (db: Db["Service"], session: string, message: string) => db.insertInbox({ sessionId: session, message })
+const finish = (db: Db.Interface, session: string, message: string) =>
+  db.inbox.insertInbox({ sessionId: session, message })
 
 describe("another machine's vibestd runs agents here", () => {
   it.effect("Peer.Spawn for an agent id machine B does not know is refused before any session is made", () =>
@@ -429,7 +438,10 @@ describe("another machine's vibestd runs agents here", () => {
       )
       const result = yield* finish(b.db, session, "General Agent completed")
       assert.strictEqual(result?.status, "dropped", "B's own delivery never sees it")
-      assert.strictEqual(unwrapped((yield* b.db.latestInbox(session, "notice"))!.message), "General Agent completed")
+      assert.strictEqual(
+        unwrapped((yield* b.db.inbox.latestInbox(session, "notice"))!.message),
+        "General Agent completed",
+      )
       const item = yield* Queue.take(items)
       assert.deepStrictEqual(
         { session: item.session, recipient: item.recipient, kind: item.kind, content: item.content, cut: item.cut },
@@ -452,7 +464,7 @@ describe("another machine's vibestd runs agents here", () => {
       const call = yield* b.as(randomId(), "aproj")
       const { session } = yield* b.spawn(call)
       yield* finish(b.db, session, "one")
-      yield* b.db.insertInbox({ sessionId: session, message: "two" })
+      yield* b.db.inbox.insertInbox({ sessionId: session, message: "two" })
       const first = yield* call.outbox.pipe(Stream.take(2), Stream.runCollect)
       assert.deepStrictEqual(
         first.map((i) => [i.kind, i.content]),
@@ -582,7 +594,7 @@ describe("another machine's vibestd runs agents here", () => {
       const x = yield* b.as(a, "aproj")
       const { session } = yield* b.spawn(x)
       const grandchild = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-      yield* b.db.insertSession(
+      yield* b.db.session.insertSession(
         { ...peerSession, id: grandchild, name: "grand", createdAt: 1, lastActive: 1 },
         b.project,
         { parentSessionId: session },
@@ -596,7 +608,7 @@ describe("another machine's vibestd runs agents here", () => {
         "Forbidden",
         "its parent is alive and manages it",
       )
-      yield* b.db.archive(session)
+      yield* b.db.session.archive(session)
       assert.strictEqual(
         failureTag(yield* Effect.exit(x(b.raw.Send({ id: grandchild, message: "still not its child" })))),
         "Forbidden",
@@ -617,7 +629,7 @@ describe("another machine's vibestd runs agents here", () => {
       const archived = yield* b.spawn(call)
       yield* finish(b.db, kept.session, "waiting")
       yield* finish(b.db, archived.session, "archived")
-      yield* b.db.archive(archived.session)
+      yield* b.db.session.archive(archived.session)
       assert.deepStrictEqual(
         (yield* b.run(outboxRows)).map((r) => r.sessionId),
         [kept.session],
@@ -700,7 +712,7 @@ describe("vibest run --machine and remote sessions", () => {
       const b = yield* repoStack(net, {}, "git@github.com:o/r.git")
       const second = yield* tempDirectory("vibest-b-second-")
       yield* (yield* b.run(FakeGit)).repository(second, { ...REPOSITORY, origin: "https://github.com/o/r" })
-      yield* b.db.createProject(second, [{ path: second, remote: "https://github.com/o/r" }])
+      yield* b.db.project.createProject(second, [{ path: second, remote: "https://github.com/o/r" }])
       net.route("b-host", b.layout.socket)
       yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
       yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
@@ -731,7 +743,7 @@ describe("vibest run --machine and remote sessions", () => {
       const asSession = <A, E>(effect: Effect.Effect<A, E>) =>
         RpcClient.withHeaders(effect, sessionHeaders({ sessionId: local.id, projectId: a.project }))
       const spawned = yield* asSession(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "y", callerEnv: {} }))
-      assert.deepStrictEqual(yield* b.db.creatorOf(onB(spawned.id)), {
+      assert.deepStrictEqual(yield* b.db.session.creatorOf(onB(spawned.id)), {
         peer: a.id,
         session: local.id,
       })
@@ -761,7 +773,7 @@ describe("vibest run --machine and remote sessions", () => {
           a.raw.Spawn({ agent: "general", machine: "mb", prompt: "do it there", callerEnv: {} }),
         )
         assert.match(spawned.id, /^mb\/[0-9a-f-]{36}$/, "the address, as every other method answers")
-        assert.isUndefined(yield* a.db.getSession(onB(spawned.id)), "A stores no session")
+        assert.isUndefined(yield* a.db.session.getSession(onB(spawned.id)), "A stores no session")
         assert.strictEqual(b.spawns[0]!.commit, COMMIT)
         yield* finish(b.db, onB(spawned.id), "General Agent completed")
         const [notice] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
@@ -788,7 +800,7 @@ describe("vibest run --machine and remote sessions", () => {
     Effect.gen(function* () {
       const { a, b, entryId, asEntry } = yield* twoMachines()
       const spawned = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} }))
-      assert.isTrue(yield* b.db.sendToOrigin(onB(spawned.id), entryId.slice(0, 8), "which branch?"))
+      assert.isTrue(yield* b.db.remote.sendToOrigin(onB(spawned.id), entryId.slice(0, 8), "which branch?"))
       const [sent] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
       assert.strictEqual(sent!.kind, "send")
       assert.include(sent!.content, `<agent-id>${spawned.id.slice(0, 11)}</agent-id>`)
@@ -828,7 +840,7 @@ describe("vibest run --machine and remote sessions", () => {
         )
         assert.strictEqual(failed._tag, "NoRuntime")
         assert.include(failed.message, 'the runtime "term" is not loaded; loaded: herdr')
-        assert.include(failed.message, (yield* c.run(VibestdIdentity)).name)
+        assert.include(failed.message, (yield* c.run(Identity.Service)).name)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
@@ -871,16 +883,19 @@ describe("vibest run --machine and remote sessions", () => {
         a: {
           db: (db) => ({
             ...db,
-            receivePeerItem: (item) =>
-              db
-                .receivePeerItem(item)
-                .pipe(
-                  Effect.tap(() =>
-                    cutOnce.done || cutOnce.net === undefined
-                      ? Effect.void
-                      : Effect.sync(() => (cutOnce.done = true)).pipe(Effect.andThen(cutOnce.net.cutAll("b-host"))),
+            remote: {
+              ...db.remote,
+              receivePeerItem: (item) =>
+                db.remote
+                  .receivePeerItem(item)
+                  .pipe(
+                    Effect.tap(() =>
+                      cutOnce.done || cutOnce.net === undefined
+                        ? Effect.void
+                        : Effect.sync(() => (cutOnce.done = true)).pipe(Effect.andThen(cutOnce.net.cutAll("b-host"))),
+                    ),
                   ),
-                ),
+            },
           }),
         },
       })

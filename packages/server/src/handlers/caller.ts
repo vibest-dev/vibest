@@ -1,11 +1,10 @@
 import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
-import { Db } from "@vibest/core/db"
-import { Plugins } from "@vibest/core/plugins"
-import { locateProject, resolveProject } from "@vibest/core/project-identity"
+import { Db } from "@vibest/core/database/db"
+import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { Runtimes } from "@vibest/core/runtimes"
-import { NotInRepository } from "@vibest/core/worktree"
 import { type ACCESS, Caller, type CallerShape, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
-import { Effect } from "effect"
+import { NotInRepository } from "@vibest/schema/session"
+import { Context, Effect, Layer } from "effect"
 import type { RpcGroup } from "effect/rpc"
 
 type Access = typeof ACCESS
@@ -19,9 +18,8 @@ export type Handlers = Partial<RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof Vibest
 export type Agent = Extract<CallerShape, { _tag: "Cli" | "Session" }>
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
-  const plugins = yield* Plugins
-  const runtimes = yield* Runtimes
+  const db = yield* Db.Service
+  const runtimes = yield* Runtimes.Service
 
   const agent = (method: MethodOf<"agent" | "owner">) =>
     Effect.gen(function* () {
@@ -41,12 +39,12 @@ export const make = Effect.gen(function* () {
       ),
     )
   const resolveAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => resolveProject(db, at)))
-  const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.projectAt(at.root)))
+  const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.project.projectAt(at.root)))
 
   const projectOf = (c: Agent, method: string) =>
     Effect.gen(function* () {
       if (c._tag === "Cli") return yield* resolveAt(c.repositoryRoot)
-      const directory = yield* db.projectDirectory(c.projectId)
+      const directory = yield* db.project.projectDirectory(c.projectId)
       if (directory !== undefined) return { id: c.projectId, directory }
       if (c.repositoryRoot === undefined) return yield* new NotInRepository({ path: `project ${c.projectId}` })
       const here = yield* resolveAt(c.repositoryRoot)
@@ -66,7 +64,7 @@ export const make = Effect.gen(function* () {
     readonly runtimeSession?: string | undefined
   }) =>
     Effect.gen(function* () {
-      const specs = yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))
+      const specs = yield* runtimes.callers
       const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
       return { id: "local", ...(target !== undefined ? { target } : {}) }
     })
@@ -89,3 +87,7 @@ export const make = Effect.gen(function* () {
 })
 
 export type Checks = Effect.Success<typeof make>
+
+export class Service extends Context.Service<Service, Checks>()("vibest/CallerChecks") {}
+
+export const layer = Layer.effect(Service, make)

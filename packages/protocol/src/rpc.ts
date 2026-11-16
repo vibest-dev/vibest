@@ -1,3 +1,4 @@
+import { RequestId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
   ListedMachine,
@@ -14,13 +15,14 @@ import {
   UnknownMachine,
 } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
-import { AgentRefused, PluginInfo, Routing } from "@vibest/schema/plugin"
-import { ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
+import { AgentRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
+import { ProjectActivity, ProjectCreateFailed, ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
   AllocationFailed,
   AmbiguousSession,
+  HarnessChoice,
   HarnessUnavailable,
   LaunchFailed,
   LimitReached,
@@ -40,9 +42,6 @@ import {
 import { Subscription } from "@vibest/schema/subscription"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
-
-import pkg from "../package.json" with { type: "json" }
-import { PROTOCOL } from "./protocol.ts"
 
 export const DaemonIdentity = Schema.Struct({
   pid: Schema.optional(Schema.Number),
@@ -81,6 +80,8 @@ export const UpdateStatus = Schema.Struct({
 })
 export type UpdateStatus = typeof UpdateStatus.Type
 
+export const NOT_CHECKED: UpdateStatus = { checked: null, latest: null, checking: false }
+
 export const PingResult = Schema.Struct({
   protocol: Schema.optional(Schema.Number),
   version: Schema.String,
@@ -90,10 +91,6 @@ export const PingResult = Schema.Struct({
   capabilities: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 })
 export type Ping = typeof PingResult.Type
-
-export const VERSION = pkg.version
-
-export { PROTOCOL }
 
 export class ProtocolRejected extends Schema.TaggedError<ProtocolRejected>()("ProtocolRejected", {
   method: Schema.String,
@@ -117,10 +114,6 @@ export class InvalidCaller extends Schema.TaggedError<InvalidCaller>()("InvalidC
 
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   method: Schema.String,
-  message: Schema.String,
-}) {}
-
-export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
   message: Schema.String,
 }) {}
 
@@ -215,6 +208,7 @@ export const GitInfo = Schema.Struct({
   pushed: Schema.Boolean,
   saved: Schema.Boolean,
   why: Schema.String,
+  unknown: Schema.optional(Schema.String),
 })
 
 export const SessionInfo = Schema.Struct({
@@ -265,24 +259,6 @@ export const SessionStatusInfo = Schema.Struct({
   reply: Schema.optional(Schema.NullOr(SessionReply)),
 })
 
-export const HarnessModel = Schema.Struct({
-  provider: Schema.NullOr(Schema.String),
-  model: Schema.String,
-  name: Schema.String,
-  default: Schema.Boolean,
-})
-
-export const HarnessChoice = Schema.Struct({
-  harness: Schema.String,
-  binary: Schema.String,
-  problem: Schema.NullOr(Schema.String),
-  models: Schema.Array(HarnessModel),
-})
-export type HarnessChoice = typeof HarnessChoice.Type
-
-export const ProjectActivity = Schema.Literals(["blocked", "done", "working", "idle"])
-export type ProjectActivity = typeof ProjectActivity.Type
-
 export const ProjectRow = Schema.Struct({
   id: Schema.String,
   directory: Schema.NullOr(Schema.String),
@@ -305,6 +281,14 @@ export const WatchEvent = Schema.Union([
   Schema.TaggedStruct("SessionEnded", { id: Schema.String, projectId: Schema.String }),
 ])
 export type WatchEvent = typeof WatchEvent.Type
+
+export const EventsFact = Schema.Struct({
+  aggregate: Schema.String,
+  seq: Schema.Number,
+  at: Schema.Number,
+  type: Schema.String,
+  data: Schema.Unknown,
+})
 
 export class WatchLagged extends Schema.TaggedError<WatchLagged>()("WatchLagged", { message: Schema.String }) {}
 
@@ -356,6 +340,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoHarnessChosen,
           NoRuntime,
           AgentRefused,
+          PluginsNotActive,
           UnknownAgent,
           NoSuchSession,
           AmbiguousSession,
@@ -414,6 +399,7 @@ export class VibestRpcs extends RpcGroup.make(
           LaunchFailed,
           NoRuntime,
           AgentRefused,
+          PluginsNotActive,
           UnknownAgent,
         ]),
       }),
@@ -422,7 +408,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Send", {
-        payload: { id: Schema.String, message: Schema.String, request: Schema.optional(Schema.String) },
+        payload: { id: Schema.String, message: Schema.String, request: Schema.optional(RequestId) },
         success: Schema.Struct({ id: Schema.String }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),
@@ -499,6 +485,18 @@ export class VibestRpcs extends RpcGroup.make(
         }),
       ),
       error: Schema.Union([Forbidden]),
+    }),
+  ),
+  scoped(
+    Rpc.make("Events", {
+      payload: {
+        session: Schema.optional(Schema.String),
+        after: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+        follow: Schema.optional(Schema.Boolean),
+      },
+      success: EventsFact,
+      error: Schema.Union([Forbidden, NoSuchSession]),
+      stream: true,
     }),
   ),
   scoped(Rpc.make("Watch", { success: WatchEvent, error: Schema.Union([Forbidden, WatchLagged]), stream: true })),
@@ -586,6 +584,7 @@ export class VibestRpcs extends RpcGroup.make(
         ProjectMoved,
         NoHarnessChosen,
         AgentRefused,
+        PluginsNotActive,
         HarnessUnavailable,
         NoRuntime,
         LaunchFailed,
@@ -803,6 +802,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoHarnessChosen,
           NoRuntime,
           AgentRefused,
+          PluginsNotActive,
           UnknownAgent,
           NoSuchSession,
           RuntimeUnreachable,
@@ -855,6 +855,7 @@ export const ACCESS = {
   "Inbox.Subscribe": "session",
   "Inbox.Take": "session",
   Watch: "cli",
+  Events: "cli",
   "Session.Seen": "cli",
   "Project.Open": "cli",
   "Project.EntryPlace": "cli",
@@ -903,6 +904,7 @@ export const CAPABILITIES = {
   handoff: true,
   requests: true,
   watch: true,
+  events: true,
   projects: true,
   spawnRuntime: true,
 } as const

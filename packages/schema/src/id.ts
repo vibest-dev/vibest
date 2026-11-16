@@ -1,6 +1,8 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 export const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+export const RequestId = Schema.String.check(Schema.isUUID(4))
 
 export const shortId = (id: string) => id.slice(0, 8)
 

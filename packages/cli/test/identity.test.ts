@@ -1,13 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import { HOST_ID_TIMEOUT, ioregUuid, loadIdentity, readHostId, shortHostName } from "@vibest/core/identity"
-import { Layout } from "@vibest/core/paths"
+import { runVibest, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { ID } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
 import { Duration, Effect, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
-
-import { runVibest, tempDirectory } from "./fakes.ts"
 
 const host = (id: string | undefined, name = "mac-mini.local") => ({ name, id: Effect.succeed(id), pid: 4242 })
 
@@ -105,7 +104,7 @@ describe("identity.json", () => {
         ["daemon", "--foreground"],
       )
       assert.strictEqual(run.code, 1)
-      assert.include(run.stderr, "is not a vibest identity file")
+      assert.include(yield* fs.readFileString(layout.log), "is not a vibest identity file")
       assert.isFalse(yield* fs.exists(layout.database))
       assert.strictEqual(yield* fs.readFileString(layout.identity), "garbage")
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),

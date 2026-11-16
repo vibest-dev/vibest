@@ -1,8 +1,10 @@
-import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
-import type { HarnessDefinition, HarnessesShape } from "@vibest/core/host"
+import { Harness } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { normalizeModels } from "@vibest/core/models"
-import { HostEnv, Runtimes } from "@vibest/core/runtimes"
+import type { HarnessDefinition, HarnessesShape } from "@vibest/core/plugin/domains"
+import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { HarnessUnavailable } from "@vibest/schema/session"
 import { Effect, Layer, type Scope } from "effect"
 
 const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
@@ -132,16 +134,16 @@ export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
 export const harnessesFrom = (
   definitions: ReadonlyArray<HarnessDefinition> = HARNESSES,
 ): Effect.Effect<HarnessesShape, never, Scope.Scope> =>
-  Effect.tap(makeHarnesses, (harnesses) =>
+  Effect.tap(Harnesses.make, (harnesses) =>
     harnesses.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
   )
 
-export const noHostEnv = Layer.succeed(HostEnv, { drop: () => {} })
+export const noHostEnv = Layer.succeed(Runtimes.HostEnv, { drop: () => {} })
 
 export const runtimesLayer = Runtimes.layer.pipe(Layer.provide(noHostEnv))
 
 export const harnessesLayer = (definitions: ReadonlyArray<HarnessDefinition> = HARNESSES) =>
-  Layer.effect(Harnesses, harnessesFrom(definitions))
+  Layer.effect(Harnesses.Service, harnessesFrom(definitions))
 
 export interface HarnessStandIn {
   readonly hooked?: ReadonlyArray<string>
@@ -152,7 +154,7 @@ export interface HarnessStandIn {
 }
 
 export const harnessLayer = (options: HarnessStandIn = {}) =>
-  Layer.succeed(Harness, {
+  Layer.succeed(Harness.Service, {
     available: (id) => Effect.succeed(!(options.missingBinary ?? []).includes(id)),
     plugin: (id) =>
       (options.hooked ?? (options.harnesses ?? HARNESSES).map((h) => h.id)).includes(id)

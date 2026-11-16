@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { type MachineEvent, type MachineNote, Plugin } from "@vibest/plugin"
+import { type MachineEvent, type MachineNote, Plugin } from "@vibest/plugin/effect"
 import { machineHooks } from "@vibest/plugin/testing"
 import { Effect, Queue, Stream } from "effect"
 import { type api, HcError, type HcShape, HcTransportError } from "effect-herdr-core-sdk"

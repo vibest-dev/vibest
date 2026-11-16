@@ -1,11 +1,9 @@
-import type { Harness } from "@vibest/plugin"
-import { Effect, Schema } from "effect"
+import type { Harness } from "@vibest/plugin/effect"
+import { Schema } from "effect"
 
 import { findMessage, jsonLines, opt, withConfigured } from "./models.ts"
-import { platform } from "./platform.ts"
-import { piSubscription } from "./subscriptions/pi.ts"
 
-const extension = (pluginDir: string) => `${pluginDir}/extension.mjs`
+const extensions = (pluginDir: string) => ["-e", `${pluginDir}/extension.mjs`, "-e", `${pluginDir}/presentation.mjs`]
 
 const piState = findMessage(
   Schema.Struct({
@@ -72,8 +70,7 @@ export const pi: Harness.HarnessDefinition = {
     ...opt("--session-id", i.sessionId),
     "--append-system-prompt",
     i.systemPromptFile,
-    "-e",
-    extension(i.pluginDir),
+    ...extensions(i.pluginDir),
     ...providerModel(i.provider, i.model),
   ],
   models: {
@@ -84,7 +81,6 @@ export const pi: Harness.HarnessDefinition = {
     ),
     answer: piModels,
   },
-  subscription: (home) => piSubscription(home).pipe(Effect.provide(platform)),
   userPrompt: (event) => {
     if (event.type === "accepted")
       return typeof event.execution === "number" ? { execution: event.execution } : undefined

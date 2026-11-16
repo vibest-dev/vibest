@@ -26,7 +26,7 @@ and a user's delegation extension (pi-subagents' `subagent`) would then win over
 `--model`, so a login chosen without a model is dropped and Pi starts on its own default (a known ceiling: pick that
 provider's default model when quota routing on Pi matters).
 
-The entry session's Pi TUI groups adjacent tool rows (thinking does not split a group; user text, assistant text or a
+`pi -e <dir>/presentation.mjs` loads `src/presentation.ts`, which does not depend on the extension above (neither needs the other to work). The entry session's Pi TUI groups adjacent tool rows (thinking does not split a group; user text, assistant text or a
 displayed custom message does; image results stay outside) and compacts user messages. Pi's values are read
 defensively, as their shapes differ across versions. A custom message sent with `triggerTurn: false` during a run is
 appended outside the agent loop and reaches no `message_start`, so the extension observes the session's

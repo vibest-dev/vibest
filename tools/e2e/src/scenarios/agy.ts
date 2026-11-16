@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { compiled, expect, harnesses, herdr, row, SESSIONS, Skip, until, type World, writeEvidence } from "../world.ts"
+import { compiled, expect, harnesses, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { addAgyPlugin } from "../world/plugins.ts"
 import { addressOf, isolatedCore } from "./hc.ts"
 import { project } from "./inbox.ts"
@@ -36,7 +36,7 @@ const untilShown = async (
   } catch (error) {
     const screen = await w.run(w.repository, [compiled, "peek", id])
     const listing = await w.run(w.repository, [compiled, "ls"])
-    await writeEvidence(path.join(evidence, "agy-screen.txt"), `${what}\n${listing.stdout}\n${screen.stdout}`)
+    await w.writeEvidence(path.join(evidence, "agy-screen.txt"), `${what}\n${listing.stdout}\n${screen.stdout}`)
     throw error
   }
 }

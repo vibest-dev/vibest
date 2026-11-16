@@ -7,6 +7,13 @@ import { alive, expect, expectReplied, expectFacts, row, until, type World } fro
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
 
+type ListedGit = {
+  branch: string
+  pushed: boolean
+  saved: boolean
+  why: string
+  unknown?: string
+}
 type Listed = {
   id: string
   title: string
@@ -18,6 +25,7 @@ type Listed = {
   exitedAt: number | null
   address: { id: string }
   worktree: string
+  git: ListedGit | null
   latest: { status: string; summary: string } | null
 }
 type Removed = {
@@ -158,7 +166,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S5",
     title:
-      "vibest result has no reply before a subagent's first execution ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the entry session and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
+      "vibest result has no reply before a subagent's first execution ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the entry session and the subagent with its latest reply; a worktree removed from outside leaves every session listed, that row's git unknown and the other complete; after archive only vibest ls --all lists it, exited",
     run: async (w) => {
       const p = await piProject(w, "s5")
       try {
@@ -199,6 +207,28 @@ const checks: ReadonlyArray<Check> = [
             sub !== undefined &&
             sub.latest?.summary.includes("done-s5") === true,
           `ls: ${JSON.stringify(listed)}`,
+        )
+        const keptId = await p.runSub("s5kept")
+        await answered(w, p, keptId, "s5kept")
+        const keptBefore = (await ls(w, p)).find((e) => e.id === keptId)
+        expect(
+          sub !== undefined &&
+            sub.worktree !== "" &&
+            keptBefore?.worktree !== undefined &&
+            sub.worktree !== keptBefore.worktree,
+          `worktrees: ${sub?.worktree} ${keptBefore?.worktree}`,
+        )
+        await fs.rm(sub!.worktree, { recursive: true, force: true })
+        const afterGone = await ls(w, p)
+        const marked = afterGone.find((e) => e.id === a)
+        const kept = afterGone.find((e) => e.id === keptId)
+        expect(
+          afterGone.some((e) => e.agent === "coordinator") &&
+            marked?.git?.unknown === "git cannot read it" &&
+            kept?.git?.saved === true &&
+            kept.git.unknown === undefined &&
+            kept.latest?.summary.includes("done-s5kept") === true,
+          `ls after the worktree was removed: ${JSON.stringify(afterGone)}`,
         )
         await archive(w, p, a)
         expect(!(await ls(w, p)).some((e) => e.id === a), "ls still lists the archived subagent")

@@ -1,18 +1,17 @@
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
-import { Harness, Harnesses } from "@vibest/core/harness"
+import { Harness } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
-import { Machines } from "@vibest/core/machines"
-import { Peers } from "@vibest/core/peer"
-import { Plugins } from "@vibest/core/plugins"
+import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
-import { Remote } from "@vibest/core/remote"
-import { SshHosts } from "@vibest/core/repository-url"
+import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
+import { Session } from "@vibest/core/session"
 import { Archive } from "@vibest/core/session/archive"
 import { Delivery } from "@vibest/core/session/delivery"
 import { EntrySession } from "@vibest/core/session/entry"
@@ -25,8 +24,11 @@ import { Placement } from "@vibest/core/session/placement"
 import { Reconcile } from "@vibest/core/session/reconcile"
 import { Restart } from "@vibest/core/session/restart"
 import { Spawn } from "@vibest/core/session/spawn"
-import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+
+import { Machines } from "./machine/machines.ts"
+import { Peer } from "./machine/peer.ts"
+import { Remote } from "./machine/remote.ts"
 
 export const services = LayerNode.group([
   Bus.node,
@@ -40,7 +42,7 @@ export const services = LayerNode.group([
   Inbox.node,
   Subscriptions.node,
   Plugins.node,
-  SshHosts.node,
+  RepositoryUrl.node,
   Git.node,
   SessionLocks.node,
   Executions.node,
@@ -52,9 +54,9 @@ export const services = LayerNode.group([
   Exits.node,
   Reconcile.node,
   Restart.node,
-  Sessions.node,
+  Session.node,
   Integration.node,
-  Peers.node,
+  Peer.node,
   EntrySession.node,
   Machines.node,
   Remote.node,

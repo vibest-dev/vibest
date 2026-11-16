@@ -8,8 +8,8 @@ export const DRAIN_TIMEOUT = Duration.seconds(5)
 type Blocker = { readonly id: string; readonly reason: string }
 
 export interface StopDeps {
-  readonly drain: Drain["Service"]
-  readonly bus: Bus["Service"]
+  readonly drain: Drain.Interface
+  readonly bus: Bus.Interface
   readonly deliveringInbox: Effect.Effect<
     ReadonlyArray<{ readonly id: number; readonly kind: string; readonly sessionId: string }>
   >
@@ -46,12 +46,12 @@ export const stopOnce =
         const accepted = yield* awaitEvent(
           acceptedOnceIdle,
           (event) =>
-            event.type === "live.drain" || event.type === "inbox.moved"
+            event.type === "drain.released" || event.type === "inbox.moved"
               ? acceptedOnceIdle
               : Effect.succeed(Option.none()),
           DRAIN_TIMEOUT,
           Effect.map(acceptedOnceIdle, Option.isSome),
-        ).pipe(Effect.provideService(Bus, bus))
+        ).pipe(Effect.provideService(Bus.Service, bus))
         if (!accepted) return yield* new DaemonBusy({ blockers: last })
         yield* Effect.uninterruptible(takeOver.pipe(Effect.andThen(Deferred.succeed(shutdown, undefined))))
         return { instance }

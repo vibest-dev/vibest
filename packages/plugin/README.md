@@ -5,11 +5,11 @@ plugin imports both normally and bundles neither.
 
 ## A plugin
 
-A plugin is an id and an effect, or an id and a Promise `setup`. The effect runs once per load in the plugin's own scope; everything it registers lasts
-until the plugin is unloaded or reloaded.
+A plugin is an id and an effect (`@vibest/plugin/effect`), or an id and a Promise `setup` (`@vibest/plugin`). The effect
+runs once per load in the plugin's own scope; everything it registers lasts until the plugin is unloaded or reloaded.
 
 ```ts
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 export default Plugin.define({
@@ -28,35 +28,32 @@ import { Plugin } from "@vibest/plugin"
 export default Plugin.define({
   id: "my-plugin",
   setup: async (context) => {
-    await context.agent.hook("start.before", async (event) =>
-      event.prompt.startsWith("ask:") ? { harness: "pi" } : undefined,
-    )
+    await context.agent.hook("start.before", async (event) => {
+      if (event.prompt.startsWith("ask:")) event.harness = "pi"
+    })
     return () => console.log("unloaded")
   },
 })
 ```
 
-Add it to `plugins` in `vibest.json`, or drop the file into `$VIBEST_HOME/plugins/`. `context.options` holds the
-options its entry gives (`{ "package": "./my-plugin.ts", "options": { … } }`); they reload live. `vibest plugins`
+Drop the file into `$VIBEST_HOME/plugins/`, or put it in a folder (`index.ts`, or a `package.json` with `exports`) and add the folder to `plugins` in `vibest.json`. `context.options` holds the
+options its entry gives (`{ "package": "./my-plugin", "options": { … } }`); they reload live. `vibest plugins`
 lists every plugin, builtins first, with its status and counters.
 
 ## Context
 
-| Member                             | What it does                                                                                                                                                      |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `options`                          | the plugin's options                                                                                                                                              |
-| `agent.hook`                       | intercept `start.before` (return `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (return a move) |
-| `runtime.transform`                | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                |
-| `harness.transform`                | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
-| `runtime.reload`, `harness.reload` | rebuild that registry, for a transform that reads data of its own                                                                                                 |
-| `subscription.report`              | replace one `(harness, provider)` row's usage limits                                                                                                              |
-| `event.subscribe`                  | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                            |
+| Member                | What it does                                                                                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options`             | the plugin's options                                                                                                                                              |
+| `agent.hook`          | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (assign `move`) |
+| `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                |
+| `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
+| `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                              |
+| `event.subscribe`     | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                            |
 
-**Hooks** run in plugin order; each callback gets a read-only event, returns what it decides, and has 5 seconds.
-Assigning to the event throws, and counts as the plugin crashing. **Transforms** take a synchronous
-editor (`list`, `get`, `add`, `update`, `remove`) and apply in registration order, so a later plugin sees and may
-change what earlier ones, builtins included, defined. Load effectful data before registering a transform or calling
-`reload`. A transform that throws fails the whole plugin and removes what it registered.
+**Hooks** run in plugin order; each callback gets the event, changes it by assigning to its fields, and has 5 seconds. A callback that times out or fails changes nothing. **Transforms** take a synchronous
+editor (`add`; the harness editor also has `update`) and apply in registration order, so a later plugin sees and may
+change what earlier ones, builtins included, defined. Load effectful data before registering a transform. A transform that throws fails the whole plugin and removes what it registered.
 
 `hook` and `transform` return a `Registration`. Its `dispose` removes it early (a second call does nothing); the
 plugin's scope disposes the rest when it unloads, and removing a transform restores the definitions it changed.
@@ -68,7 +65,7 @@ A runtime is where agents' terminals live. Its definition has an `id`, the requi
 terminals set, so `vibest` started in one of them runs there.
 
 ```ts
-import { Plugin, Runtime } from "@vibest/plugin"
+import { Plugin, Runtime } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 declare const mine: Omit<Runtime.RuntimeDefinition, "id" | "caller">
@@ -87,7 +84,7 @@ export default Plugin.define({
 
 Keep stable references in runtime definitions: build the definition (and any function you put in it with `update`)
 once, outside the transform, because every registry commit runs all transforms again, and a member that is a new
-inline arrow each time makes vibest treat the runtime as replaced (a `live.reset` and a `machine.connect` per connected
+inline arrow each time makes vibest treat the runtime as replaced (a `runtime.reset` and a `machine.connect` per connected
 machine).
 
 `runtimeContract(definition, { cwd })` from `@vibest/plugin/testing` checks a definition against a real local
@@ -99,7 +96,7 @@ A harness is a coding-agent CLI. The builtin ones (`pi`, `claude`, `cursor`) are
 harness or change one:
 
 ```ts
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 export default Plugin.define({

@@ -1,7 +1,7 @@
 import type { SubscriptionAccount } from "@vibest/schema/subscription"
 import { Effect } from "effect"
 
-import { parseJson, record, runCli } from "./index.ts"
+import { parseJson, record, runCli, type Spawner } from "./index.ts"
 
 export const claudeAccount = (status: unknown): SubscriptionAccount => {
   const s = record(status)
@@ -12,9 +12,9 @@ export const claudeAccount = (status: unknown): SubscriptionAccount => {
     : { kind: "subscription" }
 }
 
-export const claudeSubscription = (home: string) =>
+export const claudeSubscription = (spawner: Spawner) => (home: string) =>
   Effect.gen(function* () {
-    const status = parseJson(yield* runCli("claude", ["auth", "status", "--json"], home))
+    const status = parseJson(yield* runCli(spawner, "claude", ["auth", "status", "--json"], home))
     if (status === undefined) return [{ provider: "", error: "claude auth status failed" }]
     return [{ provider: "", account: claudeAccount(status), limits: [] }]
   })

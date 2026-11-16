@@ -4,20 +4,9 @@ import path from "node:path"
 import { assert, layer } from "@effect/vitest"
 import { accepts, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
-import { Layout, VibestCommand } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
-import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
-import { PingResult, VERSION } from "@vibest/protocol/rpc"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { readDaemonInfo } from "@vibest/server/daemon"
-import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
-import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
-import { replaceDaemon, type Timing } from "../src/replace.ts"
 import {
   PATH_WITHOUT_HARNESS_CLIS,
   noteRecorded,
@@ -27,7 +16,21 @@ import {
   runVibest,
   stopRecorded,
   tempDirectory,
-} from "./fakes.ts"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import { PingResult } from "@vibest/protocol/rpc"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
+import { readDaemonInfo } from "@vibest/server/daemon"
+import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
+import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
+
+import { replaceDaemon, type Timing } from "../src/replace.ts"
+import { VERSION } from "../src/version.ts"
 
 const typed = (text: string, terminal = true) =>
   Stdio.layerTest({
@@ -236,8 +239,8 @@ layer(Platform.services)(
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           const pending = yield* Effect.gen(function* () {
-            const db = yield* Db
-            yield* db.insertSession(
+            const db = yield* Db.Service
+            yield* db.session.insertSession(
               {
                 id: "b0050001-b005-4b00-8b00-b0050001b005",
                 agent: "general",
@@ -258,13 +261,14 @@ layer(Platform.services)(
               },
               yield* projectOf("seeded-project"),
             )
-            return (yield* db.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
+            return (yield* db.inbox.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
           }).pipe(
             Effect.provide(
               Db.layer.pipe(
-                Layer.provide(Platform.sqlite(layout.database)),
+                Layer.provide(Projectors.layer),
                 Layer.provide(Bus.layer),
                 Layer.provide(SessionLive.layer),
+                Layer.provide(Platform.sqlite(layout.database)),
               ),
             ),
           )
@@ -294,14 +298,15 @@ layer(Platform.services)(
             assert.deepStrictEqual(yield* stop(old.instance!, cliHeaders(layout.home)), { instance: old.instance! })
             assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
             assert.isFalse(yield* probe(layout.socket))
-            const rows = yield* Effect.flatMap(Db, (db) =>
-              db.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
+            const rows = yield* Effect.flatMap(Db.Service, (db) =>
+              db.inbox.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
             ).pipe(
               Effect.provide(
                 Db.layer.pipe(
-                  Layer.provide(Platform.sqlite(layout.database)),
+                  Layer.provide(Projectors.layer),
                   Layer.provide(Bus.layer),
                   Layer.provide(SessionLive.layer),
+                  Layer.provide(Platform.sqlite(layout.database)),
                 ),
               ),
             )

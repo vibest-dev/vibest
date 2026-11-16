@@ -1,8 +1,13 @@
+import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
+import { LOG_KEEP_BYTES, LOG_MAX_BYTES } from "../../../../packages/platform-bun/src/log-file.ts"
+import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
-import { alive, binary, expect, until, type World } from "../world.ts"
+import { ask } from "../fake-model.ts"
+import { alive, binary, expect, expectReplied, factsOf, until, type World } from "../world.ts"
+import { piProject } from "./exits.ts"
 
 type Status = { daemon: { status: string; pid?: number | null; protocol?: number | null } }
 
@@ -25,6 +30,48 @@ const raw = (w: World, request: object) =>
     socket.on("error", reject)
     setTimeout(() => (socket.destroy(), reject(new Error("no reply in 5 s"))), 5_000)
   })
+
+const hungTeardownPlugin = `import { Plugin } from "@vibest/plugin/effect"
+import { Effect } from "effect"
+export default Plugin.define({ id: "hung-teardown", effect: () => Effect.addFinalizer(() => Effect.never) })
+`
+
+const startWithHungPlugin = async (w: World) => {
+  const file = path.join(w.vibestHome, "plugins", "hung-teardown.ts")
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(file, hungTeardownPlugin)
+  await w.daemon()
+  await until("the hung-teardown plugin active", async () =>
+    (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
+      (p) => p.id === "hung-teardown" && p.status === "active",
+    ),
+  )
+  return (await running(w)).pid!
+}
+
+const logOf = (w: World) => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
+
+const exitsAtDeadline = async (w: World, pid: number, stop: () => Promise<unknown>) => {
+  const logged = (await logOf(w)).length
+  const t0 = Date.now()
+  await stop()
+  await until("vibestd exited", () => !alive(pid), 20_000)
+  const took = Date.now() - t0
+  expect(took >= 9_000 && took <= 14_000, `vibestd exited ${took} ms after the stop; the deadline is 10 s plus a flush`)
+  const said = (await logOf(w)).slice(logged)
+  expect(
+    /shutdown deadline exceeded[\s\S]*vibest\/Plugins/.test(said),
+    `the log does not name the layer still releasing: ${said.slice(-1500)}`,
+  )
+}
+
+type Printed = { aggregate: string; seq: number; at: number; type: string; data: unknown }
+
+const printed = (stdout: string) =>
+  stdout
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as Printed)
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -49,9 +96,10 @@ const checks: ReadonlyArray<Check> = [
       {
         const before = (await running(w)).pid
         const r = await w.run(w.repository, [binary, "daemon", "--foreground"], { timeoutMs: 15_000 })
+        const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
         expect(
-          r.code === 0 && /already running/.test(r.stdout + r.stderr),
-          `second vibestd: ${r.code} ${r.stdout}${r.stderr}`,
+          r.code === 0 && log.includes("already running"),
+          `second vibestd: ${r.code} ${r.stdout}${r.stderr}\n${log.slice(-500)}`,
         )
         expect((await running(w)).pid === before, "the first vibestd changed")
       }
@@ -66,6 +114,47 @@ const checks: ReadonlyArray<Check> = [
           return d.status === "running" && d.pid !== before
         })
         expect(!alive(before), `old vibestd ${before} still alive`)
+      }
+    },
+  },
+  {
+    id: "D11",
+    title:
+      "D11 vibestd whose plugin teardown never ends exits at the shutdown deadline after SIGTERM and after a stop request, logging the layer still releasing; daemon restart onto a new vibestd still goes through",
+    run: async (w) => {
+      {
+        const pid = await startWithHungPlugin(w)
+        await exitsAtDeadline(w, pid, async () => process.kill(pid, "SIGTERM"))
+      }
+      {
+        const pid = await startWithHungPlugin(w)
+        const info = JSON.parse(await fs.readFile(path.join(w.vibestHome, "vibestd.pid"), "utf8")) as {
+          instance: string
+        }
+        await exitsAtDeadline(w, pid, async () => {
+          const reply = await raw(w, {
+            jsonrpc: "2.0",
+            id: "1",
+            method: "Daemon.Stop",
+            params: { instance: info.instance },
+            headers: [
+              ["vibest-protocol", String(PROTOCOL)],
+              ["vibest-caller", "cli"],
+              ["vibest-repository", w.repository],
+            ],
+          })
+          expect(!("error" in reply), `Daemon.Stop was refused: ${JSON.stringify(reply)}`)
+        })
+      }
+      {
+        const before = await startWithHungPlugin(w)
+        const r = await w.tty(["daemon", "restart"], "y\n", { timeoutMs: 120_000 })
+        expect(r.code === 0, `daemon restart exited ${r.code}: ${r.stdout}${r.stderr}`)
+        await until("a new vibestd answers", async () => {
+          const d = await running(w)
+          return d.status === "running" && d.pid !== before
+        })
+        await until("the old vibestd gone", () => !alive(before), 20_000)
       }
     },
   },
@@ -95,6 +184,143 @@ const checks: ReadonlyArray<Check> = [
       const r = await w.vibest(["ls"], { env: { VIBEST_SESSION_ID: "deadbeef" } })
       expect(r.code !== 0, `ls as an unknown session exited 0: ${r.stdout}`)
       expect(/InvalidCaller|Forbidden|NoSuchSession/.test(r.stderr), `unexpected refusal: ${r.stderr}`)
+    },
+  },
+  {
+    id: "D10",
+    title:
+      "vibest events prints a session's facts, or all facts, as JSON lines in order, --follow prints later facts once each, and an unknown session fails with NoSuchSession",
+    run: async (w) => {
+      const p = await piProject(w, "d10")
+      let follower: ReturnType<typeof Bun.spawn> | undefined
+      try {
+        p.model.release()
+        const sub = await p.runSub("d10")
+        await until("the subagent's execution ended", () => p.idle(sub), 60_000)
+        await expectReplied(w, sub)
+        const events = (...args: Array<string>) => w.vibest(["events", ...args], { cwd: p.repo, env: p.env })
+        const own = printed((await events("--session", sub)).stdout)
+        const recorded = factsOf(w, sub)
+        expect(
+          own.map((f) => f.type).join() === recorded.join() &&
+            own.every((f, i) => f.aggregate === sub && f.seq === i + 1),
+          `events --session printed ${own.map((f) => `${f.seq} ${f.type}`).join(", ")}, not ${recorded.join(", ")}`,
+        )
+        const all = printed((await events()).stdout)
+        const rising = new Map<string, number>()
+        for (const f of all) {
+          expect(f.seq > (rising.get(f.aggregate) ?? 0), `${f.aggregate} seq ${f.seq} did not rise in the whole log`)
+          rising.set(f.aggregate, f.seq)
+        }
+        expect(
+          own.every((f) => all.some((a) => a.aggregate === sub && a.seq === f.seq && a.type === f.type)),
+          "the whole log lacks facts of the session",
+        )
+
+        const cut = Math.max(1, Math.floor(own.length / 2))
+        const rest = printed((await events("--session", sub, "--after", String(cut))).stdout)
+        expect(
+          rest.map((f) => f.seq).join() ===
+            own
+              .slice(cut)
+              .map((f) => f.seq)
+              .join(),
+          `--after ${cut} printed seqs ${rest.map((f) => f.seq).join(", ")}, not ${own
+            .slice(cut)
+            .map((f) => f.seq)
+            .join(", ")}`,
+        )
+        const orphan = await events("--after", "1")
+        expect(
+          orphan.code !== 0 && orphan.stdout === "",
+          `--after without --session exited ${orphan.code}: ${orphan.stdout}`,
+        )
+
+        const negative = await events("--session", sub, "--after=-1")
+        expect(
+          negative.code !== 0 && negative.stdout === "",
+          `--after=-1 exited ${negative.code}: ${negative.stdout}${negative.stderr}`,
+        )
+
+        follower = Bun.spawn([binary, "events", "--session", sub, "--after", String(cut), "--follow"], {
+          cwd: p.repo,
+          env: w.env(p.env),
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "ignore",
+        })
+        const decoder = new TextDecoder()
+        let heard = ""
+        void (async () => {
+          for await (const chunk of follower!.stdout as ReadableStream<Uint8Array>) heard += decoder.decode(chunk)
+        })()
+        const lines = () => printed(heard.slice(0, heard.lastIndexOf("\n") + 1))
+        await until("the follower printed the facts so far", () => lines().length >= own.length - cut, 30_000)
+        await p.vibestSend(sub, ask("d10-again"))
+        await until(
+          "the follower printed the second execution",
+          () => lines().filter((f) => f.type === "execution.ended").length >= 2,
+          60_000,
+        )
+        const followed = lines()
+        const seqs = followed.map((f) => f.seq)
+        expect(
+          new Set(seqs).size === seqs.length && seqs.every((seq, i) => seq === cut + i + 1),
+          `follow printed seqs ${seqs.join(", ")}`,
+        )
+        expect(
+          followed.map((f) => f.type).join() ===
+            factsOf(w, sub)
+              .slice(cut, cut + followed.length)
+              .join(),
+          "follow printed facts that differ from the recorded ones",
+        )
+
+        const unknown = await events("--session", crypto.randomUUID())
+        expect(
+          unknown.code !== 0 && unknown.stdout === "" && unknown.stderr.includes("NoSuchSession"),
+          `unknown session exited ${unknown.code}: ${unknown.stdout}${unknown.stderr}`,
+        )
+      } finally {
+        follower?.kill()
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "D12",
+    title:
+      "D12 vibestd writes vibestd.log itself, and a start over a log larger than 10 MiB keeps the last 5 MiB from a line boundary",
+    run: async (w) => {
+      await w.daemon()
+      const log = path.join(w.vibestHome, "vibestd.log")
+      await until("vibestd wrote its log", async () =>
+        (await fs.readFile(log, "utf8").catch(() => "")).includes("level="),
+      )
+      await w.stopDaemon()
+      const old = await w.daemonPid()
+      expect(old === undefined || !alive(old), `vibestd ${old} still alive`)
+      const line = `${"x".repeat(127)}\n`
+      const lines = Math.ceil((LOG_MAX_BYTES + 1) / line.length)
+      await fs.writeFile(log, `HEAD-LOG-TRIM-MARKER\n${line.repeat(lines)}TAIL-LOG-TRIM-MARKER\n`)
+      expect((await fs.stat(log)).size > LOG_MAX_BYTES, "the planted log is not over the trim point")
+      await w.ok(["daemon"])
+      await until("vibestd wrote after the trim", async () =>
+        (await fs.readFile(log, "utf8").catch(() => "")).includes("level="),
+      )
+      const after = await fs.readFile(log, "utf8")
+      expect(!after.includes("HEAD-LOG-TRIM-MARKER"), "the head of the large log survived the start")
+      expect(after.includes("TAIL-LOG-TRIM-MARKER"), "the tail of the large log was dropped")
+      expect(
+        Buffer.byteLength(after) <= LOG_KEEP_BYTES + 256 * 1024,
+        `trimmed log is ${Buffer.byteLength(after)} bytes`,
+      )
+      expect(
+        /^(?:x{127}|TAIL-LOG-TRIM-MARKER)\n/.test(after),
+        `trimmed log does not start on a line: ${after.slice(0, 40)}`,
+      )
+      const tailAt = after.indexOf("TAIL-LOG-TRIM-MARKER")
+      expect(after.indexOf("level=", tailAt) > tailAt, "vibestd wrote nothing after the kept tail")
     },
   },
 ]

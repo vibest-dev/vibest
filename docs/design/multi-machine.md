@@ -20,7 +20,7 @@ Every machine runs its own vibestd. vibest mirrors herdr-core: each vibestd has 
   file: move it aside and start again"; vibest never rewrites a file it cannot read.
 - It survives restarts, `vibest update` and a handoff. Replacing `vibest.db` alone keeps the identity; deleting
   `identity.json` gives a new one at the next start.
-- The host id is read by the platform layer (`packages/cli/src/platform/bun.ts`): on macOS `IOPlatformUUID` from
+- The host id is read by the platform layer (`packages/platform-bun/src/bun.ts`): on macOS `IOPlatformUUID` from
   `ioreg -rd1 -c IOPlatformExpertDevice` (the value hc stores); on Linux the first line of `/etc/machine-id`, else of
   `/var/lib/dbus/machine-id`. Anything else, a read that fails, is empty or takes more than 2 s: unreadable.
 
@@ -71,7 +71,7 @@ added as <name> (<id8>); use that name"), decided from the result of the `INSERT
 machine rm` stops the connection and deletes the row (`UnknownMachine` when there is none), with no checks: agents and undelivered messages stay on B.
 
 The ssh command is `ssh -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p <port>] <target>
-<line>` (`sshArgv`, `packages/core/src/machines.ts`), found on vibestd's `PATH`; ssh resolves the target, so
+<line>` (`sshArgv`, `packages/server/src/machine/machines.ts`), found on vibestd's `PATH`; ssh resolves the target, so
 `~/.ssh/config` applies, and a login that needs a password or a new host key fails with ssh's message. The line finds
 vibest on B (`command -v vibest`, else `$HOME/.local/bin/vibest`) and runs `vibest connect`; exit 127 is reported as
 "vibest is not installed on <name>". A name is letters, digits, `-`, `_`, `.`; a target has no `:` before `@` (a
@@ -94,7 +94,7 @@ notifies nobody.
 `remote_url` equals `repository` or has the same repository identity as `identity` (a multi-repository project is
 refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
-and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
+and fetch it there"), and runs `Session.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
 `origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
@@ -120,7 +120,7 @@ The same repository is often cloned with different URLs on two machines (`git@gi
 port, a leading `~/` or `/`, a trailing `/` and a trailing `.git`: `github.com/o/r` for all of `git@github.com:o/r.git`,
 `ssh://git@github.com:22/o/r`, `https://github.com/o/r.git` and `https://GitHub.com/o/r`. The host of an ssh form
 (scp-like `host:path`, `ssh://`, `git+ssh://`) may be an alias from the ssh config; it is resolved to its real
-`HostName` with `ssh -G <alias>` (the `SshHosts` service: a successful lookup is cached per alias; a failure, a non-zero exit or the 5 s limit gives
+`HostName` with `ssh -G <alias>` (the `RepositoryUrl` service: a successful lookup is cached per alias; a failure, a non-zero exit or the 5 s limit gives
 the alias itself and is asked again next time)
 on the machine that reads it: A resolves its own remote, B the remotes of its own checkouts. An https host is never
 looked up, nor a bracketed IPv6 host or a one-letter host (a Windows path such as `C:/src/r`): those have no identity. A local path or `file://` URL has no identity and matches only the same string. A sends both the raw URL
@@ -153,7 +153,7 @@ project and `vibest-peer-by` set to the calling session, or `user`. `List` (and 
 each connected machine's rows (ids `<name>/<id>`, `machine` set), asked of all machines at once; `machines` lists every
 added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`; a connected
 machine whose `List` fails is shown `unreachable` with that failure as its `reason`. The code is
-`core/src/remote.ts` (forwarding, the merged List, the remote Spawn) and `core/src/machines.ts` (add, dial, the
+`server/src/machine/remote.ts` (forwarding, the merged List, the remote Spawn) and `server/src/machine/machines.ts` (add, dial, the
 connection and outbox receiving).
 
 Errors follow hc. An error from B reaches A's caller unchanged, with B's type and message and no machine prefix

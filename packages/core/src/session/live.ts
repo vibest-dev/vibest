@@ -1,8 +1,17 @@
 import type { AgentStatus } from "@vibest/schema/session"
-import { Context, Effect, HashMap, Layer, Option, Ref, SynchronizedRef } from "effect"
+import { Context, Deferred, Effect, HashMap, Layer, Option, Ref, SynchronizedRef } from "effect"
 
-import type { Integration } from "../db-rows.ts"
+import type { Integration } from "../database/db-rows.ts"
 import { LayerNode } from "../effect/layer-node.ts"
+
+export * as SessionLive from "./live.ts"
+
+export interface Restarted {
+  readonly id: string
+  readonly projectId: string
+  readonly ok: boolean
+  readonly message: string
+}
 
 export interface Tracked {
   readonly endedAt: Ref.Ref<number | undefined>
@@ -24,12 +33,13 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   forgetOnRelease: Ref.make(false),
 })
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
   const statuses = new Map<string, AgentStatus>()
   const integrations = new Map<string, Integration>()
   const archiveOnIdle = new Set<string>()
   const restarting = new Set<string>()
+  const restartOwners = new Map<string, Deferred.Deferred<Restarted>>()
 
   const track = Effect.fn("SessionLive.track")((id: string) =>
     SynchronizedRef.modifyEffect(tracked, (map) =>
@@ -133,6 +143,25 @@ const make = Effect.gen(function* () {
     }),
   )
 
+  const ownRestart = Effect.fn("SessionLive.restarting.own")((id: string, restart: Effect.Effect<Restarted>) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        const owner = restartOwners.get(id)
+        if (owner !== undefined) return restore(Deferred.await(owner))
+        const done = Deferred.makeUnsafe<Restarted>()
+        restartOwners.set(id, done)
+        return restore(restart).pipe(
+          Effect.onExit((exit) =>
+            Effect.sync(() => {
+              restartOwners.delete(id)
+              Deferred.doneUnsafe(done, exit)
+            }),
+          ),
+        )
+      }),
+    ),
+  )
+
   const size = Effect.gen(function* () {
     return { tracked: HashMap.size(yield* SynchronizedRef.get(tracked)), statuses: statuses.size }
   })
@@ -151,14 +180,14 @@ const make = Effect.gen(function* () {
     archiveWhenIdle,
     ended,
     size,
-    restarting: { has: isRestarting, mark: markRestarting, clear: clearRestarting },
+    restarting: { has: isRestarting, mark: markRestarting, clear: clearRestarting, own: ownRestart },
   }
 })
 
-export class SessionLive extends Context.Service<SessionLive, Effect.Success<typeof make>>()("vibest/SessionLive") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(SessionLive, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/SessionLive") {}
 
-  static readonly node = LayerNode.make({ service: SessionLive, layer: SessionLive.layer, deps: [] })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [] })

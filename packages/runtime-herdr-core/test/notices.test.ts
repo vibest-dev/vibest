@@ -1,6 +1,6 @@
 import { BunServices, BunSocketServer } from "@effect/platform-bun"
 import { assert, describe, it } from "@effect/vitest"
-import type * as VibestPlugin from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
 import {
   Cause,
   Deferred,
@@ -133,7 +133,7 @@ const fakeCore = Effect.gen(function* () {
     Stream.runForEach((e) => Queue.offer(seen, e)),
     Effect.forkScoped,
   )
-  yield* Effect.sleep("50 millis")
+  assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
   const follow = Effect.gen(function* () {
     yield* runtime.process(terminal)
     const sub = yield* Queue.take(subscribers)

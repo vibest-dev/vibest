@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
-import { Db, exitedAt } from "@vibest/core/db"
-import { Sessions, START_TIMEOUT } from "@vibest/core/sessions"
+import { Db } from "@vibest/core/database/db"
+import { exitedAt } from "@vibest/core/database/db-rows"
+import { Session, START_TIMEOUT } from "@vibest/core/session"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -15,20 +16,20 @@ const TEST_HERDR = "herdr"
 const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) =>
   testEffect(sessionFrom({ hooked: ["pi"] }))(name, () => program)
 
-const startupSettled = (sessions: Sessions["Service"]) => until(sessions.inMemory, (memory) => memory.reconciles >= 1)
+const startupSettled = (sessions: Session.Interface) => until(sessions.inMemory, (memory) => memory.reconciles >= 1)
 
 describe("reconcile: a terminal whose agent has not started", () => {
   test(
     "a pending launch is checked again after the start timeout, and ended once the runtime says it is gone",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
       const id = "cccccccc-cccc-4ccc-8ccc-000000000001"
       yield* herdr.addPane("w8:pending", "w8", repo)
-      yield* startupSettled(yield* Sessions)
-      yield* db.insertSession(
+      yield* startupSettled(yield* Session.Service)
+      yield* db.session.insertSession(
         {
           id,
           agent: "general",
@@ -52,12 +53,12 @@ describe("reconcile: a terminal whose agent has not started", () => {
       )
       const sessions = yield* restartSessions
       yield* startupSettled(sessions)
-      assert.isNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
       yield* herdr.seedAgent("w8:pending")
       yield* herdr.updateAgent("w8:pending", (agent) => ({ ...agent, alive: false }))
-      assert.isNull(exitedAt((yield* db.getSession(id))!))
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* until(db.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
+      yield* until(db.session.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
     }),
   )
 })

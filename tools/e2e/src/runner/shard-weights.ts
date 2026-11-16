@@ -1,5 +1,6 @@
 export const shardWeights: Readonly<Record<string, number>> = {
   D1: 4,
+  D12: 4,
   D5: 2,
   D6: 2,
   G1: 2,

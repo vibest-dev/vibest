@@ -1,21 +1,23 @@
 import { assert, describe } from "@effect/vitest"
-import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
-import { Sessions } from "@vibest/core/sessions"
+import { Db } from "@vibest/core/database/db"
+import { harnessIdOf, exitedAt, executionStateOf, terminalOf } from "@vibest/core/database/db-rows"
+import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
-import { Effect, Fiber, FileSystem, HashMap } from "effect"
+import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
+import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { EXECUTIONS, writeEnd, systemPromptFile } from "./lib/observe.ts"
+import { EXECUTIONS, settled, until, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
   harnessOf,
   spawnWorking,
   sessionWorktree,
+  spawnInput,
   test,
   sqlNotices,
   limited,
@@ -24,25 +26,141 @@ import {
   entryOfProject,
 } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
+  test(
+    "a usage limit when the first terminal opens moves the session; when the move dies the new worktree is removed",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const fs = yield* FileSystem.FileSystem
+      const opening = yield* herdr.hold("open")
+      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
+      yield* opening.reached
+      const worktree = yield* sessionWorktree(id)
+      assert.isTrue(yield* fs.exists(worktree))
+      yield* opening.release("rate_limit: usage limit reached")
+      yield* until(db.session.getSession(id), (row) => row !== undefined && exitedAt(row) !== null)
+      yield* settled
+      assert.isFalse(yield* fs.exists(worktree))
+      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "move died")
+    }),
+    { db: (db) => ({ ...db, session: { ...db.session, limitSource: () => Effect.die(new Error("move died")) } }) },
+  )
+
+  {
+    const defect = { armed: false }
+    test(
+      "a move that dies after it opened the replacement terminal closes that terminal before removing the worktree",
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        const db = yield* Db.Service
+        const fs = yield* FileSystem.FileSystem
+        const opening = yield* herdr.hold("open")
+        const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
+        yield* opening.reached
+        const worktree = yield* sessionWorktree(id)
+        const replacing = yield* herdr.hold("open")
+        yield* opening.release("rate_limit: usage limit reached")
+        yield* replacing.reached
+        defect.armed = true
+        yield* replacing.release()
+        yield* until(db.inbox.latestInbox(id, "notice"), (row) => row?.message.includes("move died") === true)
+        yield* settled
+        const replacement = terminalOf((yield* db.session.getSession(id))!)
+        assert.notStrictEqual(replacement.id, "")
+        assert.include(
+          (yield* herdr.callsTo("close")).map((call) => call.terminal),
+          replacement.id,
+        )
+        assert.isFalse(yield* fs.exists(worktree))
+      }),
+      {
+        plugins: [chooseNext],
+        db: (db) => ({
+          ...db,
+          session: {
+            ...db.session,
+            getSession: (id) => {
+              if (!defect.armed) return db.session.getSession(id)
+              defect.armed = false
+              return Effect.die(new Error("move died"))
+            },
+          },
+        }),
+      },
+    )
+  }
+
+  {
+    const gate = { armed: false, reached: Deferred.makeUnsafe<void>(), go: Deferred.makeUnsafe<void>() }
+    test(
+      "a move that dies after another session joined its worktree with --share keeps the worktree for that session",
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        const db = yield* Db.Service
+        const fs = yield* FileSystem.FileSystem
+        const sessions = yield* Session.Service
+        const repo = yield* makeRepository
+        const opening = yield* herdr.hold("open")
+        const { id } = yield* sessions.spawn(yield* spawnInput(repo))
+        yield* opening.reached
+        const worktree = yield* sessionWorktree(id)
+        const replacing = yield* herdr.hold("open")
+        yield* opening.release("rate_limit: usage limit reached")
+        yield* replacing.reached
+        gate.armed = true
+        yield* replacing.release()
+        yield* Deferred.await(gate.reached)
+        const borrower = yield* sessions.spawn({ ...(yield* spawnInput(repo)), share: id })
+        yield* until(
+          db.session.getSession(borrower.id),
+          (row) => row !== undefined && (row.process?.placedAt ?? null) !== null,
+        )
+        assert.strictEqual(yield* sessionWorktree(borrower.id), worktree)
+        yield* Deferred.succeed(gate.go, undefined)
+        yield* until(db.inbox.latestInbox(id, "notice"), (row) => row?.message.includes("move died") === true)
+        yield* settled
+        assert.isTrue(yield* fs.exists(worktree))
+        assert.isNull(exitedAt((yield* db.session.getSession(borrower.id))!))
+      }),
+      {
+        plugins: [chooseNext],
+        db: (db) => ({
+          ...db,
+          session: {
+            ...db.session,
+            getSession: (id) => {
+              if (!gate.armed) return db.session.getSession(id)
+              gate.armed = false
+              return Deferred.succeed(gate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(gate.go)),
+                Effect.andThen(Effect.die(new Error("move died"))),
+              )
+            },
+          },
+        }),
+      },
+    )
+  }
+
   test(
     "a usage-limit failure of a running session reports the limit and starts nothing else",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* (yield* Subscriptions).report({
+      yield* (yield* Subscriptions.Service).report({
         harness: "pi",
         limits: [{ window: "5h", percent: 100, status: "limited", resetTime }],
       })
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       yield* sessions.check(id)
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "pi")
       assert.strictEqual(executionStateOf(row), "failed")
       assert.include(
-        (yield* db.latestInbox(id, "notice"))!.message,
+        (yield* db.inbox.latestInbox(id, "notice"))!.message,
         `pi: 5h limit exhausted, resets ${new Date(resetTime).toISOString()}`,
       )
       assert.deepStrictEqual(
@@ -61,14 +179,14 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const { id, sessions, db } = yield* spawnWorking(repo)
       assert.notInclude(yield* fs.readFileString(yield* systemPromptFile(id)), "learned before the move")
-      const memory = `${layout.project(String((yield* db.getSession(id))!.projectId))}/memories`
+      const memory = `${layout.project(String((yield* db.session.getSession(id))!.projectId))}/memories`
       yield* fs.makeDirectory(memory, { recursive: true })
       yield* fs.writeFileString(`${memory}/moved.md`, "learned before the move")
       yield* fs.writeFileString(yield* systemPromptFile(id), "stale text")
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       yield* sessions.check(id)
-      assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "claude")
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "claude")
       const [run] = yield* herdr.callsTo("run")
       assert.include(run!.argv, yield* systemPromptFile(id))
       const prompt = yield* fs.readFileString(yield* systemPromptFile(id))
@@ -84,15 +202,15 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const project = (yield* db.getSession(id))!.projectId
+      const project = (yield* db.session.getSession(id))!.projectId
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       yield* sessions.check(id)
-      const moved = (yield* db.getSession(id))!
+      const moved = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(moved), "claude")
       assert.strictEqual(executionStateOf(moved), "open")
       assert.deepStrictEqual(yield* entryPending(db, project), [])
-      assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
+      assert.strictEqual((yield* db.session.sessionBriefs([id])).get(id)?.task, "do it")
       assert.strictEqual((yield* herdr.callsTo("open")).at(-1)!.cwd, yield* sessionWorktree(id))
       assert.lengthOf(yield* herdr.callsTo("close"), 1)
       assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
@@ -110,8 +228,8 @@ describe.concurrent("Sessions", () => {
       )
       yield* writeEnd(id, "pi", { error: "rate_limit", text: "status: completed\nsummary: stale" })
       yield* sessions.check(id)
-      assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "claude")
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "open")
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "claude")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude"],
@@ -142,7 +260,7 @@ describe.concurrent("Sessions", () => {
       const aborted = yield* spawnWorking(repo)
       const missing = yield* spawnWorking(repo)
       const lost = yield* spawnWorking(repo)
-      yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
+      yield* (yield* Subscriptions.Service).report({ harness: "pi", limits: [limited] })
       const fail = (
         id: string,
         sessions: typeof aborted.sessions,
@@ -154,10 +272,10 @@ describe.concurrent("Sessions", () => {
           yield* writeEnd(id, "pi", details === undefined ? { error } : { error, error_details: details })
           yield* herdr.endExecution(id)
           yield* sessions.check(id)
-          const row = (yield* db.getSession(id))!
+          const row = (yield* db.session.getSession(id))!
           assert.strictEqual(harnessIdOf(row), "pi")
           assert.strictEqual(executionStateOf(row), "failed")
-          const result = yield* db.latestInbox(id, "notice")
+          const result = yield* db.inbox.latestInbox(id, "notice")
           assert.include(result!.message, error)
           assert.notInclude(result!.message, "no harness left")
         })
@@ -165,10 +283,10 @@ describe.concurrent("Sessions", () => {
       yield* fail(missing.id, missing.sessions, missing.db, "model_not_found", "usage limit")
       yield* herdr.endExecution(lost.id)
       yield* lost.sessions.check(lost.id)
-      assert.strictEqual(executionStateOf((yield* lost.db.getSession(lost.id))!), "open")
+      assert.strictEqual(executionStateOf((yield* lost.db.session.getSession(lost.id))!), "open")
       yield* TestClock.adjust("11 seconds")
       yield* lost.sessions.check(lost.id)
-      const row = (yield* lost.db.getSession(lost.id))!
+      const row = (yield* lost.db.session.getSession(lost.id))!
       assert.strictEqual(harnessIdOf(row), "pi")
       assert.strictEqual(executionStateOf(row), "lost")
       assert.deepStrictEqual(
@@ -200,11 +318,11 @@ describe.concurrent("Sessions", () => {
       const agent = (yield* herdr.agent(id))!
       assert.strictEqual(harnessOf((yield* herdr.callsTo("open")).at(-1)!.argv), "pi")
       assert.strictEqual(agent.terminal, pane)
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "pi")
       assert.strictEqual(executionStateOf(row), "failed")
       assert.isNull(exitedAt(row))
-      assert.include((yield* db.latestInbox(id, "notice"))!.message, "closing its terminal failed")
+      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "closing its terminal failed")
     }),
     { noRun: true, plugins: [chooseNext] },
   )
@@ -221,7 +339,7 @@ describe.concurrent("Sessions", () => {
       yield* held.reached
       yield* held.release("failed to start claude")
       yield* Fiber.join(checking)
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "cursor")
       assert.strictEqual(executionStateOf(row), "open")
       assert.deepStrictEqual(
@@ -232,7 +350,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "cursor", { error: "rate_limit" })
       yield* sessions.check(id)
-      const again = (yield* db.getSession(id))!
+      const again = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(again), "claude")
       assert.strictEqual(executionStateOf(again), "open")
       assert.deepStrictEqual(
@@ -253,15 +371,15 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       yield* sessions.check(id)
-      assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "cursor")
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "cursor")
       assert.deepStrictEqual(failSeen, [{ parent: yield* entryOfProject(repo), attempts: [["pi", "limited"]] }])
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "cursor", { error: "rate_limit" })
       yield* sessions.check(id)
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(executionStateOf(row), "failed")
       assert.isNull(exitedAt(row))
-      const message = (yield* db.latestInbox(id, "notice"))!.message
+      const message = (yield* db.inbox.latestInbox(id, "notice"))!.message
       assert.include(message, "cursor: rate_limit")
       assert.strictEqual(message.includes("claude"), false)
       assert.deepStrictEqual(
@@ -300,7 +418,7 @@ describe.concurrent("Sessions", () => {
       yield* held.reached
       yield* held.release("failed to start claude")
       yield* Fiber.join(checking)
-      assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "cursor")
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "cursor")
       const executions = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
         (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
@@ -331,21 +449,21 @@ describe.concurrent("Sessions", () => {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
-      assert.strictEqual(harnessIdOf((yield* db.getSession(id))!), "pi")
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
+      yield* (yield* Session.Service).check(id)
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "pi")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi"],
       )
-      assert.include((yield* db.latestInbox(id, "notice"))!.message, "no harness left")
+      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "no harness left")
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
     }),
     {
       plugins: [
         Plugin.define({
           id: "stuck",
-          effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "pi" })),
+          effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi" }))),
         }),
       ],
     },
@@ -358,11 +476,11 @@ describe.concurrent("Sessions", () => {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
-      const row = (yield* db.getSession(id))!
+      yield* (yield* Session.Service).check(id)
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "pi")
       assert.strictEqual(executionStateOf(row), "failed")
-      assert.include((yield* db.latestInbox(id, "notice"))!.message, "claude tried and did not start")
+      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "claude tried and did not start")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi"],
@@ -379,8 +497,8 @@ describe.concurrent("Sessions", () => {
               )
               yield* ctx.agent.hook("fail", (event) =>
                 Effect.sync(() => {
-                  if (!event.attempts.some((attempt) => attempt.harness === "claude")) return { harness: "claude" }
-                  return undefined
+                  if (!event.attempts.some((attempt) => attempt.harness === "claude"))
+                    event.move = { harness: "claude" }
                 }),
               )
             }),
@@ -398,18 +516,18 @@ describe.concurrent("Sessions", () => {
       const pane = (yield* herdr.agent(id))!.terminal
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
-      const row = (yield* db.getSession(id))!
+      yield* (yield* Session.Service).check(id)
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(executionStateOf(row), "failed")
       assert.isNull(exitedAt(row))
       assert.include(
-        (yield* db.listSessions()).map((s) => s.id),
+        (yield* db.session.listSessions()).map((s) => s.id),
         id,
       )
       assert.isTrue(HashMap.has(yield* herdr.panes, pane))
       assert.strictEqual(harnessOf((yield* herdr.callsTo("open"))[0]!.argv), "pi")
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-      assert.include((yield* db.latestInbox(id, "notice"))!.message, "pi: rate_limit")
+      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "pi: rate_limit")
       const results = yield* sql<{
         n: number
       }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
@@ -435,7 +553,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       const held = yield* herdr.hold("send", id)
-      const checking = yield* Effect.forkChild((yield* Sessions).check(id))
+      const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
       yield* held.reached
       yield* held.release("failed")
       yield* Fiber.join(checking)
@@ -444,8 +562,8 @@ describe.concurrent("Sessions", () => {
       assert.lengthOf(closes, 2)
       assert.isFalse(HashMap.has(yield* herdr.panes, closes[1]!))
       assert.isFalse((yield* herdr.agent(id))!.agent.alive)
-      assert.include((yield* db.latestInbox(id, "notice"))!.message, "rate_limit")
-      assert.isNotNull(exitedAt((yield* db.getSession(id))!))
+      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "rate_limit")
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
       assert.lengthOf(yield* sqlNotices(id), 1)
     }),
     {
@@ -455,11 +573,10 @@ describe.concurrent("Sessions", () => {
           id: "once",
           effect: (ctx) => {
             let first = true
-            return ctx.agent.hook("fail", () =>
+            return ctx.agent.hook("fail", (event) =>
               Effect.sync(() => {
-                const move = first ? { harness: "claude" } : undefined
+                if (first) event.move = { harness: "claude" }
                 first = false
-                return move
               }),
             )
           },
@@ -478,7 +595,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       const closing = yield* herdr.hold("close")
-      const checking = yield* Effect.forkChild((yield* Sessions).check(id))
+      const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
       yield* closing.reached
       const prompting = yield* herdr.hold("send", id)
       yield* closing.release()
@@ -497,11 +614,11 @@ describe.concurrent("Sessions", () => {
       const agent = (yield* herdr.agent(id))!
       assert.strictEqual(harnessOf((yield* herdr.callsTo("open")).at(-1)!.argv), "claude")
       assert.strictEqual(agent.terminal, kept)
-      const row = (yield* db.getSession(id))!
+      const row = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "claude")
       assert.strictEqual(executionStateOf(row), "failed")
       assert.isNull(exitedAt(row))
-      const message = (yield* db.latestInbox(id, "notice"))!.message
+      const message = (yield* db.inbox.latestInbox(id, "notice"))!.message
       assert.include(message, "closing its terminal failed")
       assert.notInclude(message, "no harness left")
       const results = yield* sql<{
@@ -517,11 +634,10 @@ describe.concurrent("Sessions", () => {
           id: "close-fails",
           effect: (ctx) => {
             let first = true
-            return ctx.agent.hook("fail", () =>
+            return ctx.agent.hook("fail", (event) =>
               Effect.sync(() => {
-                const move = first ? { harness: "claude" } : undefined
+                if (first) event.move = { harness: "claude" }
                 first = false
-                return move
               }),
             )
           },

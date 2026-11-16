@@ -14,14 +14,17 @@
   ],
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/promise/index.ts",
+    "./effect": "./src/effect/index.ts",
+    "./promise/adapter": "./src/promise/adapter.ts",
     "./testing": "./src/testing.ts"
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/plugin/"
   },
   "dependencies": {
     "@vibest/schema": "workspace:*"

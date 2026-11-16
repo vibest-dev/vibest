@@ -1,9 +1,10 @@
 import { it } from "@effect/vitest"
-import { Db, executionStateOf, exitedAt, type SessionRow } from "@vibest/core/db"
-import type { HarnessId } from "@vibest/core/harness"
+import { Db } from "@vibest/core/database/db"
+import { executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/db-rows"
 import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
-import { Sessions } from "@vibest/core/sessions"
-import { isLimited, Plugin, stillLimited } from "@vibest/plugin"
+import { Session } from "@vibest/core/session"
+import { isLimited, Plugin, stillLimited } from "@vibest/plugin/effect"
+import type { HarnessId } from "@vibest/schema/session"
 import { Effect, type Scope } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -18,11 +19,11 @@ export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-a
 
 export const entryOfProject = (repo: string) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     const projectId = yield* projectOf(repo)
-    const found = yield* db.entryOf(projectId)
+    const found = yield* db.session.entryOf(projectId)
     if (found !== undefined) return found.id
-    return (yield* db.startEntry(
+    return (yield* db.session.startEntry(
       projectId,
       "pi",
       false,
@@ -67,17 +68,20 @@ export const claudeEnd = (reason: string) =>
 
 export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {
-    const sessions = yield* Sessions
-    const db = yield* Db
+    const sessions = yield* Session.Service
+    const db = yield* Db.Service
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
     })
-    yield* until(db.getSession(id), (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null))
+    yield* until(
+      db.session.getSession(id),
+      (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
+    )
     yield* sessions.check(id)
     yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
-    const row = (yield* db.getSession(id))!
+    const row = (yield* db.session.getSession(id))!
     return { id, row, sessions, db, entryId: yield* entryOfProject(repo) }
   })
 
@@ -94,7 +98,7 @@ export const idleSession = (repo: string, extra: { readonly archive?: boolean } 
 
 export const sessionWorktree = (id: string) =>
   Effect.gen(function* () {
-    const located = yield* (yield* Db).sessionDirectory(id)
+    const located = yield* (yield* Db.Service).session.sessionDirectory(id)
     if (!located) return yield* Effect.die(`no worktree for ${id}`)
     return located
   })
@@ -103,13 +107,7 @@ export const test = <E>(
   name: string,
   program: Effect.Effect<void, E, TestServices | Scope.Scope>,
   options?: TestOptions,
-  touchesProcessWideSeam = false,
-) =>
-  it.effect(
-    name,
-    () => program.pipe(Effect.provide(sessionFrom(options))),
-    touchesProcessWideSeam ? { concurrent: false } : undefined,
-  )
+) => it.effect(name, () => program.pipe(Effect.provide(sessionFrom(options))))
 
 export const SPAWN_HEAVY_TEST_TIMEOUT = 90_000
 
@@ -152,7 +150,7 @@ export const chooseNext = Plugin.define({
   effect: (ctx) =>
     ctx.agent.hook("fail", (event) =>
       Effect.sync(() => {
-        if (event.reason !== "limited") return undefined
+        if (event.reason !== "limited") return
         const pair = (harness: string, provider: string) => `${harness}\0${provider}`
         const excludedPairs = new Set<string>()
         const excludedHarnesses = new Set(event.attempts.filter((a) => a.outcome !== "limited").map((a) => a.harness))
@@ -193,8 +191,7 @@ export const chooseNext = Plugin.define({
         }
         const picked = known.length > 0 ? known.reduce((a, b) => (a.score <= b.score ? a : b)) : undefined
         const fallback = unknown[0]
-        const chosen = picked ?? (fallback === undefined ? undefined : { harness: fallback, provider: undefined })
-        return chosen
+        event.move = picked ?? (fallback === undefined ? undefined : { harness: fallback, provider: undefined })
       }),
     ),
 })

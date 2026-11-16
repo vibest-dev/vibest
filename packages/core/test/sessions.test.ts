@@ -1,47 +1,48 @@
 import { assert, describe } from "@effect/vitest"
-import { executionStateOf, exitedAt } from "@vibest/core/db"
+import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
+import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
-import { Sessions } from "@vibest/core/sessions"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
+import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { entryOfProject, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
+import { entryOfProject, sessionWorktree, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
 
-describe.concurrent("Sessions", () => {
+describe.concurrent("Session", () => {
   test(
     "a session's in-memory flags, lock and live status go once it ends; resumed, its next execution ends as any execution does; archived, they go again with no check of its own",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db, entryId } = yield* spawnWorking(yield* makeRepository)
       yield* settleEntry(sessions, entryId)
-      const entryStatuses = (yield* (yield* SessionLive).size).statuses - 1
+      const entryStatuses = (yield* (yield* SessionLive.Service).size).statuses - 1
       assert.deepInclude(yield* sessions.inMemory, { tracked: 2, locks: 0 })
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses + 1)
+      assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses + 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
+      assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses)
       yield* until(sessions.inMemory, atMostEntryTracked)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       yield* sessions.check(id)
-      const open = (yield* db.getSession(id))!
+      const open = (yield* db.session.getSession(id))!
       assert.strictEqual(executionStateOf(open), "open")
       assert.isNull(exitedAt(open))
       yield* writeEnd(id, "pi", { text: "done again" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "completed")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.include(yield* replyOf(id), "done again")
       yield* TestClock.adjust("10 seconds")
       assert.strictEqual((yield* sessions.inMemory).tracked, 2)
-      assert.deepInclude(yield* db.getSession(id), { status: "idle" })
+      assert.deepInclude(yield* db.session.getSession(id), { status: "idle" })
       yield* sessions.remove(id)
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses)
       yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
     }),
     { hooked: ["pi"] },
@@ -63,15 +64,15 @@ describe.concurrent("Sessions", () => {
       yield* processHeld.reached
       yield* sessions.send(id, "queued")
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
-      assert.lengthOf(yield* db.pendingInbox(id), 1)
+      assert.lengthOf(yield* db.inbox.pendingInbox(id), 1)
       yield* processHeld.release()
       yield* Fiber.join(checking)
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       yield* settled
-      assert.strictEqual(executionStateOf((yield* db.getSession(id))!), "failed")
-      assert.isNotNull(exitedAt((yield* db.getSession(id))!))
-      assert.lengthOf(yield* db.pendingInbox(id), 0)
-      assert.lengthOf(yield* db.inboxWithStatus(id, "failed"), 1)
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.lengthOf(yield* db.inbox.pendingInbox(id), 0)
+      assert.lengthOf(yield* db.inbox.inboxWithStatus(id, "failed"), 1)
       assert.strictEqual(yield* opens(), before)
       const notices = yield* sqlNotices(id)
       assert.lengthOf(notices, 1)
@@ -86,7 +87,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const { parentSessionId: _, ...input } = yield* spawnInput(repo)
       const error = yield* Effect.flip(
-        (yield* Sessions).spawn({
+        (yield* Session.Service).spawn({
           ...input,
           harness: undefined,
           origin: { peer: "a".repeat(32), project: "p", reportTo: "origin-session" },
@@ -103,12 +104,30 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const parent = yield* entryOfProject(repo)
-      const error = yield* Effect.flip((yield* Sessions).spawn({ ...(yield* spawnInput(repo)), harness: undefined }))
+      const error = yield* Effect.flip(
+        (yield* Session.Service).spawn({ ...(yield* spawnInput(repo)), harness: undefined }),
+      )
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, `(inherited from ${parent})`)
       assert.match(error.message, /this machine can run: .*claude/)
       assert.notMatch(error.message, /can run: .*\bpi\b/)
     }),
     { unusable: ["pi"] },
+  )
+
+  test(
+    "a git read that fails marks that session unknown and still lists the others",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const broken = yield* spawnWorking(repo)
+      const fine = yield* spawnWorking(repo)
+      yield* (yield* FakeGit).checkout(yield* sessionWorktree(broken.id), { stateError: "worktree unreadable" })
+      const listed = yield* broken.sessions.list()
+      const failed = listed.find((row) => row.id === broken.id)
+      const other = listed.find((row) => row.id === fine.id)
+      assert.strictEqual(failed?.git?.unknown, "Unknown: Git.state: worktree unreadable")
+      assert.strictEqual(other?.git?.saved, true)
+      assert.strictEqual(other?.git?.unknown, undefined)
+    }),
   )
 })

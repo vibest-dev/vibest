@@ -1,5 +1,6 @@
 import {
   cliHeaders,
+  DAEMON_START_TIMEOUT,
   connect,
   described,
   importCheck,
@@ -8,8 +9,6 @@ import {
   startDaemon,
   stopByHand,
 } from "@vibest/client/client"
-import { askYesNo, interactive, Layout, VibestCommand, shellQuote } from "@vibest/core/paths"
-import { NoSuchSession } from "@vibest/core/sessions"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import {
   DaemonBusy,
@@ -20,9 +19,13 @@ import {
   ProtocolRejected,
   WrongInstance,
 } from "@vibest/protocol/rpc"
+import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
+import { NoSuchSession } from "@vibest/schema/session"
 import { Cause, Console, Duration, Effect, Exit, Option, Path, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, type RpcClientError } from "effect/rpc"
+
+import { askYesNo, interactive } from "./ask.ts"
 
 export const ReplaceOutcome = Schema.Literals(["declined", "busy", "unchanged", "unknown", "other"])
 
@@ -185,7 +188,14 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
           ),
         ),
       )
-    const now = Option.getOrUndefined(yield* readPing(layout.socket))
+    const now = (yield* readPing(layout.socket).pipe(
+      Effect.repeat({
+        until: (p) => Option.isSome(p) && p.value.instance !== old.instance,
+        schedule: Schedule.spaced("200 millis"),
+      }),
+      Effect.timeoutOption(DAEMON_START_TIMEOUT),
+      Effect.map(Option.flatten),
+    )).pipe(Option.getOrUndefined)
     if (!now)
       return yield* fail("unknown", `the old vibestd stopped answering, and nothing answers on ${layout.socket} now`)
     if (!isTarget(now, old, target))

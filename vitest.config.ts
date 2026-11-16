@@ -7,6 +7,7 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     include: [
       "packages/cli/test/**/*.test.ts",
+      "packages/platform-bun/test/**/*.test.ts",
       "packages/integration/claude/test/**/*.test.ts",
       "packages/effect-herdr-sdk/test/**/*.test.ts",
       "packages/effect-herdr-core-sdk/test/**/*.test.ts",
@@ -18,8 +19,8 @@ export default defineConfig({
       "packages/core/src/**/*.test.ts",
       "packages/core/test/**/*.test.ts",
       "packages/plugin-harnesses/test/**/*.test.ts",
+      "packages/plugin/test/**/*.test.ts",
       "tools/oxlint/**/*.test.mjs",
-      "tools/check/**/*.test.ts",
     ],
     fileParallelism: true,
     maxConcurrency: 8,

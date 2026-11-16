@@ -436,6 +436,11 @@ const checks: ReadonlyArray<Check> = [
         const id = await runSub(w, m.repo, session, sub.url, "pi-quiet-sub", "end the execution without sending")
         await until("the subagent's answer", async () => (await replyOf(w, id, m.repo)).includes("done-s3"), 60_000)
         await expectReplied(w, id)
+        await until(
+          "the entry session's setup tool result to reach its model",
+          () => entryModel.requests.some((r) => r.some(isEntryRunResult)),
+          60_000,
+        )
         const asked = entryModel.requests.length
         await Bun.sleep(5_000)
         expect(

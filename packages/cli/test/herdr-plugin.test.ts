@@ -4,9 +4,18 @@ import os from "node:os"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Db, terminalOf } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
+import { Db } from "@vibest/core/database/db"
+import { terminalOf } from "@vibest/core/database/db-rows"
 import { Project } from "@vibest/core/project"
+import {
+  FakeRuntime,
+  makeRepository,
+  projectOf,
+  runVibest,
+  stopRecorded,
+  tempDirectory,
+  testLayer,
+} from "@vibest/platform-bun/test/lib/fakes"
 import {
   ACTIONS,
   formatUsage,
@@ -21,6 +30,7 @@ import {
   projectDirectory,
   type Verb,
 } from "@vibest/runtime-herdr/commands"
+import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { Effect, FileSystem, Layer } from "effect"
 import { TestClock } from "effect/testing"
@@ -28,7 +38,6 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { ARCHIVE_ROOTS, copyHerdrPlugin } from "../scripts/archive-layout.ts"
-import { FakeRuntime, makeRepository, projectOf, runVibest, stopRecorded, tempDirectory, testLayer } from "./fakes.ts"
 
 const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({
   workspaceId: undefined,
@@ -355,7 +364,7 @@ describe("herdr open-entry", () => {
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout
-        const db = yield* Db
+        const db = yield* Db.Service
         const herdr = yield* FakeRuntime
         const repo = yield* makeRepository
         const env = {
@@ -368,7 +377,7 @@ describe("herdr open-entry", () => {
         assert.match(never.stderr, /no harness to inherit/)
         assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
         const projectId = yield* projectOf(repo)
-        yield* db.startEntry(
+        yield* db.session.startEntry(
           projectId,
           "pi",
           false,
@@ -382,7 +391,7 @@ describe("herdr open-entry", () => {
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.match(stopped.stdout, /^opened /)
         assert.ok((yield* herdr.callsTo("open")).length > 0)
-        const entryId = terminalOf((yield* db.entryOf(projectId))!)!.id
+        const entryId = terminalOf((yield* db.session.entryOf(projectId))!)!.id
         yield* herdr.seedAgent(entryId)
         const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(again.code, 0, again.stderr)

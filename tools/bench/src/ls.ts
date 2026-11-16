@@ -3,7 +3,8 @@ import path from "node:path"
 
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Bus } from "@vibest/core/bus"
-import { Db, SQL_NAMES } from "@vibest/core/db"
+import { Db, SQL_NAMES } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Layer } from "effect"
 
@@ -80,11 +81,11 @@ const stop = async (home: string) => {
 
 const seed = (file: string, directory: string, n: number) =>
   Effect.gen(function* () {
-    const db = yield* Db
-    const project = yield* db.createProject(directory, [])
+    const db = yield* Db.Service
+    const project = yield* db.project.createProject(directory, [])
     const now = Date.now()
     for (let i = 0; i < n; i++) {
-      const inserted = yield* db.insertSession(
+      const inserted = yield* db.session.insertSession(
         {
           id: `${i.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`,
           agent: "general",
@@ -113,9 +114,10 @@ const seed = (file: string, directory: string, n: number) =>
   }).pipe(
     Effect.provide(
       Db.layer.pipe(
-        Layer.provide(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES })),
+        Layer.provide(Projectors.layer),
         Layer.provide(Bus.layer),
         Layer.provide(SessionLive.layer),
+        Layer.provide(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES })),
       ),
     ),
     Effect.scoped,

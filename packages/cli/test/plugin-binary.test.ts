@@ -2,9 +2,9 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { assert, it } from "@effect/vitest"
+import { assert, beforeAll, it } from "@effect/vitest"
 import { connect, probe, protocolHeaders } from "@vibest/client/client"
-import type { PluginInfo } from "@vibest/core/plugins"
+import type { PluginInfo } from "@vibest/core/plugin"
 import { Effect } from "effect"
 
 import * as Platform from "#platform"
@@ -15,7 +15,7 @@ const pkg = path.join(import.meta.dirname, "..")
 const binary = path.join(pkg, "dist", "vibest")
 
 const plugins: Record<string, string> = {
-  "shared.ts": `import { AgentRefused, Plugin } from "@vibest/plugin"
+  "shared.ts": `import { AgentRefused, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import * as S from "effect/Schema"
 export default Plugin.define({
@@ -25,7 +25,7 @@ export default Plugin.define({
     : Effect.die("effect/Schema or @vibest/plugin is not usable"),
 })
 `,
-  "bundled/index.ts": `import { Plugin } from "@vibest/plugin"
+  "bundled/index.ts": `import { Plugin } from "@vibest/plugin/effect"
 import * as E from "effect"
 export default Plugin.define({ id: "bundled", effect: (ctx) => ("ownCopy" in E ? E.Effect.die("own copy") : ctx.agent.hook("start.before", () => E.Effect.void)) })
 `,
@@ -79,19 +79,15 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
   }
 }
 
-let built = false
-const build = () => {
-  if (built) return
+beforeAll(() => {
   const out = Bun.spawnSync(["bun", "run", "build"], { cwd: pkg, stdout: "pipe", stderr: "pipe" })
   assert.strictEqual(out.exitCode, 0, out.stderr.toString())
-  built = true
-}
+}, 120_000)
 
 it(
   "P11: the compiled binary maps effect, effect/* and @vibest/plugin to its own instances, even for a plugin with its own copy of effect",
   { timeout: 60_000 },
   async () => {
-    build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-p11-"))
     for (const [file, content] of Object.entries(plugins)) {
       await fs.mkdir(path.dirname(path.join(home, "plugins", file)), { recursive: true })
@@ -99,7 +95,11 @@ it(
     }
     try {
       await withVibestd(home, async (list) => {
-        const status = Object.fromEntries((await list()).map((p) => [path.basename(p.id), [p.status, p.error]]))
+        const listed = await listUntil(list, (rows) => {
+          const status = Object.fromEntries(rows.map((p) => [path.basename(p.id), p.status]))
+          return status["shared"] === "active" && status["bundled"] === "active" && status["broken.ts"] === "failed"
+        })
+        const status = Object.fromEntries(listed.map((p) => [path.basename(p.id), [p.status, p.error]]))
         assert.deepStrictEqual(status["shared"], ["active", undefined])
         assert.deepStrictEqual(status["bundled"], ["active", undefined])
         assert.strictEqual(status["broken.ts"]?.[0], "failed")
@@ -129,7 +129,6 @@ it(
   "P16/P17: the running binary reloads changed async imports, keeps running the last good one while an import hangs (it gives up after 5s) without setting it up again, recovers",
   { timeout: 300_000 },
   async () => {
-    build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-reload-"))
     const setups = path.join(home, "setups.log")
     const version = path.join(home, "shared", "version.ts")
@@ -140,7 +139,7 @@ it(
     await fs.writeFile(version, versionFileWithTopLevelAwait("v1"))
     await fs.writeFile(
       path.join(home, "plugins", "live.ts"),
-      `import { Plugin } from "@vibest/plugin"
+      `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import fs from "node:fs"
 import { version } from "../shared/version.ts"
@@ -193,7 +192,6 @@ it(
   "a plugin's lazy import, imported again once another plugin loads, is the same module evaluated once",
   { timeout: 180_000 },
   async () => {
-    build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-lazy-"))
     const log = path.join(home, "lazy.log")
     await fs.mkdir(path.join(home, "plugins", "lazy"), { recursive: true })
@@ -203,7 +201,7 @@ it(
     )
     await fs.writeFile(
       path.join(home, "plugins", "lazy", "index.ts"),
-      `import { Plugin } from "@vibest/plugin"
+      `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import fs from "node:fs"
 const home = process.env.VIBEST_HOME!
@@ -228,7 +226,7 @@ export default Plugin.define({
         await listUntil(list, (l) => l[0]?.status === "active")
         await fs.writeFile(
           path.join(home, "plugins", "zz-other.ts"),
-          `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "other", effect: () => Effect.void })\n`,
+          `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "other", effect: () => Effect.void })\n`,
         )
         await listUntil(list, (l) => l[1]?.status === "active")
         await fs.writeFile(path.join(home, "trigger"), "")

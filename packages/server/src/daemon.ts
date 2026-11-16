@@ -1,17 +1,20 @@
-import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand } from "@vibest/client/client"
-import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/db"
+import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import type { SocketConnector } from "@vibest/client/socket-connector"
+import { App } from "@vibest/core/app"
+import type { ReplayDiffers } from "@vibest/core/bus"
+import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db-schema"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import * as PlatformNode from "@vibest/core/effect/platform"
-import { HostFacts } from "@vibest/core/identity"
-import type { ReplayDiffers } from "@vibest/core/journal"
-import { Layout, VibestCommand } from "@vibest/core/paths"
-import { VERSION } from "@vibest/protocol/rpc"
+import { PlatformNode } from "@vibest/core/effect/platform"
+import { Identity } from "@vibest/core/identity"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
-import * as Server from "./server.ts"
+import { DaemonHandlers } from "./handlers/daemon.ts"
+import * as ShutdownDeadline from "./shutdown-deadline.ts"
+import type { ShutdownHost } from "./shutdown-deadline.ts"
 
 export const DaemonInfo = Schema.Struct({
   pid: Schema.Number,
@@ -35,16 +38,15 @@ export class LockFailed extends Schema.TaggedError<LockFailed>()("LockFailed", {
   message: Schema.String,
 }) {}
 
-export interface Host {
+export interface Host extends ShutdownHost {
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
   readonly checkDatabase: (
     filename: string,
   ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
+  readonly trimLog: (file: string) => Effect.Effect<void>
 }
-
-export { HANDOFF_ENV } from "./server.ts"
 
 const HANDOFF_TIMEOUT = Duration.seconds(30)
 const STOP_REPLY_GRACE = Duration.millis(200)
@@ -65,7 +67,9 @@ export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("
   message: Schema.String,
 }) {}
 
-export const run = (host: Host, replacements: LayerNode.Replacements, options: { readonly handoff?: boolean } = {}) =>
+export type Replacements = LayerNode.Replacements
+
+export const run = (host: Host, replacements: Replacements, options: { readonly handoff?: boolean } = {}) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -81,7 +85,7 @@ export const run = (host: Host, replacements: LayerNode.Replacements, options: {
             message: `cannot take vibestd's start lock ${layout.daemonInfo}: ${e.message}. Nothing was changed; check that file.`,
           }),
       ),
-      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector> => {
+      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector.Service> => {
         if (writer) return Effect.succeed({ held: true, write: writer })
         if (options.handoff) return Effect.succeed(undefined)
         return probe(layout.socket).pipe(Effect.map((up) => (up ? { held: false } : undefined)))
@@ -111,9 +115,13 @@ export const run = (host: Host, replacements: LayerNode.Replacements, options: {
       return yield* new DaemonSocketInUse({
         message: `something on ${layout.socket} ${inUse}; it was left running. ${stopByHand(layout.socket, undefined)}`,
       })
+    yield* host.trimLog(layout.log)
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
-    const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
+    const facts = yield* Identity.HostFacts.pipe(
+      Effect.provide(LayerNode.compile(Identity.hostFactsNode, { replacements })),
+    )
+    const app = yield* App.Service.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
     const identity = {
       pid: facts.pid,
       instance: yield* newId(),
@@ -121,19 +129,22 @@ export const run = (host: Host, replacements: LayerNode.Replacements, options: {
       startedAt: yield* Clock.currentTimeMillis,
     }
     const shutdown = yield* Deferred.make<void>()
+    const releases = new LayerNode.Releases()
+    yield* ShutdownDeadline.install(host, releases, shutdown)
     yield* Layer.build(
       LayerNode.compile(daemon, {
+        releases,
         replacements: [
           ...replacements,
           PlatformNode.layout.replace(Layer.succeed(Layout, layout)),
-          Server.Identity.node.replace(Layer.succeed(Server.Identity, identity)),
-          Server.Shutdown.node.replace(Layer.succeed(Server.Shutdown, shutdown)),
+          DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, identity)),
+          DaemonHandlers.shutdownNode.replace(Layer.succeed(DaemonHandlers.Shutdown, shutdown)),
         ],
       }),
     )
     yield* fs.chmod(layout.socket, 0o600)
     yield* fs.chmod(layout.httpSocket, 0o600)
-    const info: DaemonInfo = { ...identity, version: VERSION, socket: layout.socket }
+    const info: DaemonInfo = { ...identity, version: app.version, socket: layout.socket }
     yield* acquired.write(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)
     yield* fs.remove(`${layout.home}/vibestd.lock`, { force: true }).pipe(Effect.ignore)
     yield* Effect.log(`vibestd listening on ${layout.socket}`)

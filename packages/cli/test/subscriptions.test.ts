@@ -1,25 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
-import { Harness, HarnessUnavailable } from "@vibest/core/harness"
-import { Layout } from "@vibest/core/paths"
-import { Plugins } from "@vibest/core/plugins"
+import { Harness } from "@vibest/core/harness"
+import { makePlugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { Plugin } from "@vibest/plugin"
-import { claude, cursor, pi } from "@vibest/plugin-harnesses"
-import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
-import { claudeSubscription } from "@vibest/plugin-harnesses/subscriptions/claude"
-import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
-import { piSubscription } from "@vibest/plugin-harnesses/subscriptions/pi"
-import * as Server from "@vibest/server/server"
-import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
-import { Sink } from "effect"
-import { Headers, HttpClient, HttpClientResponse } from "effect/http"
-import { ChildProcessSpawner } from "effect/process"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
 import {
   agentsLayer,
   runtimesLayer,
@@ -28,7 +11,22 @@ import {
   makeRepository,
   runVibest,
   testLayer,
-} from "./fakes.ts"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
+import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
+import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
+import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
+import { HarnessUnavailable } from "@vibest/schema/session"
+import * as Server from "@vibest/server/server"
+import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
+import { Sink } from "effect"
+import { Headers, HttpClient, HttpClientResponse } from "effect/http"
+import { ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const PI_SECRET = "pi-key-do-not-log"
@@ -71,7 +69,7 @@ const output = (stdout: string, exitCode: Effect.Effect<number> = Effect.succeed
   })
 
 const harnessLayer = (installed: ReadonlyArray<string>) =>
-  Layer.succeed(Harness, {
+  Layer.succeed(Harness.Service, {
     available: (id) => Effect.succeed(installed.includes(id)),
     plugin: (id) => Effect.fail(new HarnessUnavailable({ harness: id, message: "unused" })),
     models: () => Effect.die("unused"),
@@ -116,17 +114,30 @@ const fakeMachine = (options: {
   )
   const onMachine = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provide(machine), Effect.provide(Platform.services), Effect.orDie)
-  const definitions = [
-    { ...claude, subscription: (dir: string) => onMachine(claudeSubscription(dir)) },
-    {
-      ...cursor,
-      subscription: (dir: string) =>
-        onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(dir, problem))),
-    },
-    { ...pi, subscription: (dir: string) => onMachine(piSubscription(dir)) },
-  ]
+  const registered = (assembled: typeof claudePlugin) =>
+    Effect.gen(function* () {
+      const plugin = yield* assembled
+      const added: Array<HarnessTypes.HarnessDefinition> = []
+      const editor = { add: (definition: HarnessTypes.HarnessDefinition) => added.push(definition) }
+      const registration = { dispose: Effect.void }
+      const ctx = {
+        harness: {
+          transform: (edit: (e: typeof editor) => unknown) => Effect.sync(() => (edit(editor), registration)),
+        },
+      } as unknown as Parameters<typeof plugin.effect>[0]
+      yield* plugin.effect(ctx)
+      return added[0]!
+    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+  const cursorDefinition = {
+    ...cursor,
+    subscription: (dir: string) =>
+      onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(spawner)(dir, problem))),
+  }
+  const definitions = Effect.all([registered(claudePlugin), registered(piPlugin)]).pipe(
+    Effect.map(([claudeDefinition, piDefinition]) => [claudeDefinition, cursorDefinition, piDefinition]),
+  )
   const fakes = Subscriptions.testLayer.pipe(
-    Layer.provideMerge(harnessesLayer(definitions)),
+    Layer.provideMerge(Layer.unwrap(Effect.map(definitions, harnessesLayer))),
     Layer.provideMerge(harnessLayer(options.installed)),
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -193,7 +204,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const listed = yield* fake.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 1, status: "available", resetTime: null }],
@@ -270,7 +281,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const listed = yield* fresh.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 1, status: "available", resetTime: 5 }],
@@ -296,7 +307,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const kept = yield* denied.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 9, status: "available", resetTime: null }],
@@ -319,7 +330,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const row = yield* hung.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 8, status: "available", resetTime: null }],
@@ -345,7 +356,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
 
   it.effect("a harness subscription that never answers is cut off after 30 s and the next harness is still read", () =>
     Effect.gen(function* () {
-      const subs = yield* Subscriptions
+      const subs = yield* Subscriptions.Service
       const polling = yield* Effect.forkChild(subs.poll)
       yield* TestClock.adjust("30 seconds")
       yield* Fiber.join(polling)
@@ -389,7 +400,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       yield* fake.provide(
         Effect.gen(function* () {
           const context = yield* Layer.build(Subscriptions.layer.pipe(Layer.provide(fake.layer)))
-          const subs = Context.get(context, Subscriptions)
+          const subs = Context.get(context, Subscriptions.Service)
           yield* TestClock.adjust("59 seconds")
           yield* subs.list
           assert.strictEqual(fake.spawned.length, 1)
@@ -422,8 +433,8 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           }),
       })
       const listed = yield* Effect.gen(function* () {
-        const subs = yield* Subscriptions
-        const plugins = yield* Plugins.make([{ source: "see", revision: "-", options: {}, plugin }])
+        const subs = yield* Subscriptions.Service
+        const plugins = yield* makePlugins([{ source: "see", revision: "-", options: {}, plugin }])
         yield* plugins.start({
           project: "/r",
           agent: "general",
@@ -445,7 +456,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(agentsLayer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
         Effect.scoped,
       )
       assert.deepStrictEqual(listed.seen, listed.list)
@@ -460,7 +471,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       Effect.gen(function* () {
         const layout = yield* Layout
         const repo = yield* makeRepository
-        yield* (yield* Subscriptions).report({
+        yield* (yield* Subscriptions.Service).report({
           harness: "pi",
           provider: "example-proxy",
           limits: [{ window: "monthly", percent: 12, status: "available", resetTime: null }],

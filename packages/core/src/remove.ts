@@ -1,16 +1,17 @@
+import { Layout } from "@vibest/schema/layout"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Clock, Duration, Effect, FileSystem, Option, Path } from "effect"
 
 import { awaitOn, Bus } from "./bus.ts"
-import { Db, type SessionRow, runtimeOf, terminalOf, exitedAt } from "./db.ts"
-import { Layout } from "./paths.ts"
+import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
+import { Db } from "./database/db.ts"
+import { Git } from "./git.ts"
 import { Processes, validPid } from "./processes.ts"
-import { listProjectRepositories, workspaceGit } from "./project-create.ts"
+import { listProjectRepositories, workspaceGit } from "./project/create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { removeSystemPrompt } from "./system-prompt.ts"
-import { Git, gitState, mainCheckout, removeWorktree } from "./worktree.ts"
-export { RemoveOutcome } from "@vibest/schema/remove"
+import { gitState, mainCheckout, removeWorktree } from "./worktree.ts"
 
 type ProcessState = RemoveOutcome["processes"]
 
@@ -33,7 +34,7 @@ export const stopAgent = (
   },
 ) =>
   Effect.gen(function* () {
-    const processes = yield* Processes
+    const processes = yield* Processes.Service
     const pid = input.pid
     const unsupported = (reason: string) => ({ result: "unsupported" as const, reason })
     if (pid === undefined || !validPid(pid))
@@ -48,7 +49,7 @@ export const stopAgent = (
         Effect.gen(function* () {
           if ((yield* detached).result === "moved") return { result: "moved" as const }
           const gone = processes.liveness(pid).pipe(Effect.map((l) => l === "exited"))
-          const subscription = yield* (yield* Bus).subscribe
+          const subscription = yield* (yield* Bus.Service).subscribe()
           const exited =
             (yield* processes.terminate(pid)) === "sent" &&
             (yield* awaitOn(
@@ -56,7 +57,7 @@ export const stopAgent = (
               gone.pipe(Effect.map((yes) => (yes ? Option.some(true) : Option.none()))),
               (event) =>
                 Effect.succeed(
-                  event.type === "live.exited" &&
+                  event.type === "terminal.exited" &&
                     event.terminal.machine === terminal.machine &&
                     event.terminal.id === terminal.id
                     ? Option.some(true)
@@ -82,19 +83,19 @@ export interface ReleaseInput {
 }
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const layout = yield* Layout
-  const processes = yield* Processes
+  const processes = yield* Processes.Service
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const git = yield* Git
+  const git = yield* Git.Service
 
   const release = (input: ReleaseInput) =>
     Effect.gen(function* () {
       const { h, session } = input
       const id = session.id
       const reasons = [...input.reasons]
-      const directory = yield* db.sessionDirectory(id)
+      const directory = yield* db.session.sessionDirectory(id)
       if (!directory) {
         reasons.push(`${id} records no directory; nothing was deleted`)
         return {
@@ -169,7 +170,7 @@ export const make = Effect.gen(function* () {
           : yield* confirmExited
       const processState: ProcessState = confirmed.state
       if (processState === "exited" && exitedAt(session) === null) {
-        yield* db.endProcess(id, "archived")
+        yield* db.session.endProcess(id, "archived")
       }
       let shared = false
       const g = exists ? yield* gitState(worktree) : undefined
@@ -180,7 +181,7 @@ export const make = Effect.gen(function* () {
       const linked = (repoRoot: string, path: string) =>
         Effect.gen(function* () {
           const at = yield* fs.realPath(path).pipe(Effect.orElseSucceed(() => path))
-          return (yield* Git.use((git) => git.linkedWorktrees(repoRoot))).includes(at)
+          return (yield* Git.Service.use((git) => git.linkedWorktrees(repoRoot))).includes(at)
         })
       const keepWorktree = Effect.gen(function* () {
         if (input.keepWorktree) return "worktree kept as asked (--keep-worktree)"
@@ -188,7 +189,7 @@ export const make = Effect.gen(function* () {
           return `${worktree} is not under ${layout.worktrees}; left alone`
         const sharing = (live: ReadonlyArray<string>) =>
           live.length > 0 ? `worktree kept: session ${live.join(", ")} still works in it` : undefined
-        const liveSharers = db.liveSharers(id)
+        const liveSharers = db.session.liveSharers(id)
         const early = sharing(yield* liveSharers)
         if (early) {
           shared = true
@@ -263,7 +264,7 @@ export const make = Effect.gen(function* () {
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
-      Effect.provideService(Git, git),
+      Effect.provideService(Git.Service, git),
     )
 
   return { release }

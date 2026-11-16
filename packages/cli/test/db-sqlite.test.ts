@@ -3,20 +3,21 @@ import fs from "node:fs/promises"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db, SQL_NAMES } from "@vibest/core/db"
+import { Db, SQL_NAMES } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
+import { projectOf, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { projectOf, tempDirectory } from "./fakes.ts"
-
 const database = (filename: string) =>
   Db.layer.pipe(
-    Layer.provideMerge(Platform.sqlite(filename)),
+    Layer.provide(Projectors.layer),
     Layer.provide(Bus.layer),
     Layer.provide(SessionLive.layer),
+    Layer.provideMerge(Platform.sqlite(filename)),
   )
 
 const modeOf = (path: string) => Effect.promise(async () => (await fs.stat(path)).mode & 0o777)
@@ -125,7 +126,9 @@ describe("SQLite", () => {
       yield* createFileFirst
       const dir = `${file}-repo`
       const create = Effect.gen(function* () {
-        return yield* (yield* Db).createProject(dir, [{ path: `${dir}/app`, remote: "git@example.com:a.git" }])
+        return yield* (yield* Db.Service).project.createProject(dir, [
+          { path: `${dir}/app`, remote: "git@example.com:a.git" },
+        ])
       }).pipe(Effect.provide(open))
       const [a, b] = yield* Effect.all([create, create], { concurrency: 2 })
       assert.strictEqual(a, b)
@@ -145,20 +148,20 @@ describe("a vibestd restart", () => {
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
       const id = yield* Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const place = { runtime: "fake", address: { machine: "local", id: "a" } }
-        const { sessionId } = yield* db.startEntry(yield* projectOf("a"), "claude", false, place, {
+        const { sessionId } = yield* db.session.startEntry(yield* projectOf("a"), "claude", false, place, {
           agent: "coordinator",
         })
-        yield* db.insertNoticeTo(sessionId, "a")
+        yield* db.inbox.insertNoticeTo(sessionId, "a")
         const [row] = yield* (yield* SqlClient.SqlClient)<{
           id: number
         }>`SELECT id FROM inbox WHERE session_id = ${sessionId}`
-        assert.deepStrictEqual(yield* db.claim(sessionId, [row!.id]), [row!.id])
+        assert.deepStrictEqual(yield* db.inbox.claim(sessionId, [row!.id]), [row!.id])
         return row!.id
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
-        yield* (yield* Db).recoverDelivering(() => "")
+        yield* (yield* Db.Service).inbox.recoverDelivering(() => "")
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox WHERE id = ${id}`
       }).pipe(Effect.provide(database(file)))

@@ -3,7 +3,11 @@ import net from "node:net"
 import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
 import { assert, describe, it } from "@effect/vitest"
-import * as Platform from "@vibest/cli/platform/bun"
+import { cliHeaders, connect } from "@vibest/client/client"
+import { Db } from "@vibest/core/database/db"
+import { Project } from "@vibest/core/project"
+import { noticeEnvelope } from "@vibest/core/replies"
+import * as Platform from "@vibest/platform-bun/bun"
 import {
   authed,
   FakeRuntime,
@@ -20,12 +24,8 @@ import {
   untilVirtual,
   projectOf,
   entryPending,
-} from "@vibest/cli/test/fakes"
-import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
-import { Project } from "@vibest/core/project"
-import { noticeEnvelope } from "@vibest/core/replies"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
@@ -34,6 +34,7 @@ import { vi } from "vitest"
 
 import { extension, services, skillsDir } from "../src/extension.ts"
 import { Pi } from "../src/pi.ts"
+import presentation from "../src/presentation.ts"
 
 const valuesStoredByRefSet = vi.hoisted(() => [] as Array<unknown>)
 vi.mock("effect", async (importOriginal) => {
@@ -63,11 +64,11 @@ const served = Server.layer.pipe(
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>,
+  program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>,
   timeout?: number,
 ) => it.effect(name, () => program.pipe(Effect.scoped, Effect.provide(served)), timeout)
 
-const session = (env: Record<string, string>) =>
+const session = (env: Record<string, string>, withPresentation = false) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -126,6 +127,7 @@ const session = (env: Record<string, string>) =>
     yield* Effect.promise(() =>
       Pi.runMain(api, extension.pipe(Layer.provide(Layer.merge(services, noTty)), Layer.provide(config))),
     )
+    if (withPresentation) presentation(api)
     yield* Effect.addFinalizer(() => emit("session_shutdown"))
     return { handlers, messages, renderers, statuses, emit }
   })
@@ -190,14 +192,14 @@ describe("pi-vibest", () => {
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const layout = yield* Layout
         const fs = yield* FileSystem.FileSystem
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("pi")
-        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.startEntry(
+        yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        const coord = yield* db.session.startEntry(
           yield* projectOf("r"),
           "pi",
           false,
@@ -207,7 +209,7 @@ describe("pi-vibest", () => {
           },
           { agent: "coordinator" },
         )
-        yield* db.insertNoticeTo(coord.sessionId, "survives the gap")
+        yield* db.inbox.insertNoticeTo(coord.sessionId, "survives the gap")
         const notes: Array<string> = []
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
@@ -245,11 +247,11 @@ describe("pi-vibest", () => {
     "Subagent: a ready report made while no vibestd answers reaches the next vibestd",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const layout = yield* Layout
         const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const project = yield* projectOf("r")
-        yield* db.insertSession({ id, ...idleRow("pi") }, project)
+        yield* db.session.insertSession({ id, ...idleRow("pi") }, project)
         const s = yield* session({
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: id,
@@ -258,11 +260,11 @@ describe("pi-vibest", () => {
         })
         yield* s.emit("session_start", { reason: "startup" }, tuiStart)
         yield* TestClock.withLive(Effect.sleep("200 millis"))
-        assert.isUndefined(yield* db.readyAt(id))
+        assert.isUndefined(yield* db.session.readyAt(id))
         yield* Layer.build(
           Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
         )
-        yield* untilVirtual(db.readyAt(id), (at) => at !== undefined)
+        yield* untilVirtual(db.session.readyAt(id), (at) => at !== undefined)
       }).pipe(Effect.scoped, Effect.provide(pulling())),
     15_000,
   )
@@ -271,13 +273,13 @@ describe("pi-vibest", () => {
     "Coordinator: a vibestd that stops ends the subscription on its side; the next vibestd's rows still arrive until the session shuts down, and none once vibestd sees the closed connection",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const layout = yield* Layout
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("claude")
-        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.startEntry(
+        yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        const coord = yield* db.session.startEntry(
           yield* projectOf("r"),
           "pi",
           false,
@@ -305,7 +307,7 @@ describe("pi-vibest", () => {
           { reason: "startup" },
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
-        const report = (message: string) => db.insertNoticeTo(coord.sessionId, message)
+        const report = (message: string) => db.inbox.insertNoticeTo(coord.sessionId, message)
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
@@ -331,7 +333,7 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Session TUI: grouped tools and the user-message lease, released at shutdown and taken again after a reload",
+    "Session TUI: the essential extension alone leaves the TUI untouched; the presentation extension groups tools and holds the user-message lease, released at shutdown and taken again after a reload",
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
       const paint = Object.getOwnPropertyDescriptor(TuiAltScreen.prototype, "doRender")?.value
@@ -342,7 +344,12 @@ describe("pi-vibest", () => {
         },
       ]) {
         for (const _load of ["startup", "reload"]) {
-          const s = yield* session(env)
+          const essential = yield* session(env)
+          yield* essential.emit("session_start", { reason: "startup" }, tuiStart)
+          assert.strictEqual(essential.renderers.length, 0)
+          assert.isUndefined(lease())
+          yield* essential.emit("session_shutdown")
+          const s = yield* session(env, true)
           assert.strictEqual(s.renderers.length, 1)
           assert.isTrue(s.handlers.has("message_start") && s.handlers.has("tool_execution_end"))
           assert.deepStrictEqual(
@@ -399,12 +406,12 @@ describe("pi-vibest", () => {
     "Coordinator: no MCP server, its tool rules allow vibest, and inbox rows arrive as hidden custom messages, never through agent.prompt",
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       yield* runtime.addPane("w1:p7", "ws", "/")
       const row = idleRow("pi")
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
-      const coord = yield* db.startEntry(
+      yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+      yield* db.session.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
+      const coord = yield* db.session.startEntry(
         yield* projectOf("r"),
         "pi",
         false,
@@ -414,7 +421,7 @@ describe("pi-vibest", () => {
         },
         { agent: "coordinator" },
       )
-      yield* db.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
+      yield* db.inbox.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
 
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
@@ -456,7 +463,7 @@ describe("pi-vibest", () => {
         (n) => n === 1,
       )
       yield* finishExecution(s, executionOf(s.messages[0]!.message))
-      yield* db.insertNoticeTo(coord.sessionId, "<agent-message>two</agent-message>")
+      yield* db.inbox.insertNoticeTo(coord.sessionId, "<agent-message>two</agent-message>")
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 2,
@@ -480,11 +487,11 @@ describe("pi-vibest", () => {
   test(
     "an input event records what the user typed, in any session; an extension delivery does not",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const sql = yield* SqlClient.SqlClient
       const row = idleRow("pi")
-      yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
-      const coord = yield* db.startEntry(
+      yield* db.session.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
+      const coord = yield* db.session.startEntry(
         yield* projectOf("r"),
         "pi",
         false,
@@ -532,7 +539,7 @@ describe("pi-vibest", () => {
   test(
     "Coordinator: a TUI startup execution reports its session id once; /new, /resume and /fork report before the next execution",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const c = yield* cli
       const launched = yield* c["Project.EntrySession"]({
         agent: "coordinator",
@@ -568,7 +575,7 @@ describe("pi-vibest", () => {
         Boolean,
       )
       assert.strictEqual(yield* saved, s1)
-      yield* db.noteConversation(launched.sessionId, "other")
+      yield* db.session.noteConversation(launched.sessionId, "other")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
@@ -587,7 +594,7 @@ describe("pi-vibest", () => {
           .harnessSessionId,
         "s-fork",
       )
-      yield* db.noteConversation(launched.sessionId, "kept")
+      yield* db.session.noteConversation(launched.sessionId, "kept")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
       const renewed = yield* c["Project.EntrySession"]({

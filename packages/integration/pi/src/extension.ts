@@ -6,21 +6,15 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import {
-  claimHeaders,
-  type ClientServices,
-  connect,
-  hookCall,
-  SocketConnector,
-  withVibest,
-} from "@vibest/client/client"
-import { VERSION } from "@vibest/protocol/rpc"
+import { claimHeaders, type ClientServices, connect, hookCall, makeClient } from "@vibest/client/client"
+import { SocketConnector } from "@vibest/client/socket-connector"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
 import { Pi } from "./pi.ts"
-import toolGroups from "./tui/tool-groups.ts"
-import compactUserMessages from "./tui/user-message-padding.ts"
+import { VERSION } from "./version.ts"
+
+const { withVibest } = makeClient({ version: VERSION })
 
 export const skillsDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "skills")
 
@@ -152,8 +146,6 @@ const terminal = (sessionId: string): Role =>
     Effect.gen(function* () {
       const pi = yield* Pi
       yield* pi.handle("resources_discover", () => Effect.succeed({ skillPaths: [skillsDir] }))
-      yield* pi.load(toolGroups)
-      yield* pi.load(compactUserMessages)
       yield* reportSession(sessionId)
     }),
   )
@@ -283,7 +275,7 @@ export const services = Layer.mergeAll(
   Layout.layer,
   NodeChildProcessSpawner.layer.pipe(Layer.provide(NodeFileSystem.layer)),
   NodeFileSystem.layer,
-  Layer.succeed(SocketConnector, (endpoint) => NodeSocket.makeNet({ path: endpoint })),
+  Layer.succeed(SocketConnector.Service, (endpoint) => NodeSocket.makeNet({ path: endpoint })),
   vibestCommand,
 ).pipe(Layer.provideMerge(NodePath.layer))
 

@@ -51,9 +51,12 @@ const swapOnce = (bytes: Buffer, from: string, to: string) => {
   bytes.write(to, at)
 }
 
-const protocolLine = (protocol: number, width: number) => `PROTOCOL = ${String(protocol).padStart(width)}`
-const olderProtocol = (bytes: Buffer, protocol: number) =>
-  swapOnce(bytes, protocolLine(protocol, 0), protocolLine(protocol - 1, String(protocol).length))
+const olderProtocol = (bytes: Buffer, protocol: number) => {
+  const found = [...bytes.toString("latin1").matchAll(new RegExp(`PROTOCOL\\d* = ${protocol}\\b`, "g"))]
+  expect(found.length === 1, `expected one PROTOCOL = ${protocol}, found ${found.length}`)
+  const from = found[0]![0]
+  swapOnce(bytes, from, from.replace(/\d+$/, String(protocol - 1).padStart(String(protocol).length)))
+}
 
 const olderVibest = async (w: World, share: string, version: string, protocol: number) => {
   const dir = path.join(share, "versions", version)
@@ -61,7 +64,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   await fs.mkdir(path.dirname(bin), { recursive: true })
   const bytes = Buffer.from(await fs.readFile(compiled))
   olderProtocol(bytes, protocol)
-  swapOnce(bytes, `version: "${buildVersion}"`, `version: "${version}"`)
+  swapOnce(bytes, `"${buildVersion}"`, `"${version}"`)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
   if (process.platform === "darwin") {
     const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
@@ -71,7 +74,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
   const source = Buffer.from(await fs.readFile(extension))
   olderProtocol(source, protocol)
-  const older = source.toString().replace("var VERSION = package_default.version;", `var VERSION = "${version}";`)
+  const older = source.toString().replace(/var VERSION = "[^"]+";/, `var VERSION = "${version}";`)
   expect(older !== source.toString(), `${extension}: its version was not found`)
   await fs.writeFile(extension, older)
   return bin

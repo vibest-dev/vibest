@@ -1,6 +1,7 @@
+import { shellQuote } from "@vibest/schema/layout"
 import { Config, Context, Data, Effect, FileSystem, Option, Path } from "effect"
 
-import { shellQuote, writeAtomic } from "./paths.ts"
+import { writeAtomic } from "./paths.ts"
 
 export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
 

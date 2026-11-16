@@ -1,4 +1,4 @@
-import { Plugin, type AgentDefinition, type GuardCall } from "@vibest/plugin"
+import { Plugin, type AgentDefinition, type GuardCall } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 const COORDINATOR_SYSTEM = `You are an AI assistant that orchestrates software engineering tasks across multiple coding agents.

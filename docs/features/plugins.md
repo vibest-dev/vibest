@@ -5,12 +5,15 @@ is and when it counts as working.
 
 ## G1. Listing plugins
 
-`vibest plugins` lists a plugin from the plugins folder and one named in `vibest.json`, both active with zero counters.
+`vibest plugins` lists a plugin from the plugins folder, one folder named in `vibest.json`, and one named there by a `file://`
+URL whose path has an escaped space, all active with zero counters. A single file named in `vibest.json` is not loaded; vibestd logs a warning that the path
+must be a directory.
 
 ## G2. Reloading an edited plugin
 
 Editing a plugin file reloads it without a daemon restart: `vibest plugins` shows the new version, and vibestd is the
-same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way.
+same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way. A plugin whose teardown fails
+is logged as an error with its plugin id and cause, and its edited revision still runs.
 
 ## G3. A plugin that fails to load
 
@@ -21,8 +24,7 @@ error, and the other plugins, those after it included, stay active.
 
 A plugin hook that refuses a run blocks `vibest run` with its reason before any pane or worktree exists: the command
 fails and prints the reason. A hook that throws instead of returning an Effect blocks the run the same way, printing
-`plugin <id> crashed: <error>`, and counts as a crash of that plugin; so does a hook written in the old style that
-assigns to the event it is given instead of returning its decision.
+`plugin <id> crashed: <error>`, and counts as a crash of that plugin.
 
 ## G5. A routing plugin picks the harness
 
@@ -58,7 +60,8 @@ once, active, and it runs with the options from `vibest.json`.
 A plugin folder whose `package.json` maps `exports` loads the file the map names for `./server`, else for `.`, skipping a
 file that does not exist, and never a file the map does not export. While a package it imports is not
 installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
-active without editing the plugin or restarting vibestd.
+active without editing the plugin or restarting vibestd. An `exports` entry that resolves outside the plugin folder is
+not loaded, and the plugin is not listed.
 
 ## G11. A plugin disabled by a failing transform
 
@@ -69,7 +72,7 @@ does not set it up again; editing the plugin itself does.
 
 A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `process.started`, `execution.started` and
 `execution.ended` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
-subscribes to every fact gets no `live.*` event. After the plugin is edited, the new revision gets the next agent's
+subscribes to every fact gets no signal. After the plugin is edited, the new revision gets the next agent's
 facts and the old one gets nothing more.
 
 ## G13. A plugin written with Promises
@@ -82,5 +85,18 @@ plugin into the `setup` form reloads it like any edit (G2).
 ## G14. A builtin plugin can be removed
 
 `"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-harness-default"`); `"-*"` and
-`"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts, even while slow
-user plugins are still importing, and deleting the line brings the builtin back without restarting vibestd.
+`"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts. While slow user
+plugins are still importing, a start is refused with `PluginsNotActive` and does not run on a partial set; once they
+are active, `vibest plugins` shows the builtin gone, and deleting the line brings it back without restarting vibestd.
+
+## G15. A start waits for plugins to finish activating
+
+While user plugins are still setting up, `vibest run` is refused with `PluginsNotActive` and the names of the plugins
+still loading, and no session starts. Once they are active, the same run starts, and a routing plugin's decision is
+what `vibest ls` records.
+
+## G16. Moving a plugin keeps it running
+
+A plugin is identified by its declared id and the content of its files, not by where the folder is. Moving an unchanged
+plugin folder and updating `vibest.json` to the new path does not set it up again; `vibest plugins` lists it under the
+new path. Changing its declared id makes it a new plugin.

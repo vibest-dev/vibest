@@ -2,7 +2,6 @@ import crypto from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { loginEnv } from "../world/user-env.ts"
 import { shared } from "./pool.ts"
 
 const dir = path.join(shared, "cache")
@@ -63,12 +62,13 @@ const writtenByHarness = (rel: string) => /^claude\/(tsconfig\.json$|\.claude-pl
 const stablePath = (p: string) => p.replace(/fnm_multishells\/[^/:]+/g, "fnm_multishells")
 
 export const cacheKeys = async (o: {
+  readonly login: Readonly<Record<string, string>>
   readonly binaries: ReadonlyArray<string>
   readonly harnesses: string
   readonly method: string
   readonly userFiles: Record<string, string>
 }) => {
-  const env = await loginEnv()
+  const env = o.login
   const [binaries, harnesses, runner, versions] = await Promise.all([
     Promise.all(
       [...new Set(o.binaries)].map((file) =>

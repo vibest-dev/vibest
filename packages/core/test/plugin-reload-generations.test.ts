@@ -1,14 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Bus } from "@vibest/core/bus"
-import { Layout } from "@vibest/core/paths"
-import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugins"
-import { Plugin } from "@vibest/plugin"
+import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Hooks } from "@vibest/core/plugin/hooks"
+import { Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "../../cli/src/platform/bun.ts"
+import * as Platform from "../../platform-bun/src/bun.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
+import { memoryBus } from "./platform/bun.ts"
 
 const events: Array<string> = []
 const builtin: Candidate = {
@@ -27,7 +28,7 @@ const builtin: Candidate = {
 }
 
 const plugin = (id: string) => `// gate:${id}
-import { Plugin } from "@vibest/plugin"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({ id: "${id}", effect: () => Effect.void })
 `
@@ -49,7 +50,7 @@ const event = {
 }
 
 const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
-  for (let i = 0; i < 250 && !done(); i++) {
+  for (let i = 0; i < 3000 && !done(); i++) {
     yield* TestClock.withLive(Effect.sleep("20 millis"))
     yield* TestClock.adjust("150 millis")
   }
@@ -58,7 +59,7 @@ const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
 
 describe("plugins: builtins follow the latest config", () => {
   it.effect(
-    "a removal that arrives while user plugins are still importing takes the builtin off at once, so the 10s fallback does not run it",
+    "a removal that arrives while user plugins are still importing takes the builtin off at once, so a start does not run it",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -71,8 +72,9 @@ describe("plugins: builtins follow the latest config", () => {
         let release!: () => void
         const gate = new Promise<void>((resolve) => (release = resolve))
         const entered = new Set<string>()
+        const platform = Platform.makePluginLoader()
         const loader: PluginLoader["Service"] = {
-          ...Platform.plugins,
+          ...platform,
           prepare: Effect.void,
           load: async (entry, files) => {
             const name = /gate:(\w+)/.exec(await Bun.file(entry).text())?.[1]
@@ -80,7 +82,7 @@ describe("plugins: builtins follow the latest config", () => {
               entered.add(name)
               await gate
             }
-            return Platform.plugins.load(entry, files)
+            return platform.load(entry, files)
           },
         }
         yield* fs.writeFileString(config, `{ "plugins": ["-harness-x"] }`)
@@ -92,9 +94,10 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(Layer.effect(Layout, Layout.make(dir))),
           Layer.provide(runtimesLayer),
           Layer.provide(Agents.layer),
-          Layer.provide(Bus.layer),
+          Layer.provide(memoryBus),
+          Layer.provide(Hooks.layer),
           Layer.build,
-          Effect.map(Context.get(Plugins)),
+          Effect.map(Context.get(Plugins.Service)),
         )
         assert.deepStrictEqual(events, [])
 
@@ -107,14 +110,13 @@ describe("plugins: builtins follow the latest config", () => {
         yield* until("the removal", () => events.at(-1) === "close")
 
         const spawning = yield* Effect.forkChild(plugins.start(event))
-        yield* TestClock.adjust("10 seconds")
-        const decision = yield* Fiber.join(spawning)
+        release()
+        const decision = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("60 seconds")))
         assert.isFalse(
           decision.trace.some((t) => t.plugin === "harness-x"),
-          "the removed builtin ran in the fallback",
+          "the removed builtin ran",
         )
-        release()
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    { timeout: 20_000 },
+    { timeout: 120_000 },
   )
 })

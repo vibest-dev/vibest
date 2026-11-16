@@ -5,6 +5,7 @@
     "handoff": true,
     "requests": true,
     "watch": true,
+    "events": true,
     "projects": true,
     "spawnRuntime": true
   },
@@ -1032,6 +1033,268 @@
         }
       }
     },
+    "Events": {
+      "access": "cli",
+      "stream": true,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "follow": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "aggregate": {
+            "type": "string"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
+                ]
+              }
+            ]
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
+                ]
+              }
+            ]
+          },
+          "type": {
+            "type": "string"
+          },
+          "data": {}
+        },
+        "required": [
+          "aggregate",
+          "seq",
+          "at",
+          "type",
+          "data"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "not": {}
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "ExecutionEnd": {
       "access": "open",
       "stream": false,
@@ -1335,6 +1598,16 @@
                   },
                   "why": {
                     "type": "string"
+                  },
+                  "unknown": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -3409,6 +3682,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/UnknownAgentEncoded"
               }
             ]
@@ -3581,6 +3857,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },
@@ -3926,6 +4224,16 @@
                         },
                         "why": {
                           "type": "string"
+                        },
+                        "unknown": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -6767,6 +7075,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
@@ -7062,6 +7373,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },
@@ -10611,6 +10944,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/HarnessUnavailableEncoded"
               },
               {
@@ -10773,6 +11109,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },
@@ -12216,7 +12574,9 @@
           "request": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -13444,6 +13804,9 @@
                 "$ref": "#/$defs/AgentRefusedEncoded"
               },
               {
+                "$ref": "#/$defs/PluginsNotActiveEncoded"
+              },
+              {
                 "$ref": "#/$defs/UnknownAgentEncoded"
               },
               {
@@ -13879,6 +14242,28 @@
               "_tag",
               "plugin",
               "reason"
+            ],
+            "additionalProperties": true
+          },
+          "PluginsNotActiveEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "PluginsNotActive"
+                ]
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "plugins"
             ],
             "additionalProperties": true
           },
@@ -14567,6 +14952,16 @@
                             },
                             "why": {
                               "type": "string"
+                            },
+                            "unknown": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
                           },
                           "required": [
@@ -15115,6 +15510,16 @@
                           },
                           "why": {
                             "type": "string"
+                          },
+                          "unknown": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [

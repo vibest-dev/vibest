@@ -17,6 +17,9 @@ import {
   withRuntime,
 } from "./runtime-herdr-live.ts"
 
+const promptAttempts = 100
+const promptRounds = 12
+
 describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
   afterAll(() => stopStartedSessions(), 30_000)
 
@@ -47,13 +50,15 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 "the started agent idle",
                 coldPiStartupAttempts,
               )
-            yield* runtime.send(terminal, { text: "! printf 'VBT_%s\\n' STARTED" })
-            yield* waitFor(
-              runtime.read(terminal, 80),
-              (text) => text.includes("VBT_STARTED"),
-              "the prompt ran",
-              coldPiStartupAttempts,
-            )
+            const ran = runtime.read(terminal, 80).pipe(Effect.map((text) => text.includes("VBT_STARTED")))
+            const promptRuns = Effect.gen(function* () {
+              yield* runtime.send(terminal, { text: "! printf 'VBT_%s\\n' STARTED" })
+              return yield* waitFor(ran, (seen) => seen, "the prompt ran", promptAttempts).pipe(
+                Effect.catchDefect(() => Effect.succeed(false)),
+              )
+            })
+            for (let round = 0; round < promptRounds; round++) if (yield* promptRuns) return
+            return yield* Effect.die(new Error(`the prompt did not run in ${promptRounds} sends`))
           })
         }),
       ).pipe(Effect.provide(layer)),

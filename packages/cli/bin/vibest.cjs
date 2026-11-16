@@ -4,20 +4,22 @@ const os = require("node:os")
 const path = require("node:path")
 
 const target = `${process.platform}-${process.arch}`
-let binary
-try {
-  binary = require.resolve(`@vibest/cli-${target}/bin/vibest`)
-} catch {
-  const pkg = `@vibest/cli-${target}@${require("../package.json").version}`
-  const prefix = /^(.+)\/lib\/node_modules\/@vibest\/cli\/bin$/.exec(__dirname)
-  const install = __dirname.includes("/.bun/")
-    ? `bun add -g ${pkg}`
-    : prefix
-      ? `npm install -g --prefix ${prefix[1]} ${pkg}`
-      : `npm install -g ${pkg}`
-  console.error(`vibest: no binary for ${target}; install it with: ${install}`)
-  process.exit(1)
+const resolveBinary = () => {
+  try {
+    return require.resolve(`@vibest/cli-${target}/bin/vibest`)
+  } catch {
+    const pkg = `@vibest/cli-${target}@${require("../package.json").version}`
+    const prefix = /^(.+)\/lib\/node_modules\/@vibest\/cli\/bin$/.exec(__dirname)
+    const install = __dirname.includes("/.bun/")
+      ? `bun add -g ${pkg}`
+      : prefix
+        ? `npm install -g --prefix ${prefix[1]} ${pkg}`
+        : `npm install -g ${pkg}`
+    console.error(`vibest: no binary for ${target}; install it with: ${install}`)
+    process.exit(1)
+  }
 }
+const binary = resolveBinary()
 
 const env = { ...process.env, VIBEST_HARNESSES: path.join(__dirname, "..", "harnesses") }
 const child = childProcess.spawn(binary, process.argv.slice(2), { stdio: "inherit", env })

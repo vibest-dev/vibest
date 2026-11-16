@@ -1,11 +1,12 @@
-import { Db } from "@vibest/core/db"
+import { App } from "@vibest/core/app"
+import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import { Harnesses } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
-import { Effect, Layer, Option, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import type { ServeError } from "effect/http/HttpServerError"
@@ -25,18 +26,34 @@ export type Reply = { readonly status: number; readonly body?: unknown }
 const failure = (status: number, error: string): Reply => ({ status, body: { error } })
 const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { status: 200, body })
 
+const REASON_LIMIT = 1024
+const boundReason = (reason: string) =>
+  reason.length <= REASON_LIMIT
+    ? reason
+    : reason.slice(0, REASON_LIMIT) + `... (${reason.length - REASON_LIMIT} more chars)`
+
+const schemaRejection = (reason: string) =>
+  Effect.logWarning("schema rejection").pipe(
+    Effect.annotateLogs({ kind: "Payload", reason }),
+    Effect.as({
+      status: 400,
+      body: { _tag: "InvalidRequestError", message: reason, kind: "Payload" },
+    } satisfies Reply),
+  )
+
 const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
-  const inbox = yield* Inbox
-  const integration = yield* Integration
-  const drain = yield* Drain
-  const harnesses = yield* Harnesses
+  const db = yield* Db.Service
+  const inbox = yield* Inbox.Service
+  const integration = yield* Integration.Service
+  const drain = yield* Drain.Service
+  const harnesses = yield* Harnesses.Service
+  const { version } = yield* App.Service
   const caller = (headers: Headers.Headers) =>
     Effect.gen(function* () {
       const read = reader(headers)
-      const rejected = yield* checkProtocol(db, read)
+      const rejected = yield* checkProtocol(db, read, version)
       if (rejected)
         return {
           status: 409,
@@ -67,10 +84,14 @@ export const make = Effect.gen(function* () {
         return ok(yield* inbox.take(who.id, who.process))
       }
       if (request.path === "/session/ready") {
-        const pid = Option.getOrUndefined(
-          yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
-        )?.pid
-        const current = yield* integration.ready(who.id, pid, integrationOf(reader(request.headers)), who.process)
+        const decoded = yield* Effect.result(Schema.decodeUnknownEffect(ReadyBody)(request.body))
+        if (decoded._tag === "Failure") return yield* schemaRejection(boundReason(decoded.failure.message))
+        const current = yield* integration.ready(
+          who.id,
+          decoded.success.pid,
+          integrationOf(reader(request.headers)),
+          who.process,
+        )
         return ok(current === undefined ? undefined : { process: current })
       }
       const hook = parseHookRoute(request.path)
@@ -103,7 +124,10 @@ export const layer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         if (request.method !== "POST") return HttpServerResponse.jsonUnsafe({ error: "POST only" }, { status: 405 })
-        const body = yield* request.text.pipe(Effect.orElseSucceed(() => ""))
+        const read = yield* Effect.result(request.text)
+        if (read._tag === "Failure")
+          return HttpServerResponse.jsonUnsafe({ error: read.failure.message }, { status: 400 })
+        const body = read.success
         const reply = yield* handle({
           path: request.url.replace(/^[a-z]+:\/\/[^/]*/, "").split("?")[0] ?? "",
           headers: request.headers,
@@ -117,10 +141,18 @@ export const layer = Layer.unwrap(
   ),
 )
 
-export const httpServer = LayerNode.unbound<ServeError>()(HttpServer.HttpServer)
+export class HttpServerLayer extends Context.Service<HttpServerLayer, Layer.Layer<HttpServer.HttpServer, ServeError>>()(
+  "vibest/HttpServerLayer",
+) {}
+export const httpServerLayer = LayerNode.unbound(HttpServerLayer)
+export const httpServer = LayerNode.make({
+  service: HttpServer.HttpServer,
+  layer: Layer.unwrap(Effect.map(HttpServerLayer, (layer) => layer)),
+  deps: [httpServerLayer],
+})
 
 export const node = LayerNode.make({
   name: "vibest/HttpServer",
   layer,
-  deps: [services, Db.node, Drain.node, Harnesses.node, Inbox.node, Integration.node, httpServer],
+  deps: [services, Db.node, Drain.node, Harnesses.node, Inbox.node, Integration.node, httpServer, App.node],
 })

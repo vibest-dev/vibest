@@ -47,12 +47,12 @@ harness to inherit.
 ## H8. Cursor is a plugin
 
 Cursor is not built in. `vibest run cursor` is refused saying no plugin provides it and where plugins are added; after
-the shipped `harnesses/cursor/plugin.js` of the install directory is added to `plugins` in `~/.vibest/vibest.json`,
+the shipped `harnesses/cursor` folder of the install directory is added to `plugins` in `~/.vibest/vibest.json`,
 `cursor` appears in `vibest harness list`.
 
 ## H9. Antigravity (agy) is a plugin
 
-With the shipped `harnesses/agy/plugin.js` of the install directory added to `plugins` in `~/.vibest/vibest.json`, `agy` appears
+With the shipped `harnesses/agy` folder of the install directory added to `plugins` in `~/.vibest/vibest.json`, `agy` appears
 in `vibest harness list` and its models in `vibest models`, read from the agy CLI without a model turn, and
 `vibest subscriptions` shows its usage windows (used percent, reset time) from `agy -p /usage`. vibest never reads agy's own
 config or credential files and never signs in; a CLI that is not signed in is listed as unavailable with its own message.

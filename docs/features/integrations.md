@@ -16,7 +16,7 @@ The vibest binary finds the plugins installed beside it. A vibest with no plugin
 
 ## I3. Pi runs vibest's extension
 
-A real Pi session started by vibest runs vibest's extension: a herdr command the agent tries is refused with the
+A real Pi session started by vibest runs vibest's extension (reporting, guard and inbox; the TUI presentation is a separate extension loaded beside it): a herdr command the agent tries is refused with the
 guard's reason and does not run, and the agent's reply is the execution's reply.
 
 ## I4. Claude runs vibest's plugin beside the user's plugins

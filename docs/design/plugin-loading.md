@@ -5,7 +5,7 @@ Implementation notes for the [plugin architecture](architecture.md#7-plugin-arch
 ## Order and boundary
 
 Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`harness-pi`, `harness-claude`,
-`runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `harness-default`), then the plugins directory, then
+`runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `archive-on-idle`, `harness-default`), then the plugins directory, then
 `vibest.json` in the order written. Registration order is detection order for runtime callers (herdr-core before
 herdr) and the order of `transform`s on a registry, so a user plugin sees and may change the builtin definitions.
 `vibest plugins` lists them in that order.
@@ -19,7 +19,7 @@ and `vibest/no-restricted-disable` reports a disable comment for that rule. What
 
 ## Loading and watching
 
-In `plugin-sources.ts`: a half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
+In `plugin/sources.ts`: a `vibest.json` entry must be a folder (a single file there is skipped with a warning; single files are discovered in the plugins directory), and `file://` entries are decoded as URLs. A half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
 `package.json` has a `name` and `exports` loads, as OpenCode's `Host.resolve`, the first existing file `exports` maps
 for `./server`, then for `.` (taking the first of the `bun`, `import` and `default` conditions), and nothing else; the
 mapped files are watched until one exists. vibest reads the map itself, because Bun's resolver keeps a lookup that
@@ -58,17 +58,23 @@ fires a plugin's machine hooks in its own tests.
 
 ## Running hooks
 
-`hooks.ts` registers and runs both `agent.*` and `machine.*` hooks: each plugin keeps its registrations, and
-`Hooks.run` bounds one call and counts it in the plugin's stats. Every hook runs in the host's scope, not its plugin's,
+`plugin/hooks.ts` is the host's one hook registry (the `Hooks.node` service): it registers and runs both `agent.*` and
+`machine.*` hooks. Every registration is keyed by the activation that made it and removed with that activation's scope;
+dispatch takes the registrations of the active activations in plugin load order, and in registration order within one
+activation, so a late registration or a retired revision whose teardown overran its deadline never changes the order
+or runs beside its replacement. `Hooks.run` bounds one call and counts it in the
+plugin's stats, and `Hooks.dispatch` runs the `agent.*` hooks one after another on a copy of the event and commits each
+copy. `plugin/host.ts` builds the context one plugin's setup receives; `plugin/service.ts` holds the `Plugins` interface and tag.
+Every hook runs in the host's scope, not its plugin's,
 so a reload or a disabled plugin never cuts short a call in flight: it finishes on the plugin snapshot it started with
 and is only interrupted by its own timeout or by vibestd shutting down. Setups, teardowns and hook calls are bounded by
-`timeoutWithoutWaiting` (`bounded.ts`), not `Effect.timeout`: `Effect.timeout` interrupts the late effect and waits for
+`timeoutWithoutWaiting` (`effect/bounded.ts`), not `Effect.timeout`: `Effect.timeout` interrupts the late effect and waits for
 it to stop, which never happens for plugin code that is uninterruptible or ignores interruption, so the helper returns
 at the deadline and leaves the interrupt to a detached fiber (effect 4.0.2 has no `Effect.disconnect`).
 
 ## Loading on Bun
 
-In `platform/bun.ts` and `platform/plugin-source.ts` (after OpenCode V2's `source.bun.ts`): inside the
+In `packages/platform-bun/src/bun.ts` and `plugin-source.ts` (after OpenCode V2's `source.bun.ts`): inside the
 compiled binary nothing resolves a plugin's `effect` and `@vibest/plugin` imports, and a copy beside the plugin would
 be a second effect instance, so `Bun.plugin` maps them to vibestd's own modules (`effect/X` is `effect.X` for every
 top-level module the root namespace exports). A plugin's graph is its entry and the local files it imports,

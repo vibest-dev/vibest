@@ -1,10 +1,10 @@
-import { Db } from "@vibest/core/db"
+import { Db } from "@vibest/core/database/db"
 import { Effect, FileSystem } from "effect"
 
 export const projectOf = (directory: string) =>
   Effect.gen(function* () {
-    const db = yield* Db
-    return (yield* db.projectAt(directory))?.id ?? (yield* db.createProject(directory, []))
+    const db = yield* Db.Service
+    return (yield* db.project.projectAt(directory))?.id ?? (yield* db.project.createProject(directory, []))
   })
 
 export const tempDirectory = (prefix: string) =>
@@ -13,7 +13,7 @@ export const tempDirectory = (prefix: string) =>
     return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
   }).pipe(Effect.orDie)
 
-export const entryPending = (db: Db["Service"], projectId: string) =>
-  Effect.flatMap(db.entryOf(projectId), (entry) =>
-    entry === undefined ? Effect.succeed([]) : db.pendingInbox(entry.id),
+export const entryPending = (db: Db.Interface, projectId: string) =>
+  Effect.flatMap(db.session.entryOf(projectId), (entry) =>
+    entry === undefined ? Effect.succeed([]) : db.inbox.pendingInbox(entry.id),
   )

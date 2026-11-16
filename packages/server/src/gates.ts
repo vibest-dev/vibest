@@ -1,6 +1,7 @@
-import { Db } from "@vibest/core/db"
+import { App } from "@vibest/core/app"
+import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
-import { NoSuchSession } from "@vibest/core/sessions"
+import { NoSuchSession } from "@vibest/core/session"
 import {
   CALLER_HEADER,
   CWD_HEADER,
@@ -13,7 +14,6 @@ import {
   PLUGIN_VERSION_HEADER,
   PROCESS_HEADER,
   PROJECT_HEADER,
-  PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
   REPOSITORY_HEADER,
@@ -30,10 +30,10 @@ import {
   PEER_CALLS,
   ProtocolGate,
   ProtocolRejected,
-  VERSION,
   type CallerShape,
 } from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Effect, Layer, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 
@@ -52,7 +52,7 @@ export const processOf = (read: Read) => {
 }
 
 export const admit = <A, E, R, A2, E2>(
-  drain: Drain["Service"],
+  drain: Drain.Interface,
   label: string,
   settlement: boolean,
   effect: Effect.Effect<A, E, R>,
@@ -67,25 +67,25 @@ export const admit = <A, E, R, A2, E2>(
 export const AdmissionLive = Layer.effect(
   Admission,
   Effect.gen(function* () {
-    const drain = yield* Drain
+    const drain = yield* Drain.Service
     return Admission.of((effect, { rpc }) =>
       admit(drain, rpc._tag, SETTLEMENTS.has(rpc._tag), effect, Effect.fail(new DaemonStopping({ method: rpc._tag }))),
     )
   }),
 )
 
-const noteConversation = (db: Db["Service"], read: Read, row: { id: string; harness: string }) =>
+const noteConversation = (db: Db.Interface, read: Read, row: { id: string; harness: string }) =>
   Effect.gen(function* () {
     const conversation = read(HARNESS_SESSION_HEADER)
     if (!conversation || read(HARNESS_HEADER) !== row.harness) return
-    if (yield* db.noteConversation(row.id, conversation, processOf(read)))
+    if (yield* db.session.noteConversation(row.id, conversation, processOf(read)))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
-export const identify = (db: Db["Service"], read: Read) =>
+export const identify = (db: Db.Interface, read: Read) =>
   Effect.gen(function* () {
     const id = read(SESSION_HEADER)
-    const row = id ? yield* db.sessionIdentity(id) : undefined
+    const row = id ? yield* db.session.sessionIdentity(id) : undefined
     if (!row) return { _tag: "NoSession", id } as const
     const project = read(PROJECT_HEADER)
     if (project === undefined) return { _tag: "NoProject", row } as const
@@ -94,10 +94,10 @@ export const identify = (db: Db["Service"], read: Read) =>
     return { _tag: "Known", row } as const
   })
 
-export const noteOpen = (db: Db["Service"], read: Read, sessionId: string) =>
+export const noteOpen = (db: Db.Interface, read: Read, sessionId: string) =>
   read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(db, read)) : Effect.void
 
-export const checkProtocol = (db: Db["Service"], read: Read) =>
+export const checkProtocol = (db: Db.Interface, read: Read, version: string) =>
   Effect.gen(function* () {
     yield* noteIntegration(db, read)
     const sent = read(PROTOCOL_HEADER)
@@ -107,13 +107,13 @@ export const checkProtocol = (db: Db["Service"], read: Read) =>
       mismatch: protocolMismatch(
         sent === undefined ? undefined : Number(sent),
         PROTOCOL,
-        VERSION,
+        version,
         read(PLUGIN_VERSION_HEADER),
       ),
     }
   })
 
-export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
+export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method: string) =>
   Effect.gen(function* () {
     const read = reader(headers)
     const kind = Headers.get(headers, CALLER_HEADER)
@@ -128,7 +128,7 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
         return yield* bad(`${method} claims peer without a valid ${PEER_HEADER}`)
       if (sessionId._tag === "Some") return yield* bad(`${method} claims peer and a session id`)
       if (!PEER_CALLS.has(method)) return yield* bad(`a peer vibestd may not call ${method}`)
-      if (method !== "Peer.Hello" && !(yield* db.peerKnown(peer)))
+      if (method !== "Peer.Hello" && !(yield* db.remote.peerKnown(peer)))
         return yield* bad(`peer ${peer} has not said Peer.Hello; call it first`)
       const by = read(PEER_BY_HEADER)
       if (
@@ -181,12 +181,12 @@ export const integrationOf = (read: Read) => {
   return { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
 }
 
-const noteIntegration = (db: Db["Service"], read: Read): Effect.Effect<void> =>
+const noteIntegration = (db: Db.Interface, read: Read): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
     const integration = integrationOf(read)
     if (!sessionId || !integration) return
-    if (yield* db.noteIntegration(sessionId, integration, processOf(read)))
+    if (yield* db.session.noteIntegration(sessionId, integration, processOf(read)))
       yield* Effect.logInfo(
         `session ${sessionId} runs integration ${integration.version} (protocol ${integration.protocol})`,
       ).pipe(
@@ -201,10 +201,11 @@ const noteIntegration = (db: Db["Service"], read: Read): Effect.Effect<void> =>
 export const ProtocolGateLive = Layer.effect(
   ProtocolGate,
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
+    const { version } = yield* App.Service
     return ProtocolGate.of((effect, { headers, rpc }) =>
       Effect.gen(function* () {
-        const rejected = yield* checkProtocol(db, reader(headers))
+        const rejected = yield* checkProtocol(db, reader(headers), version)
         if (rejected)
           return yield* new ProtocolRejected({ method: rpc._tag, protocol: rejected.sent, mismatch: rejected.mismatch })
         return yield* effect
@@ -216,7 +217,7 @@ export const ProtocolGateLive = Layer.effect(
 export const CallerGateLive = Layer.effect(
   CallerGate,
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Db.Service
     return CallerGate.of((effect, { headers, rpc }) =>
       resolveCaller(db, headers, rpc._tag).pipe(
         Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),

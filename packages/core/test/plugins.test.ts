@@ -1,28 +1,25 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
-import { Bus } from "@vibest/core/bus"
-import { Db, harnessIdOf } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
-import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
-import { Sessions } from "@vibest/core/sessions"
+import { Db } from "@vibest/core/database/db"
+import { harnessIdOf } from "@vibest/core/database/db-rows"
+import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugin"
+import { Hooks } from "@vibest/core/plugin/hooks"
+import { Session } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
-import {
-  AgentRefused as PluginRefused,
-  Plugin,
-  type AgentRoute,
-  type AgentStartBefore,
-  type Registration,
-} from "@vibest/plugin"
+import { Plugin as PromisePlugin } from "@vibest/plugin"
+import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin/effect"
 import type { Fact } from "@vibest/schema/event"
+import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "../../cli/src/platform/bun.ts"
+import * as Platform from "../../platform-bun/src/bun.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
 import { until, yieldToIo } from "./lib/observe.ts"
 import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
+import { memoryBus } from "./platform/bun.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
@@ -37,9 +34,10 @@ const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: st
     ...extra,
   }))
 
-const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<AgentRoute | void, PluginRefused>) =>
+const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void, PluginRefused>) =>
   Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) })
-const write = (id: string, f: (e: AgentStartBefore) => AgentRoute | void) => hook(id, (e) => Effect.sync(() => f(e)))
+const write = (id: string, f: (e: AgentStartBefore) => Partial<AgentStartBefore> | void) =>
+  hook(id, (e) => Effect.sync(() => void Object.assign(e, f(e))))
 
 const HARNESS_MODELS = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
 
@@ -47,9 +45,9 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const herdr = yield* FakeRuntime
-  return { rows: (yield* db.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
+  return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
 
 describe("plugins: spawn hook", () => {
@@ -57,17 +55,17 @@ describe("plugins: spawn hook", () => {
     "P5/P8: the event has the resolved root; writes reach the row and the launch args",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
-      const s = yield* (yield* Sessions).spawn(
+      const s = yield* (yield* Session.Service).spawn(
         yield* spawnInput(yield* mainCheckout(nested), { prompt: "research: how does the cache work?" }),
       )
       assert.strictEqual(s.harness, "claude")
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
-      const row = (yield* db.getSession(s.id))!
+      const row = (yield* db.session.getSession(s.id))!
       assert.strictEqual(harnessIdOf(row), "claude")
       assert.strictEqual(row.process?.model ?? null, "claude-haiku-5-5")
       assert.deepStrictEqual(row.process?.routing?.decidedBy, {
@@ -83,7 +81,7 @@ describe("plugins: spawn hook", () => {
         hook("route", (e) =>
           Effect.sync(() => {
             assert.strictEqual(e.project.endsWith("/sub"), false)
-            return e.prompt.startsWith("research:") ? { harness: "claude", model: "claude-haiku-5-5" } : undefined
+            if (e.prompt.startsWith("research:")) Object.assign(e, { harness: "claude", model: "claude-haiku-5-5" })
           }),
         ),
       ],
@@ -96,7 +94,9 @@ describe("plugins: spawn hook", () => {
     "P3: a hook stuck in an uninterruptible sleep times out and refuses the start",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const spawning = yield* Effect.forkChild((yield* Sessions).spawn(yield* spawnInput(repo, { harness: "pi" })))
+      const spawning = yield* Effect.forkChild(
+        (yield* Session.Service).spawn(yield* spawnInput(repo, { harness: "pi" })),
+      )
       yield* until(
         Effect.sync(() => stuckHookEntered.value),
         (x) => x,
@@ -124,7 +124,7 @@ describe("plugins: spawn hook", () => {
     "a plugin can rewrite the prompt the session receives",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const s = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      const s = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepStrictEqual(s.trace.at(-1)!.changes, [
         { field: "prompt", from: "do it", to: "do it\n\nRun the tests first." },
       ])
@@ -138,14 +138,17 @@ describe("plugins: spawn hook", () => {
     "a JS plugin that returns undefined for the prompt or the machine changes neither; its other fields apply",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const s = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      const s = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepStrictEqual(s.trace.at(-1)!.changes, [{ field: "model", to: "m" }])
       yield* until(herdr.callsTo("send"), (c) => c.length > 0)
       assert.include((yield* herdr.callsTo("send"))[0]!.text, "do it")
     }),
     {
       plugins: [
-        write("untyped", () => ({ prompt: undefined, machine: undefined, model: "m" }) as unknown as AgentRoute),
+        write(
+          "untyped",
+          () => ({ prompt: undefined, machine: undefined, model: "m" }) as unknown as Partial<AgentStartBefore>,
+        ),
       ],
     },
   )
@@ -154,12 +157,12 @@ describe("plugins: spawn hook", () => {
     "P8/P14: an unknown harness written by a plugin is refused, naming it; one that unsets the harness leaves NoHarnessChosen",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const error = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(repo)))
+      const error = yield* Effect.flip((yield* Session.Service).spawn(yield* spawnInput(repo)))
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, "vim")
       assert.include(error.message, "editor")
       assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-      const unset = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(repo, { prompt: "unset" })))
+      const unset = yield* Effect.flip((yield* Session.Service).spawn(yield* spawnInput(repo, { prompt: "unset" })))
       assert.strictEqual(unset._tag, "NoHarnessChosen")
       assert.include(unset.message, "no harness to inherit")
     }),
@@ -169,7 +172,7 @@ describe("plugins: spawn hook", () => {
   test(
     "P10/P12: setup failures are isolated; counters follow the runs",
     Effect.gen(function* () {
-      const plugins = yield* Plugins
+      const plugins = yield* Plugins.Service
       const listed = yield* plugins.list
       const byId = (id: string) => listed.filter((q) => q.id === id)
       assert.deepInclude(byId("runtime-choice")[0], { status: "active" })
@@ -177,7 +180,7 @@ describe("plugins: spawn hook", () => {
       assert.include(byId("broken")[0]!.error, "setup boom")
       assert.deepInclude(byId("ok")[0], { id: "ok", status: "active", calls: 0 })
       assert.deepInclude(byId("ok")[1], { id: "ok", status: "failed", error: "Duplicate plugin ID: ok" })
-      yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepInclude(
         (yield* plugins.list).find((q) => q.id === "ok")!,
         { calls: 1, changed: 1, crashed: 0 },
@@ -208,7 +211,7 @@ describe("plugins: spawn hook", () => {
   test(
     "old and unknown hook names fail the plugin's setup instead of running at startup",
     Effect.gen(function* () {
-      const s = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      const s = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepStrictEqual(
         s.trace.map((t) => [t.plugin, t.outcome]),
         [
@@ -217,7 +220,7 @@ describe("plugins: spawn hook", () => {
         ],
       )
       assert.strictEqual(s.model, "m")
-      const listed = yield* (yield* Plugins).list
+      const listed = yield* (yield* Plugins.Service).list
       assert.deepStrictEqual(
         listed.map((p) => [p.id, p.status]),
         [
@@ -228,6 +231,7 @@ describe("plugins: spawn hook", () => {
           ["typo", "failed"],
           ["proto", "failed"],
           ["current", "active"],
+          ["archive-on-idle", "active"],
         ],
       )
       const supported = "agent.start.before, agent.fail"
@@ -250,7 +254,7 @@ describe("plugins: spawn hook", () => {
   it.effect("P10: a setup that never returns times out without blocking the others", () =>
     Effect.gen(function* () {
       const building = yield* Effect.forkChild(
-        Plugins.make([
+        makePlugins([
           {
             source: "hang",
             revision: "-",
@@ -275,19 +279,19 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(Bus.layer),
+      Effect.provide(memoryBus),
     ),
   )
 
   it.effect("a Promise setup that never resolves is torn down within the one setup timeout", () =>
     Effect.gen(function* () {
       const building = yield* Effect.forkChild(
-        Plugins.make([
+        makePlugins([
           {
             source: "pro",
             revision: "-",
             options: {},
-            plugin: Plugin.define({ id: "pro", setup: () => new Promise(() => {}) }),
+            plugin: PromisePlugin.define({ id: "pro", setup: () => new Promise(() => {}) }),
           },
         ]),
       )
@@ -306,7 +310,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(Bus.layer),
+      Effect.provide(memoryBus),
     ),
   )
 
@@ -324,7 +328,7 @@ describe("plugins: spawn hook", () => {
                 .hook("start.before", () => Effect.sync(() => calls.push(id)).pipe(Effect.andThen(after())))
                 .pipe(Effect.map((registration) => void (registrations[id] = registration))),
           })
-        const plugins = yield* Plugins.make([
+        const plugins = yield* makePlugins([
           { source: "a", revision: "-", options: {}, plugin: recorder("a", () => registrations.b!.dispose) },
           { source: "b", revision: "-", options: {}, plugin: recorder("b") },
         ])
@@ -350,7 +354,7 @@ describe("plugins: spawn hook", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(Bus.layer),
+        Effect.provide(memoryBus),
       ),
   )
 })
@@ -363,24 +367,28 @@ const packageHome = Effect.gen(function* () {
   return dir
 })
 
-const source = (id: string, model: string) => `import { Plugin } from "@vibest/plugin"
+const source = (id: string, model: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
-export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed({ model: ${JSON.stringify(model)} })) })
+export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${JSON.stringify(model)} })) })
 `
 
 const loaded = (dir: string) =>
   Plugins.layer.pipe(
-    Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
+    Layer.provide(Layer.succeed(PluginLoader, { ...Platform.makePluginLoader(), prepare: Effect.void })),
     Layer.provide(Layer.succeed(Builtins, [])),
     Layer.provide(subscriptionsLayer),
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(Bus.layer),
+    Layer.provide(memoryBus),
+    Layer.provide(Hooks.layer),
     Layer.build,
-    Effect.map(Context.get(Plugins)),
+    Effect.map(Context.get(Plugins.Service)),
   )
+
+const settledAfterLoad = (dir: string) =>
+  loaded(dir).pipe(Effect.tap((plugins) => until(plugins.settled, (activated) => activated)))
 
 const event = {
   project: "/r",
@@ -402,36 +410,42 @@ const event = {
   ],
 }
 
+const loadingFixture = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const dir = yield* packageHome
+  const plugins = path.join(dir, "plugins")
+  yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
+  yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))
+  yield* fs.writeFileString(path.join(plugins, "a.d.ts"), "export {}")
+  yield* fs.writeFileString(path.join(plugins, ".hidden.ts"), source("hidden", "from-hidden"))
+  yield* fs.writeFileString(path.join(plugins, "notes.md"), "not a plugin")
+  yield* fs.makeDirectory(path.join(plugins, "empty"))
+  yield* fs.makeDirectory(path.join(plugins, "node_modules"))
+  yield* fs.writeFileString(path.join(plugins, "broken.ts"), "export default 42\n")
+  for (const name of ["x", "y"]) {
+    yield* fs.makeDirectory(path.join(dir, name))
+    yield* fs.writeFileString(path.join(dir, name, "index.ts"), source(name, `from-${name}`))
+  }
+  yield* fs.writeFileString(path.join(dir, "a-file.ts"), source("f", "from-f"))
+  const config = (entries: ReadonlyArray<unknown>) =>
+    fs.writeFileString(
+      path.join(dir, "vibest.json"),
+      `// comments are fine\n{ "plugins": ${JSON.stringify(entries)}, }\n`,
+    )
+  return { dir, plugins, path, config }
+})
+
+const LOADING_TIMEOUT = 120_000
+
 describe("plugins: loading", () => {
   it.live(
-    "P1: plugins/ first in path order, then vibest.json in its order (a local entry may be one source file); -x removes; bad entries fail visibly",
+    "P1: plugins/ first in path order, then vibest.json in its order (a configured entry must be a folder); -x removes",
     () =>
       Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* packageHome
-        const plugins = path.join(dir, "plugins")
-        yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
-        yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))
-        yield* fs.writeFileString(path.join(plugins, "a.d.ts"), "export {}")
-        yield* fs.writeFileString(path.join(plugins, ".hidden.ts"), source("hidden", "from-hidden"))
-        yield* fs.writeFileString(path.join(plugins, "notes.md"), "not a plugin")
-        yield* fs.makeDirectory(path.join(plugins, "empty"))
-        yield* fs.makeDirectory(path.join(plugins, "node_modules"))
-        yield* fs.writeFileString(path.join(plugins, "broken.ts"), "export default 42\n")
-        for (const name of ["x", "y"]) {
-          yield* fs.makeDirectory(path.join(dir, name))
-          yield* fs.writeFileString(path.join(dir, name, "index.ts"), source(name, `from-${name}`))
-        }
-        yield* fs.writeFileString(path.join(dir, "a-file.ts"), source("f", "from-f"))
-        const config = (entries: ReadonlyArray<unknown>) =>
-          fs.writeFileString(
-            path.join(dir, "vibest.json"),
-            `// comments are fine\n{ "plugins": ${JSON.stringify(entries)}, }\n`,
-          )
-
+        const { dir, plugins, path, config } = yield* loadingFixture
         yield* config(["./x", "./y", "-b", "vibest-plugin-npm@1.0.0", "./a-file.ts"])
-        const first = yield* loaded(dir)
+        const first = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* first.list).map((p) => [p.id, p.status]),
           [
@@ -440,31 +454,51 @@ describe("plugins: loading", () => {
             ["x", "active"],
             ["y", "active"],
             ["vibest-plugin-npm@1.0.0", "failed"],
-            ["f", "active"],
           ],
         )
         const listed = yield* first.list
         assert.include(listed.find((p) => p.id.endsWith("broken.ts"))!.error, "Plugin.define")
         assert.include(listed.find((p) => p.id.startsWith("vibest-plugin-npm"))!.error, "not supported yet")
         assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
-        assert.strictEqual((yield* first.start(event)).model, "from-f")
+        assert.strictEqual((yield* first.start(event)).model, "from-y")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    LOADING_TIMEOUT,
+  )
 
+  it.live(
+    "P1: a bad config entry fails visibly and loads nothing",
+    () =>
+      Effect.gen(function* () {
+        const { dir, config } = yield* loadingFixture
+        yield* config(["./x", "file://["])
+        const invalid = yield* settledAfterLoad(dir)
+        assert.deepStrictEqual(
+          (yield* invalid.list).map((p) => p.id),
+          [],
+        )
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    LOADING_TIMEOUT,
+  )
+
+  it.live(
+    "P1: -* removes every earlier plugin and the later entries load in their order",
+    () =>
+      Effect.gen(function* () {
+        const { dir, config } = yield* loadingFixture
         yield* config(["-*", "./y", "./x"])
-        const second = yield* loaded(dir)
+        const second = yield* settledAfterLoad(dir)
         assert.deepStrictEqual(
           (yield* second.list).map((p) => p.id),
           ["y", "x"],
         )
         assert.strictEqual((yield* second.start(event)).model, "from-x")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    LOADING_TIMEOUT,
   )
 })
 
 const held: Array<Fact> = []
-let release = () => {}
-const gate = new Promise<void>((resolve) => {
-  release = resolve
-})
+const { promise: gate, resolve: release } = Promise.withResolvers<void>()
 const watcher = Plugin.define({
   id: "watcher",
   effect: (ctx) =>
@@ -482,7 +516,7 @@ describe("plugins: event.subscribe", () => {
     "a consumer that holds up its facts does not hold up the commits, and gets every fact in order once it goes on",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       yield* yieldToIo
       yield* sessions.spawn(yield* spawnInput(repo, { harness: "pi" }))
       const second = yield* sessions.spawn(yield* spawnInput(repo, { harness: "pi" }))

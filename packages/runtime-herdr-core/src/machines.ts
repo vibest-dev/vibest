@@ -1,4 +1,4 @@
-import type * as VibestPlugin from "@vibest/plugin"
+import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Duration, Effect, type Scope, Stream } from "effect"
 import type { api, HcFailure, HcShape } from "effect-herdr-core-sdk"
 

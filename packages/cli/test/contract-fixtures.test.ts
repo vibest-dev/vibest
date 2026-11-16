@@ -3,15 +3,22 @@ import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders } from "@vibest/client/client"
-import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
-import { VERSION } from "@vibest/protocol/rpc"
+import {
+  type Line,
+  makeRepository,
+  tempDirectory,
+  testLayer,
+  type TestServices,
+  wire,
+} from "@vibest/platform-bun/test/lib/fakes"
+import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { Effect, Layer, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
-import { type Line, makeRepository, tempDirectory, testLayer, type TestServices, wire } from "./fakes.ts"
+import { VERSION } from "../src/version.ts"
 
 const FIXTURES = path.join(import.meta.dirname, "..", "..", "..", "packages", "protocol", "contract", "fixtures")
 const RECORD = process.env["VIBEST_RECORD_FIXTURES"] === "1"
@@ -81,7 +88,7 @@ const check = (name: string, lines: ReadonlyArray<Line>, paths: Record<string, s
     )
   })
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
+const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(served)))
 
 describe("contract", () => {

@@ -1,18 +1,19 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { callerTarget, entryPlace, specHits, type CallerHit } from "@vibest/core/caller"
-import type { Caller, RuntimeDefinition } from "@vibest/core/host"
-import { Layout, VibestCommand } from "@vibest/core/paths"
-import { Builtins, builtinsNode } from "@vibest/core/plugins"
-import { HostEnv, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
-import { Plugin } from "@vibest/plugin"
+import { Builtins, builtinsNode } from "@vibest/core/plugin"
+import type { Caller, RuntimeDefinition } from "@vibest/core/plugin/domains"
+import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
+import { hostReplacements } from "@vibest/platform-bun/test/lib/fakes"
+import { PATH_WITHOUT_HARNESS_CLIS } from "@vibest/platform-bun/test/lib/fakes"
+import { memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { Plugin } from "@vibest/plugin/effect"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { run as runDaemon } from "@vibest/server/daemon"
 import { ConfigProvider, Effect, FileSystem, Layer, Path, PubSub, Queue, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
-
-import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
 
 const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
   id,
@@ -90,10 +91,10 @@ describe("the runtime registry", () => {
     () =>
       Effect.gen(function* () {
         const dropped: Array<string> = []
-        const bus = yield* Bus
-        const seen = yield* bus.subscribe
+        const bus = yield* Bus.Service
+        const seen = yield* bus.subscribe()
         const runtimes = yield* makeRuntimes.pipe(
-          Effect.provideService(HostEnv, { drop: (names) => void dropped.push(...names) }),
+          Effect.provideService(Runtimes.HostEnv, { drop: (names) => void dropped.push(...names) }),
         )
         const queue = yield* Queue.unbounded<RuntimeEvent>()
         yield* runtimes.transform((editor) => editor.add(definition("hc", ["HC_ID"])))
@@ -111,27 +112,27 @@ describe("the runtime registry", () => {
         )
         assert.includeMembers(dropped, ["HC_ID", "HERDR_ID"])
         const exited = (id: string): RuntimeEvent => ({ type: "exited", terminal: { id } })
-        const until = (type: "live.exited" | "live.drain") =>
+        const until = (type: "terminal.exited" | "drain.released") =>
           Effect.gen(function* () {
             const passed: Array<string> = []
             for (;;) {
               const event = yield* PubSub.take(seen)
-              if (event.type === "live.exited") passed.push(event.terminal.id)
+              if (event.type === "terminal.exited") passed.push(event.terminal.id)
               if (event.type === type) return passed
             }
           })
         yield* Queue.offer(queue, exited("first"))
-        assert.deepStrictEqual(yield* until("live.exited"), ["first"])
+        assert.deepStrictEqual(yield* until("terminal.exited"), ["first"])
         yield* herdr.dispose
         yield* Queue.offer(queue, exited("after"))
         for (let i = 0; i < 20; i++) yield* Effect.yieldNow
-        yield* bus.observe({ type: "live.drain" })
-        assert.deepStrictEqual(yield* until("live.drain"), [])
+        yield* bus.observe({ type: "drain.released" })
+        assert.deepStrictEqual(yield* until("drain.released"), [])
         assert.deepStrictEqual(
           (yield* runtimes.all).map((runtime) => runtime.id),
           ["hc"],
         )
-      }).pipe(Effect.scoped, Effect.provide(Bus.layer)),
+      }).pipe(Effect.scoped, Effect.provide(memoryBus)),
   )
 })
 
@@ -250,6 +251,7 @@ describe("caller runtimes", () => {
       })
       const replacements = [
         ...Platform.replacements,
+        ...hostReplacements,
         builtinsNode.replace(
           Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
         ),

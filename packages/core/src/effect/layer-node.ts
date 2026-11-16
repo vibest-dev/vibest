@@ -1,4 +1,4 @@
-import { Brand, Context, Effect, Layer, type Scope } from "effect"
+import { Brand, Context, Effect, Layer, Scope } from "effect"
 
 export * as LayerNode from "./layer-node.ts"
 
@@ -210,18 +210,11 @@ function makeProvider<Implementation extends Layer.Any, Items extends readonly A
   )
 }
 
-export function unbound<E>(): <R, Shape, const T extends Tag | undefined = undefined>(
-  service: Context.Key<R, Shape>,
-  tag?: T,
-) => Node<R, E, T>
 export function unbound<R, Shape, const T extends Tag | undefined = undefined>(
   service: Context.Key<R, Shape>,
   tag?: T,
-): Node<R, never, T>
-export function unbound(service?: { readonly key: string }, tag?: Tag): unknown {
-  const declare = (service: { readonly key: string }, tag?: Tag) =>
-    new NodeValue({ kind: "unbound", name: service.key }, tag)
-  return service === undefined ? declare : declare(service, tag)
+): Node<R, never, T> {
+  return new NodeValue({ kind: "unbound", name: service.key }, tag as T)
 }
 
 export function group<const Items extends readonly AnyGraph[]>(
@@ -233,6 +226,23 @@ export function group<const Items extends readonly AnyGraph[]>(
 export interface CompileOptions {
   readonly replacements?: Replacements
   readonly shared?: Tag
+  readonly releases?: Releases
+}
+
+const TrackTypeId = Symbol("LayerNode.Releases.track")
+
+export class Releases {
+  [TrackTypeId](name: string) {
+    const key = Symbol(name)
+    this.#entries.set(key, { name, since: Date.now() })
+    return () => void this.#entries.delete(key)
+  }
+
+  readonly #entries = new Map<symbol, { readonly name: string; readonly since: number }>()
+
+  pending(now = Date.now()) {
+    return Array.from(this.#entries.values(), (entry) => ({ name: entry.name, ms: now - entry.since }))
+  }
 }
 
 type Resolved = {
@@ -305,6 +315,23 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
 
   const roots = resolve(root)
   return Layer.fromBuild((memoMap, scope) => {
+    const releases = options.releases ?? new Releases()
+    const trackRelease = <B, F, R>(name: string, nodeScope: Scope.Scope, build: () => Effect.Effect<B, F, R>) =>
+      Effect.gen(function* () {
+        let settle = () => {}
+        yield* Scope.addFinalizer(
+          nodeScope,
+          Effect.sync(() => settle()),
+        )
+        const result = yield* build()
+        yield* Scope.addFinalizer(
+          nodeScope,
+          Effect.sync(() => {
+            settle = releases[TrackTypeId](name)
+          }),
+        )
+        return result
+      })
     const local = shared === undefined ? memoMap : Layer.makeMemoMapUnsafe()
     const ambient = Layer.succeed(Layer.CurrentMemoMap, memoMap)
     const layers = new Map<Resolved, RuntimeLayer>()
@@ -313,7 +340,11 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
       if (cached) return cached
       const dependencies = node.dependencies.map(build)
       const implementation = Layer.suspend(() => node.implementation.pipe(Layer.provide([ambient, ...dependencies])))
-      const layer = Layer.fromBuild((_, scope) => buildContext(implementation, node.shared ? memoMap : local, scope))
+      const layer = Layer.fromBuild((_, nodeScope) =>
+        trackRelease(node.name, nodeScope, () =>
+          buildContext(implementation, node.shared ? memoMap : local, nodeScope),
+        ),
+      )
       layers.set(node, layer)
       return layer
     }

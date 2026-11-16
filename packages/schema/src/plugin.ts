@@ -11,6 +11,14 @@ export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefus
 
 export class HookFailed extends Schema.TaggedError<HookFailed>()("HookFailed", { message: Schema.String }) {}
 
+export class PluginsNotActive extends Schema.TaggedError<PluginsNotActive>()("PluginsNotActive", {
+  plugins: Schema.Array(Schema.String),
+}) {
+  override get message() {
+    return this.plugins.length === 0 ? "plugins still loading" : `plugins still loading: ${this.plugins.join(", ")}`
+  }
+}
+
 export const Change = Schema.Struct({
   field: Schema.String,
   from: Schema.optional(Schema.Unknown),

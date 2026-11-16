@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest"
 import { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Exit, Sink, Stdio, Stream } from "effect"
 
-import { openProject } from "../src/cli.ts"
+import { openProject } from "../src/open-project.ts"
 
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 

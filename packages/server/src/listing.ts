@@ -1,20 +1,21 @@
-import { projectActivity, unseenDone } from "@vibest/core/activity"
-import { type EngineEvent } from "@vibest/core/bus"
+import { type BusEvent } from "@vibest/core/bus"
+import { Db } from "@vibest/core/database/db"
 import {
-  Db,
   executionStateOf,
   exitedAt,
   harnessIdOf,
   runtimeOf,
-  type RuntimeAddress,
   type SessionBrief,
   terminalOf,
-} from "@vibest/core/db"
-import type { ListScope } from "@vibest/core/remote"
+} from "@vibest/core/database/db-rows"
+import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
-import { type SessionView, Sessions } from "@vibest/core/sessions"
+import { type SessionView, Session } from "@vibest/core/session"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
-import { Effect } from "effect"
+import type { RuntimeAddress } from "@vibest/schema/session"
+import { Context, Effect, Layer } from "effect"
+
+import type { ListScope } from "./machine/remote.ts"
 
 const LS_TASK = 500
 const taskForLs = (task: string | null) =>
@@ -45,13 +46,13 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
 })
 
 export const sessionListing = (deps: {
-  readonly db: Db["Service"]
-  readonly sessions: Sessions["Service"]
-  readonly runtimes: Runtimes["Service"]
+  readonly db: Db.Interface
+  readonly sessions: Session.Interface
+  readonly runtimes: Runtimes.Interface
 }) => {
   const { db, sessions, runtimes } = deps
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
-    Effect.map(db.sessionBriefs(rows.map((row) => row.id)), (briefs) =>
+    Effect.map(db.session.sessionBriefs(rows.map((row) => row.id)), (briefs) =>
       rows.map((row) => {
         const brief = briefs.get(row.id)
         return { ...toInfo(row, brief), task: taskForLs(brief?.task ?? null) }
@@ -76,7 +77,7 @@ export const sessionListing = (deps: {
 
   const watched = (infos: ReadonlyArray<SessionInfo>) =>
     Effect.gen(function* () {
-      const parents = yield* db.sessionParents(infos.map((info) => info.id))
+      const parents = yield* db.session.sessionParents(infos.map((info) => info.id))
       return yield* Effect.forEach(
         infos,
         (info) =>
@@ -91,7 +92,7 @@ export const sessionListing = (deps: {
     })
 
   const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
-    Effect.map(db.watchProjects(), (rows) =>
+    Effect.map(db.project.watchProjects(), (rows) =>
       rows.map((row): ProjectRow => ({
         ...row,
         activity: projectActivity(sessions.filter((s) => s.projectId === row.id).map((s) => s.status)),
@@ -101,7 +102,7 @@ export const sessionListing = (deps: {
   const projectStatuses = (id: string) =>
     Effect.gen(function* () {
       return yield* Effect.forEach(
-        yield* db.listSessions({ projectId: id, stopped: false }),
+        yield* db.session.listSessions({ projectId: id, stopped: false }),
         (s) => Effect.map(seenAt(runtimeOf(s), terminalOf(s)), (seen) => unseenDone(s.status, seen)),
         { concurrency: "unbounded" },
       )
@@ -109,10 +110,10 @@ export const sessionListing = (deps: {
 
   const watchSession = (id: string) =>
     Effect.gen(function* () {
-      const identity = yield* db.sessionIdentity(id)
+      const identity = yield* db.session.sessionIdentity(id)
       if (identity === undefined) return []
       const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
-      const row = yield* db.getSession(id)
+      const row = yield* db.session.getSession(id)
       if (row === undefined || exitedAt(row) !== null) return [ended]
       const view = yield* sessions
         .get(id)
@@ -129,7 +130,7 @@ export const sessionListing = (deps: {
 
   const watchProject = (id: string) =>
     Effect.gen(function* () {
-      const rows = yield* db.watchProjects(id)
+      const rows = yield* db.project.watchProjects(id)
       if (rows.length === 0) return []
       const activity = projectActivity(yield* projectStatuses(id))
       return rows.map((row): WatchEvent => ({ _tag: "Project", project: { ...row, activity } }))
@@ -137,7 +138,7 @@ export const sessionListing = (deps: {
 
   const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
     Effect.gen(function* () {
-      const rows = yield* db.listSessions()
+      const rows = yield* db.session.listSessions()
       return rows
         .filter(
           (row) =>
@@ -148,27 +149,25 @@ export const sessionListing = (deps: {
         .map((row) => row.id)
     })
 
-  const watchDeltas = (events: ReadonlyArray<EngineEvent>) =>
+  const watchDeltas = (events: ReadonlyArray<BusEvent>) =>
     Effect.gen(function* () {
       const projectIds = new Set<string>()
       const sessionIds = new Set<string>()
       for (const event of events) {
-        if ("seq" in event) {
-          if (event.sessionId !== undefined) sessionIds.add(event.sessionId)
-        } else if (event.type === "live.session") sessionIds.add(event.sessionId)
-        else if (event.type === "live.project") projectIds.add(event.projectId)
-        else if (event.type === "live.state" || event.type === "live.exited") {
-          const project = yield* db.entryAt(event.runtime, event.terminal)
-          const entry = project === undefined ? undefined : yield* db.entryOf(project)
+        if (event.type === "session.changed") sessionIds.add(event.sessionId)
+        else if (event.type === "project.changed") projectIds.add(event.projectId)
+        else if (event.type === "terminal.state" || event.type === "terminal.exited") {
+          const project = yield* db.session.entryAt(event.runtime, event.terminal)
+          const entry = project === undefined ? undefined : yield* db.session.entryOf(project)
           if (entry !== undefined) sessionIds.add(entry.id)
-        } else if (event.type === "live.seen")
+        } else if (event.type === "terminal.seen")
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
-        else if (event.type === "live.reset")
+        else if (event.type === "runtime.reset")
           for (const info of yield* listed({ _tag: "All" }, false))
             if (info.runtime === event.runtime) sessionIds.add(info.id)
       }
       for (const id of sessionIds) {
-        const identity = yield* db.sessionIdentity(id)
+        const identity = yield* db.session.sessionIdentity(id)
         if (identity !== undefined) projectIds.add(identity.projectId)
       }
       return [
@@ -180,4 +179,17 @@ export const sessionListing = (deps: {
   return { listed, watched, snapshotProjects, watchDeltas }
 }
 
-export type Listing = ReturnType<typeof sessionListing>
+export type Interface = ReturnType<typeof sessionListing>
+
+export class Service extends Context.Service<Service, Interface>()("vibest/Listing") {}
+
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    return sessionListing({
+      db: yield* Db.Service,
+      sessions: yield* Session.Service,
+      runtimes: yield* Runtimes.Service,
+    })
+  }),
+)

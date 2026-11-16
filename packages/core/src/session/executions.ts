@@ -1,11 +1,12 @@
 import { NotReady } from "@vibest/schema/session"
 import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
 
-import { awaitEvent, awaitOn, Bus, type EngineEvent } from "../bus.ts"
-import { Db, type SessionRow, harnessIdOf } from "../db.ts"
+import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
+import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
+import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import { Harnesses, runtimeLifecycle } from "../harness.ts"
-import type { HarnessDefinition } from "../host.ts"
+import { Harnesses } from "../harnesses.ts"
+import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
   type AgentState,
@@ -17,6 +18,8 @@ import {
   type AgentSeen,
 } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
+
+export * as Executions from "./executions.ts"
 
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
@@ -33,15 +36,15 @@ export const busyOf = (seen: AgentSeen) => {
 const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 
 const usable = (seen: AgentSeen, adapter: HarnessDefinition) =>
-  runtimeLifecycle(adapter) ? seen === "idle" : settled(seen)
+  Harnesses.runtimeLifecycle(adapter) ? seen === "idle" : settled(seen)
 
 const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
 
-const make = Effect.gen(function* () {
-  const db = yield* Db
-  const harnesses = yield* Harnesses
-  const bus = yield* Bus
-  const { track } = yield* SessionLive
+export const make = Effect.gen(function* () {
+  const db = yield* Db.Service
+  const harnesses = yield* Harnesses.Service
+  const bus = yield* Bus.Service
+  const { track } = yield* SessionLive.Service
 
   const awaitReady = Effect.fn("Executions.awaitReady")(
     (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
@@ -52,12 +55,12 @@ const make = Effect.gen(function* () {
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
         const look = Effect.gen(function* () {
           const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-          const ready = (yield* db.readyAt(id)) !== undefined || (!reports && usable(seen, adapter))
+          const ready = (yield* db.session.readyAt(id)) !== undefined || (!reports && usable(seen, adapter))
           return { seen, ready }
         })
         return yield* look.pipe(
           Effect.flatMap((now) => {
-            if (now.ready || step === undefined || (settled(now.seen) && !runtimeLifecycle(adapter)))
+            if (now.ready || step === undefined || (settled(now.seen) && !Harnesses.runtimeLifecycle(adapter)))
               return Effect.succeed(now)
             return step({
               screen,
@@ -87,8 +90,8 @@ const make = Effect.gen(function* () {
 
   const pickedUp = (session: SessionRow, execution: number, state: "working" | "blocked") =>
     Effect.gen(function* () {
-      yield* db.acceptExecution(session.id, execution)
-      yield* db.setStatus(session.id, state)
+      yield* db.session.acceptExecution(session.id, execution)
+      yield* db.session.setStatus(session.id, state)
       return true
     })
 
@@ -96,7 +99,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const state = stateOf(yield* agentState(h, terminal))
       if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
-      return yield* db.executionAccepted(session.id)
+      return yield* db.session.executionAccepted(session.id)
     })
 
   const confirmed = (
@@ -104,7 +107,7 @@ const make = Effect.gen(function* () {
     session: SessionRow,
     terminal: Terminal,
     execution: number,
-    subscription: PubSub.Subscription<EngineEvent>,
+    subscription: PubSub.Subscription<BusEvent>,
   ) =>
     awaitOn(
       subscription,
@@ -114,7 +117,7 @@ const make = Effect.gen(function* () {
       (event) =>
         event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
           ? Effect.succeed(Option.some(true))
-          : event.type === "live.state" &&
+          : event.type === "terminal.state" &&
               sameTerminal(event.terminal, terminal) &&
               (event.state === "working" || event.state === "blocked")
             ? Effect.map(pickedUp(session, execution, event.state), Option.some)
@@ -142,7 +145,7 @@ const make = Effect.gen(function* () {
       ),
       (event) =>
         Effect.succeed(
-          (event.type === "live.state" &&
+          (event.type === "terminal.state" &&
             sameTerminal(event.terminal, terminal) &&
             event.state !== "working" &&
             event.state !== "blocked") ||
@@ -152,7 +155,7 @@ const make = Effect.gen(function* () {
         ),
       STOP_WAIT,
       settledNow,
-    ).pipe(Effect.provideService(Bus, bus))
+    ).pipe(Effect.provideService(Bus.Service, bus))
   })
 
   const interruptAgent = Effect.fn("Executions.interruptAgent")((
@@ -176,31 +179,31 @@ const make = Effect.gen(function* () {
     text: string,
     onHandover: Effect.Effect<void> = Effect.void,
   ) {
-    const kept = yield* db.openExecution(session.id)
+    const kept = yield* db.session.openExecution(session.id)
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const state = yield* awaitReady(h, terminal, adapter, session.id)
-    const open = yield* db.openExecution(session.id)
+    const open = yield* db.session.openExecution(session.id)
     if (open !== undefined && open !== kept) return undefined
     const begun =
       open === undefined
-        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.startExecution(session.id, at))
+        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(session.id, at))
         : { execution: open, opened: true }
     if (!begun.opened) return undefined
     const execution = begun.execution
-    const standing = Effect.map(db.openExecution(session.id), (now) =>
+    const standing = Effect.map(db.session.openExecution(session.id), (now) =>
       now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
     )
     yield* onHandover
     const r = yield* track(session.id)
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
-    yield* db.setStatus(session.id, state)
+    yield* db.session.setStatus(session.id, state)
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
-    const missed = db.closeExecution(session.id, execution, "not_started")
-    const subscription = yield* bus.subscribe
+    const missed = db.session.closeExecution(session.id, execution, "not_started")
+    const subscription = yield* bus.subscribe()
     const delivered = yield* send.pipe(
       Effect.as(false),
       Effect.catchTag("RuntimeError", (error) =>
@@ -215,8 +218,8 @@ const make = Effect.gen(function* () {
     )
     if (delivered) return undefined
     if (state === "unknown" && adapter.ready === "runtime") {
-      yield* db.acceptExecution(session.id, execution)
-      yield* db.setStatus(session.id, "working")
+      yield* db.session.acceptExecution(session.id, execution)
+      yield* db.session.setStatus(session.id, "working")
       return undefined
     }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
@@ -235,7 +238,7 @@ const make = Effect.gen(function* () {
   }, Effect.scoped)
 
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
-    yield* db.endExecution(
+    yield* db.session.endExecution(
       session.id,
       { outcome: end, failure: { message: error } },
       `${session.id}'s execution ended with an error: ${error}`,
@@ -245,14 +248,14 @@ const make = Effect.gen(function* () {
   return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish }
 })
 
-export class Executions extends Context.Service<Executions, Effect.Success<typeof make>>()("vibest/Executions") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Executions, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Executions") {}
 
-  static readonly node = LayerNode.make({
-    service: Executions,
-    layer: Executions.layer,
-    deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
+})

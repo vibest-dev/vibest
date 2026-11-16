@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { MachineEvent, MachineNote } from "@vibest/plugin"
+import type { MachineEvent, MachineNote } from "@vibest/plugin/effect"
 import { type Cli, link, locate, type Profile } from "@vibest/runtime-herdr/machines"
 import * as Mirror from "@vibest/runtime-herdr/mirror"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"

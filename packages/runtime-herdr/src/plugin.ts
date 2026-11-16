@@ -2,7 +2,7 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin/effect"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"

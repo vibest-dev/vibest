@@ -1,13 +1,13 @@
 import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
-import { PROTOCOL } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
+import { runVibest as vibest, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Effect, FileSystem, Path, Schema } from "effect"
 
 import * as Platform from "#platform"
 
-import { runVibest as vibest, tempDirectory } from "./fakes.ts"
+import { VERSION } from "../src/version.ts"
 
 const TIMEOUT = 30_000
 

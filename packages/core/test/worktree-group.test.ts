@@ -1,17 +1,22 @@
+import fs from "node:fs"
+
 import { assert, describe, it } from "@effect/vitest"
-import { Db, type NewSession, exitedAt, executionStateOf } from "@vibest/core/db"
-import type { HarnessId } from "@vibest/core/harness"
-import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
-import { allocationNameSource, Sessions } from "@vibest/core/sessions"
+import { Db } from "@vibest/core/database/db"
+import { type NewSession, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
+import { sameWorktreeBucket } from "@vibest/core/paths"
+import { Session } from "@vibest/core/session"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
-import { Effect, FileSystem, Path, type Scope } from "effect"
+import { Layout } from "@vibest/schema/layout"
+import type { HarnessId } from "@vibest/schema/session"
+import { Deferred, Effect, Exit, Fiber, FileSystem, Path, Scheduler, type Scope } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { interruptOnceReady } from "./lib/interrupt-at.ts"
 import { until } from "./lib/observe.ts"
-import { makeRepository, testLayer, type TestServices } from "./lib/session.ts"
+import { makeRepository, scriptedLeaves, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(
@@ -30,8 +35,11 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
       }) as const,
   )
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer())))
+const test = <E>(
+  name: string,
+  program: Effect.Effect<void, E, TestServices | Scope.Scope>,
+  options: (() => TestOptions) | undefined = undefined,
+) => it.effect(name, () => program.pipe(Effect.provide(testLayer(options?.()))))
 
 const storedRow = (
   id: string,
@@ -64,7 +72,8 @@ const marker = (dir: string) =>
     yield* fs.writeFileString(path.join(dir, "keep"), "keep\n")
   })
 
-const directoryOf = (id: string) => Effect.flatMap(Db, (db) => db.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
+const directoryOf = (id: string) =>
+  Effect.flatMap(Db.Service, (db) => db.session.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
 
 describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a name is reserved by creating its directory, so whatever already sits at a path takes that name", () => {
   test(
@@ -73,22 +82,21 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const db = yield* Db
-      const sessions = yield* Sessions
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
-      allocationNameSource.leaves = ["ab01", "ab02", "ab03"]
-      const reset = Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined)))
       const repository = yield* repositoryDirectoryName(repo)
       const taken = layout.allocationWorktree(repository, "ab01")
       yield* marker(taken)
       const link = layout.allocationWorktree(repository, "ab02")
       yield* fs.symlink("nowhere", link)
-      const { id } = yield* sessions.spawn(yield* spawnInput(repo)).pipe(reset)
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       assert.strictEqual(yield* directoryOf(id), layout.allocationWorktree(repository, "ab03"))
-      yield* until(db.getSession(id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
+      yield* until(db.session.getSession(id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
       assert.strictEqual(yield* fs.readFileString(path.join(taken, "keep")), "keep\n")
       assert.strictEqual(yield* fs.readLink(link), "nowhere")
     }),
+    () => ({ crypto: scriptedLeaves(["ab01", "ab02", "ab03"]) }),
   )
 
   test(
@@ -98,7 +106,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const path = yield* Path.Path
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const name = path.basename(repo)
       const parent = path.join(layout.worktrees, name)
@@ -119,17 +127,17 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const held = yield* herdr.hold("open")
-      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
+      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(repo))
       yield* held.reached
       const wt = yield* directoryOf(id)
       assert.isTrue(yield* fs.exists(wt))
       yield* fs.writeFileString(path.join(path.dirname(wt), "sibling"), "group\n")
       yield* held.release("failed")
-      yield* until(db.getSession(id), (w) => !!w && exitedAt(w) !== null)
+      yield* until(db.session.getSession(id), (w) => !!w && exitedAt(w) !== null)
       assert.isFalse(yield* fs.exists(wt))
       assert.strictEqual(yield* fs.readFileString(path.join(path.dirname(wt), "sibling")), "group\n")
     }),
@@ -141,16 +149,16 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const db = yield* Db
-      const sessions = yield* Sessions
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const key = yield* projectOf(repo)
       const outside = "e5f6a7b8-e5f6-4e5f-8e5f-e5f6a7b8e5f6"
       const none = "a7b8c9d0-a7b8-4a7b-8a7b-a7b8c9d0a7b8"
       const elsewhere = path.join(layout.home, "x", outside)
       yield* marker(elsewhere)
-      yield* db.insertSession(storedRow(outside), key, { cwd: elsewhere })
-      yield* db.insertSession(storedRow(none), key)
+      yield* db.session.insertSession(storedRow(outside), key, { cwd: elsewhere })
+      yield* db.session.insertSession(storedRow(none), key)
       const left = (yield* sessions.remove(outside))!
       assert.strictEqual(left.worktree, "kept")
       assert.include(left.reasons.join("\n"), "left alone")
@@ -166,42 +174,38 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     "a held creation reserves its leaf, so the next draw does not alias it, even under a name differing only in case on a case-folding file system",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const sessions = yield* Sessions
-      const db = yield* Db
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const other = yield* makeRepository
       yield* (yield* FakeGit).update(repo, { origin: "git@github.com:Org/MyRepo.git" })
       yield* (yield* FakeGit).update(other, { origin: "git@github.com:Other/myrepo.git" })
-      const reset = Effect.sync(() => (allocationNameSource.leaves = undefined))
-      yield* Effect.gen(function* () {
-        allocationNameSource.leaves = ["abcd", "abce"]
-        const held = yield* herdr.hold("open")
-        const first = yield* sessions.spawn(yield* spawnInput(repo))
-        yield* held.reached
-        assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
-        assert.isTrue(
-          yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")),
-          "the directory exists before the terminal opens",
-        )
-        allocationNameSource.leaves = ["abcd", "abce"]
-        const second = yield* sessions.spawn(yield* spawnInput(other))
-        yield* until(
-          db.getSession(second.id),
-          (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
-        )
-        const expected = sameWorktreeBucket("MyRepo", "myrepo") ? "abce" : "abcd"
-        assert.strictEqual(yield* directoryOf(second.id), layout.allocationWorktree("myrepo", expected))
-        yield* held.release()
-        yield* until(
-          db.getSession(first.id),
-          (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
-        )
-        assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
-        assert.isTrue(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
-      }).pipe(Effect.ensuring(reset))
+      const held = yield* herdr.hold("open")
+      const first = yield* sessions.spawn(yield* spawnInput(repo))
+      yield* held.reached
+      assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
+      assert.isTrue(
+        yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")),
+        "the directory exists before the terminal opens",
+      )
+      const second = yield* sessions.spawn(yield* spawnInput(other))
+      yield* until(
+        db.session.getSession(second.id),
+        (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
+      )
+      const expected = sameWorktreeBucket("MyRepo", "myrepo") ? "abce" : "abcd"
+      assert.strictEqual(yield* directoryOf(second.id), layout.allocationWorktree("myrepo", expected))
+      yield* held.release()
+      yield* until(
+        db.session.getSession(first.id),
+        (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "open",
+      )
+      assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
+      assert.isTrue(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
     }),
+    () => ({ crypto: scriptedLeaves(["abcd", "abcd", "abce"]) }),
   )
 
   test(
@@ -209,27 +213,107 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
-      const db = yield* Db
-      const sessions = yield* Sessions
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
       const layout = yield* Layout
       const repo = yield* makeRepository
       yield* (yield* FakeGit).update(repo, { origin: "git@github.com:Org/MyRepo.git" })
       yield* marker(layout.allocationWorktree("MyRepo", "abcd"))
       const file = layout.allocationWorktree("MyRepo", "abce")
       yield* fs.writeFileString(file, "keep\n")
-      const before = (yield* db.listSessions({ stopped: true })).map((row) => row.id)
-      allocationNameSource.leaves = ["abcd", "abce"]
-      const failed = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo))).pipe(
-        Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined))),
-      )
+      const before = (yield* db.session.listSessions({ stopped: true })).map((row) => row.id)
+      const failed = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo)))
       assert.strictEqual(failed._tag, "AllocationFailed")
       assert.include(failed.message, "no unused 4-hex")
       assert.lengthOf(yield* herdr.callsTo("open"), 0)
       assert.strictEqual(yield* fs.readFileString(file), "keep\n")
       assert.deepStrictEqual(
-        (yield* db.listSessions({ stopped: true })).map((row) => row.id),
+        (yield* db.session.listSessions({ stopped: true })).map((row) => row.id),
         before,
       )
     }),
+    () => ({ crypto: scriptedLeaves(["abcd", "abce"]) }),
+  )
+  test(
+    "an admission that fails after the directory was reserved leaves no directory behind",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const layout = yield* Layout
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      const exit = yield* Effect.exit(sessions.spawn(yield* spawnInput(repo)))
+      assert.isTrue(Exit.isFailure(exit))
+      const parent = path.join(layout.worktrees, yield* repositoryDirectoryName(repo))
+      assert.deepStrictEqual(yield* fs.readDirectory(parent), [])
+    }),
+    () => ({ db: (db) => ({ ...db, session: { ...db.session, insertSession: () => Effect.die("insert failed") } }) }),
+  )
+
+  test(
+    "a spawn interrupted after its directory was reserved and before its admission leaves no directory and no row",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const files = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const layout = yield* Layout
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      const parent = path.join(layout.worktrees, yield* repositoryDirectoryName(repo))
+      const reserved = () => fs.existsSync(parent) && fs.readdirSync(parent).length > 0
+      const spawning = yield* Effect.forkChild(
+        sessions
+          .spawn(yield* spawnInput(repo))
+          .pipe(Effect.provideService(Scheduler.Scheduler, interruptOnceReady(reserved))),
+      )
+      const exit = yield* Fiber.await(spawning)
+      assert.isTrue(Exit.hasInterrupts(exit))
+      assert.deepStrictEqual(yield* files.readDirectory(parent), [])
+      assert.lengthOf(yield* db.session.listSessions({ stopped: true }), 0)
+      assert.lengthOf(yield* herdr.callsTo("open"), 0)
+    }),
+  )
+
+  const heldAfterInsert = () => {
+    const inserted = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    return {
+      options: (): TestOptions => ({
+        db: (db) => ({
+          ...db,
+          session: {
+            ...db.session,
+            insertSession: (...args) =>
+              db.session
+                .insertSession(...args)
+                .pipe(Effect.tap(() => Deferred.succeed(inserted, undefined).pipe(Effect.andThen(Deferred.await(go))))),
+          },
+        }),
+      }),
+      inserted: Deferred.await(inserted),
+      go: Deferred.succeed(go, undefined),
+    }
+  }
+
+  const held = heldAfterInsert()
+  test(
+    "a spawn interrupted right after its admission still has exactly one launch owner",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      const spawning = yield* Effect.forkChild(sessions.spawn(yield* spawnInput(repo)))
+      yield* held.inserted
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(spawning))
+      yield* Effect.yieldNow
+      yield* held.go
+      yield* Fiber.join(interrupting)
+      const [row] = yield* until(db.session.listSessions({ stopped: true }), (rows) => rows.length === 1)
+      yield* until(db.session.getSession(row!.id), (w) => (w ? (w.process?.placedAt ?? null) : undefined) !== null)
+      assert.lengthOf(yield* herdr.callsTo("open"), 1)
+    }),
+    held.options,
   )
 })

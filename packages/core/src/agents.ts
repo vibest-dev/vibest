@@ -2,9 +2,10 @@ import { UnknownAgent } from "@vibest/schema/session"
 import { Context, Effect, Layer } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import type { AgentDefinition, AgentsShape } from "./host.ts"
-import * as Registry from "./registry.ts"
-export type { AgentDefinition }
+import type { AgentDefinition, AgentsShape } from "./plugin/domains.ts"
+import * as Registry from "./plugin/registry.ts"
+
+export * as Agents from "./agents.ts"
 
 export const unknownAgent = (id: string, loaded: ReadonlyArray<AgentDefinition>) =>
   new UnknownAgent({
@@ -12,7 +13,7 @@ export const unknownAgent = (id: string, loaded: ReadonlyArray<AgentDefinition>)
     known: loaded.map(({ id, description }) => ({ id, description })),
   })
 
-export const makeAgents: Effect.Effect<AgentsShape> = Effect.sync(() => {
+export const make: Effect.Effect<AgentsShape> = Effect.sync(() => {
   const registry = Registry.definitions<AgentDefinition>("agent")
   return {
     get all() {
@@ -23,8 +24,10 @@ export const makeAgents: Effect.Effect<AgentsShape> = Effect.sync(() => {
   }
 })
 
-export class Agents extends Context.Service<Agents, AgentsShape>()("vibest/Agents") {
-  static readonly layer = Layer.effect(Agents, makeAgents)
+export type Interface = AgentsShape
 
-  static readonly node = LayerNode.make({ service: Agents, layer: Agents.layer, deps: [] })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/Agents") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({ service: Service, layer, deps: [] })

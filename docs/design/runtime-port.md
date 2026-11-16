@@ -2,7 +2,7 @@
 
 The agent runtime is where Agents' terminals live: herdr, rex and tern today, other products later. vibest owns the
 flow (who runs, where, what came back); a runtime owns the terminals of its own machine. The API is
-[`packages/plugin/src/runtime.ts`](../../packages/plugin/src/runtime.ts); `packages/runtime-herdr` is a runtime plugin
+[`packages/plugin/src/effect/runtime.ts`](../../packages/plugin/src/effect/runtime.ts); `packages/runtime-herdr` is a runtime plugin
 built on it. This replaces the herdr-shaped `RuntimeClient` (architecture §10) and answers open
 question 3 (§12, §17).
 
@@ -77,7 +77,7 @@ last pane closes its workspace, and a main checkout's workspace takes its linked
 
 `RuntimeError.code`: `not_found`, `busy`, `unreachable` (transient, retried), `incompatible` (needs the user),
 `failed` (anything else). `events` carries at least `exited` for each terminal whose program ended or that closed, and
-`reset` when the runtime lost track; core then reads each of its terminals once. `state` answers `not_found` when it
+`reset` when the runtime lost track; core then reads each of its terminals once. `events` emits `reset` as its first element once its subscription is acquired (build it with `Runtime.eventsFrom` over a PubSub), so core reads state after the subscription exists; when `events` fails, core logs it and subscribes again with a capped exponential backoff that starts over after each `reset`. `state` answers `not_found` when it
 names no agent in that terminal, which core reads as absent. `run(terminal, argv)` runs a command in an existing
 terminal once its program ended and its shell is back, the counterpart of `open`; without it there is no restart in
 place, and `vibest update` and a usage-limit move leave that terminal's agent for the user to restart. `present` gets
@@ -230,7 +230,7 @@ machine, and vibest never installs, prepares or reaches another machine through 
 Out of scope now: Agents on another machine starting their own subagents there, load balancing.
 
 Core follows only its own runtimes (`core/runtimes.ts`): a runtime that registers or comes back publishes one
-`live.reset`, and a terminal a runtime hands back is stored with machine `local`. The runtime registry follows every
+`runtime.reset`, and a terminal a runtime hands back is stored with machine `local`. The runtime registry follows every
 committed change: a definition that appears starts its event merge and a reset, one that is removed (its transform
 disposed or its plugin unloaded) stops its merge.
 

@@ -1,9 +1,10 @@
-import type { Harness } from "@vibest/plugin"
+import type { Harness } from "@vibest/plugin/effect"
 import { shellQuote } from "@vibest/schema/layout"
 import { Effect } from "effect"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { noProvider, opt } from "./models.ts"
-import { platform } from "./platform.ts"
+import { nodePlatform } from "./node-platform.ts"
 import { agySubscription } from "./subscriptions/agy.ts"
 import { parseJson, record } from "./subscriptions/index.ts"
 
@@ -21,7 +22,7 @@ export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.R
   })
 }
 
-export const agyConversation = (event: Harness.HarnessEvent): string | undefined =>
+export const agyConversation = (event: Readonly<Record<string, unknown>>): string | undefined =>
   typeof event.conversation_id === "string" && event.conversation_id !== "" ? event.conversation_id : undefined
 
 const statusLine = (pluginDir: string) =>
@@ -61,6 +62,10 @@ export const agy: Harness.HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => ["--output-format", "json", "models"], answer: agyModels },
-  subscription: (home, binary) => agySubscription(home, binary).pipe(Effect.provide(platform)),
+  subscription: (home, binary) =>
+    Effect.service(ChildProcessSpawner.ChildProcessSpawner).pipe(
+      Effect.flatMap((spawner) => agySubscription(spawner)(home, binary)),
+      Effect.provide(nodePlatform),
+    ),
   conversationOf: agyConversation,
 }

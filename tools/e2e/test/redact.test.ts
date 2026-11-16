@@ -26,7 +26,7 @@ test("copied pty evidence is redacted and otherwise kept byte for byte", async (
   await fs.mkdir(path.join(from, "a"))
   await fs.writeFile(path.join(from, "a/out.pty"), Buffer.from(bytes))
   await fs.writeFile(path.join(from, "screen.txt"), "model opus ready")
-  await copyEvidence(from, to, ["opus"])
+  await copyEvidence({}, from, to, ["opus"])
   expect([...(await fs.readFile(path.join(to, "a/out.pty")))]).toEqual(bytes)
   expect(await fs.readFile(path.join(to, "screen.txt"), "utf8")).toBe("model <redacted> ready")
 })

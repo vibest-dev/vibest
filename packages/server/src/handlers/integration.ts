@@ -1,22 +1,24 @@
-import { Db } from "@vibest/core/db"
-import { harnessCatalog, Harnesses, unprovided } from "@vibest/core/harness"
+import { Db } from "@vibest/core/database/db"
+import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
+import { harnessCatalog } from "@vibest/core/harness"
+import { Harnesses, unprovided } from "@vibest/core/harnesses"
 import { type HookCaller, Integration } from "@vibest/core/integration"
-import { LOCAL_MACHINE } from "@vibest/core/ledger-read"
 import { forProvider } from "@vibest/core/models"
-import { Remote } from "@vibest/core/remote"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"
 import { Caller, Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
 import type * as Headers from "effect/http/Headers"
 
 import { noteOpen, processOf, reader } from "../gates.ts"
+import { Remote } from "../machine/remote.ts"
 import type { Handlers } from "./caller.ts"
+import { group } from "./group.ts"
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
-  const harnesses = yield* Harnesses
-  const integration = yield* Integration
-  const remote = yield* Remote
+  const db = yield* Db.Service
+  const harnesses = yield* Harnesses.Service
+  const integration = yield* Integration.Service
+  const remote = yield* Remote.Service
 
   const hook = (
     sessionId: string,
@@ -27,7 +29,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const read = reader(headers)
       yield* noteOpen(db, read, sessionId)
-      const row = yield* db.sessionIdentity(sessionId)
+      const row = yield* db.session.sessionIdentity(sessionId)
       if (!row || row.harness !== harness) return
       yield* run({ id: row.id, entry: row.entry, harness, process: processOf(read) })
     }).pipe(Effect.orDie)
@@ -71,3 +73,5 @@ export const make = Effect.gen(function* () {
       hook(sessionId, harness, headers, (who) => integration.prompt(who, event)),
   } satisfies Handlers
 })
+
+export const layer = group(["Harnesses.List", "Integration.Guard", "ExecutionEnd", "Prompt"]).toLayer(make)

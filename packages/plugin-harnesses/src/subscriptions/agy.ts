@@ -1,7 +1,7 @@
 import type { SubscriptionLimit } from "@vibest/schema/subscription"
 import { Effect } from "effect"
 
-import { parseJson, record, runCli } from "./index.ts"
+import { parseJson, record, runCli, type Spawner } from "./index.ts"
 
 const windowName = (group: string, window: string) => `${group} ${window}`
 
@@ -28,9 +28,9 @@ export const agyLimits = (usage: unknown): ReadonlyArray<SubscriptionLimit> => {
   })
 }
 
-export const agySubscription = (home: string, binary: string) =>
+export const agySubscription = (spawner: Spawner) => (home: string, binary: string) =>
   Effect.gen(function* () {
-    const usage = parseJson(yield* runCli(binary, ["-p", "/usage", "--output-format", "json"], home))
+    const usage = parseJson(yield* runCli(spawner, binary, ["-p", "/usage", "--output-format", "json"], home))
     const limits = agyLimits(usage)
     if (record(usage)?.status !== "SUCCESS" || limits.length === 0)
       return [{ provider: "", error: `${binary} usage failed` }]
