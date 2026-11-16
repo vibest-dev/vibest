@@ -7,10 +7,6 @@ import type { RuntimesShape } from "@vibest/core/plugin/domains"
 import { Project } from "@vibest/core/project"
 import { type Runtime, Runtimes } from "@vibest/core/runtimes"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
-import { Forbidden } from "@vibest/protocol/rpc"
-import { Layout, VibestCommand } from "@vibest/schema/layout"
-import type { Host } from "@vibest/server/daemon"
-import * as Server from "@vibest/server/server"
 import {
   agentsLayer,
   FakeGit,
@@ -20,7 +16,11 @@ import {
   runVibest,
   tempDirectory,
   testLayer,
-} from "@vibest/server/test/lib/fakes"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { Forbidden } from "@vibest/protocol/rpc"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import type { Host } from "@vibest/server/daemon"
+import * as Server from "@vibest/server/server"
 import {
   Cause,
   ConfigProvider,

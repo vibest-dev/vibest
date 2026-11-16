@@ -4,8 +4,6 @@ import path from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders } from "@vibest/client/client"
 import { Project } from "@vibest/core/project"
-import { Layout } from "@vibest/schema/layout"
-import * as Server from "@vibest/server/server"
 import {
   type Line,
   makeRepository,
@@ -13,7 +11,9 @@ import {
   testLayer,
   type TestServices,
   wire,
-} from "@vibest/server/test/lib/fakes"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { Layout } from "@vibest/schema/layout"
+import * as Server from "@vibest/server/server"
 import { Effect, Layer, type Scope } from "effect"
 
 import * as Platform from "#platform"

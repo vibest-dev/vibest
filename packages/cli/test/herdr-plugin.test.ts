@@ -8,6 +8,15 @@ import { Db } from "@vibest/core/database/db"
 import { terminalOf } from "@vibest/core/database/db-rows"
 import { Project } from "@vibest/core/project"
 import {
+  FakeRuntime,
+  makeRepository,
+  projectOf,
+  runVibest,
+  stopRecorded,
+  tempDirectory,
+  testLayer,
+} from "@vibest/platform-bun/test/lib/fakes"
+import {
   ACTIONS,
   formatUsage,
   type HerdrDaemon,
@@ -23,15 +32,6 @@ import {
 } from "@vibest/runtime-herdr/commands"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import {
-  FakeRuntime,
-  makeRepository,
-  projectOf,
-  runVibest,
-  stopRecorded,
-  tempDirectory,
-  testLayer,
-} from "@vibest/server/test/lib/fakes"
 import { Effect, FileSystem, Layer } from "effect"
 import { TestClock } from "effect/testing"
 

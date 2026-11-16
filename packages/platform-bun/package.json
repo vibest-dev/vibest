@@ -4,11 +4,18 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "imports": {
+    "#platform": {
+      "bun": "./src/bun.ts"
+    }
+  },
   "exports": {
+    "./test/*": "./test/*.ts",
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p test/tsconfig.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/platform-bun"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
@@ -21,5 +28,9 @@
     "@vibest/server": "workspace:*",
     "effect": "catalog:",
     "effect-herdr-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@vibest/runtime-herdr": "workspace:*",
+    "@vibest/runtime-herdr-core": "workspace:*"
   }
 }

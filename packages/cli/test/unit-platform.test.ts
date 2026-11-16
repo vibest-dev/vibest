@@ -1,7 +1,7 @@
 import { assert, layer } from "@effect/vitest"
 import { copyIncluded } from "@vibest/core/worktree"
+import { FakeGit, harnessesLayer, makeRepository, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { claude, cursor, pi } from "@vibest/plugin-harnesses"
-import { FakeGit, harnessesLayer, makeRepository, tempDirectory } from "@vibest/server/test/lib/fakes"
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
 
 import * as Platform from "#platform"

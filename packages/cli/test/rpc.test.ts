@@ -8,11 +8,6 @@ import { projectRoot } from "@vibest/core/project/create"
 import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
 import { PRESENT_TIMEOUT } from "@vibest/core/session/entry"
-import { Plugin } from "@vibest/plugin/effect"
-import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
-import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
-import { Layout } from "@vibest/schema/layout"
-import { PROTOCOL } from "@vibest/schema/version"
 import {
   authed,
   FakeRuntime,
@@ -21,9 +16,14 @@ import {
   until,
   writeEnd,
   projectOf,
-} from "@vibest/server/test/lib/fakes"
-import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vibest/server/test/lib/rpc-helpers"
-import { session as draftSession } from "@vibest/server/test/lib/unit-helpers"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vibest/platform-bun/test/lib/rpc-helpers"
+import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { Plugin } from "@vibest/plugin/effect"
+import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
+import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
+import { Layout } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"

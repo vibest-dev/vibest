@@ -21,7 +21,7 @@ import {
   systemPromptFile,
   projectOf,
   processesOn,
-} from "@vibest/server/test/lib/fakes"
+} from "@vibest/platform-bun/test/lib/fakes"
 import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 

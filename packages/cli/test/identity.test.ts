@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { HOST_ID_TIMEOUT, ioregUuid, loadIdentity, readHostId, shortHostName } from "@vibest/core/identity"
+import { runVibest, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { ID } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
-import { runVibest, tempDirectory } from "@vibest/server/test/lib/fakes"
 import { Duration, Effect, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
 

@@ -31,12 +31,6 @@
     "typecheck": {
       "dependsOn": ["^typecheck"]
     },
-    "@vibest/server#build": {
-      "dependsOn": []
-    },
-    "@vibest/server#typecheck": {
-      "dependsOn": []
-    },
     "test": {
       "dependsOn": ["^typecheck"],
       "outputs": []

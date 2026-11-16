@@ -3,13 +3,6 @@ import { Harness } from "@vibest/core/harness"
 import { makePlugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
-import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
-import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
-import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin/effect"
-import { Layout } from "@vibest/schema/layout"
-import { HarnessUnavailable } from "@vibest/schema/session"
-import * as Server from "@vibest/server/server"
 import {
   agentsLayer,
   runtimesLayer,
@@ -18,8 +11,15 @@ import {
   makeRepository,
   runVibest,
   testLayer,
-} from "@vibest/server/test/lib/fakes"
-import { memoryBus } from "@vibest/server/test/lib/unit-helpers"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
+import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
+import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
+import { type Harness as HarnessTypes, Plugin } from "@vibest/plugin/effect"
+import { Layout } from "@vibest/schema/layout"
+import { HarnessUnavailable } from "@vibest/schema/session"
+import * as Server from "@vibest/server/server"
 import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
 import { Headers, HttpClient, HttpClientResponse } from "effect/http"

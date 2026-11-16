@@ -2,10 +2,10 @@ import net from "node:net"
 
 import { assert, layer } from "@effect/vitest"
 import { HOOK_RETRY_DELAY } from "@vibest/client/client"
+import { tempDirectory, untilVirtual } from "@vibest/platform-bun/test/lib/fakes"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { tempDirectory, untilVirtual } from "@vibest/server/test/lib/fakes"
 import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
 

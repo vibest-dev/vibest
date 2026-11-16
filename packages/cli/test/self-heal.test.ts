@@ -7,12 +7,6 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
-import { sessionHeaders } from "@vibest/protocol/protocol"
-import { PingResult } from "@vibest/protocol/rpc"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { PROTOCOL } from "@vibest/schema/version"
-import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   PATH_WITHOUT_HARNESS_CLIS,
   noteRecorded,
@@ -22,7 +16,13 @@ import {
   runVibest,
   stopRecorded,
   tempDirectory,
-} from "@vibest/server/test/lib/fakes"
+} from "@vibest/platform-bun/test/lib/fakes"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import { PingResult } from "@vibest/protocol/rpc"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
+import { readDaemonInfo } from "@vibest/server/daemon"
 import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
 import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
 import { TestClock } from "effect/testing"

@@ -8,11 +8,6 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
 import { unwrapped } from "@vibest/core/replies"
-import { PEER_BY_USER, peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
-import { randomId } from "@vibest/schema/id"
-import { Layout } from "@vibest/schema/layout"
-import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
-import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/server/machine/machines"
 import {
   callerPlugin,
   FakeGit,
@@ -21,7 +16,7 @@ import {
   until,
   untilVirtual,
   yieldToIo,
-} from "@vibest/server/test/lib/fakes"
+} from "@vibest/platform-bun/test/lib/fakes"
 import {
   A_ENTRY,
   COMMIT,
@@ -34,7 +29,12 @@ import {
   repoStack,
   served,
   twoMachines,
-} from "@vibest/server/test/lib/machines-fakes"
+} from "@vibest/platform-bun/test/lib/machines-fakes"
+import { PEER_BY_USER, peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
+import { randomId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
+import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
+import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/server/machine/machines"
 import { Cause, Clock, type Context, Duration, Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect"
 import { RpcClient } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
