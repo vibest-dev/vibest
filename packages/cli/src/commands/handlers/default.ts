@@ -9,7 +9,6 @@ import { callerEnvOf, caller, userOnly } from "../../caller.ts"
 import { withVibest } from "../../client.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Host } from "../../host.ts"
-import { openProject } from "../../open-project.ts"
 import { updateNotice } from "../../update.ts"
 import { Commands } from "../commands.ts"
 
@@ -64,7 +63,7 @@ export default Runtime.handler(Commands, (o) =>
     const claim = (yield* caller).claim
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem
-    yield* withVibest(claim, openProject)
+    yield* withVibest(claim, (client) => client["Project.Open"]({}))
     const placed = yield* withVibest(claim, (client) =>
       client["Project.EntryPlace"]({
         callerEnv: callerEnvOf(),

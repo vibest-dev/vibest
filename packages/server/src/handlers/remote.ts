@@ -5,7 +5,7 @@ import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerShape, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
-import type { NotInRepository, ProjectMoved } from "@vibest/schema/session"
+import type { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, Layer, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
@@ -51,7 +51,7 @@ const makeRouting = Effect.gen(function* () {
       return { c: yield* deps.agent(method), scope }
     })
 
-  const refused = (method: string) => (e: NotInRepository | ProjectMoved) =>
+  const refused = (method: string) => (e: NotInRepository) =>
     Effect.fail(new Forbidden({ method, message: `${method} on another machine: ${e.message}` }))
 
   const routed = <A, E, R2, B, F>(
@@ -66,7 +66,7 @@ const makeRouting = Effect.gen(function* () {
       : deps.agent(method).pipe(
           Effect.flatMap((c) =>
             deps.projectOf(c, method).pipe(
-              Effect.catchTags({ NotInRepository: refused(method), ProjectMoved: refused(method) }),
+              Effect.catchTag("NotInRepository", refused(method)),
               Effect.flatMap((project) => forwarded(at, project.id, byOf(c))),
             ),
           ),

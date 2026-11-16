@@ -986,4 +986,15 @@ describe("Db", () => {
         }),
       ),
   )
+
+  it.effect("moving a project whose path has a non-BMP character carries its child session directories along", () =>
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const from = "/tmp/😀repo"
+      const project = yield* projectOf(from)
+      yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), project, { cwd: `${from}/sub` })
+      yield* db.project.moveProject(project, "/tmp/moved", [])
+      assert.strictEqual(yield* db.session.sessionDirectory("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "/tmp/moved/sub")
+    }).pipe(Effect.provide(memoryDb())),
+  )
 })
