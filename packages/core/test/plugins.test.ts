@@ -128,8 +128,8 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(s.trace.at(-1)!.changes, [
         { field: "prompt", from: "do it", to: "do it\n\nRun the tests first." },
       ])
-      yield* until(herdr.callsTo("send"), (c) => c.length > 0)
-      assert.include((yield* herdr.callsTo("send"))[0]!.text, "Run the tests first.")
+      yield* until(herdr.callsTo("open"), (c) => c.length > 0)
+      assert.include((yield* herdr.callsTo("open"))[0]!.argv.at(-1), "Run the tests first.")
     }),
     { plugins: [write("rules", (e) => ({ prompt: `${e.prompt}\n\nRun the tests first.` }))] },
   )
@@ -140,8 +140,8 @@ describe("plugins: spawn hook", () => {
       const herdr = yield* FakeRuntime
       const s = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
       assert.deepStrictEqual(s.trace.at(-1)!.changes, [{ field: "model", to: "m" }])
-      yield* until(herdr.callsTo("send"), (c) => c.length > 0)
-      assert.include((yield* herdr.callsTo("send"))[0]!.text, "do it")
+      yield* until(herdr.callsTo("open"), (c) => c.length > 0)
+      assert.include((yield* herdr.callsTo("open"))[0]!.argv.at(-1), "do it")
     }),
     {
       plugins: [

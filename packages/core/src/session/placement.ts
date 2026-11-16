@@ -69,7 +69,7 @@ export type LaunchOptions = {
 
 export type LaunchOutcome =
   | { readonly _tag: "Started" }
-  | { readonly _tag: "Limited"; readonly input: string; readonly error: string }
+  | { readonly _tag: "Limited"; readonly input: string; readonly error: string; readonly execution: number }
   | { readonly _tag: "Failed" }
 
 export const make = Effect.gen(function* () {
@@ -188,24 +188,21 @@ export const make = Effect.gen(function* () {
     resume: boolean,
     first?: FirstInput,
   ) {
-    const inArgv = first !== undefined && (yield* harnesses.get(harnessIdOf(session))).firstInput !== undefined
-    const argv = yield* launchArgv(session, resume, inArgv ? first.text : undefined)
+    const argv = yield* launchArgv(session, resume, first?.text)
     const execution = yield* Ref.make<number | undefined>(undefined)
-    const beforeStart = inArgv
-      ? Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
-      : Effect.void
+    const beforeStart =
+      first === undefined
+        ? Effect.void
+        : Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
     const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
-      Effect.gen(function* () {
-        if (first === undefined) return undefined
-        const opened = yield* Ref.get(execution)
-        if (opened !== undefined) return yield* launched(h, row, terminal, opened)
-        return yield* prompt(h, row, terminal, first.text, first.onHandover)
-      })
+      Effect.flatMap(Ref.get(execution), (opened) =>
+        opened === undefined ? Effect.succeed(undefined) : launched(h, row, terminal, opened),
+      )
     const abandoned = Effect.flatMap(Ref.get(execution), (opened) =>
       opened === undefined ? Effect.void : db.session.closeExecution(session.id, opened, "not_started"),
     )
     const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError(() => abandoned))
-    return { argv, beforeStart, starting, deliver }
+    return { argv, beforeStart, starting, deliver, opened: Ref.get(execution) }
   }, provided)
 
   const handTask = Effect.fn("Placement.handTask")(function* (
@@ -381,7 +378,12 @@ export const make = Effect.gen(function* () {
       ),
     )
     if ("limited" in terminal)
-      return { _tag: "Limited", input: firstPrompt, error: terminal.limited } satisfies LaunchOutcome
+      return {
+        _tag: "Limited",
+        input: firstPrompt,
+        error: terminal.limited,
+        execution: (yield* plan.opened) ?? 0,
+      } satisfies LaunchOutcome
     yield* show(h, session, terminal.terminal, root)
     const notStarted = yield* plan.deliver(h, session, terminal.terminal)
     if (notStarted) yield* notice(session, notStarted)

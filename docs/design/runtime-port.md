@@ -155,9 +155,10 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   after the process is recorded and before it starts, so a report the harness sends at once finds it. If that start fails (the terminal does not open, or the in-place start fails), the execution it opened is closed
   `not_started` unless the harness already ended it, so a later message resumes the session again. vibestd then
   waits for the harness's report to accept it, answering the definition's startup dialogs meanwhile; no report within
-  the ready timeout ends it `not_started`. agy (`--prompt-interactive`) and Cursor (`--`) use it: agy reports nothing before its first
-  input, so on a runtime with no state for it nothing else could say it is ready. An in-place restart carries no
-  message. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
+  the ready timeout ends it `not_started`. Every harness has one: Claude, Pi and Cursor take `--` (Claude's
+  `--allowedTools` would otherwise swallow the message), agy `--prompt-interactive`. A start never waits for a ready
+  report first, and messages to a running process keep their own delivery (typed or pulled). An in-place restart
+  carries no message. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
   the system prompt in a prompt) does not go through `Placement.launching`: it is queued and typed, so agy as the entry
   session on herdr-core waits the ready timeout and fails `NotReady`.
 - Every start in a new terminal names its process: `VIBEST_PROCESS` (the process row id) is in the environment of every

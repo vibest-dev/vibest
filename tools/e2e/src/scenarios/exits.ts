@@ -167,13 +167,6 @@ const rpc = (socket: string, method: string, params: object, headers: ReadonlyAr
     sock.on("error", reject)
   })
 
-const untaken = (w: World, id: string) =>
-  row<{ n: number }>(
-    w,
-    "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'task' AND execution_id IS NULL",
-    id,
-  )?.n === 1
-
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 
 const killWindowTries = 5
@@ -424,39 +417,30 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S29",
     title:
-      "vibestd killed (kill -9) while a subagent's terminal waits for its harness to be ready (no execution open, the task not handed over): the next vibestd types the task once, as its first execution's input, and the one completed execution sends nothing",
+      "vibestd killed (kill -9) as soon as a subagent's terminal is placed: its task is in the launch argv, so the model is asked it once, it is the input of one execution, and that completed execution sends nothing",
     run: async (w) => {
       const p = await piProject(w, "s29")
       try {
         p.model.release()
-        let sub = ""
-        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
-          const daemon = await w.daemonPid()
-          const id = await p.runSub(`t${attempt}`)
-          const placed = () =>
-            row<{ n: number }>(
-              w,
-              "SELECT count(*) AS n FROM process WHERE session_id = ? AND coalesce(terminal, '') != ''",
-              id,
-            )?.n === 1
-          const executions = () =>
-            row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", id)?.n
-          for (const deadline = Date.now() + 60_000; !placed(); await Bun.sleep(1))
-            expect(Date.now() < deadline, `${id}: its terminal never opened`)
-          await w.killDaemon(daemon)
-          if (untaken(w, id) && executions() === 0) sub = id
-          await p.startDaemon()
-          if (sub === "") await until(`${id} idle`, () => p.idle(id), 60_000)
-        }
-        expect(sub !== "", "every try handed the task over before vibestd was killed")
-        const task = `t${row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE session_id = ? AND kind = 'task'", sub)?.c.match(/done-t(\d+)/)?.[1]}`
+        const daemon = await w.daemonPid()
+        const sub = await p.runSub("t1")
+        const placed = () =>
+          row<{ n: number }>(
+            w,
+            "SELECT count(*) AS n FROM process WHERE session_id = ? AND coalesce(terminal, '') != ''",
+            sub,
+          )?.n === 1
+        for (const deadline = Date.now() + 60_000; !placed(); await Bun.sleep(1))
+          expect(Date.now() < deadline, `${sub}: its terminal never opened`)
+        await w.killDaemon(daemon)
+        await p.startDaemon()
         await until(
           "one completed execution",
           () => p.executionEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed",
           60_000,
         )
         await nothingMoreComesWithin(3_000)
-        expect(p.model.asked(task) === 1, `the task was asked ${p.model.asked(task)} times`)
+        expect(p.model.asked("t1") === 1, `the task was asked ${p.model.asked("t1")} times`)
         expect(p.sent(sub) === 0, `${p.sent(sub)} rows sent by the session`)
         const input = row<{ n: number }>(
           w,

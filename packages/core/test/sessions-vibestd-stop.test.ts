@@ -2,9 +2,8 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, harnessIdOf, runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
-import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
-import { Deferred, Effect, FileSystem, Ref } from "effect"
+import { Deferred, Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
@@ -12,7 +11,7 @@ import { projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { CLAUDE, CURSOR, PI } from "./lib/harnesses.ts"
-import { EXECUTIONS, until, untilVirtual, processEnds, writeEnd } from "./lib/observe.ts"
+import { EXECUTIONS, until, processEnds, writeEnd } from "./lib/observe.ts"
 import { makeRepository, restartSessions, type TestServices } from "./lib/session.ts"
 import {
   chooseNext,
@@ -143,92 +142,11 @@ describe.concurrent("after a vibestd stop", () => {
     { hooked: ["pi"], harnesses: [{ ...PI, delivery: "pull" }, CLAUDE, CURSOR] },
   )
 
-  const waitingForReady = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
-      const repo = yield* makeRepository
-      yield* db.session.startEntry(
-        yield* projectOf(repo),
-        "pi",
-        false,
-        {
-          runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
-        },
-        { agent: "coordinator" },
-      )
-      const opening = yield* herdr.hold("open")
-      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(repo))
-      yield* opening.reached
-      const looking = yield* herdr.hold("state", id)
-      yield* opening.release()
-      yield* looking.reached
-      return yield* body(id).pipe(Effect.ensuring(looking.release("unreachable")))
-    })
-
   const executionInputs = (id: string) =>
     Effect.flatMap(SqlClient.SqlClient, (sql) =>
       sql<{ input: string; status: string }>`SELECT input, status FROM ${sql.literal(EXECUTIONS)} m
         WHERE session_id = ${id} ORDER BY id`.pipe(Effect.orDie),
     )
-  const typed = (text: string) =>
-    Effect.map(
-      Effect.flatMap(FakeRuntime, (herdr) => herdr.callsTo("send")),
-      (calls) => calls.filter((c) => c.text !== undefined && unwrapped(c.text) === text).length,
-    )
-
-  test(
-    "a task handed over at reconcile that does not start ends the execution not_started and is not handed over again",
-    waitingForReady((id) =>
-      Effect.gen(function* () {
-        const herdr = yield* FakeRuntime
-        yield* Ref.set(herdr.skipPromptUpdates, 2)
-        const next = yield* restartSessions
-        yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status === "not_started")
-        assert.strictEqual(yield* typed("do it"), 2)
-        assert.isTrue((yield* sqlNotices(id)).some((t) => t.startsWith("task_not_started")))
-        yield* next.check(id)
-        yield* until(next.inMemory, (m) => m.locks === 0)
-        assert.strictEqual(yield* typed("do it"), 2)
-        assert.strictEqual((yield* executionInputs(id)).length, 1)
-      }),
-    ),
-    { hooked: ["pi"] },
-  )
-
-  test(
-    "vibestd stopped after the task is linked but before the runtime got it ends that execution not_started, not lost",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
-      const repo = yield* makeRepository
-      yield* db.session.startEntry(
-        yield* projectOf(repo),
-        "pi",
-        false,
-        {
-          runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
-        },
-        { agent: "coordinator" },
-      )
-      const sending = yield* herdr.hold("send")
-      const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(repo))
-      yield* sending.reached
-      yield* Effect.gen(function* () {
-        assert.isUndefined(yield* db.inbox.untakenTask(id))
-        assert.isFalse(yield* db.session.executionAccepted(id))
-        yield* restartSessions
-        yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status !== "working")
-        assert.deepStrictEqual(
-          (yield* executionInputs(id)).map((e) => e.status),
-          ["not_started"],
-        )
-      }).pipe(Effect.ensuring(sending.release("unreachable")))
-    }),
-    { hooked: ["pi"] },
-  )
 
   const limitedMidMove = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
@@ -259,7 +177,7 @@ describe.concurrent("after a vibestd stop", () => {
         const handed = Effect.map(herdr.callsTo("send"), (calls) =>
           calls.filter((call) => call.text?.includes("do it") === true),
         )
-        yield* nextVibestd(Effect.map(handed, (calls) => calls.length === 2))
+        yield* nextVibestd(Effect.map(handed, (calls) => calls.length === 1))
         assert.lengthOf(yield* herdr.callsTo("open"), 1)
         assert.lengthOf(yield* herdr.callsTo("run"), 0)
         assert.strictEqual(yield* db.session.currentProcessId(id), successor)

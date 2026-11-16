@@ -37,10 +37,10 @@ is recorded), and sends still work.
 When vibestd is killed while a session's terminal is not open yet, the next vibestd ends the session as failed to
 launch, with one notice, and removes its worktree, or keeps it and says why.
 
-## S29. vibestd killed before the first task was handed over
+## S29. vibestd killed while a session starts
 
-When vibestd is killed before a session's first task reached it, the next vibestd types the task once, and the one
-execution it runs sends nothing.
+When vibestd is killed right after a session's terminal is placed, its task is already in the launch argv: the agent
+works on it once, as one execution, and that execution sends nothing.
 
 ## S30. Archive cut off
 

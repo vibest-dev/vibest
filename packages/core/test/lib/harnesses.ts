@@ -21,6 +21,7 @@ export const PI: HarnessDefinition = {
   interruptKey: "esc",
   replyField: "text",
   ready: "integration",
+  firstInput: ["--"],
   launchArgs: (i) => [
     ...opt("--session-id", i.sessionId),
     "--append-system-prompt",
@@ -54,6 +55,7 @@ export const CLAUDE: HarnessDefinition = {
   interruptKey: "esc",
   replyField: "last_assistant_message",
   ready: "integration",
+  firstInput: ["--"],
   checkProvider: noProvider("claude"),
   launchArgs: (i) => [
     ...(i.sessionId === null ? [] : [i.resume ? "--resume" : "--session-id", i.sessionId]),

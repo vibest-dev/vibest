@@ -107,7 +107,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
       launch(h, target, row, root, task, options).pipe(
         Effect.flatMap((outcome) =>
           outcome._tag === "Limited"
-            ? rerun(h, row, undefined, outcome.input, false, outcome.error, 0).pipe(
+            ? rerun(h, row, undefined, outcome.input, false, outcome.error, outcome.execution).pipe(
                 Effect.onExit((exit) =>
                   Exit.isFailure(exit)
                     ? launchFailed(row, exit.cause).pipe(

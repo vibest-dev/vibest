@@ -6,14 +6,14 @@ import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
-import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, HashMap, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
-import { EXECUTIONS, settled, until, writeEnd, systemPromptFile } from "./lib/observe.ts"
+import { EXECUTIONS, settled, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
   harnessOf,
@@ -345,7 +345,7 @@ describe.concurrent("Session", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi"],
       )
-      assert.lengthOf(yield* herdr.callsTo("send"), 1)
+      assert.lengthOf(yield* herdr.callsTo("send"), 0)
       const agent = (yield* herdr.agent(id))!
       assert.strictEqual(harnessOf((yield* herdr.callsTo("open")).at(-1)!.argv), "pi")
       assert.strictEqual(agent.terminal, pane)
@@ -377,7 +377,7 @@ describe.concurrent("Session", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude", "cursor"],
       )
-      assert.include((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
+      assert.include((yield* herdr.callsTo("open")).at(-1)!.argv.at(-1), "do it")
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "cursor", { error: "rate_limit" })
       yield* sessions.check(id)
@@ -434,43 +434,6 @@ describe.concurrent("Session", () => {
         }),
       ],
     },
-  )
-
-  test(
-    "a prompt failure after a limit tries the next harness; each attempt is its own execution and the last carries the result",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sql = yield* SqlClient.SqlClient
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      const held = yield* herdr.hold("send", id)
-      const checking = yield* Effect.forkChild(sessions.check(id))
-      yield* held.reached
-      yield* held.release("failed to start claude")
-      yield* Fiber.join(checking)
-      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "cursor")
-      const executions = () =>
-        sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
-        FROM ${sql.literal(EXECUTIONS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
-      assert.deepStrictEqual(
-        (yield* executions()).map((row) => [row.status, row.inbox === row.task]),
-        [
-          ["failed", true],
-          ["not_started", false],
-          ["working", false],
-        ],
-      )
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "cursor", { text: "status: completed\nsummary: moved" })
-      yield* sessions.check(id)
-      assert.deepStrictEqual(
-        (yield* executions()).map((row) => row.status),
-        ["failed", "not_started", "completed"],
-      )
-    }),
-    { plugins: [chooseNext] },
   )
 
   test(
@@ -583,10 +546,9 @@ describe.concurrent("Session", () => {
       const original = (yield* herdr.agent(id))!.terminal
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      const held = yield* herdr.hold("send", id)
+      yield* Ref.set(herdr.skipPromptUpdates, 1)
       const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
-      yield* held.reached
-      yield* held.release("failed")
+      yield* untilVirtual(herdr.callsTo("close"), (calls) => calls.length === 2, "1 second")
       yield* Fiber.join(checking)
       const closes = (yield* herdr.callsTo("close")).map((call) => call.terminal)
       assert.deepStrictEqual(closes[0], original)
@@ -626,13 +588,12 @@ describe.concurrent("Session", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       const closing = yield* herdr.hold("close")
+      yield* Ref.set(herdr.skipPromptUpdates, 1)
       const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
       yield* closing.reached
-      const prompting = yield* herdr.hold("send", id)
       yield* closing.release()
-      yield* prompting.reached
       const closingAgain = yield* herdr.hold("close")
-      yield* prompting.release("failed")
+      yield* untilVirtual(herdr.callsTo("close"), (calls) => calls.length === 2, "1 second")
       yield* closingAgain.reached
       yield* closingAgain.release("failed")
       yield* Fiber.join(checking)

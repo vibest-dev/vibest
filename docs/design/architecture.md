@@ -332,7 +332,8 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
   `take` runs in one transaction: with an execution open it answers empty; otherwise it opens the execution, marks the
   batch `delivered` and attaches it to that execution. The integration reports the execution accepted when the batch
   reaches the model; a batch never used is settled by the confirmation timeout like a typed one (`not_started`). A
-  session with no process is resumed by the typed path's wake-up and then takes its message.
+  process vibest starts, whatever its delivery, takes its first message in its launch argv (a new session's task, or the
+  queued messages that resume a session with no process); pull and type are only for a process already running.
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
   and wait 8 s; otherwise `not_started` with a notice naming `vibest peek <id>` (CAO #479, #496, #566). No screen text is ever

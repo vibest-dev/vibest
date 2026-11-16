@@ -28,7 +28,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses)
       yield* until(sessions.inMemory, atMostEntryTracked)
       yield* sessions.send(id, "next")
-      yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
+      yield* until(herdr.callsTo("open"), (calls) => calls.some((c) => c.argv.at(-1)?.includes("next") === true))
       yield* sessions.check(id)
       const open = (yield* db.session.getSession(id))!
       assert.strictEqual(executionStateOf(open), "open")

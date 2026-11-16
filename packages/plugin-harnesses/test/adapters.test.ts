@@ -38,6 +38,15 @@ describe("HarnessAdapter", () => {
       ])
   })
 
+  it("claude's and pi's launch end with -- and the message, so --allowedTools or --add-dir never takes it, new or resumed", () => {
+    for (const harness of [claude, pi])
+      for (const resume of [false, true])
+        assert.deepStrictEqual(Harness.harnessArgv(harness, { ...input, model: "m", resume }, message).slice(-2), [
+          "--",
+          message,
+        ])
+  })
+
   it("agy's launch ends with --prompt-interactive and the message, after every option, new or resumed", () => {
     for (const resume of [false, true])
       assert.deepStrictEqual(Harness.harnessArgv(agy, { ...input, model: "m", resume }, message).slice(-2), [

@@ -232,6 +232,10 @@ export class FakeRuntime extends Context.Service<
 
       const reachable = yield* Ref.make(true)
       const skipPromptUpdates = yield* Ref.make(0)
+      const registers = (argv: ReadonlyArray<string>) =>
+        withMessage(argv) && !options.promptsIgnored
+          ? Ref.modify(skipPromptUpdates, (n) => [n === 0, n > 0 ? n - 1 : 0] as const)
+          : Effect.succeed(false)
 
       const addPane = (paneId: string, workspaceId: string, cwd: string) =>
         Effect.gen(function* () {
@@ -293,7 +297,7 @@ export class FakeRuntime extends Context.Service<
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
             const record = HashMap.get(yield* Ref.get(agents), terminal.id)
             if (Option.isNone(record)) return
-            const working = withMessage(argv) && !options.promptsIgnored
+            const working = yield* registers(argv)
             yield* updateAgent(terminal.id, (current) => ({
               ...current,
               alive: true,
@@ -358,11 +362,12 @@ export class FakeRuntime extends Context.Service<
                   ? undefined
                   : HashMap.toEntries(yield* Ref.get(agents)).find(([, agent]) => agent.vibestSession === session)?.[1]
               const coordinator = session === undefined && input.argv.some((part) => part.includes("vibest"))
+              const working = yield* registers(input.argv)
               const started: FakeAgent = {
                 ...prior,
                 ...(session !== undefined ? { vibestSession: session } : {}),
-                status: coordinator || (withMessage(input.argv) && !options.promptsIgnored) ? "working" : "idle",
-                seq: withMessage(input.argv) && !options.promptsIgnored ? 1 : 0,
+                status: coordinator || working ? "working" : "idle",
+                seq: working ? 1 : 0,
                 alive: true,
               }
               yield* Ref.update(agents, (map) => {

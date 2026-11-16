@@ -79,62 +79,6 @@ describe.concurrent("Session", () => {
     { hooked: ["pi"] },
   )
 
-  const typedBeforeTheTask = Effect.gen(function* () {
-    const herdr = yield* FakeRuntime
-    const sessions = yield* Session.Service
-    const db = yield* Db.Service
-    const repo = yield* makeRepository
-    const held = yield* herdr.hold("state")
-    const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
-    yield* held.reached
-    yield* sessions.userPrompt(id, "typed during the ready wait")
-    yield* held.release()
-    yield* settled
-    yield* herdr.endExecution(id)
-    yield* writeEnd(id, "pi", { text: "typed done" })
-    yield* until(
-      herdr.callsTo("send").pipe(Effect.map((calls) => calls.some((c) => c.text?.includes("do it")))),
-      (sent) => sent,
-    )
-    assert.isUndefined(yield* db.inbox.untakenTask(id))
-    assert.isNull((yield* db.session.getSession(id))!.endedAt)
-  })
-
-  test(
-    "auto-archive with runtime status events: the first task is still handed over after a typed execution ends",
-    typedBeforeTheTask,
-    { hooked: ["pi"], statusEvents: true },
-  )
-
-  test(
-    "a prompt typed while the first task waits for ready is its own execution; the task is handed over once it ends",
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const herdr = yield* FakeRuntime
-      const sessions = yield* Session.Service
-      const repo = yield* makeRepository
-      const held = yield* herdr.hold("state")
-      const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* held.reached
-      yield* sessions.userPrompt(id, "typed during the ready wait")
-      yield* held.release()
-      const taskSent = herdr.callsTo("send").pipe(Effect.map((calls) => calls.some((c) => c.text?.includes("do it"))))
-      yield* settled
-      assert.isFalse(yield* taskSent)
-      yield* writeEnd(id, "pi", { text: "typed done" })
-      yield* herdr.endExecution(id)
-      yield* sessions.check(id)
-      yield* until(taskSent, (sent) => sent)
-      const linked = yield* sql<{
-        n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE session_id = ${id} AND kind = 'task' AND execution_id IS NOT NULL`.pipe(
-        Effect.orDie,
-      )
-      assert.strictEqual(linked[0]!.n, 1)
-    }),
-    { hooked: ["pi"] },
-  )
-
   test(
     "an echo during the runtime prompt returns without waiting and is not an execution",
     Effect.gen(function* () {
@@ -327,7 +271,7 @@ describe.concurrent("Session", () => {
       )
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).map((call) => unwrapped(call.text!)),
-        ["do it", "first", "second"],
+        ["first", "second"],
       )
       assert.deepStrictEqual(pick(yield* db.session.getSession(id)), { status: "working", executionState: "open" })
     }),
@@ -366,7 +310,7 @@ describe.concurrent("Session", () => {
       }
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).map((c) => unwrapped(c.text!)),
-        ["do it", "first", "second"],
+        ["first", "second"],
       )
       assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
       assert.deepStrictEqual((yield* notices).slice(1), [
