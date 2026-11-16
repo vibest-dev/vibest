@@ -1,6 +1,6 @@
-# vibest Architecture (draft 9)
+# vibest Architecture
 
-Status: draft for review. Nothing here is implemented.
+Status: describes what main implements.
 
 vibest is a **product for one person**, shaped like Claude Projects or Cursor projects: a Project holds your
 instructions, knowledge, memory, and conversations, and inside it you chat with one **entry session** that hands work
@@ -16,10 +16,10 @@ The daily experience, which every part of this document serves:
    the Project.
 3. A session tells the session that started it what it found by running `vibest send` when it decides to; the entry session checks it and reports. An execution end sends nothing.
 4. You can step into any session's pane, also after it finished, and keep talking to it.
-5. The entry session always knows every subagent's task, status, and latest reply (`vibest ls`), also after
+5. The entry session always knows every session's task, status, and latest reply (`vibest ls`), also after
    compaction or a restart.
 6. When a job needs a fixed flow (plan → implement → review until both sides agree → pull request), the entry
-   session runs it with a skill, driving several subagents, with you able to step in at every point.
+   session runs it with a skill, driving several sessions, with you able to step in at every point.
 
 The core is a kernel: it names no orchestration role. It knows sessions, each session's parent (its creator), and each project's entry session (the one the user enters through). The behaviour above belongs to an agent definition, `coordinator`, and its prompt, which the builtin plugin `vibest.agent` delivers (§1.1).
 
@@ -37,28 +37,24 @@ Reference implementations:
 - **OpenCode V2** (`anomalyco/opencode` at `f0944f0`, 2026-10-30): vibest borrows its code architecture, Effect
   patterns, and plugin API, and its split of **domain in the core, implementation and rules in plugins**. It
   does not borrow the coding-agent domain or the vocabulary; Appendix A maps each borrowed pattern to its source.
-- **omac** (`iamdin/pi-orchestrator`): the predecessor. Where its implementation is good, vibest copies the code
-  and refactors it into vibest's model (D12, §15): protocol, daemon, delivery, cleanup, integrations, guard.
-- The orchestrator survey in `~/ObsidianVault/CLI-Agent-Orchestration-Research/` (§1).
 
 ## 0. Fixed decisions
 
-| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | The runtime (herdr first) runs panes and processes. What happens inside a CLI agent reaches vibest first through harness integrations (hooks, plugins, extensions); the runtime's state detection and screen reading are the fallback. Per-CLI differences live only in harness adapters.                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| D2  | The core defines the domain (schema contracts, lifecycles, execution, scheduling framework). Implementations and rules are plugins, builtin by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| D3  | The execution unit is the **session**: one long-lived conversation with a CLI agent, handling one input at a time (an **execution**). The core defines no orchestration patterns and no roles. A flow over several sessions is a skill the session that runs it follows; there is no workflow engine or program controller. Plugins observe, refuse, transform, schedule, and enforce rules (such as "a writing session is done only when the tests pass"); they never start or steer sessions.                                                                                                                                                                                                           |
-| D4  | `vibest` runs inside a Project directory and opens that Project's entry session; there is one entry session per Project (`project.entry_session_id`), with one active conversation and earlier ones kept (`vibest --new`). There is no separate `launch` command: the entry session starts through the same path as every session, placed in the current terminal. `vibest run` is run by a session and is refused with no calling session (the hint is to open one with bare `vibest`); the new session's parent is its caller. A session sends only to its parent and to sessions it started, and the user sends to any session of the Project. Nothing is routed to the entry session by default.      |
-| D5  | Plugins follow OpenCode V2: `{ id, effect }` or `{ id, setup }` with Promises.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| D6  | Products are composed per host from shared packages; hosts are fully isolated (no shared daemon, database, or Runs). The Herdr TUI product comes first; the herdr-core desktop application comes after the base capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| D7  | Machine and multi-repository Project dimensions exist from the first commit; one machine and one repository are special cases. Several repositories are composed by copying them into one directory, never by symlinks (Node and other toolchains break on symlinked folders).                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| D8  | In scope now: delegation (entry session and subagents); the `pipeline` skill (plan → implement → review → pull request); multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription for now).                                                                                                                                                                                                                                                               |
-| D9  | Names are spelled out (`repository`, never `repo`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| D10 | vibest keeps a **Subscription** for every supported harness on every machine, with its usage limits, and hands the current set to plugins in each Run's context. Choosing a harness, waiting, or switching is plugin scheduling. Usage limits come only from official or CLI-provided sources, so a harness that offers none keeps an empty limits list and that is fine; a Subscription is per (harness, provider, machine), provider empty for a single-login harness (Claude Code, Cursor) and set for Pi; vibest does not read a harness token or call a usage API, so a harness that offers no limits keeps an empty list (unknown, not full). Any vibest plugin may report a Subscription's limits. |
-| D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest send` carries what it decides to say; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| D12 | Where omac's implementation is good, vibest copies its code and tests and refactors them (session → Agent and Run, inbox row → Message, plugin hooks → §7 kinds) instead of designing again. §15 lists every part.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| D13 | The engine knows one kind of session, described by an agent definition (`id`, `description`, `system` prompt, optional `guard`). It names no orchestration role: `coordinator` and `general` are definitions the builtin plugin `vibest.agent` registers (`packages/builtins/src/agent.ts`), and no code in the core branches on either. How a session works and splits work is written only in its definition's prompt and in skills. Messages move only by explicit `vibest send`.                                                                                                                                                                                                                      |
-| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/effect/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                       |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | The runtime (herdr first) runs panes and processes. What happens inside a CLI agent reaches vibest first through harness integrations (hooks, plugins, extensions); the runtime's state detection and screen reading are the fallback. Per-CLI differences live only in harness adapters.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| D2  | The core defines the domain (schema contracts, lifecycles, execution, scheduling framework). Implementations and rules are plugins, builtin by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| D3  | The execution unit is the **session**: one long-lived conversation with a CLI agent, handling one input at a time (an **execution**). The core defines no orchestration patterns and no roles. A flow over several sessions is a skill the session that runs it follows; there is no workflow engine or program controller. Plugins observe, refuse, transform, schedule, and enforce rules (such as "a writing session is done only when the tests pass"); they never start or steer sessions.                                                                                                                                                                                                                     |
+| D4  | `vibest` runs inside a Project directory and opens that Project's entry session; there is one entry session per Project (`project.entry_session_id`), with one active conversation and earlier ones kept (`vibest --new`). There is no separate `launch` command: the entry session starts through the same path as every session, placed in the current terminal. `vibest run` is run by a session and is refused with no calling session (the hint is to open one with bare `vibest`); the new session's parent is its caller. A session sends only to its parent and to sessions it started, and the user sends to any session of the Project. Nothing is routed to the entry session by default.                |
+| D5  | Plugins follow OpenCode V2: `{ id, effect }` or `{ id, setup }` with Promises.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| D6  | Products are composed per host from shared packages; hosts are fully isolated (no shared daemon, database, or sessions). The Herdr TUI product comes first; the herdr-core desktop application comes after the base capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| D7  | Machine and multi-repository Project dimensions exist from the first commit; one machine and one repository are special cases. Several repositories are composed by copying them into one directory, never by symlinks (Node and other toolchains break on symlinked folders).                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| D8  | In scope now: delegation (an entry session and the sessions it starts); the `pipeline` skill (plan → implement → review → pull request); multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription).                                                                                                                                                                                                                                                                 |
+| D9  | Names are spelled out (`repository`, never `repo`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| D10 | vibest keeps a **Subscription** for every supported harness on every machine, with its usage limits, and hands the current set to plugins in each session start's context. Choosing a harness, waiting, or switching is plugin scheduling. Usage limits come only from official or CLI-provided sources, so a harness that offers none keeps an empty limits list and that is fine; a Subscription is per (harness, provider, machine), provider empty for a single-login harness (Claude Code, Cursor) and set for Pi; vibest does not read a harness token or call a usage API, so a harness that offers no limits keeps an empty list (unknown, not full). Any vibest plugin may report a Subscription's limits. |
+| D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest send` carries what it decides to say; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| D13 | The engine knows one kind of session, described by an agent definition (`id`, `description`, `system` prompt, optional `guard`). It names no orchestration role: `coordinator` and `general` are definitions the builtin plugin `vibest.agent` registers (`packages/builtins/src/agent.ts`), and no code in the core branches on either. How a session works and splits work is written only in its definition's prompt and in skills. Messages move only by explicit `vibest send`.                                                                                                                                                                                                                                |
+| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/effect/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                                 |
 
 ## 1. A multi-CLI agent engine
 
@@ -67,29 +63,14 @@ watch and step into. The kernel names no orchestration role (no main, no coordin
 agent definition, its prompt and skills, delivered through plugins (§1.1). The daily experience above (one entry
 session handing work to the sessions it starts) is what the `coordinator` definition and the `delegate` skill do.
 
-The survey groups orchestrators by the unit above a single agent. All of them need only "start an agent, prompt
-it, see it go idle, read its result, message it"; they differ in that upper unit and in who decides the next
-step. vibest gives every type the same engine:
-
-| Type                         | Examples                                                                                | Unit above the agent | In vibest                                                                                 |
-| ---------------------------- | --------------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
-| A. Direct launch             | Paseo, hcom, DMux, Autonomous Harness                                                   | none                 | a session the user opened with bare `vibest` runs `vibest run`; nothing runs without one  |
-| B. Entry session with a team | CAO, OpenRig, Shogun, oh-my-claudecode, ClawTeam, Squad, Paradev MCP, WSP               | a team               | the `coordinator` definition; a session that starts sessions may itself be started by one |
-| C. Work-item driven          | Gas Town, Cyrus, Machinist, Emdash, Orchestrator.inc, Kandev, Cezar                     | issue or card        | out of scope: work-item intake is a plugin or an outside client                           |
-| D. Workflow / pipeline       | CAO workflows, Prowl, herdr-orch, obra, Fusion, Raven, Cotal Lang, pi-dynamic-workflows | workflow run         | a skill, or an `agent.result` plugin that hands one stage's output to the next; no engine |
-| E. Message mesh              | hcom, Agmsg, Cotal, Block Buzz, herdr-msg, Concord                                      | channel              | sessions that `send` to each other, allowed only between a session and its parent         |
-| F. Racing / best-of-N        | Orca, Uzi, Pragma, Claudexor                                                            | attempt group        | fan-out: one parent spawns N sessions and compares; gathering is a skill or a plugin      |
-
-**What the kernel knows.** A session's creator link decides who it may send to and who manages it. Items marked planned are not built.
+**What the kernel knows.** A session's creator link decides who it may send to and who manages it.
 
 - **One kind of session**, described by an **agent definition**: `{ id, description, system, guard? }`, registered by
   plugins with `ctx.agent.transform`. The definition is a prompt and a guard, never permissions: a send is allowed
   to the creator and to sessions the sender started, and management belongs to the nearest living creator.
-- **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
-  sender (a session, or the user). One delivery path, locked per recipient, for entry sessions and subagents alike:
-  natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
-  is kept and read with `vibest inbox`. A harness that polls (Claude) or subscribes (Pi) pulls its batches when idle;
-  any other harness (Cursor) is typed into, whichever session it runs. A row with no session to go to is dropped.
+- **An inbox per session**: every message is a row for one session, from a session or the user. One delivery path,
+  locked per recipient, for the entry session and every other: through the harness integration when it can take
+  input, typed into the terminal otherwise. A row with no session to go to is dropped.
 - **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, and sessions it started; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its nearest living creator (its parent, else the parent's parent and so on; a creator on another machine through the
@@ -101,8 +82,7 @@ step. vibest gives every type the same engine:
   may send only to its creator and to sessions it started, notices and sends to an ended creator go to the nearest
   living one above it, management belongs to the nearest living creator, and a new terminal opens beside the live creator.
 - **An entry session per project** (`project.entry_session_id`): the session a
-  bare `vibest` reopens. It is not identity; it is the one session the user enters through. "One entry session per
-  project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
+  bare `vibest` reopens. It is not identity; it is the one session the user enters through. A project has at most one entry session at a time; moving it to another terminal asks for confirmation.
 - **Harnesses registered by plugins**: a plugin adds a `HarnessDefinition` with
   `context.harness.transform((editor) => editor.add(definition))`, like a runtime with `context.runtime.transform`.
   The two builtin harnesses are the plugins `harness-pi` and `harness-claude` in
@@ -110,13 +90,8 @@ step. vibest gives every type the same engine:
   and added by the user); their integration files stay in `packages/integration/*`. A harness id is
   a plain string: a harness the database names but no plugin provides is unavailable ("no plugin provides harness
   X; loaded: …"), never a decode failure.
-- **One neutral integration event contract** (planned): every integration sends the same events over vibestd's
-  HTTP socket, `POST /events` with `ready`, `conversation`, `execution.start` (origin typed or inbox, and the inbox
-  row ids the execution consumed), `execution.end` (outcome completed, failed or interrupted; text; failure `{ kind: limited
-  | auth | other, message }`) and `blocked`; `POST /guard` with a neutral `ToolCall { kind, name, command?,
-  paths }`. vibestd parses no harness's own payload; a CLI with only shell hooks (Cursor) decodes in its own
-  process through `vibest integration event <hook>`. Today each harness reaches vibestd its own way (Claude over
-  HTTP, Pi and Cursor over RPC `ExecutionEnd` and `Prompt`) and the adapter decodes the raw event in vibestd.
+- **Harness integrations** reach vibestd over its sockets, each its own way (Claude over HTTP, Pi and Cursor over RPC
+  `ExecutionEnd` and `Prompt`), and the harness adapter decodes the raw event in vibestd (§8).
 
 ### 1.1 Orchestration
 
@@ -216,131 +191,110 @@ folder of the same name, and the facade re-exports its own domain's names; a one
 
 ## 3. Core domain
 
+The database and its facts are specified in [schema.md](schema.md); this section names the concepts.
+
 ```
-Project ──< Workspace ──< Agent ──< Message (inbox)
-Run ──< Agent (runID)
- └─ parentAgentID → the Project's entry session (absent when the user or a plugin started it)
+Project ──< Session ──< Process    (one live at a time; a harness run in a terminal)
+   │           │  └──< Execution   (one open at a time; one input handled until it ends)
+   │           └──< Inbox row      (text for the session)
+   └─ entry session → one of its sessions
+Session.parent → the session that created it (none: the user)
 
-AgentDefinition    Harness    Subscription    Machine
+AgentDefinition    Harness    Runtime    Machine
 ```
 
-| Concept             | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Key fields                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Project**         | The directory vibest starts in. A single repository is a Project as it is. Several repositories become one Project with `vibest project create`, which makes a directory and copies each repository into it as a folder (`app/`, `sdk/`, each a local git clone). Only git repositories are composed; a plain directory can still be a Project, used in place.                                                                                                                                       | `id`, `name`, `paths { machine → path }`, `folders[] { name, source }`, `setupCommand?`, `entrySessionID`, `time { creation, update, archive? }`                                                                                                                                                                                                             |
-| **Workspace**       | The directory Agents run in, made by its Workspace type. `root` is the Project directory itself, where the entry session runs; `plugin-git` adds `isolated`, a git worktree of every repository in the Project (omac #82 rules), never symlinks. A Project without git repositories has only `root`. A Workspace made for an Agent is released with that Agent; one made with `vibest workspace create` (shared by several Agents) stays until `vibest workspace release`; `root` is never released. | `id`, `projectID`, `name`, `type`, `machine`, `path`, `agentID?` (the Agent it was made for), `time { creation, release? }`                                                                                                                                                                                                                                  |
-| **AgentDefinition** | What to run and how to introduce it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `id`, `description`, `system`, `guard?`                                                                                                                                                                                                                                                                                                                      |
-| **Harness**         | Adapter for one CLI, implementing the Harness contract (§8). The runtime maps its id to its own agent kind (herdr's kind for herdr).                                                                                                                                                                                                                                                                                                                                                                 | `id`, `capabilities`, adapter functions                                                                                                                                                                                                                                                                                                                      |
-| **Run**             | One or more subagents working on one input, started by `vibest run`.                                                                                                                                                                                                                                                                                                                                                                                                                                 | `id`, `projectID`, `parentAgentID?`, `input`, `status`, `outcome?`, `result?`, `acceptance[]`, `time { creation, start?, end? }`                                                                                                                                                                                                                             |
-| **Agent**           | One running CLI agent: one runtime pane and the agent in it.                                                                                                                                                                                                                                                                                                                                                                                                                                         | `id`, `projectID`, `runID`, `workspaceID`, `definition`, `lifetime` (`once` \| `kept`), `previousAgentID?`, `harness`, `subscription`, `machine`, `labels { key → value }`, `runtime { kind, address }`, `status` (`AgentStatus`), `outcome?` (`completed` \| `failed` \| `stopped` \| `replaced`), `result?`, `time { creation, start?, end? }`             |
-| **Message**         | Text for an Agent: a task or follow-up for a subagent, or a result, report, or notice for the entry session. Accepting and delivering are separate.                                                                                                                                                                                                                                                                                                                                                  | `id`, `agentID`, `kind` (`task` \| `message` \| `result` \| `report` \| `notice`), `sender` (`user` \| Agent id \| plugin id), `text`, `details`, `status` (`pending` \| `delivering` \| `delivered` \| `failed` \| `dropped`), `outcome?` (for a task or message: `completed` \| `failed` \| `lost` \| `not_started` \| `interrupted`), `time { creation }` |
-| **Subscription**    | What one harness can use on one machine: its login and usage limits. Prepared by vibest (refreshed through the harness adapter) for every supported harness, whether or not an Agent is running on it.                                                                                                                                                                                                                                                                                               | `id`, `harness`, `provider` (Pi: one login per provider; empty otherwise), `machine`, `account` (the CLI's own login for now), `limits[] { window, percent, status (available \| limited), resetTime }`, `time { update }`                                                                                                                                   |
-| **Machine**         | A computer that runs Agents: the local one or a remote host.                                                                                                                                                                                                                                                                                                                                                                                                                                         | `id`, `name`, `platform`, `harnesses[]`, `load`, `status` (`online` \| `offline`)                                                                                                                                                                                                                                                                            |
+| Concept             | Meaning                                                                                                                                                                                                                                                   | Key fields                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Project**         | The directory vibest starts in, found by its realpath. A single repository is a project as it is; a plain directory whose direct children are repositories is one project of several repositories.                                                        | `id`, `directory`, repositories (`path`, `remote_url`), `entry_session_id`                                                                 |
+| **Session**         | One conversation with a CLI agent in its own directory (a vibest-made detached worktree, or the project root for the entry session). It lives until it is archived; its parent is the session that created it.                                            | `id`, `project_id`, `parent_session_id?`, `agent`, `name`, `directory`, `created_at`, `ended_at?`, `origin_*` (started by another vibestd) |
+| **Process**         | One run of the session's harness in a terminal. A session has at most one live process; a restart, a usage-limit move or an exit ends it and a new one starts.                                                                                            | `harness`, `provider?`, `model?`, `routing?`, `runtime`, `terminal?`, `pid?`, `conversation?`, `started_at`, `ready_at?`, `end_reason?`    |
+| **Execution**       | One input a session handles until it ends. At most one is open per session. Its input is the text typed into the pane or the inbox rows delivered with it.                                                                                                | `typed?`, `accepted_at?`, `outcome?` (`completed` \| `failed` \| `interrupted` \| `lost` \| `not_started`), `failure?`, `reply?`           |
+| **Inbox row**       | Text for one recipient session. `task` is its first input, `send` a message from the user or from a session to its creator or a session it started, `notice` something vibest tells the recipient about a session. Accepting and delivering are separate. | `kind`, `sender_session_id?`, `content`, `status` (`pending` \| `delivering` \| `delivered` \| `failed` \| `dropped`), `execution_id?`     |
+| **AgentDefinition** | What a session is introduced with: a system prompt and a guard, registered by a plugin.                                                                                                                                                                   | `id`, `description`, `system`, `guard?`                                                                                                    |
+| **Harness**         | Adapter for one CLI, registered by a plugin as a `HarnessDefinition` (§8). The runtime maps its id to its own agent kind.                                                                                                                                 | `id`, `inbox?` (`poll` \| `subscribe`), adapter functions                                                                                  |
+| **Machine**         | Another vibestd this one can start sessions on and send to (`vibest connect`; multi-machine.md).                                                                                                                                                          | `name`, target, connection state                                                                                                           |
 
-- **One controller per Run.** A Run is controlled by the entry session (or the user) that ran `vibest run`,
-  through `send`, `wait`, `stop`. Plugins only shape it through hooks (§7); the user can always stop any Run.
-- **Subscriptions in the Run context.** Every Run hook and scheduling hook receives the current Subscriptions
-  (Claude's 5-hour and weekly windows, Cursor's usage, …). The core only gathers and hands them over; plugins
-  decide which harness to use, when to wait, and when to switch.
-- **Conversations.** The entry session has one active conversation per Project; `vibest --new` starts another and
-  keeps the earlier ones (their CLI session ids) so they can be resumed. Knowledge belongs to the Project, so
-  every conversation and every subagent sees the same preferences and memory index.
-- **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/`): `preferences.md` (how the user likes work done), `docs/`,
-  `memories/` and `artifacts/`, read and written by every Agent of the Project with its own file tools; the guard
-  keeps each Agent to its own project's folder. `preferences.md` is added to every agent's rules (16,000 characters).
-  Memories are an index of at most 200 lines, not the file text. A subagent's `## Remember` section is a proposal the entry session may write to memories.
-- **Labels** are free key/value pairs for references outside vibest; grouping uses `runID`.
-- **Conventions (borrowed):** branded IDs with a type prefix and a sortable body (`prj_`, `wsp_`, `run_`,
-  `agt_`, `msg_`, `evt_`), each exposing `ID.create()`; one `time` struct per entity; archiving is a
-  timestamp; `status` is the live state and `outcome` the finished one; every domain module exports its schema,
-  events, and their inventory.
-- **Not borrowed:** OpenCode's coding-agent domain (tool permissions, models and providers, message parts, token
-  accounting, compaction, fork, revert). The CLI agent owns its conversation.
+- **Parent, not controller.** A session's parent is the session that ran `vibest run`. A session sends only to its
+  parent and to sessions it started; the user sends to any session of the project. Management (`interrupt`, `archive`,
+  `peek`) belongs to the user and to the nearest living creator. The core defines no orchestration pattern; plugins
+  shape what happens through hooks (§7).
+- **Entry session.** One per project, the session a bare `vibest` reopens (`project.entry_session_id`). It records its
+  executions like every other session. `vibest --new` starts a new conversation as a new session and ends the old one
+  (`session.ended` reason `replaced`).
+- **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/` under `VIBEST_HOME`): `preferences.md` (how the user
+  likes work done), `docs/`, `memories/` and `artifacts/`, read and written by every session of the project with its own
+  file tools; the guard keeps each session to its own project's folder. `preferences.md` is added to every session's
+  rules (16,000 characters). Memories are an index of at most 200 lines, not the file text.
+- **Conventions:** project and session ids are UUIDv4 strings (people see the first 8); times are epoch
+  milliseconds; archiving is a timestamp; `outcome` is the finished state of an execution. Execution statuses and inbox
+  statuses are fixed enumerations: plugins observe them and cannot add values.
+- **Not stored:** a copy of the CLI's conversation: the CLI owns its
+  conversation, and who spawned whom is `parent_session_id` (schema.md, Not stored).
 
 ### 3.1 Lifecycles
 
-**Run:** `queued → active → ended { completed | failed | stopped }`. Each time all its Agents are idle or ended,
-the Run's result so far goes to the entry session as one Message (the way a V2 subagent result wakes its parent).
-The Run ends when all its Agents have ended.
+**Session:** created by `vibest run` (or the bare `vibest` launch), then alive until `vibest archive` (`ended_at`) or
+`vibest --new`. Archiving is final: nothing sent afterwards brings it back.
 
-**Agent status is `AgentStatus`.** vibest's schema defines `idle | working | blocked | done | unknown`, the same five
-values herdr reports; `runtime-herdr` passes herdr's status through, and another runtime maps its own to them.
-vibest adds no status values and no state machine over it. What herdr cannot
-know is told by other fields, not by extra statuses:
+**Status** is `AgentStatus`: `idle | working | blocked | done | unknown`, the five values herdr reports. For a harness
+with an integration, `working` is the time between `execution.started` and `execution.ended`, plus `blocked`; for one
+without, the runtime's status is passed through. vibest adds no status values and no state machine over it.
 
-| Question                                | Field                                                                        |
-| --------------------------------------- | ---------------------------------------------------------------------------- |
-| Accepted but not yet placed or started? | `time.start` absent (`status` is `unknown` until herdr reports)              |
-| Ended, and how?                         | `time.end` set; `outcome` is `completed`, `failed`, `stopped`, or `replaced` |
-| Replaced by a continuation?             | `outcome: replaced`; the continuation's `previousAgentID` points here        |
+**Process:** `started → placed? → ready → ended` with an end reason (`exited`, `limited`, `restart`, `move`,
+`archived`, `launch_failed`, `superseded`). One live process per session.
 
-`status`, Message `status`, and `outcome` are fixed enumerations: plugins observe them through hooks and cannot add
-or change values.
+**Execution:** opened when a delivery hands text over, or when the user types into a pane with none open, and closed by
+the harness's end report or by vibestd (`lost`, `not_started`, `interrupted`, an exit). Idle is not an end: vibest does
+not model the CLI agent's internal loop. A piece of work ends when its integration reports the end of its work (Claude
+`Stop`, Pi `agent_settled`, …) and the session's inbox is empty; then the next rows are delivered. For a harness with an
+integration, the runtime reporting idle with no report for 10 s makes the execution `lost` (a reason and the
+`vibest peek <id>` command, never screen text; the last 30 lines go to vibestd.log). A harness whose definition has no
+`executionEnd` treats the runtime's idle as the end: an execution vibest handed over, or one the runtime saw start with
+none open, is `completed` the moment the runtime reports idle, with no reply text and no way to tell an error from an
+answer; `blocked` keeps it open. Such a harness is ready for its first task only once the runtime reports idle (not
+blocked on a login or a dialog).
 
-**Agent lifetime** (`vibest run --once`, else the definition's `lifetime`, else the configuration default, which
-is `kept`). An Agent is reused by its id; one that may be needed again should be `kept` from the start:
+**Outcome of an inbox row's execution:** `completed` or `failed` by the harness, `lost` as above, `not_started` when
+delivery could not be confirmed (§3.2), `interrupted` by `vibest interrupt`.
 
-- `once`: the Agent ends `completed` when its execution ended normally (`completed`), it is idle, and no Message it sent or was
-  sent is pending (`--archive-on-idle`; a message that ended dropped or failed no longer waits); a `failed` execution
-  (the harness or execution reported an error) keeps it. Ending closes the pane and releases its Workspace (§3.3).
-- `kept`: when the Agent answers, it stays `idle` with its pane open. `vibest send` continues the conversation,
-  and every new reply is readable with `vibest result`. `vibest stop <agent>` ends it, closes the pane, and releases
-  its Workspace.
+**Answers** come through the best channel (D11): the integration sends its execution-end event to vibestd, which writes
+the harness's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) in the execution's `execution.ended`;
+the projection keeps it as `reply`, read with `vibest result` and shown in `vibest ls`. Nothing is sent to anyone: a
+session that has something to say runs `vibest send <id>`.
 
-**Idle:** vibest does not model the CLI agent's internal loop. herdr's `idle` is the status. A piece of work ends
-when its integration reports the end of its work (Claude `Stop`, Pi `agent_settled`, …) and its inbox is empty;
-that is when the execution ends and the next Message is delivered. For a harness with an integration, herdr reporting idle with no hook result for
-10 s makes the Message `lost` (a reason and the `vibest peek <id>` command, never screen text; the last 30 lines go to vibestd.log); only a harness whose
-definition has no `executionEnd` (agy) treats the runtime's idle as the end: an execution vibest handed over, or one the runtime saw start with no open
-execution (`working` reported while nothing was open: typed work, the entry session's included), is `completed` the moment the runtime reports idle, with no
-reply text and no way to tell an error from an answer; `blocked` keeps it open. Such a harness is ready for its first task only once the runtime reports
-idle (not blocked on a login or a dialog), and its entry session takes queued messages like any other.
+**Notices** say only what a session could not say itself: its harness exited, it never started, an execution ended in an
+error, it waits on a permission, a message to it was not delivered, it was archived. A notice goes to the nearest living
+creator (its parent, else the parent's parent, and so on; a creator on another machine through the outbox; none left,
+only the user reads it). A sent message that cannot be delivered goes back to its sender as a notice.
 
-**Outcome of a task or message** (omac's execution states, copied): a Message vibest delivered is `completed` or
-`failed` by its execution, `lost` as above, `not_started` when delivery could not be confirmed (§3.2), `interrupted`
-by `vibest interrupt`. Text the user types into a subagent's pane is recorded as its own execution and
-opens no such Message; when that execution ends, the user's text and the subagent's reply go to the entry session as one
-`notice` (information, delivered with its next input, never a task it must act on).
-
-**Answers** come through the best channel (D11): the integration sends its execution-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) in the execution's `execution.ended`; the projection keeps it as `execution.reply`, read with `vibest result` and shown as the summary in `vibest ls`. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
-
-The subagent's rules ask for a message whose first line is one sentence the recipient can relay, then the details, and an
-optional `## Remember`. The recipient gets it as:
-
-```
-<agent-message>
-<agent-id>agt_…</agent-id> <title>…</title>
-<message>what the agent sent</message>
-</agent-message>
-```
+**Archive on idle** (`vibest run --archive-on-idle`): the session is archived the first time it is idle after a
+completed execution with nothing waiting (§3.3).
 
 ### 3.2 Execution
 
-Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
-
-- **Inbox.** One lock per receiver; read, mark `delivering`, deliver, mark `delivered` only on success. Consecutive
-  Messages from one sender are delivered as one. Triggers: on write, on the receiver's status event, a 10 s
-  reconcile tick, daemon start. A `blocked` receiver gets nothing.
-- **Pull or type is a property of the harness.** A harness whose adapter declares `inbox` (`poll` for the Claude plugin
+- **Inbox.** One lock per recipient session; read the pending rows, deliver, mark `delivered` only on success.
+  Consecutive rows from one sender are delivered as one. Triggers: a row written, the recipient's status event, vibestd
+  start and a runtime registering or coming back. A `blocked` recipient gets nothing.
+- **Pull or type is a property of the harness.** A harness whose definition declares `inbox` (`poll` for the Claude plugin
   over HTTP on `vibest-http.sock`, `subscribe` for the Pi extension's subscription stream) pulls; the integration asks
   for the next batch with `take` only while its session is idle, and the subscription stream carries only a wake-up.
-  Any other harness is typed through herdr `agent.prompt`. Entry sessions and spawned sessions follow the same rule.
+  Any other harness is typed through the runtime's prompt. The entry session and spawned sessions follow the same rule.
   `take` runs in one transaction: with an execution open it answers empty; otherwise it opens the execution, marks the
   batch `delivered` and attaches it to that execution. The integration reports the execution accepted when the batch
   reaches the model; a batch never used is settled by the confirmation timeout like a typed one (`not_started`). A
   session with no process is resumed by the typed path's wake-up and then takes its message.
-- **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
-  sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
-  and wait 8 s; otherwise `not_started` with a notice naming `vibest peek <id>` (CAO #479, #496, #566). No screen text is ever
-  pushed to an agent: a entry session reads a terminal on demand with `vibest peek <id> [--lines N]`; vibestd.log keeps the tail.
-- **Failure.** A Message that cannot be delivered is finalized `failed` and its text returned to the sender as a
-  notice, once. A Message found `delivering` after a restart is finalized as "may have been delivered": never
-  replayed blindly. herdr unreachable before handover leaves it `pending`.
-- **Exited agent.** Sending to a `kept` Agent whose process exited reopens its Workspace, opens a pane, and
-  resumes the CLI conversation with the adapter's resume arguments; without a known conversation id it fails.
-- **Restart.** Started Agents (`time.start` set, no `time.end`) with no herdr agent end with `outcome: failed`; open Messages are checked again by the
-  rules above; orphan worktrees are logged, never deleted.
-- Decision points (`agent.fail`, `run.end`) are recorded before their hook runs;
-  after a restart an unfinished decision runs again, so plugin decisions must be idempotent.
+- **Typed delivery**, text unchanged, then confirmed: within 8 s the state sequence must move or the agent must be
+  working; otherwise press Enter and wait 8 s; otherwise paste once more and wait 8 s; otherwise `not_started` with a
+  notice naming `vibest peek <id>`. No screen text is ever pushed to a session: one reads a terminal on demand with
+  `vibest peek <id> [--lines N]`; vibestd.log keeps the tail.
+- **Failure.** A row that cannot be delivered is finalized `failed` and its text returned to the sender as a notice,
+  once. A row found `delivering` after a restart is finalized `failed` with "may or may not have arrived": never
+  replayed blindly. A runtime unreachable before handover leaves it `pending`.
+- **Exited session.** Sending to a session whose process exited opens a terminal in its directory and resumes the CLI
+  conversation with the harness's resume arguments; without a known conversation id it fails.
+- **Restart.** On start, vibestd subscribes before writing anything, settles the deliveries a stop cut off, labels
+  terminals again, then checks every live session once (the same check runs when a runtime registers or comes back); a
+  session whose process is gone gets an exit recorded; orphan worktrees are logged, never deleted.
 
 Session work lives in `packages/core/src/session/`, one `Context.Service` per module, each depending only on the ones
 below it and subscribing to the events it handles itself:
@@ -369,7 +323,7 @@ How these modules keep the rules:
   session directory has its own lock (`directory:<path>`), which an archive holds while it decides whether the
   directory goes and a `--share` spawn holds while it joins it. Per-session flags live in memory and are dropped once
   the session is no longer live and nothing is in flight on them (`forget`, under the lock).
-- Remove and archive close the execution and mark the session archived and exited under its lock. The aborted execution
+- Archive closes the execution and marks the session archived and exited under its lock. The aborted execution
   end their interrupt causes, landing during the interrupt or after the archive, writes nothing: an interrupted end
   with no open execution is dropped (`db.session.endObserved`).
 - Ready for input: a harness whose integration reports ready is ready once that report is on its row (a restart or
@@ -385,7 +339,7 @@ How these modules keep the rules:
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
   runs twice. A refused text undoes the execution unless the integration wrote a result anyway or a usage-limit move
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
-- A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
+- A check decides nothing for an exited session (the next row resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the
   terminal gone before any exit was recorded records that exit first (the check), so only a recorded exit is ever
@@ -401,9 +355,9 @@ How these modules keep the rules:
   find is. An execution counts
   as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
-- A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
+- A row stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
   is final. A session whose harness is being restarted is never resumed in another terminal.
-- Placing a start (`session/placement.ts`): the session's `process.start` is written before its terminal exists, so what the
+- Placing a start (`session/placement.ts`): the session's `process.started` is written before its terminal exists, so what the
   harness reports while it starts (ready, its pid) belongs to it; a terminal that never opens ends it as
   `launch_failed`. The worktree comes first: the terminal's cwd is in it, the argv names it, and the
   `.worktreeinclude` files are in place before the harness starts. It is detached and made by vibest (a linked
@@ -416,20 +370,17 @@ How these modules keep the rules:
   project directory its name cannot be given again and is left as it is (a known gap).
 - Starting the entry session (`launch.ts`): every check that can refuse the launch (harness, provider, binary, plugin,
   temporary directory) runs before the entry session is recorded, since that supersedes the running entry
-  session's launch. The shell a launch opens at the root runs the command and then stays, so a failed start (or a
+  session's launch. The shell a launch opens at the root runs the command and then stays, so a failed start (or an
   entry session the user quits) leaves its error and a shell, not a closing terminal. `VIBEST_HOME` is set last in its
   environment, so a caller's `--env` cannot point that shell at another vibestd.
-- On start: subscribe before writing anything, settle the deliveries a stop cut off, label terminals again (the
-  runtime does not keep labels), then check every live session once. The same reconcile runs when a runtime
-  registers or comes back, and finishes archives a stop cut off. It does not archive `--archive-on-idle` sessions: that
-  flag lives only in the memory of the vibestd that started them, so after a restart they stay until archived by hand
-  (schema.md, Memory).
+- The start-up reconcile does not archive `--archive-on-idle` sessions: that flag lives only in the memory of the
+  vibestd that started them, so after a restart they stay until archived by hand (schema.md, Memory).
 
 How an execution ends:
 
 - An execution end the harness reports (`db.session.endObserved`) is written as it arrives, without the session lock, in one
   transaction: the `execution.ended` with the reply and the conversation, the session idle, and the error notice for a
-  failed end that is not a usage limit. It is ignored for the entry session, for a harness the session no longer
+  failed end that is not a usage limit. It is ignored for a harness the session no longer
   runs, before the current process's ready report when its harness reports ready, and when it is interrupted with no
   execution open. A completed or failed end with no execution open is an execution of its own (an execution typed in the terminal whose
   start was missed). vibestd's own closes (`lost`, `not_started`, `interrupted`, an exit) are conditional on the
@@ -444,30 +395,30 @@ How an execution ends:
 - Reports from a harness carry the process id vibestd started it as, and an execution end or start from an earlier
   process of the session is dropped (schema.md). An end that arrives while the open execution is not accepted yet is
   earlier activity and changes nothing.
-- Queued Messages: one wake is one delivery; the batch goes pending, delivering, delivered, or failed with the owner
+- Queued rows: one wake is one delivery; the batch goes pending, delivering, delivered, or failed with the sender
   told. A broken connection before the handover leaves it pending for the next check; after it, the text may have
-  arrived, so it is not sent again and the owner decides.
+  arrived, so it is not sent again and the sender decides.
 - Text the user types while no execution is open opens one (no inbox row). It is stamped when the hook arrives, before
   the session's lock is taken: the lock can be held for seconds (a delivery, an interrupt, an archive) and the typed
   execution may already be over when it frees, and a later stamp would drop that execution's reported end. vibest's own paste
-  sets a flag around its send, so that echo is no execution and the hook cannot deadlock on the lock the paste holds. A
+  sets a flag around its send, so that echo is no execution and the hook cannot deadlock on the lock the paste holds. An
   execution that opened after the read is not recorded twice.
 
 ### 3.3 Ending and cleanup
 
-Copied from omac `remove.ts`, `processes.ts`, `worktree.ts`. `vibest interrupt <agent>` sends the adapter's
-interrupt key and waits 10 s for idle; the Agent and pane stay. `vibest stop <agent>`:
+`vibest interrupt <id>` sends the harness's interrupt key and waits up to 10 s for the execution to end; the session,
+its terminal and its worktree stay. `vibest archive <id>` (`remove.ts`, `processes.ts`, `worktree.ts`):
 
-1. interrupts if working, records a tombstone, and fails its pending Messages with one notice;
-2. records the pane's shell and foreground PIDs, then closes the pane; if the pane is the last one of a main
-   checkout's workspace, it is first moved alone into a new workspace, because closing it would close the
-   whole herdr worktree group;
-3. proves exit with signal 0 (every 100 ms, 30 times); `alive` or `unknown` (no PIDs recorded, or signal 0 could
-   not answer) keeps everything and a later
-   `vibest stop` checks again;
-4. removes a Workspace made for this Agent only when it is a listed worktree, no pane or process (lsof cwd scan)
-   is inside it, `git status` is clean, and HEAD is on a branch or remote ref; `git worktree remove` without
-   force; branches are never deleted.
+1. marks the session archived first, so from then no send, check or resume brings it back; a session that already
+   exited is not closed again;
+2. interrupts if working, closes the execution, and fails its pending rows with one notice;
+3. reads the session's process tree (harness pid, its descendants, and the shell that is its parent), closes the
+   terminal (if it is the last one of a main checkout's workspace, it is first moved alone into a new workspace,
+   because closing it would close the whole herdr worktree group), then gives those pids 10 s to exit;
+4. removes the session's worktree only when it is a listed worktree under vibest's worktrees root, no other live
+   session shares it, no process (lsof cwd scan) is inside it, `git status` is clean, and HEAD is on a branch or
+   remote ref; `git worktree remove` without force; branches are never deleted. `--keep-worktree` keeps a clean one.
+   A kept worktree is named with its reasons, and the archive is still finished.
 
 How `packages/core/src/remove.ts` and `processes.ts` keep this:
 
@@ -478,11 +429,9 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   contract; vibestd still proves it by cwd before the worktree goes), and a close that failed proves nothing. The
   only signal vibest sends is SIGTERM to one harness pid it was told (a restart, a usage-limit move, an entry session
   moving terminal), never its group. A reused pid reads as alive, which can only keep more.
-- Before that close, on this machine only, the session's process tree is read (`ps -x -o pid=,ppid=,comm=`): the
-  harness pid recorded for the session, its descendants, and the shell that is that pid's parent (not the shell's
-  other children). After the close those pids get 10 s to exit, by the liveness probe only. A tree `ps` could not
-  read is not waited on. A process that is not in the tree is not waited on either: the one cwd listing below keeps
-  the worktree as soon as it names one.
+- Before that close, on this machine only, the session's process tree is read (`ps -x -o pid=,ppid=,comm=`). After the
+  close those pids get 10 s to exit, by the liveness probe only. A tree `ps` could not read is not waited on. A process
+  that is not in the tree is not waited on either: the one cwd listing below keeps the worktree as soon as it names one.
 - The cwd check is one lsof run (`lsof +w -a -u <uid> -d cwd -FpRcfn0`, no shell) in its own process group, cut off
   after 10 s, then SIGTERM and SIGKILL 1 s later; a helper stuck in uninterruptible I/O holds the run until it
   returns. The listing is trusted only when lsof exited 0 with nothing on stderr (warnings mean a partial listing),
@@ -501,103 +450,99 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   process on vibestd's machine; a remote one needs a runtime operation), and a pid reused by another program while
   the runtime still sees an agent there would get the signal.
 
-Rows are never deleted. `vibest ls` lists Agents that have not exited; `vibest ls --all` and `vibest result <id>` still show an exited one.
+Rows are never deleted. `vibest ls` lists sessions that have not ended; `vibest ls --all` and `vibest result <id>` still
+show an ended one.
 
-An archive marks the session archived before anything is closed, so from then no Send, check or resume brings it
-back. A row that already exited is not closed again. A spawn reserves its worktree name with an atomic `mkdir`; a
-start cut off before its terminal was recorded is undone as a failed launch (its worktree goes when nothing can be
-lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
-`--archive-on-idle` decides under the session's lock, at a completed execution end and whenever a row it sent or was sent leaves
-`pending`/`delivering`: a session with work again (a queued Message, a row still waiting in either direction, or a newer execution) stays, and a clean archive sends no notice, since each notice is a entry session execution.
-The builtin plugin `archive-on-idle` subscribes to those facts and calls that check; `"-archive-on-idle"` removes the plugin, and the flag then archives nothing.
+A spawn reserves its worktree name with an atomic `mkdir`; a start cut off before its terminal was recorded is undone
+as a failed launch (its worktree goes when nothing can be lost, its reserved directory when still empty), while a
+resume or move falls back to its previous start.
+`--archive-on-idle` decides under the session's lock, at a completed execution end and whenever a row it sent or was
+sent leaves `pending`/`delivering`: a session with work again (a queued row, a row still waiting in either direction,
+or a newer execution) stays, and a clean archive sends no notice, since each notice is an entry session execution.
+The builtin plugin `archive-on-idle` subscribes to those facts and calls that check; `"-archive-on-idle"` removes the
+plugin, and the flag then archives nothing.
 
 ## 4. Patterns
 
-The core knows no patterns. The one controller is the entry session, in the conversation with the user:
+The core knows no patterns. A session that starts and directs others does it with the commands the CLI has (`run`, `send`, `result`, `ls`, `interrupt`, `peek`, `archive`):
 
 - **Delegation** (§4.1) is the product: the entry session starts sessions and reads what they send back.
-- **Flows over several subagents** are skills (§4.2): instructions the entry session follows with the same commands
-  (`run`, `send`, `read`, `stop`, `ls`), so the user sees and can step into every step.
-- **Rules that must hold every time** are plugins on hooks (§4.3), not programs: they refuse, transform, or
-  decide at one hook point, and the result still goes to the entry session.
+- **Flows over several sessions** are skills (§4.2): instructions the session that runs them follows with the same
+  commands, so the user sees and can step into every step.
+- **Rules that must hold every time** are plugins on hooks, or the guard of an agent definition (§4.3), not programs:
+  they refuse, transform, or decide at one hook point.
 
-There is no workflow engine. Someone who wants a fixed script writes it outside vibest, as an ordinary client of
-the CLI; the Runs it starts are controlled by whoever runs it.
+There is no workflow engine. Someone who wants a fixed script writes it outside vibest, as an ordinary client of the
+CLI.
 
-### 4.1 Delegation (supervisor and workers)
+### 4.1 Delegation
 
-The product, and the base of every skill; needs no plugin.
+The product, and the base of every skill; needs no plugin beyond the builtin agent definitions.
 
 ```
 you ──chat──▶ entry session
-                │ vibest run "…" --agent worker        ← dispatched from the entry session
+                │ vibest run "…"                       ← started by the entry session
                 ▼
-              worker session ── works; its integration forwards every step to vibest
+              new session ── works; its integration forwards its executions to vibest
                 │
                 ▼
-              the worker runs `vibest send` when it has something to say
+              the session runs `vibest send` when it has something to say
                 ▼
 entry session's integration delivers it as new input     ← back in the conversation
 ```
 
-- **Entry session.** The entry session is an ordinary Agent: one CLI conversation, in its own Run (started by the
-  user, no parent), with the same lifecycle, integration, hooks, and Messages as any other. Only one thing marks
-  it: `project.entry_session_id` points to it.
-  `vibest` in a Project directory opens the Project's entry session in the `root` Workspace,
-  creating it on first use and resuming it if its pane is gone. The user chats with it like with any CLI agent.
-- **Workers.** Any session runs `vibest run "…" --agent <definition>`; a run with no calling session is refused, so
-  the user opens a session with bare `vibest` first. The new session's parent is its caller, and its replies are not
-  sent anywhere: it reaches its parent with `vibest send`, and the parent reaches it the same way.
-- **Ending or keeping.** `once` Agents end on their reply (pane closed, worktree removed); `kept` Agents
-  stay for follow-ups through `vibest send`, until `vibest stop`
-  (§3.1).
-- **Commands for the entry session:** `run`, `send`, `read`, `stop`, `ls`, plus commands plugins add. Skills do
-  not block on `vibest wait` or `--wait`: a CLI's shell tool times out long before a worker finishes, so results
-  come back through the inbox (§3.2). `wait` is for scripts and the user.
-- **Defaults** are configuration: the definition of the entry session and the default subagent definition.
-- **The entry session does not edit files by default**: its guard rules refuse file edits (like omac's coordinator);
-  writes go to subagents.
-- **Where a subagent works** (`--workspace` overrides):
-  - In a Project with git repositories: a new `isolated` Workspace made for this Agent; a reviewer shares the
-    implementer's Workspace with `--share`.
-  - Without git repositories: `root`, and only one writing subagent at a time; the next one
-    queues (the builtin harness choice refuses: one writing subagent at a time in such a Project).
-- **Stepping into a subagent's pane** is allowed, also after it answered (a `kept` Agent's pane stays open). It
-  is recorded as an execution the user typed; the entry session reads it with `vibest ls` and `vibest result`.
-- **What the entry session knows.** `vibest ls` gives every live subagent's task text, status, and latest result
-  summary, so the entry session recovers the whole picture after compaction or a restart without relying on its
-  context.
-- **Subagent rules** (omac `rules.ts`, copied): work on a detached HEAD, then branch, commit, and push when done;
-  destructive git or file actions need the user's quoted consent; never control herdr; shared files go to the
-  project folder's `artifacts/` prefixed with the Agent id; the final reply format of §3.1.
+- **Entry session.** An ordinary session: one CLI conversation with the same lifecycle, integration, hooks and inbox
+  as any other. Only one thing marks it: `project.entry_session_id` points to it. Bare `vibest` in a Project directory
+  opens it as the `coordinator` definition, creating it on first use and resuming it if its pane is gone. The user chats
+  with it like with any CLI agent.
+- **Starting sessions.** Any session runs `vibest run [<harness>] <prompt>`; a run with no calling session is refused,
+  so the user opens a session with bare `vibest` first. Without `--agent` the new session runs the `general` definition.
+  The new session's parent is its caller. Its replies are not sent anywhere: it reaches its parent with `vibest send`,
+  and the parent reaches it the same way.
+- **Ending or keeping.** A session stays for follow-ups through `vibest send` until `vibest archive`;
+  `--archive-on-idle` archives it the first time it is idle after a completed execution with nothing waiting (the
+  builtin plugin `archive-on-idle`). `VIBEST_MAX_SESSIONS` limits how many run at once.
+- **Waiting.** Skills do not poll or block: a CLI's shell tool times out long before a session finishes, so what a
+  session sends comes back through the inbox.
+- **Where a session works.** In its own new linked git worktree, detached at the caller's HEAD; `--share <session>`
+  runs it in another session's directory, in a pane split from that session's pane (a reviewer shares the
+  implementer's worktree).
+- **Stepping into a pane** is allowed, also after the session answered. If no execution is open, what the user types
+  starts one; the entry session reads it with `vibest ls` and `vibest result`.
+- **What the entry session knows.** `vibest ls` gives every session that has not exited, with its task, live status and
+  latest execution, so the entry session recovers the whole picture after compaction or a restart without relying on
+  its context.
+- **Session rules.** The `general` definition's prompt (`packages/builtins/src/agent.ts`): work on a detached HEAD, then
+  branch, commit and push when done; destructive git or file actions need the user's quoted consent; never control
+  herdr; shared files go to the project folder's `artifacts/` prefixed with the session id.
 
 ### 4.2 Skills
 
-A skill is a `SKILL.md` instruction document for an Agent. vibest has only builtin skills, `delegate` and
+A skill is a `SKILL.md` instruction document for an agent. vibest has only builtin skills, `delegate` and
 `pipeline` in `packages/skills/`; it loads no skill directory of the user or of a Project. The build copies them into
-each harness's vibest plugin: Claude Code and Cursor load that plugin (`--plugin-dir`) in every Agent, and each skill's
-description says only the entry session uses it; Pi's vibest extension offers them (`resources_discover`) to the entry
-session only. Skills the user installed in the CLI itself stay the CLI's own.
+each harness's vibest plugin: Claude Code loads that plugin (`--plugin-dir`) in every session, and each skill's
+description says only the entry session uses it; Pi's vibest extension returns them from `resources_discover`. Skills
+the user installed in the CLI itself stay the CLI's own.
 
-| Skill    | The entry session…                                                                                                                                                                                                                                                                                                                                                                      |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| delegate | splits work, runs subagents, keeps talking with the user, checks each result when it arrives, reports                                                                                                                                                                                                                                                                                   |
-| pipeline | runs a read-only planner; shows the plan to the user and waits for agreement; passes the plan, verbatim, to a `kept` implementer; runs a read-only reviewer on the change and sends its comments back to the same implementer until the reviewer approves or the user decides (at most three reviews by default); then has the implementer open a pull request. All in one Run (`--in`) |
+| Skill    | The session that follows it…                                                                                                                                                                                                                                                                                                                                    |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| delegate | splits work, runs sessions, keeps talking with the user, checks each message when it arrives, reports                                                                                                                                                                                                                                                           |
+| pipeline | runs a read-only planner; shows the plan to the user and waits for agreement; passes the plan, verbatim, to an implementer; runs a reviewer in the implementer's worktree (`--share`) and sends its comments back to the same implementer until the reviewer approves or the user decides (at most three reviews); then has the implementer open a pull request |
 
 **Three ways to use them**, most used first:
 
 1. Just say what you want; the entry session picks a skill from its description.
 2. Name it: invoke the skill in the CLI (`/pipeline …`) or say "do it as a pipeline".
-3. Rules that must hold every time go in plugins (§4.3).
+3. Rules that must hold every time go in plugins or guards (§4.3).
 
 **Adding a flow** (a committee, racing, an advisor) is a new builtin skill in `packages/skills/`. It needs no core
 change, because every flow uses the same commands.
 
-### 4.3 Rules (hook plugins)
+### 4.3 Rules
 
-A rule is an ordinary plugin on one hook (§7), installed in the vibest home.
-
-Rule state lives in `storage` and decisions are idempotent, because decision hooks run again after a restart.
+A rule is an ordinary plugin on one hook (§7), installed in the vibest home, or the `guard` of an agent definition,
+which refuses a tool call of a session that runs it (the `coordinator` guard refuses file edits outside the project
+folder).
 
 ## 5. Service composition
 
@@ -605,12 +550,10 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
   `Context.Service` class), `Interface`, `layer`, `node` and, with options, `configured`, as OpenCode does. The
   rules are in [`.agents/rules/effect.md`](../../.agents/rules/effect.md). A host input the module needs (such as
   `Identity.HostFacts`) keeps its own class with a `<name>Node` beside the module's service.
-- Services are assembled from a **service graph**: each entry is `{ service, layer, dependencies }` with a scope.
-  A narrower scope may depend on a wider one, never the reverse, checked at type level. The graph compiles to
-  one `Layer`.
+- Services are assembled from a **service graph**: each entry is a `LayerNode` node listing its `deps`.
+  The graph compiles to one `Layer`.
 - Configuration replaces entries at the composition root (`PlatformNode.sqlClientLayer.replace(…)` in
   `packages/platform-bun/src/bun.ts`).
-  Product identity and runtime are replacements, which is how one core yields several isolated products.
 - Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
   `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; `unbound` is infallible).
   Its release tracking is kept: `LayerNode.Releases` records each node whose layer is still releasing, and when
@@ -627,36 +570,30 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
   environment, the process platform, the host facts); its `Host` keeps only `lock` and `checkDatabase`, which run
   before the graph is built. The daemon adds its `Layout`, `Identity` and `Shutdown`. The vibestd identity is the first root, so a malformed identity file stops vibestd before the database is opened. Dependencies of one node build concurrently and a group's roots build in order; a replacement drops
   the replaced node's own dependencies, so a fake is never built beside the real service.
-- Today there is only the daemon scope: plugins and catalogs are the same for every Project. Tags exist in
-  `LayerNode` and are not declared until a project scope is built.
-
-| Scope                   | Lives                                                               | Holds                                                                                                                                                        |
-| ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **daemon**              | once per daemon                                                     | the database and its ledger, the Bus, projects, machines, sessions and their executions, the inbox, the plugin host, the harness, runtime and agent catalogs |
-| **project** (not built) | one compiled graph per Project, in a `LayerMap` keyed by Project id | the plugin registry and supervisor, the agent, harness and runtime catalogs, for that project's sessions                                                     |
+- There is one scope, the daemon: the database and its ledger, the Bus, projects, machines, sessions and their
+  executions, the inbox, the plugin host, and the harness, runtime and agent catalogs are the same for every Project.
 
 ## 6. Persistence and events
 
-Copied from omac `db.ts`, on the four tables of `schema.md`:
+All state is in one SQLite file, `vibest.db`, as described in `schema.md`:
 
-- SQLite, WAL, STRICT tables, all SQL in one service. The database carries an `application_id`, the catalog version
-  that last wrote it and the migrations applied to it; a file that is not vibest's, or written by a newer catalog, is
-  refused before any writable open (`SchemaMismatch`), leaving it untouched. Pending migrations run in order when it
-  opens (schema.md, Opening and migrations).
+- SQLite, WAL, STRICT tables, all SQL in the `Db` service. The database carries an `application_id`, the catalog
+  version that last wrote it and the migrations applied to it; a file that is not vibest's, or written by a newer
+  catalog, is refused before any writable open (`SchemaMismatch`), leaving it untouched. Pending migrations run in
+  order when it opens (schema.md, Opening and migrations).
 - The check runs on a read-only connection, which sees committed WAL frames and does not checkpoint, so a refused
   database and its WAL keep their bytes (the WAL index, `-shm`, may still change). WAL mode stays off until `Db`
   accepts the file. A missing database is created mode 0600, and each open forces 0600 on the database and any
-  existing `-wal` / `-shm` (SQLite copies the database's mode onto those it creates later). Closing the last
-  connection may delete `-wal` / `-shm` (SQLite's default, as on Linux) or keep them (Apple's system SQLite), and two
-  first opens of a missing file at once fail with `SQLITE_CANTOPEN`. A writable transaction
+  existing `-wal` / `-shm` (SQLite copies the database's mode onto those it creates later). A writable transaction
   is `BEGIN IMMEDIATE`, with a 5 s busy timeout.
-- The append-only `event` log of facts in `docs/design/schema.md` is the state; the read-model tables (`project`,
-  `session`, `process`, `execution`, `inbox` and the machine tables) are projected from it in the same transaction. The
-  conversation is the Project's entry session row. An Agent's status is live from the runtime (memory only); its
-  task is its `task` inbox row. Facts are never deleted.
-- Files keep one writer each and are written to a temporary file and renamed (omac write model): system prompt
-  files by the daemon (the entry session's by `vibest`); never the user's harness configuration.
-- Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
+- The append-only `event` log of facts (`docs/design/schema.md`) is the state; the read-model tables (`project`,
+  `session`, `process`, `execution`, `inbox`, and the machine tables) are projected from it in the same transaction.
+  The Project's entry session is `project.entry_session_id`; a session's task is its `task` inbox row; its live status
+  comes from the integration's events and, for a harness with no integration, from the runtime (memory only). Facts
+  are never deleted.
+- Files keep one writer each and are written to a temporary file and renamed: system prompt files by vibestd; never
+  the user's harness configuration.
+- Not stored: worktree branches and dirty state (asked from git), terminal state (asked from the runtime).
 - Events reach the reactions through one in-memory Bus (`core/bus.ts`): the Bus itself appends facts (`Bus.publish` inside `Bus.transaction`), applies each through the projector its domain registered
   (`bus.project`, from `project/`, `session/` and `remote/` `projector.ts`) and publishes a committed transaction's facts
   in seq order, and observations the schema does not store (signals: `terminal.*`, `runtime.reset`, `session.changed`, `project.changed`) are published only. `bus.subscribe(definitions)` enqueues only the requested types, in publish order across them; `bus.subscribe()` takes every event. A waiter subscribes before
@@ -684,142 +621,132 @@ export interface Plugin {
 ```
 
 A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/plugin/src/promise/adapter.ts`, as OpenCode's
-`promise/adapter.ts`; core's plugin host picks the form; `@vibest/plugin/promise/adapter` exports the adapter `fromPromise`), so both forms share one loading, failure and reload path. Its Promise `Context` has the same
-domains with Promises: `hook` callbacks return `Promise<result | void>` or the result, and refuse by throwing
-`AgentRefused`; registrations resolve to `{ dispose(): Promise<void> }`; `event.subscribe` is an `AsyncIterable`,
-closed when the plugin unloads; `subscription.report` returns a Promise; `transform` takes the same
-synchronous editor (runtime and harness definitions stay Effect types, so their authors write Effect). The `Cleanup`
-`setup` returns runs when the plugin's scope closes; registrations made later, from inside `setup`, still belong to
-that scope.
+`promise/adapter.ts`), so both forms share one loading, failure and reload path. Its Promise `Context` has the same
+domains with Promises: `hook` callbacks return a `Promise` or a plain value and refuse by throwing `AgentRefused`;
+registrations resolve to `{ dispose(): Promise<void> }`; `event.subscribe` is an `AsyncIterable`, closed when the plugin
+unloads; `subscription.report` returns a Promise; `transform` takes the same synchronous editor (runtime and harness
+definitions stay Effect types, so their authors write Effect). The `Cleanup` that `setup` returns runs when the plugin's
+scope closes; registrations made later, from inside `setup`, still belong to that scope.
 
-**Two capabilities**, as OpenCode V2: `transform(editor)` with a synchronous editor (`add`, plus `update` on the harness editor), and `hook(name, callback)` for live interception. Both return
-a `Registration` (`{ dispose }`) owned by the plugin's scope: unloading the plugin disposes everything it registered,
-and `dispose` may be called earlier (a second call is a no-op). Registries are `packages/core/src/plugin/registry.ts`, a port
-of V2's `State`: transforms apply in registration order on a lazy rebuild, a plugin's setup runs in one `group` (a
-throwing transform disables the whole plugin and removes its earlier registrations; a disabled plugin is not set up
-again until its own revision or options change), and an activation runs in one
-`batch` (one rebuild and one notification however many plugins changed). Removing a plugin's transform restores the
-definitions it changed or removed. Editor callbacks are synchronous: load effectful data before registering a
+**Two capabilities**, as OpenCode: `transform(editor)` with a synchronous editor (`add`, plus `update` on the harness
+editor), and `hook(name, callback)` for live interception. Both return a `Registration` (`{ dispose }`) owned by the
+plugin's scope: unloading the plugin disposes everything it registered, and `dispose` may be called earlier (a second
+call is a no-op). Registries are `packages/core/src/plugin/registry.ts`: transforms apply in registration order on a lazy
+rebuild, a plugin's setup runs in one `group` (a throwing transform disables the whole plugin and removes its earlier
+registrations; a disabled plugin is not set up again until its own revision or options change), and an activation runs
+in one `batch` (one rebuild and one notification however many plugins changed). Removing a plugin's transform restores
+the definitions it changed or removed. Editor callbacks are synchronous: load effectful data before registering a
 transform.
 
-**Context domains** (`packages/plugin/src/effect/index.ts`):
+**Context domains** (`packages/plugin/src/effect/plugin.ts`):
 
 | Domain         | Members              | Edits                                                               |
 | -------------- | -------------------- | ------------------------------------------------------------------- |
 | `options`      | the plugin's options | —                                                                   |
-| `agent`        | `hook`               | `start.before`, `fail`                                              |
+| `agent`        | `hook`, `transform`  | hooks `start.before`, `fail`; `AgentDefinition`s by `id` (`add`)    |
+| `machine`      | `hook`               | `connect`, `remove` (multi-machine.md)                              |
 | `runtime`      | `transform`          | `RuntimeDefinition`s by `id`, each with its optional `caller` (§10) |
 | `harness`      | `transform`          | `HarnessDefinition`s by `id` (§8)                                   |
 | `subscription` | `report`             | one `(harness, provider)` row's limits                              |
 | `event`        | `subscribe`          | — (observes the ledger's facts)                                     |
 
-Domains such as workspaces, definitions, commands, skills, plugin RPC and storage are planned and not part of the API
-yet.
+An `AgentDefinition` is `{ id, description, system, guard? }`: the prompt a session of that definition starts with and
+its optional pre-tool guard. The builtin plugin `vibest.agent` registers `coordinator` and `general` with it.
 
 **Observing facts.** `ctx.event.subscribe({ types? })` is a `Stream` of the ledger's own facts (`Fact` from
-`@vibest/schema/event`: `seq`, `at`, `type`, `projectId?`, `sessionId?`, `data`), taken from the post-commit `Bus`.
-It replaces the earlier rule that plugins never read the ledger: a plugin observes facts, and still gets no SQL, no
-`Bus.publish` and no projector of its own. Only catalog facts reach it: every signal is filtered out.
-`types` omitted or empty means every fact; an unknown type is logged once per call and ignored, and a non-empty list
-of only unknown types is a stream that never emits. Delivery: this machine only, only after the commit, live from the
-moment the stream is run (no replay, no cursor, no ack); a replaced or unloaded plugin's stream ends with its scope,
-and facts committed between that and the next revision's subscription are not delivered to it; the queue is the
-`Bus`'s unbounded `PubSub`, so a slow consumer never holds up a commit but its backlog has no bound; each plugin gets
-its own copy of a fact. A plugin runs its consumer in its own scope (`Effect.forkScoped`); the 5 s setup bound covers
-starting it, not its life.
+`@vibest/schema/event`: `seq`, `at`, `type`, `projectId?`, `sessionId?`, `data`), taken from the post-commit `Bus`. A plugin
+observes facts and gets no SQL, no `Bus.publish` and no projector of its own. Only catalog facts reach it: every signal is
+filtered out. `types` omitted or empty means every fact; an unknown type is logged and ignored, and a non-empty list of
+only unknown types is a stream that never emits. Delivery is on this machine only, only after the commit, and live from
+the moment the stream is run (no replay, no cursor, no ack); a replaced or unloaded plugin's stream ends with its scope.
+A plugin runs its consumer in its own scope (`Effect.forkScoped`); the 5 s setup bound covers starting it, not its life.
 
-**Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
+**Agent hooks** (one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
 
-| Hook                 | Changes (by assigning to the event)                                   | Runs                                                     |
-| -------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
-| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every Agent starts, the entry session included    |
-| `agent.fail`         | `move` (`{ harness, provider?, model? }`)                             | a started Agent's execution failed (today a usage limit) |
+| Hook                 | Changes (by assigning to the event)                                   | Runs                                                    |
+| -------------------- | --------------------------------------------------------------------- | ------------------------------------------------------- |
+| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every session starts, the entry session included |
+| `agent.fail`         | `move` (`{ harness, provider?, model? }`)                             | a started session's execution failed with a usage limit |
 
-Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. A callback returns
-nothing and changes the event by assigning to its fields (OpenCode's shared mutated event). Each callback gets its own
-copy of the event as decided so far and core copies the changed fields back only when the callback succeeded within
-its deadline, so a callback that times out, fails or writes after its deadline leaves no partial or late write. Callbacks
-run sequentially in plugin order, so a later plugin sees (and may override) what an earlier one decided. On
-`agent.start.before` an assigned `undefined` unsets `harness`, `provider`, `model` or `runtime`, and is ignored for
-`prompt` and `machine`; fields outside that list are not copied back; on `agent.fail` the last `move` assigned wins.
-The trace attributes each field to the plugin that changed it
-last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
-once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
-crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On
-`agent.fail` an `AgentRefused` counts as a crash: a crash or a timeout fails that operation (the execution is left
-failed with the plugin error, no move). Nothing is skipped silently.
+Every event carries the project, the agent definition's id, the parent session, the harnesses and whether each can start,
+the current Subscriptions, and the earlier tries. A callback returns nothing and changes the event by assigning to its
+fields. Each callback gets its own copy of the event as decided so far and core copies the changed fields back only when
+the callback succeeded within its deadline, so a callback that times out, fails or writes after its deadline leaves no
+partial or late write. Callbacks run sequentially in plugin order, so a later plugin sees (and may override) what an
+earlier one decided. On `agent.start.before` an assigned `undefined` unsets `harness`, `provider`, `model` or `runtime`,
+and is ignored for `prompt` and `machine`; on `agent.fail` the last `move` assigned wins. The trace attributes each field
+to the plugin that changed it last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))`
+stops the chain at once, nothing is inserted and nothing starts, and the caller sees the plugin id and the reason. A
+defect or a timeout on either hook fails the operation (`plugin <id> crashed: ...`, `plugin <id> timed out after 5s`);
+on `agent.fail` the execution is left failed with the plugin error and no move. Nothing is skipped silently.
 
-**Default harness.** No builtin chooses or refuses a harness by quota. A new agent without a harness inherits its
-caller's harness, provider and model in core, before `agent.start.before` (§9); subscriptions are data in the hook
-events for a plugin that wants to route by quota. The builtin `harness-default` (last of `pre`) returns claude from
-`start.before` when the harness is still unset and claude is available; remove it with `"-harness-default"` in
-`vibest.json` and choose in a plugin of your own.
+**Default harness.** A session started without a harness inherits its parent's harness, provider and model in core,
+before `agent.start.before` (§9). The builtin `harness-default` (last of the builtins) sets `harness` to `claude` from
+`start.before` when it is still unset and claude is available; remove it with `"-harness-default"` in `vibest.json` and
+choose in a plugin of your own. No builtin chooses or refuses a harness by quota; subscriptions are data in the hook
+events for a plugin that wants to route by quota.
 
 **Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
-plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's
-own scope; what it registers (hooks, runtime and harness transforms) and acquires lasts until unload, and a hook name
-not in `Hooks` fails its setup. An `effect` or a hook callback that throws instead of returning an Effect counts as that
-plugin's failure (a failed setup, or `plugin <id> crashed: ...`), never as a defect of the activation or the call. In `subscriptions`, `provider` is empty for Claude Code and Cursor and set for Pi; empty `limits` means
-unknown, not unlimited, and a login is limited when any of its usage windows is. A remembered limit rules its login
-out until that login's own row was refreshed after it and reads fine again; a login with no row, or none named by the
-attempt, keeps the plain memory. `subscription.report` replaces one `(harness, provider)` row's limits until the next usage
-poll of a harness that reads usage. `agent.fail`'s `reason` is a union with one member today, `limited`.
+plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's own
+scope; what it registers (hooks, transforms) and acquires lasts until unload, and a hook name not in `Hooks` fails its
+setup. An `effect` or a hook callback that throws instead of returning an Effect counts as that plugin's failure (a failed
+setup, or `plugin <id> crashed: ...`), never as a defect of the activation or the call. In `subscriptions`, `provider` is
+empty for Claude Code and Cursor and set for Pi; empty `limits` means unknown, not unlimited, and a login is limited when
+any of its usage windows is. A remembered limit rules its login out until that login's own row was refreshed after it and
+reads fine again. `subscription.report` replaces one `(harness, provider)` row's limits until the next usage poll of a
+harness that reads usage. `agent.fail`'s `reason` is a union with one member, `limited`.
 
-**Counters and traces** (omac `plugins.ts`): per plugin and hook, calls, changes, crashes, timeouts, refusals,
-and the last error, shown by `vibest plugins`; every trace entry is `{ plugin, hook, ms, outcome:
-"ok" | "refused" | "crashed" | "timeout", changes }`, where `changes` is what that callback changed, field by
-field, with the value it replaced.
+**Counters and traces**: per plugin and hook, calls, changes, crashes, timeouts, refusals, and the last error, shown by
+`vibest plugins`; every trace entry is `{ plugin, hook, ms, outcome: "ok" | "refused" | "crashed" | "timeout", changes }`,
+where `changes` is what that callback changed, field by field, with the value it replaced.
 
-**Dispatch:** sequential in plugin order; each callback gets a copy of the event as decided so far, committed only on success; every
-callback is bounded by a 5 s timeout (waiting on its fiber, so an uninterruptible region still returns on
-time).
+**Dispatch:** sequential in plugin order; each callback gets a copy of the event as decided so far, committed only on
+success; every callback is bounded by a 5 s timeout (waiting on its fiber, so an uninterruptible region still returns on
+time). Machine hooks differ: every subscriber runs, each bounded by 30 s (multi-machine.md).
 
-**Registry and supervisor:** identity `(id, revision)`; reactivation keeps the longest unchanged prefix and
-rebuilds the rest in order inside a batch; a new revision that fails to import with unchanged options leaves the
-running one as it is (not torn down or set up again, and neither are the plugins after it) and `vibest plugins` shows
-both revisions, while with changed options it is failed and the old one is not restored; one whose setup fails falls
-back to the previous one; neither is retried until it changes; a plugin file found in the plugins
-directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
-last mention; an activation latch gates `agent.start.before` and `agent.fail`. They wait up to 10 s
-for the pending generation; if it is still not active the operation fails with `PluginsNotActive`, naming the
-plugins still loading, and does not run on the plugins already active. The hooks for that call are the ones
-active at the gate, so a reload during the reads that follow does not change them. `vibest plugins` reads the plugins
-already active and does not wait. Machine hooks keep their current reads. Builtin plugins activate while vibestd's layers are built, before it listens, so a request
-that routes to a builtin runtime never finds it unregistered. User plugins activate afterwards, in the background,
-and a start during that activation is refused rather than admitted without them. Choosing a place and reading the
-caller's runtime do not wait, so the first start waits once, at this gate. A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`
-does), because every builtin setup runs before vibestd listens and a slow one would push startup past the
-client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and module file changes, debounced by
-100 ms.
+**Registry and supervisor:** identity `(id, revision)`; reactivation keeps the longest unchanged prefix and rebuilds the
+rest in order inside a batch; a new revision that fails to import with unchanged options leaves the running one as it is
+(not torn down or set up again, and neither are the plugins after it) and `vibest plugins` shows both revisions, while
+with changed options it is failed and the old one is not restored; one whose setup fails falls back to the previous one;
+neither is retried until it changes; a plugin file found in the plugins directory and named in `vibest.json`, or named
+there twice, is one plugin, at its first place with the options of its last mention. An activation latch gates
+`agent.start.before` and `agent.fail`: they wait up to 10 s for the pending generation, and if it is still not active the
+operation fails with `PluginsNotActive`, naming the plugins still loading, and does not run on the plugins already active.
+`vibest plugins` reads the plugins already active and does not wait. Builtin plugins activate while vibestd's layers are
+built, before it listens, so a request that routes to a builtin runtime never finds it unregistered. User plugins activate
+afterwards, in the background, and a start during that activation is refused rather than admitted without them. A builtin
+plugin's setup must not do I/O (it connects lazily, as `runtime-herdr` does), because every builtin setup runs before
+vibestd listens and a slow one would push startup past the client's `DAEMON_START_TIMEOUT` of 10 s. Triggers are
+configuration changes and module file changes, debounced by 100 ms, plus a re-read every second.
 
-**Loading and watching:** local plugin changes reload without repeating unchanged imports; failed revisions keep
-the previous one. See [loading and watching](plugin-loading.md#loading-and-watching) for watch and reload details.
+**Loading and watching:** local plugin changes reload without repeating unchanged imports; failed revisions keep the
+previous one. See [loading and watching](plugin-loading.md#loading-and-watching) for watch and reload details.
 
-**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin` and `@vibest/plugin/effect` instances while local modules reload.
-See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module lifetime details.
+**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin` and `@vibest/plugin/effect` instances while local
+modules reload. See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module lifetime details.
 
 **Order:**
 
 ```
-builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude,
+builtin plugins         `@vibest/builtins` `pre`: vibest.agent, harness-pi, harness-claude,
                         runtime-herdr-core, runtime-herdr, runtime-choice, archive-on-idle, harness-default
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
 **Where plugins live**: only in the vibest home (`VIBEST_HOME`, by default `~/.vibest`), in `vibest.json` and the
-`plugins/` directory. There is no project tier: a Project directory adds no plugins and no configuration.
+`plugins/` directory. There is no project tier: a project directory adds no plugins and no configuration.
 
-**Plugin entries** (as OpenCode's `plugins`): the ordered `plugins` list of `vibest.json`.
+**Plugin entries**: the ordered `plugins` list of `vibest.json`.
 
 | Entry                                  | Meaning                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/` or `file://` (absolute, taken as is) or `./` or `../` (resolved from the vibest home)                                                                                                                                                                                      |
+| `"./plugins/x"`                        | add a local plugin: a directory, by a path starting with `/` or `file://` (absolute, taken as is) or `./` or `../` (resolved from the vibest home); a single file named here is skipped with a warning, single files are discovered in the plugins directory                                                                                                  |
 | `{ "package": "…", "options": { … } }` | add a local plugin with options                                                                                                                                                                                                                                                                                                                               |
-| `"@scope/vibest-plugin-x"`             | any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                                                                                                                                                                                     |
+| `"@scope/vibest-plugin-x"`             | any other name is a package: not supported, listed as failed with `npm plugins are not supported yet`                                                                                                                                                                                                                                                         |
 | `"-check"`                             | remove the plugins added before it whose id matches, builtins included (a builtin only by exact id; `*` and `prefix.*` match user plugins only, `*` also failed ones). Builtins are kept or removed from the config text at every activation, so removing and restoring one needs no restart. Example: `"-harness-default"` drops the builtin default harness |
 
-Files and directories in `~/.vibest/plugins/` are added without an entry, before the entries. A plugin reads its
-options from `context.options` (V2's `PluginOptions`) and they reload live:
+Files and directories in `~/.vibest/plugins/` are added without an entry, before the entries. A plugin reads its options
+from `context.options` and they reload live:
 
 ```ts
 export default Plugin.define({
@@ -827,320 +754,297 @@ export default Plugin.define({
   effect: (context) =>
     Effect.gen(function* () {
       const { provider, model } = context.options
-      // every subagent runs on Pi with this provider and model, whatever the entry session chose
       yield* context.agent.hook("start.before", () => Effect.succeed({ harness: "pi", provider, model }))
     }),
 })
 ```
 
-`vibest.json` has one key, `plugins`. Machines are not configuration: `vibest machine add` and `vibest machine rm`
-record them in the ledger (`machine.added`, `machine.removed`). There are no agent definitions and no user skills to
-configure (skills are builtin, §4.2).
+`vibest.json` has one key, `plugins`. Machines are not configuration: `vibest machine add` and `vibest machine rm` record
+them in the ledger (`machine.added`, `machine.removed`). Agent definitions are added by plugins with `agent.transform`;
+the skills are the builtin `delegate` and `pipeline` (§4.2).
 
 ## 8. Harness adapters
 
-herdr runs the process; the adapter knows how this CLI wants to be started and told things (launch side) and
-loads vibest's plugin into the CLI so its work comes back as events (integration side). The contract is
-`HarnessDefinition` in `@vibest/plugin` (`packages/plugin/src/effect/harness.ts`); `packages/plugin-harnesses` implements
-Claude Code and Pi as the builtin plugins `harness-claude` and `harness-pi` (Cursor as a plugin file users add), each adding its
-definition with `context.harness.transform`. Core and the CLI hold no adapter: vibestd answers `Harnesses.List` (each
-row with its `binary`) and `Integration.Guard` from the registered definitions. A user plugin may add a harness or
-`update` a builtin one the same way. Each CLI runs as installed on
-the machine, with its own login. Every capability has a harness-neutral fallback, so a new herdr-supported CLI
-works on day one.
+A harness adapter is a `HarnessDefinition` (`packages/plugin/src/effect/harness.ts`) that a plugin adds with
+`context.harness.transform`. The definition holds how this CLI is started and told things (launch side); the harness's
+vibest plugin or extension, loaded at launch, brings its work back as events (integration side). `packages/plugin-harnesses`
+implements Claude Code and Pi as the builtin plugins `harness-claude` and `harness-pi`, and Cursor and Antigravity (`agy`) as plugins the user adds
+(the shipped `harnesses/cursor` and `harnesses/agy` folders go into `plugins` in `vibest.json`). Core and the CLI hold no
+adapter: vibestd answers `vibest harness list` (each row with its `binary`) and the integration guard from the registered
+definitions. A user plugin may add a harness or `update` a builtin one the same way. A harness id is a plain string: an id
+the database names but no plugin provides is unavailable ("no plugin provides harness X; loaded: …"), never a decode
+failure. Each CLI runs as installed on the machine, with its own login.
 
-**Launch side:**
+**The definition** (fields of `HarnessDefinition`):
 
-| Capability     | Adapter provides                                                                                                      | Fallback                            |
-| -------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| Launch         | arguments for model, autonomy level, and initial prompt; startup dialogs to answer (trust prompts)                    | definition `arguments` as given     |
-| Instructions   | the native channel (system prompt flag, instruction file, skill or extension)                                         | sent as the first prompt            |
-| Command access | how `vibest` commands run without an approval prompt (`run`, `send`, … for the entry session; `report` for subagents) | the user approves once              |
-| Resume         | arguments to resume a conversation from herdr's `agent_session` reference                                             | start fresh with a handoff summary  |
-| Usage          | reads this CLI's usage windows into its Subscription                                                                  | none: plugins see only exits        |
-| Availability   | the CLI on PATH, login valid, its model list (cached 5 minutes); feeds `preflight` and `vibest harness list`          | none                                |
-| Read-only      | arguments that keep the CLI from editing files (plan or read-only sandbox modes)                                      | the instruction "do not edit files" |
-| Interrupt      | keys that stop the agent's current work                                                                               | `Escape`                            |
+| Field                                         | Meaning                                                                                                                                      |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `binary`, `integration?`                | the harness id, the program to run, and the folder name of its plugin (default `id`)                                                         |
+| `launchArgs`                                  | arguments from the worktree, project folder, system prompt file, provider, model, conversation id, resume, plugin folder                     |
+| `ownSessionId`, `conversationOf`              | whether the CLI chooses its own conversation id, and how an event names it                                                                   |
+| `systemPromptInPrompt`                        | the prompt goes in front of the first input instead of a file (herdr refuses launch arguments with newlines)                                 |
+| `startup`                                     | answers startup dialogs in the pane (Claude's folder-trust menu)                                                                             |
+| `interruptKey`                                | the keys that stop the agent's current work                                                                                                  |
+| `inbox`, `ready`                              | how rows reach it (`poll` or `subscribe`, otherwise typed into the terminal) and whether readiness comes from its integration or the runtime |
+| `models`, `checkProvider`, `checkEnvironment` | lists its models (cached 5 minutes), validates a provider, checks the home; feed `preflight` and `vibest harness list`                       |
+| `subscription`                                | reads this CLI's usage windows into its Subscription                                                                                         |
+| `userPrompt`, `executionEnd`, `replyField`    | decode the CLI's own events into a typed prompt, an execution end and the reply text                                                         |
+| `guardAnswer`                                 | the answer to a tool-call guard in the CLI's own shape                                                                                       |
+
+A harness listing its models reads them from the user's home, not the caller's directory (a worktree may be gone since).
+With a request the listing keeps stdin open, since a server may exit at EOF before it answers, and stops at the first
+output that holds a list. A model's provider null is the harness's default provider; `default` marks what it runs with no
+model given, as its own settings decide.
 
 **Integration side: plugins loaded at launch, never installed.** vibest's plugin for each harness ships with the binary
-(`harnesses/<harness>`, `scripts/build-harnesses.ts`): in each release archive beside `bin/vibest`, and in the
-`@vibest/cli` npm package, whose platform packages hold only the binary. `bin/vibest.cjs` hands the npm directory to the
-binary as `VIBEST_HARNESSES`; without it the compiled binary looks beside its own directory (`<root>/bin/vibest`,
-`<root>/harnesses`, the link resolved), which is how install.sh's install runs, without Node; a binary run bare from the
-npm package (a pane vibestd opened runs the binary, not the launcher) then tries the `@vibest/cli` package, flat
-(`node_modules/@vibest/cli`) or nested. From source there is no layout to look beside. The adapter loads the plugin into
-each session it starts, and into the entry session: Pi `-e <dir>/extension.mjs -e <dir>/presentation.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
-Each of these adds to what the harness loads; the user's own plugins, extensions and hooks keep loading beside it
-(checked against Pi 1.4, Claude Code 2.1.316 and cursor-agent 2026.10.22). Why not install into the harness's config:
+(`harnesses/<harness>`, built by `packages/cli/scripts/build-harnesses.ts`): in each release archive beside `bin/vibest`,
+and in the `@vibest/cli` npm package, whose platform packages hold only the binary. `bin/vibest.cjs` hands the npm
+directory to the binary as `VIBEST_HARNESSES`; without it the compiled binary looks beside its own directory
+(`<root>/bin/vibest`, `<root>/harnesses`, the link resolved), which is how install.sh's install runs, without Node; a
+binary run bare from the npm package then tries the `@vibest/cli` package, flat (`node_modules/@vibest/cli`) or nested.
+From source there is no layout to look beside, and a harness whose plugin directory is missing is unavailable (`preflight`
+says so, naming the directory). The adapter loads the plugin into each session it starts, the entry session included: Pi
+`-e <dir>/extension.mjs -e <dir>/presentation.mjs`, Claude Code and Cursor `--plugin-dir <dir>`. Each of these adds to what
+the harness loads; the user's own plugins, extensions and hooks keep loading beside it. Why not install into the harness's
+config:
 
-- scope: an installed plugin runs in every session of the user, not only vibest's (a fail-closed guard of a broken
-  vibest would block the user's own Cursor);
+- scope: an installed plugin runs in every session of the user, not only vibest's (a fail-closed guard of a broken vibest
+  would block the user's own Cursor);
 - version: the plugin always matches the binary it ships with; there is no `outdated` state, update step or marketplace;
-- no writes to the user's config, so no diff, backup or uninstall leftovers; Cursor's marketplace is account-level and
-  cannot be installed into locally at all.
+- no writes to the user's config, so no diff, backup or uninstall leftovers.
 
-The cost: a harness started by hand does not load it, which is the intent. vibest never writes into a harness's config. `preflight` refuses a harness whose plugin directory is missing: results come only from the plugin's execution-end hook.
+The cost: a harness started by hand does not load it, which is the intent. vibest never writes into a harness's config and
+never reads its config or credential files; it asks the harness CLI. Results come only from the plugin's execution-end
+report.
 
-| vibest event                   | Claude Code              | Cursor                       | Pi                              |
-| ------------------------------ | ------------------------ | ---------------------------- | ------------------------------- |
-| `agent.session`                | `SessionStart`           | to verify                    | `session_start`                 |
-| `agent.prompt`                 | `prompt.submit` (origin) | `beforeSubmitPrompt`         | `agent_start`                   |
-| `agent.tool`                   | `tool.call`              | `preToolUse`                 | `tool_call`, `tool_execution_*` |
-| execution end with last reply  | `turn.complete` (answer) | `afterAgentResponse`, `stop` | `agent_end`, `agent_settled`    |
-| `agent.fail`                   | `turn.complete` (error)  | `stop` not completed         | `agent_end` with error          |
-| `agent.blocked`                | `Notification`           | to verify                    | —                               |
-| `agent.exit`                   | `SessionEnd`             | herdr                        | `session_shutdown`              |
-| native delivery into the agent | plugin hooks module      | none (herdr typing)          | extension                       |
+**Claude Code: one hooks module over HTTP.** vibest writes nothing into `~/.claude/settings.json`. The plugin
+(`packages/integration/claude`) is a hooks module (`hooks/hooks.json` → `register.mjs`, no command hooks, no shell). Every
+call is an HTTP request to vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibest` process. Its
+native listeners are `turn.complete` (each main-loop execution end, with its reason and the answer; a subagent's loop
+reports nothing), `prompt.submit` (a prompt with its origin: the person's text only from origin `composer` or `bridge`, and
+vibest's own delivery reported as accepted), `tool.call` (the guard, refused when nothing answers) and the inbox, which polls
+vibestd every second while the session is idle. The README of the package has the protocol details. Claude's trust menu is
+answered in the pane by the definition's `startup`. The project folder's permission rules are `Read(//<dir>/**)` and
+`Edit(//<dir>/**)`, and `Bash` is allowed. An aborted `turn.complete` is an interrupted result only when the person pressed
+Esc; vibest's own interrupt records none. The conversation id is the one Claude reports at its events (`ownSessionId`). Its
+models come from the stream-json `initialize` control request and `get_settings` under `--safe-mode`, so no hooks or
+plugins run. `turn.complete` carries no API error kind, so a Claude usage limit is a failed result, not a usage-limit move.
 
-What omac installs and uses today: Claude `Stop`, `StopFailure`, `PreToolUse`;
-Cursor `afterAgentResponse`, `stop` (not `completed` becomes an error), `preToolUse` (`failClosed`); Pi
-`session_start`, `before_agent_start`, `tool_call`, `agent_end`, `agent_settled`. Every other cell is new in
-vibest and is verified before it is relied on (open question 1). Until then the CLI's conversation id is taken
-at the execution end (Claude `session_id`, Cursor `conversation_id`) and at Pi `session_start`.
+**Cursor: hook files.** The plugin (`packages/integration/cursor`) is a directory of hooks that cursor-agent loads with
+`--plugin-dir`; each hook calls the vibest that started the session (`VIBEST_COMMAND`) through `vibest integration guard`,
+`ready`, `prompt` and `stop` with `--harness cursor`. `sessionStart` reports readiness (the first task is typed only after
+it), `beforeSubmitPrompt` and the thought and tool hooks report work, `afterAgentResponse` carries the reply as `text` and
+ends the execution. The guard hook is fail-closed: a crash, timeout or missing answer refuses the call, so the guard always
+answers explicitly; `allow` only lets the call go on to Cursor's own permission checks. The hooks act only for a vibest
+session (`VIBEST_SESSION_ID`). A resume is one argument, `--resume=<id>`.
 
-vibest's Claude plugin uses the hooks module's native `turn.complete`, `prompt.submit` and `tool.call`, not the
-classic `Stop`, `StopFailure`, `UserPromptSubmit` and `PreToolUse`: Claude fires no `Stop` for an execution stopped with Esc,
-and `prompt.submit` names its origin. `turn.complete` carries no API error kind (`StopFailure`'s `rate_limit`, ...),
-so a Claude usage limit is a failed result, not a usage-limit move.
-
-**Claude Code: the plugin only.** vibest writes nothing into `~/.claude/settings.json`. The plugin (omac
-`packages/claude`, copied) is a hooks module (`hooks/hooks.json` → `register.mjs`, no command hooks, no shell) whose native
-listeners cover every Claude row of the table above, including `PreToolUse` for the guard, and the inbox module for the
-entry session; each listener calls the `vibest` binary on PATH. omac's settings.json script is not copied.
-Claude's trust and bypass menus are answered in the pane, one key per tick, as CAO does: Down until the accept option
-is under `❯`, then Enter (the trust menu preselects "No, exit"; no flag or setting skips it). The project folder's
-permission rules are `Read(//<dir>/**)` and `Edit(//<dir>/**)`: Claude matches file tools only against Read and Edit
-rules (an Edit rule covers Write), and `//` starts an absolute path. A user prompt is a `prompt.submit` from origin
-`composer` or `bridge` (Remote Control); a task notification, a scheduled trigger, a peer or a plugin's prompt is not
-the person. An aborted `turn.complete` is a result only while vibest's execution is open, so `vibest interrupt`'s own Esc
-is none. vibest does not read Claude's session files. A subagent is resumed with `--resume` only after vibest recorded a
-execution end for that conversation; otherwise it starts with `--session-id`. The entry session is resumed when the harness
-reported that conversation (`process.conversation`), because its own executions are not stored; a missing transcript then
-fails the resume, which is rare. Its models come from
-the stream-json `initialize` control request (the Agent SDK's `supportedModels()`; the list's `default` entry is
-Anthropic's recommendation, not the user's setting, and is dropped) and `get_settings` (`applied.model`, what it
-runs), under `--safe-mode` so no hooks or plugins run (`--bare` would skip OAuth and return a short list).
-
-**Cursor: hook files.** `@vibest/cursor` is the plugin as files that vibest writes into its home; cursor-agent
-(checked against 2026.10.22) runs a plugin directory's `hooks/hooks.json` like `~/.cursor/hooks.json`, with the plugin
-root as the hook's working directory; `afterAgentResponse` carries the reply as `text`, `stop` only a status. The hook
-script acts only for a vibest session (`VIBEST_SESSION_ID`). The guard hook is fail-closed: a crash, timeout or missing answer
-refuses the call, which Cursor would otherwise let through, so the guard always answers explicitly; `allow` only lets the
-call go on to Cursor's own permission checks. Every hook input carries `conversation_id`. A resume is one argument,
-`--resume=<id>`: `--resume` takes an optional value, so a separate id starting with `-` would read as a flag.
-
-**Pi: one extension.** vibest loads one extension per session for inbox delivery, execution reports, the guard and
-the entry session's TUI. Only the root TUI session participates; child modes do not. See the
+**Pi: one extension.** vibest loads one extension per session for inbox delivery, execution reports, the guard and the
+entry session's TUI; `presentation.mjs` is a separate extension that groups tool rows in the TUI. Only the root TUI
+session participates; a Pi child of a session takes no rows and reports nothing. See the
 [Pi integration](../../packages/integration/pi/README.md) for adapter and TUI internals.
 
-**Arguments and models.** herdr refuses launch arguments with newlines, so Pi and Claude read the system prompt from
-a file and Cursor gets it in front of its first prompt. A harness lists its models from the user's home, not the
-caller's directory (a worktree may be gone since). With a request the listing keeps stdin open, since a server may
-exit at EOF before it answers, and stops at the first output that holds a list. A model's provider null is the
-harness's default provider; `default` marks what it runs with no model given, as its own settings decide.
-
-**Nested conversations are filtered** (omac `integration.ts`): events carrying `agent_id` (the CLI's own
-subagents), and Cursor events whose `CURSOR_CONVERSATION_ID` differs from the conversation's, are ignored.
+**Nested conversations are filtered**: events carrying `agent_id` (the CLI's own subagents), and Cursor events whose
+`CURSOR_CONVERSATION_ID` differs from the conversation's, are ignored.
 
 ## 9. Harness choice
 
-Which harness an Agent runs on is decided in two steps. First core fills what the request left out
-(`packages/core/src/spawn.ts`): a `vibest run` without a harness takes the harness, provider and model of its caller's
-session row (the calling session, else the project's entry session when the user runs it from a plain terminal); a named
-harness replaces all three, and `--provider` or `--model` alone overrides only that field; with nothing to inherit the
-start fails with `NoHarnessChosen` ("no harness to inherit: name one, for example `vibest run claude -- <prompt>`").
-The entry session started by `vibest` without `--harness` reuses the harness the project's entry session last used, and a
-project's first start without it fails asking for `--harness`. Then the `agent.start.before` chain (§7) runs, every
-plugin in order, each able to keep or overwrite what came before. There is no default harness and no builtin that
-chooses or refuses by quota. vibestd validates the final harness (a plugin provides it, its plugin directory is there,
-its model list reads, the model is offered) and refuses a start that never settled on one.
+Which harness a session runs on is decided in two steps. First core fills what the request left out
+(`packages/core/src/session/spawn.ts`): a `vibest run` without a harness takes the harness, provider and model of its
+calling session (the parent); a named harness replaces all three, and `--provider` or `--model` alone overrides only that
+field. The entry session started by bare `vibest` without `--harness` takes the harness the project's entry session last
+used (`packages/core/src/session/entry.ts`). Then the `agent.start.before` chain (§7) runs, every plugin in order, each
+able to keep or overwrite what came before; the builtin `harness-default` picks `claude` when nothing has chosen and
+claude is available. A start that still has no harness fails with `NoHarnessChosen` ("no harness to inherit: name one, for
+example `vibest run claude -- <prompt>`"), and a first bare `vibest` fails asking for `--harness`. vibestd validates the
+final harness (a plugin provides it, its plugin directory is there, its model list reads, the model is offered) and refuses
+a start that never settled on one.
 
 A usage limit is the same decision in reverse, on `agent.fail`: the execution that failed stays the execution that
-finishes, and the session restarts — same id, same worktree, same task (the open execution's input, else the text
-the launch was about to send, else the trailing delivered batch) — on the harness the chain returns as its
-move. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
-harness/provider/model and the session's real attempts prefilled: a refusal skips that candidate (recorded as a
-`refused` try), and what the chain decides — including a rewritten harness or prompt — is what gets patched and
-started, so a start policy plugin governs a moved Agent exactly like a first start. vibest itself does not
-move: when no callback returns a move the execution fails, naming that harness and each exhausted limit with its reset time,
-and no other harness starts. A plugin may still return a move. The pairs that already hit a limit are remembered per (harness, provider) in
-`process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
-restart. Within one execution (since it started; for a launch's own limit, since the last execution ended or the
-session began) vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now:
-an execution that hit limits on every login it may use fails instead of cycling, and a later execution may use such a login
-again once its reading is free. A preflight miss, or a start or prompt that fails, is not a limit — the next move
-may use that harness again. A login already limited before start is left to `agent.start.before`: without a plugin
-that routes by quota, the agent starts and fails its execution the usual way when the limit hits.
+finishes, and the session restarts (same id, same worktree, same task: the open execution's input, else the text the launch
+was about to send, else the trailing delivered batch) on the harness the chain returns as its move. Before each candidate
+starts, the move runs the `agent.start.before` chain with the move's harness, provider and model and the session's real
+attempts prefilled: a refusal skips that candidate (recorded as a `refused` try), and what the chain decides, including a
+rewritten harness or prompt, is what gets started, so a start policy plugin governs a moved session exactly like a first
+start. vibest itself does not move: when no callback returns a move the execution fails, naming that harness and each
+exhausted limit with its reset time, and no other harness starts. The pairs that already hit a limit are remembered per
+(harness, provider) in `process.end` facts with reason `limited`, so they survive moves and a vibestd restart. Within one
+execution vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now: an execution
+that hit limits on every login it may use fails instead of cycling, and a later execution may use such a login again once
+its own usage row, refreshed after the limit, says it is free. A preflight miss, or a start or prompt that fails, is not a
+limit; the next move may use that harness again. A login already limited before start is left to `agent.start.before`:
+without a plugin that routes by quota, the session starts and fails its execution the usual way when the limit hits.
 
-How the move runs (`session/move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
-a login limited in this execution, a harness this move skipped) ends the move, since asking the same plugins again cannot
-change the answer; a limit from an earlier execution no longer rules a login out once its own usage row, refreshed after
-it, says it is free. The move stays on the session's own runtime and machine. It ends the old agent before the next
-starts: a refused SIGTERM (sent to the harness pid alone, never its group, which is the terminal's shell) or a failed
-close keeps the session where it was, so no second agent ever runs. With a runtime that can `run` in a terminal the
-next harness starts in the session's own terminal, and the row names it first so what it reports while starting is its
-own; otherwise the terminal closes and a new one opens before the row names the new harness, so a failed placement
-leaves the row on the last live one. `open` failing with code `failed` is the start dying inside the terminal (its
-own limit, a crash) and skips to the next candidate; any other code is a placement refusal and ends the move. A
-prompt the runtime took whose execution never started counts as a failed prompt: the execution stays working and the next
-harness prompts it again. Giving up with no terminal of its own (the execution-end path) fails the execution but leaves the
-agent running, so check keeps polling it.
+How the move runs (`packages/core/src/session/move.ts`, under the session's lock): a choice the chains already ruled out
+(an unknown harness, a login limited in this execution, a harness this move skipped) ends the move, since asking the same
+plugins again cannot change the answer. The move stays on the session's own runtime and machine. It ends the old process
+before the next starts: a refused SIGTERM (sent to the harness pid alone, never its group, which is the terminal's shell)
+or a failed close keeps the session where it was, so no second process ever runs. With a runtime that can `run` in a
+terminal the next harness starts in the session's own terminal; otherwise the terminal closes and a new one opens. `open`
+failing with code `failed` is the start dying inside the terminal (its own limit, a crash) and skips to the next candidate;
+any other code is a placement refusal and ends the move. A prompt the runtime took whose execution never started counts as
+a failed prompt: the execution stays working and the next harness prompts it again.
 
-A move does not carry the model named for the old harness, which the new one would not list: the move starts on the
-new harness's default. The memory of tried pairs is per harness when no login was named and per login when one was.
+A move does not carry the model named for the old harness, which the new one would not list: the move starts on the new
+harness's default.
 
 ## 10. Ports
 
-| Port                                                                   | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Herdr implementation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Runtime** (`@vibest/plugin` `RuntimeDefinition`, runtime-port.md §3) | one `RuntimeDefinition` a plugin adds (`context.runtime.transform((editor) => editor.add(definition))`, beside `agent.hook`): required `id`, optional `name` (the place text, else the id: herdr-core's name is `herdr-core`, its id stays `hc`), optional `caller` (the environment its terminals set), `status()`, and on terminals `open` (argv exactly, env, label, `near?`, `split?`, `focus?`, `target?`), `send` (text/keys), `read`, `process`, `close`; optional `state`, `session`, `events` (`exited`/`state`/`reset`), `present` (labels and tokens), `attach`. One error type `RuntimeError { code }` (`not_found`\|`busy`\|`unreachable`\|`incompatible`\|`failed`); `Terminal { id }`, stored on the Agent row with machine `local`, opaque to core; a runtime manages only the terminals of its own machine. Core uses only required members plus optional ones when present, with the §3 fallbacks (no `events` → poll `process`; no `present` → `open`'s label; no `state` → the harness integration's report lines and OSC 7501 only). Shared contract suite: `@vibest/plugin/testing` `runtimeContract`, run against a real local instance. Choice (§4): without `--runtime`, the runtime of the terminal vibest was started in (both herdr-core and herdr variables: hc, because builtin runtime-herdr-core loads before runtime-herdr; otherwise the first detected caller in registration order; `--runtime` override; none refused); subagent `--runtime` or its parent, coordinator included; old key warns once; machine is `local` this phase | `packages/runtime-herdr/src/terminal-runtime.ts` (`fromPool`, `id: KIND`, `KIND = "herdr"`): terminal id `<session>/<pane id>`; `open`'s `target` is the caller's herdr location as JSON. `open` = `tab.create` (env only settable there) in the Project's workspace (`worktree.list` group, else a pane at the root, else `workspace.create`) plus `agent.start` for a harness argv (retried on `agent_pane_busy`; anything else typed into the pane's shell as `exec`, undone with `tab.close` when the start inside it dies); `send` → `agent.prompt`/`agent.send_keys` targeted by the agent name `open` gave (a reused pane id reads `agent_not_found`), else `pane.send_text`/`send_keys`; `read` → `pane.read`; `process` → `pane.process_info` (running = a foreground process besides the shell); `close` → the agent-identity check (the name `open` gave still in that pane), then `pane.move` (alone, so a main checkout's group survives) + `pane.close`; `state` → `agent.get` (`interactive_ready`, `done`→`idle`); `events` from the pool's broadcasts (`pane_closed`/`pane_exited` → `exited`, restart → `reset` plus re-subscribing every pane) plus per-pane `pane.agent_status_changed` → `state`; `present` → `pane.report_metadata`/`workspace.report_metadata` (source `vibest`, tokens ≤ 80 chars); `attach` → `herdr session attach`. Loaded as the builtin `runtime-herdr` plugin (`plugin.ts`), beside `agent.hook` |
-| **Harness**                                                            | §8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `plugin-harnesses`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **Workspace type**                                                     | create and release a directory for a Project on a machine                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | builtin `root`; `plugin-git` adds `isolated`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| **Product**                                                            | name, home, socket, environment prefix, executable name                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| herdr connection                                                       | one client per herdr session (current session inside herdr, a named headless session started by vibest outside it), protocol pinned in `effect-herdr-sdk` and checked by `ping` on every connect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `packages/runtime-herdr/src/pool.ts` (omac `herdr-pool.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **MachineTransport**                                                   | reach a machine                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | the runtime plugin's connection (`runtime-port.md`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Port                                                                   | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Implementation                        |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| **Runtime** (`@vibest/plugin` `RuntimeDefinition`, runtime-port.md §3) | one `RuntimeDefinition` a plugin adds (`ctx.runtime.transform((editor) => editor.add(definition))`): required `id`, `status()`, `events` and, on terminals, `open`, `send`, `read`, `process`, `close`; optional `name`, `caller`, `state`, `session`, `present`, `seen`, `attach`, `link`, `locate`, `doctor`. One error type `RuntimeError { code }`; a runtime manages only the terminals of its own machine. Core uses only the required members and checks whether an optional one exists, never which runtime it is | `runtime-herdr`, `runtime-herdr-core` |
+| **Harness**                                                            | §8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `plugin-harnesses` (claude and pi)    |
+| herdr connection                                                       | one client per herdr session (the current session inside herdr, a named headless session started by vibest outside it); the protocol is pinned in `effect-herdr-sdk` and checked by `ping` on every connect                                                                                                                                                                                                                                                                                                               | `effect-herdr-sdk`, `runtime-herdr`   |
+| **MachineTransport**                                                   | reach another machine's vibestd over an ssh pipe (§12)                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `packages/platform-bun/src/bun.ts`    |
 
-## 11. Herdr TUI surface
+## 11. Herdr surface
 
-The Herdr TUI product makes vibest usable inside herdr through herdr's own extension points (herdr 0.9.5).
+vibest uses herdr through its own extension points (herdr 0.9.5; [herdr-surface.md](herdr-surface.md)).
 
-- **herdr plugin** in `packages/cli` (`herdr-plugin.toml`). Every entrypoint runs `vibest <command>` and
-  reads `HERDR_PLUGIN_CONTEXT_JSON`; the plugin holds no state.
-  - Actions with keybindings: open the entry session, run a definition on behalf of the entry session,
-    stop. The focused pane resolves to its Agent and Run.
-  - Panes: a Run list overlay (each Run with its Agents); a Subscriptions overlay (usage per harness); a command palette popup listing the
-    `command` catalog, which is how vibest plugins reach herdr without runtime action registration.
-  - The daemon already subscribes to herdr events (§10); the plugin adds no event hooks of its own.
-  - A startup hook asks the daemon to republish metadata, since herdr does not restore tokens.
-- **Presenter** (Product side of the runtime) projects vibest events onto herdr:
-  - pane metadata: `display_agent` (`reviewer · claude`), `state_labels` (`blocked` → `waiting for you`),
-    tokens `$definition`, `$run`, `$subscription`, `$machine`, plus labels;
-  - workspace tokens: Project name and live Run count, filling the gap that herdr groups only by Repository;
-  - `agent.view.set` views: this Run, everything needing the user in this Project;
-  - `notification.show` on results, `blocked`, and limits.
-- **Sidebar layout** rows using these tokens are written to the user's herdr `config.toml` only under
-  `.agents/rules/user-file-mutation-safety.md`.
-- **Machines** map to herdr saved machines; remote Agents appear in the combined agent list.
-- **Limits:** one agent view at a time for the whole server; at most 32 tokens per pane and 80 characters per
-  value; no non-terminal UI.
+- **herdr plugin** in `packages/cli/herdr-plugin` (`herdr-plugin.toml`). Every entrypoint runs `vibest herdr <verb>`
+  and reads `HERDR_PLUGIN_CONTEXT_JSON`; the plugin holds no state. vibest does not link it; the user does
+  (`herdr plugin link`), and binds keys in their own herdr config.
+  - Actions: `open-entry` (open or focus the entry session of the focused pane's Project), `run` (read a prompt and
+    start a session), `stop`, `runs` (list the Project's live sessions), `subscriptions` (usage per harness),
+    `palette` (a menu of these actions), and a startup hook that asks vibestd to republish pane metadata, since herdr
+    does not restore it.
+- **Presenter** (`present` of the `runtime-herdr` runtime) projects vibestd's state onto herdr:
+  - pane metadata (`pane.report_metadata`, source `vibest`): `display_agent` (`<agent> · <harness>`), `title`,
+    `state_labels` (`blocked` → `waiting for you`), tokens `definition` and `session`;
+  - workspace metadata (`workspace.report_metadata`): tokens `project` and `agents` (the live session count).
+- **Machines** map to herdr saved machines; sessions on another machine show in herdr's own session list (§12).
 
 ## 12. Multiple machines
 
-Designed in [`runtime-port.md`](runtime-port.md): vibest saves machines (`vibest machine add`), each names its
-runtime plugin and target, and the runtime connects; connections go outward only. A plugin picks an Agent's machine
-in `agent.start.before` (builtin: `local`). A Project runs on another machine only through its git remote (same
-remote there; the start commit must be pushed). An offline machine's Agents show `offline`, not failed.
+Designed in [`multi-machine.md`](multi-machine.md) and [`runtime-port.md`](runtime-port.md). Every machine runs its
+own vibestd; vibestds reach each other over one long-lived ssh pipe (`vibest connect` on the far side), outward only.
+`vibest machine add` records a machine and the far vibestd records this one as a peer. `vibest run --machine <name>`
+starts a session in that machine's checkout of this repository at this HEAD (the commit must be pushed); its address is
+`<machine>/<id>`, and `send`, `result`, `peek`, `ls`, `interrupt` and `archive` reach it. A session reaches on another
+machine only the sessions it started there. A machine that is not connected shows as such in `vibest ls`, and messages
+sent meanwhile arrive once the connection is back.
 
 ## 13. Surfaces and protocol
 
 ```
-vibest project create <directory> --from <repository>…   copy repositories into a new Project directory
-vibest [--new] [--harness <h>]          in a Project directory: open its entry session here (create or resume it)
-vibest run [--agent <definition>] [--in <run>] [--once] [--machine …] [--workspace …] [--wait] "prompt" | -- <prompt|->
-vibest send <agent> -- <text|->         queue; delivered when the agent is idle
-vibest interrupt <agent>                stop its current work, keep it
-vibest stop <run|agent>                 end it (§3.3)
-vibest wait | resume <run>
-vibest ls [--run …] [--all]             Runs and their Agents
-vibest read <agent> · attach <agent> · result <run|agent> · events [--run …]
-vibest send <agent> -- <text|->             from the user, the entry session or any subagent
-vibest project info | search                                                     the project folder's paths, text search
-vibest daemon [--foreground] · daemon restart · status · update · doctor · plugins · models [<harness>]
-vibest harness list | models <harness>
-vibest integration guard | stop --harness <h>   internal: what the harness plugins call
-vibest project | workspace | definition | subscription | machine …
+vibest [--new] [--harness <h>] [--provider <p>] [--model <m>] [--runtime <r>] [--session <s>] [--headless]
+                                            in a project directory: open its entry session here (create or resume it)
+vibest run [<harness>] <prompt> [--agent <definition>] [--title …] [--provider …] [--model …] [--env K=V]
+           [--share <session>] [--archive-on-idle] [--runtime …] [--machine …]
+                                            a session starts another session; refused with no calling session
+vibest send <id> <message>                  queue; delivered once the session is idle, never interrupts
+vibest interrupt <id>                       stop its running execution, keep the session
+vibest archive <id> [--keep-worktree]       end the session, release its pane and worktree
+vibest ls [--all]                           sessions: task, status, latest result
+vibest result <id> · peek <id> [-n <lines>] · events [--session <id> [--after <seq>]] [--follow]
+vibest project create <directory> --from <repository>… · add [<directory>] · info · search <query>
+vibest daemon [--foreground] · daemon restart · status · update · doctor · plugins · subscriptions
+vibest models [<harness>] · harness list | models <harness>
+vibest machine add | ls | rm · connect
+vibest integration guard | prompt | stop | ready --harness <h>     internal: what the harness plugins call
 ```
 
-Plugins add subcommands through the `command` catalog.
+**Conventions for agents**: queries print one JSON document on stdout; errors print `<Tag>: <message>` on stderr; exit
+codes 0, 1 failure, 2 usage, 130 interrupted; text is a literal argument or `-` for stdin, empty text is `EmptyInput`,
+`@file` is not expanded.
 
-**Conventions for agents** (omac `cli.ts`): queries print one JSON document on stdout; errors print
-`<Tag>: <message>` on stderr; exit codes 0, 1 failure, 2 usage, 130 interrupted; text is a literal argument or
-`-` for stdin, empty text is `EmptyInput`, `@file` is not expanded.
+**Protocol** (`packages/protocol`): effect/rpc over the unix socket, one JSON-RPC 2.0 object per line. Every method but
+`Ping` needs the `vibest-protocol` header; each command Pings once first and stops with `IncompatibleDaemon` on a
+mismatch; the package version is informational. `PROTOCOL` is the only version, for RPC and the HTTP API alike (HTTP
+paths carry none); old versions are not served. An additive feature does not bump it: Ping's `capabilities` gets a
+boolean flag, and a client uses the feature only when the flag is there. Flags (`CAPABILITIES`): `http`, `handoff`,
+`requests` (`Send` and `Spawn` take an optional `request` id: `vibest send` and `vibest run` make one per invocation and
+send a call whose connection dropped once more with it, and vibestd answers a repeat as the first; only to a vibestd
+that has the flag, and never after an answer, a refusal included), `watch`, `events`, `projects`, `spawnRuntime`. A
+mismatch is answered with what vibestd speaks (protocol, package version), a message and the command to run
+(`protocolMismatch`, the command in `MISMATCH_ACTION`): both ways it is `vibest update`, which restarts the agents on the
+new version. RPC fails with `ProtocolRejected`, HTTP answers 409.
 
-**Protocol** (omac `rpc.ts`, `protocol.ts`, `server.ts`, `client.ts`, copied): effect/rpc over the unix socket,
-one JSON-RPC 2.0 object per line, transport-agnostic so a WebSocket or HTTP transport can be added for another
-host. Every method but `Ping` needs the `vibest-protocol` header; each command Pings once first and stops with
-`IncompatibleDaemon` on a mismatch; the package version is informational. `PROTOCOL` is the only version, for RPC
-and the HTTP API alike (HTTP paths carry none); old versions are not served. An additive feature does not bump it:
-Ping's `capabilities` gets a boolean flag, and a client uses the feature only when the flag is there. Flags: `http`,
-`handoff`, `requests` (`Send` and `Spawn` take an optional `request` id: `vibest send` and `vibest run` make one per
-invocation and send a call whose connection dropped once more with it, and vibestd answers a repeat as the first;
-only to a vibestd that has the flag, since an older one would act on a repeat twice, and never after an answer, a
-refusal included). A mismatch is
-answered with what vibestd speaks (protocol, package version), a message and the command to run (`protocol.ts`
-`protocolMismatch`, the command in `MISMATCH_ACTION`): both ways it is `vibest update`, which restarts the agents on
-the new version; an older caller is told vibest was updated, a newer one that vibestd is older. RPC fails with `ProtocolRejected`, HTTP answers 409. Scoped methods need caller headers
-(`user` with a Project directory, or `agent` with `VIBEST_AGENT_ID`); the role comes from the stored row, and
-missing or mixed headers are `InvalidCaller`, never the user. The ACCESS table lists every method, checked at
-compile time: open (integration notifications), subagent (`Report`), entry session or user (`Run`, `Send`,
-`Interrupt`, `Stop`, …, only on Runs of its Project), user only (daemon, update). Socket mode 0600 is
-the authentication; roles prevent mistakes, not attackers.
+**Callers.** Scoped methods need the `vibest-caller` header: `cli` (the user, with the project directory), `session`
+(with `vibest-session-id`, which must name a stored session of the stated project) or `peer` (another vibestd,
+multi-machine.md). A missing or contradictory header is `InvalidCaller`, never the user. The `ACCESS` table in
+`packages/protocol/src/rpc.ts` lists every method, checked at compile time:
+
+| Access  | Who may call                                       | Methods                                                                                                                                                                                                                                     |
+| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| open    | anyone with the protocol header                    | `Ping`, `Plugins`, `Harnesses.List`, `Integration.Guard`, `Runtimes.Doctor`, `Subscriptions`, `Republish`, `ExecutionEnd`, `Prompt`                                                                                                         |
+| session | a session                                          | `Inbox.Subscribe`, `Inbox.Take`                                                                                                                                                                                                             |
+| self    | only that session, from its own terminal           | `Session.Ready`                                                                                                                                                                                                                             |
+| agent   | the user or a session of the project               | `Spawn` (a session only), `List`, `Get`, `Project.RunningEntry`, `Project.Info`, `Project.Search`                                                                                                                                           |
+| owner   | the user, or a session for the sessions it started | `Send` (a session may also answer its creator), `Interrupt`, `Peek`, `Remove`                                                                                                                                                               |
+| cli     | the user only                                      | `Launch`, `Watch`, `Events`, `Session.Seen`, `Project.Open`/`EntryPlace`/`EntrySession`/`StartEntry`/`FocusEntry`/`StopEntry`/`Create`, `Daemon.Stop`, `Daemon.Handoff`, `Agents.Outdated`, `Agents.Restart`, `Machine.Add`/`List`/`Remove` |
+| peer    | another vibestd that said `Peer.Hello`             | `Peer.Hello`, `Peer.Spawn`, `Peer.Outbox`, `Peer.Ack`, and the forwarded `Ping`, `Harnesses.List`, `List`, `Get`, `Send`, `Interrupt`, `Peek`, `Remove`                                                                                     |
+
+Socket mode 0600 is the authentication; roles prevent mistakes, not attackers.
 
 **RPC methods** (`packages/protocol/src/rpc.ts`). Three middlewares: `ProtocolGate` (every method but `Ping`),
-`CallerGate` on scoped methods (resolves the caller for that request only, from its headers and the stored row; a
-session never declares itself entry session), and `Admission` on methods that change something (see
-[drain admission](daemon.md#admission-while-draining)). Protocol-only methods take no caller: `Plugins`,
-`Harnesses.List` (each harness with `problem`, null when vibestd can start it, else why not, and the models it lists;
-the same preflight `Project.StartEntry` and `Spawn` route by, so the catalog and a start never disagree; `vibest models`
-and `vibest harness list` print it), `Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or restarted;
-answers how many), the hooks' `ExecutionEnd` and `Prompt` (verbatim harness JSON read with the adapter's `executionEnd` /
-`userPrompt`; unknown ids, another harness than the session's, and events the adapter ignores change nothing; a
-prompt from the entry session or from vibest's own delivery is ignored). Of the rest:
+`CallerGate` on scoped methods (resolves the caller for that request only, from its headers and the stored row), and
+`Admission` on methods that change something (see [drain admission](daemon.md#admission-while-draining)). Open methods
+take no caller: `Harnesses.List` (each harness with `problem`, null when vibestd can start it, else why not, and the
+models it lists; the same preflight `Project.StartEntry` and `Spawn` route by; `vibest models` and `vibest harness list`
+print it), `Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or
+restarted; answers how many), and the hooks' `ExecutionEnd` and `Prompt` (verbatim harness JSON read with the adapter's
+`executionEnd` / `userPrompt`; unknown ids, another harness than the session's, and events the adapter ignores change
+nothing; a prompt from the entry session or from vibest's own delivery is ignored). Of the rest:
 
-- `Spawn`: `harness` is optional when a routing plugin picks it; `agent` defaults to general and may not be the
-  entry session; `machine` defaults to `local`; `share` shares that session's worktree in a split of its pane;
-  `archive` archives the session once a completed result reached its entry session.
-- `Send` queues and returns; vibestd delivers once the session is idle, and failures reach its entry session as
-  notices. An `id` is a session id or a unique prefix of at least 8 characters, and the answer names the full id.
-- `Remove`: only the session's own entry session or the user's command line. `Get` never waits. `Peek` reads the last
-  `lines` (default 30) of the terminal when asked: screen text is never pushed to an agent, so a entry session looks
-  there itself when an execution ended without a reply. `Report` goes to the caller's own entry session.
-  `Inbox.Subscribe` streams the entry session's inbox batches (the Pi extension) instead of the runtime's prompt.
+- `Spawn`: `harness` is optional when a routing plugin picks it; `agent` is a registered definition id (`general` by
+  default); `machine` defaults to `local`; `share` shares that session's worktree in a split of its pane; `archive`
+  archives the session once it is idle after a completed execution. The caller must be a session: it becomes the new
+  session's parent; no calling session is `NoCallingSession`.
+- `Send` queues and returns; vibestd delivers once the session is idle. A session reaches only its creator and the
+  sessions it started; when its creator has ended, the nearest living session above it. Failures reach the sender's
+  nearest living creator as notices. An `id` is a session id or a unique prefix of at least 8 characters, and the answer
+  names the full id.
+- `Remove`, `Interrupt` and `Peek` need the user or the nearest living creator of the target. `Get` never waits. `Peek`
+  reads the last `lines` (default 30) of the terminal when asked: screen text is never pushed to an agent, so a session
+  looks there itself when an execution ended without a reply. `Inbox.Subscribe` streams the session's inbox batches
+  (the Pi extension) instead of the runtime's prompt; `Inbox.Take` is the same pull for a harness that polls.
 - `SessionInfo.task` is the first row delivered from the user or the parent (`List` cuts it to 500 characters);
   `latest.summary` is the first trimmed line of the execution's `reply`.
-- `Launch` opens `vibest`'s entry session outside the repository's workspace: a tab there, or a new workspace at its
+- `Launch` opens `vibest`'s entry session outside the repository's worktree: a tab there, or a new workspace at its
   root, whose shell runs argv. `Project.Open` finds or makes the project of the directory (`move` answers a
-  `ProjectMoved`). `Project.StartEntry` picks the entry session's harness, provider, model and runtime and writes
-  nothing. `Project.EntrySession` then upserts the entry session row at its terminal and returns the harness
-  command the CLI execs, with the caller's PID. An entry session's pane does not keep those variables in its shell.
-  `Project.RunningEntry` finds the entry session in another pane; `Project.StopEntry` sends SIGTERM to its
-  recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
-  longer there) or `unsupported` (with the reason).
-- `Watch` and `Session.Seen` (user only, `projects` capability) serve the desktop. A Watch session carries `finished` (the
-  runtime's count of finished executions, null without `seen`) and `status` `done` when it is idle and its finished count is past
-  the runtime's seen mark; a project carries `activity`, the first of blocked, done, working its live sessions show,
-  else idle (herdr's order: a finished agent waiting for the user outranks a busy one). `Session.Seen({id, finished})`
-  raises that mark to `finished` only when it rises and no further than the runtime's count; anything else writes nothing.
-- `Events({ session?, after?, follow? })` (user only, `events` capability, this machine only, never forwarded to a peer) streams
-  facts as `{ aggregate, seq, at, type, data }`: one session's by its `seq` (an ended session too; an unknown id fails
-  with `NoSuchSession`), or the whole log in commit order with each aggregate's `seq` rising. It reads the log by cursor in
-  pages (`Bus.log`) and uses the Bus subscription only to wake, so no fact is skipped or repeated whatever order the Bus published commits in;
-  A read without `follow` stops at the latest `seq` (or log position) captured when it starts; `follow` continues past it and keeps the stream open for facts committed later, and only a following read subscribes to the Bus. `after` (valid only with `session`) starts after that `seq` with no gap or repeat; the whole log has no resume cursor, and the log position never leaves vibestd.
-- `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and
-  watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
-  `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a
-  failure before that leaves it serving. `spawnDaemon`'s `env` reaches only the new vibestd's environment.
-- A restart in place types the entry session's harness command into its shell with the identity variables as an env prefix, so the shell does not keep them.
-  `Session.Ready` is the integration saying the harness takes input, with the harness's own `pid` (or, with `conversation`, the
-  conversation id a harness made for the session, the last report wins); vibestd hands over a
-  first or restarted execution only after it, and answers with the session's current process id, which the
-  integration sends with its later reports. A Ready is taken only from the current process: one that names an
-  earlier process counts only when that process ran in the same terminal and the pid is new (a harness an in-place
-  restart or move ran with the terminal's first environment); a pid an earlier process reported is a late report
-  from it and changes nothing.
-- `Agents.Outdated` lists live agents whose integration is not this vibestd's (`blocked`: why one cannot restart in
-  place). `Agents.Restart` returns at once and, once process `after` exited, restarts them in place: subagents
-  first (at most 4 at a time), then entry sessions; SIGTERM to the harness alone, then the runtime runs it again on
-  the same conversation. An interrupted subagent execution gets a continue execution, a working entry session a continue notice
-  naming the outcomes, which also go to vibestd.log.
+  `ProjectMoved`). `Project.EntryPlace` says where the entry session goes (this terminal, or a launch).
+  `Project.StartEntry` picks the entry session's harness, provider, model and runtime and writes nothing.
+  `Project.EntrySession` then upserts the entry session row at its terminal and returns the harness command the CLI
+  execs, with the caller's PID. `Project.RunningEntry` finds the entry session in another pane; `Project.StopEntry` sends
+  SIGTERM to its recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the
+  row is no longer there) or `unsupported` (with the reason); `Project.FocusEntry` focuses it.
+- `Watch` and `Session.Seen` (user only, `watch` and `projects` capabilities) serve a client that shows the sessions.
+  A watched session carries `finished` (the runtime's count of finished executions, null without `seen`) and status
+  `done` when it is idle and its finished count is past the runtime's seen mark; a project carries `activity`, the first
+  of blocked, done, working its live sessions show, else idle (herdr's order: a finished agent waiting for the user
+  outranks a busy one). `Session.Seen({id, finished})` raises that mark to `finished` only when it rises and no further
+  than the runtime's count; anything else writes nothing.
+- `Events({ session?, after?, follow? })` (user only, `events` capability, this machine only, never forwarded to a peer)
+  streams facts as `{ aggregate, seq, at, type, data }`: one session's by its `seq` (an ended session too; an unknown id
+  fails with `NoSuchSession`), or the whole log in commit order with each aggregate's `seq` rising. It reads the log by
+  cursor in pages (`Bus.log`) and uses the Bus subscription only to wake, so no fact is skipped or repeated whatever
+  order the Bus published commits in. A read without `follow` stops at the latest `seq` (or log position) captured when
+  it starts; `follow` continues past it and keeps the stream open for facts committed later. `after` (valid only with
+  `session`) starts after that `seq` with no gap or repeat; the whole log has no resume cursor, and the log position
+  never leaves vibestd.
+- `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and watches
+  Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as `Daemon.Stop` does,
+  starts `command daemon --foreground --import`, then hands over its sockets and lock; a failure before that leaves it
+  serving. `spawnDaemon`'s `env` reaches only the new vibestd's environment.
+- `Session.Ready` is the integration saying the harness takes input, with the harness's own `pid` (or, with
+  `conversation`, the conversation id a harness made for the session, the last report wins); vibestd hands over a first
+  or restarted execution only after it, and answers with the session's current process id, which the integration sends
+  with its later reports. A Ready is taken only from the current process: one that names an earlier process counts only
+  when that process ran in the same terminal and the pid is new (a harness an in-place restart or move ran with the
+  terminal's first environment); a pid an earlier process reported is a late report from it and changes nothing.
+- `Agents.Outdated` lists live sessions whose integration is not this vibestd's (`blocked`: why one cannot restart in
+  place). `Agents.Restart` returns at once and, once process `after` exited, restarts them in place: sessions started by
+  a session first (at most 4 at a time), then entry sessions; SIGTERM to the harness alone, then the runtime runs it
+  again on the same conversation. An interrupted execution gets a continue execution, a working entry session a continue
+  notice naming the outcomes, which also go to vibestd.log.
+- `Machine.*` and `Peer.*` connect vibestds over ssh (multi-machine.md).
 
-**Client** (`packages/client`). One short connection per command; the Ping preflight is the only Ping, and the
-call itself carries its headers. The RPC protocol layer is built into the caller's scope: `Effect.provide` would
-close the socket as soon as the client is made. Its keep-alive ping timeout is a day, because the JSON-RPC
-serialization does not encode keep-alive pings and the default 5 s timeout would cut every longer call (an
-`Inbox.Subscribe` stream); a closed unix socket still fails the read at once. An incompatible vibestd that `vibest
-daemon restart` cannot replace is stopped by the user: vibest prints the PID check and `kill -TERM`, and never
-signals it.
+**Client** (`packages/client`). One short connection per command; the Ping preflight is the only Ping, and the call
+itself carries its headers. The RPC protocol layer is built into the caller's scope: `Effect.provide` would close the
+socket as soon as the client is made. Its keep-alive ping timeout is a day, because the JSON-RPC serialization does not
+encode keep-alive pings and the default 5 s timeout would cut every longer call (an `Inbox.Subscribe` stream); a closed
+unix socket still fails the read at once. An incompatible vibestd that `vibest daemon restart` cannot replace is stopped
+by the user: vibest prints the PID check and `kill -TERM`, and never signals it.
 
 **Daemon:** only the user starts vibestd; replacement drains daemon operations, not running agents.
 See [daemon lifecycle and replacement](daemon.md#lifecycle-and-replacement).
@@ -1151,8 +1055,8 @@ See [daemon start](daemon.md#daemon-start).
 **Admission while draining:** new changes are refused while already-started work can settle.
 See [drain admission](daemon.md#admission-while-draining).
 
-**Session requests:** each request is checked against its session and Project; entry session starts are serialized
-per Project. See [session requests](daemon.md#session-requests).
+**Session requests:** each request is checked against its session and project; entry session starts are serialized per
+project. See [session requests](daemon.md#session-requests).
 
 **HTTP API** (`vibest-http.sock`, `packages/server/src/http.ts`): what an integration that can only make HTTP requests
 calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once; the
@@ -1161,132 +1065,72 @@ caller is named by the shared session headers.
 | Route                            | Answer                                  | What                                                                      |
 | -------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
 | `/inbox/take`                    | `{ execution, ids, line, text }` or 204 | the session's next batch when idle and no execution is open (Inbox.take)  |
+| `/session/ready`                 | `{ process? }` or 204                   | the harness takes input now; the harness's own pid, as `Session.Ready`    |
 | `/hooks/<harness>/execution-end` | 204                                     | the adapter's `executionEnd`, kept as the execution's reply; a settlement |
 | `/hooks/<harness>/prompt`        | 204                                     | the adapter's `userPrompt`: the execution starts; a settlement            |
 | `/hooks/<harness>/guard`         | `{ deny? }`                             | Guard.check with the session's own agent and project folder               |
 
 Errors are `{ error }`: 409 another protocol (with `ProtocolMismatch`), 404 no such session or route, 403 another
-project, another harness than the session's, or a poll from what is not an entry session whose harness polls, 503 vibestd
-is stopping. Routes match on the path alone, whether the server reports it with or without scheme and host. The guard
-reads the session's project folder as its terminal's `VIBEST_PROJECT_DIR`, which vibestd itself has none of.
-`Session.Ready`, sent once at the harness's start with the harness's own pid (which a restart signals), says it takes
-input now; vibestd waits for it before handing the harness an execution.
+project, another harness than the session's, or a poll from a harness that does not pull, 503 vibestd is stopping.
+Routes match on the path alone, whether the server reports it with or without scheme and host. The guard reads the
+session's project folder as its terminal's `VIBEST_PROJECT_DIR`, which vibestd itself has none of. `/session/ready`, sent
+once at the harness's start, is the same fact as `Session.Ready`; vibestd waits for it before handing the harness an
+execution.
 
 **Distribution:** install.sh and npm ship the same compiled binary; updates use the original install method.
 Installs stay outside the data home. See [distribution](distribution.md) for packaging, launchers and update checks.
 
 ## 14. Home layout
 
-`~/.vibest` already holds data from an earlier project (`logs/`, `pty/`, `storage/`); vibest never touches
-those. The vibest install itself is not here: install.sh puts it in `~/.local` (see [distribution](distribution.md)),
-npm in its prefix. Its own entries:
-
 ```
 ~/.vibest/                   (VIBEST_HOME overrides)
   vibest.json                the plugin list (§7), read only
   plugins/                   plugin files and directories (§7), read only
-  vibest.db                  the ledger and read model (with its -wal and -shm files)
+  vibest.db                  the event log and read model (with its -wal and -shm files)
   identity.json              this machine's id, name and machine_id; created or rewritten at every vibestd start
   vibest.sock  vibest-http.sock   vibestd's RPC socket, and the HTTP socket the Claude plugin reports to
   vibestd.pid  vibestd.log   vibestd's start lock and record, and its log (trimmed at startup; see daemon.md)
   projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
-  worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
+  worktrees/<repository>/<name>/   a session's worktrees (`.worktreeinclude` copied)
 ```
 
-The system prompt each harness gets is not kept here. It is generated again from the session's row and the
-Project's files on every harness start (new, resume, restart, move to another harness) and written to
-`$TMPDIR/vibest/<session id>/system-prompt.md`; without TMPDIR, to `/tmp/vibest-<uid>/<session id>/`, a directory
-that must be the user's own with mode 0700 and no symlink, checked with one `lstat` that does not follow a link, so
-nothing can be swapped between two checks. Archive removes the session's directory once its processes have exited
-(they may still read the prompt or report an execution end); the system cleans the rest.
+The vibest install itself is not here: install.sh puts it in `~/.local` (see [distribution](distribution.md)), npm in
+its prefix.
+
+The system prompt each harness gets is not kept here. It is generated again from the session's row and the project's
+files on every harness start (new, resume, restart, move to another harness) and written to
+`$TMPDIR/vibest/<session id>/system-prompt.md`; without TMPDIR, to `/tmp/vibest-<uid>/<session id>/`, a directory that
+must be the user's own with mode 0700 and no symlink, checked with one `lstat` that does not follow a link, so nothing
+can be swapped between two checks. Archive removes the session's directory once its processes have exited (they may
+still read the prompt or report an execution end); the system cleans the rest.
 
 `vibest project create` (`core/project/create.ts`) checks everything before it writes anything, and on failure or
-interruption removes only what it created. Each copy is independent (`--no-hardlinks`, no alternates), on the
-source's branch, with the source's origin, `origin/*` refs and upstream; the local path it was cloned from is not
-kept as a remote, and uncommitted changes are not copied. A directory is a multi-repository project when it is not
-itself in a git checkout and its direct children are main checkouts; a directory of linked worktrees is a Workspace,
-whose project is the shared parent of those main checkouts (one level).
+interruption removes only what it created. Each copy is independent (`--no-hardlinks`, no alternates), on the source's
+branch, with the source's origin, `origin/*` refs and upstream; the local path it was cloned from is not kept as a
+remote, and uncommitted changes are not copied. A directory is a multi-repository project when it is not itself in a
+git checkout and its direct children are main checkouts; a directory of linked worktrees belongs to the project of the
+shared parent of those main checkouts (one level).
 
-An isolated Workspace (`core/worktree.ts`) is one detached worktree per repository; no branch is created, so a
-leftover `refs/heads/vibest/<name>` cannot fail it. A worktree is recorded before `git worktree add`, so a failure
-or interrupt during the add still removes what git left. `.worktreeinclude` (gitignore syntax, the Claude Code
-convention) copies only paths git ignores both in the main checkout and in the worktree (a rule only the main
-checkout has would leave the copy untracked); git does the matching, and a nested repository is never included. A
-symlink is recreated as the same link, never followed; a path that exists in the worktree or lies under a link there
-is left alone (git check-ignore fails on a path beyond a symlink). Nothing is recorded in git.
+A session's worktree (`core/worktree.ts`, `core/git.ts`) is one detached worktree per repository (`git worktree add
+--detach`); no branch is created. A worktree is recorded before `git worktree add`, so a failure or interrupt during the
+add still removes what git left. `.worktreeinclude` (gitignore syntax, the Claude Code convention) copies only paths git
+ignores both in the main checkout and in the worktree (a rule only the main checkout has would leave the copy
+untracked); git does the matching, and a nested repository is never included. A symlink is recreated as the same link,
+never followed; a path that exists in the worktree or lies under a link there is left alone (git check-ignore fails on a
+path beyond a symlink). Nothing is recorded in git.
 
-## 15. Copied from omac and refactored (D12)
+## Appendix A. Patterns borrowed from OpenCode
 
-Source paths are in `iamdin/pi-orchestrator` (`packages/cli/src` unless shown). The omac tests named come along
-and are the acceptance for each part.
+Sources are in `anomalyco/opencode`, `packages/core/src`. These are sources to read when implementing, not vocabulary.
 
-| Part                                       | omac source                                                                                                                                      | Refactor                                                                        | omac tests                                                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| herdr client                               | `packages/effect-herdr-sdk`                                                                                                                      | regenerate for herdr 0.9.5, pin its protocol                                    | —                                                                                                          |
-| herdr connections                          | `herdr-pool.ts`                                                                                                                                  | moved to `runtime-herdr/pool.ts`                                                | `live.test.ts`                                                                                             |
-| Protocol, caller, ACCESS, admission        | `rpc.ts`, `protocol.ts`, `server.ts`, `client.ts`                                                                                                | methods for Run, Agent, Message, knowledge; roles main / subagent / user / open | `rpc.test.ts`                                                                                              |
-| Daemon lock, instance, replacement, update | `daemon.ts`, `core/drain.ts`, `replace.ts`, `commands/handlers/daemon/`, `update.ts`                                                             | blockers are unfinished daemon operations, never Agents                         | `daemon.test.ts`, `stop.test.ts`                                                                           |
-| Distribution                               | `packages/cli/bin`, `packages/cli-*`, `scripts/build.ts`                                                                                         | names                                                                           | `release-smoke.test.ts`                                                                                    |
-| Database                                   | `db.ts`, `platform-bun/src/bun.ts`                                                                                                               | tables of §6                                                                    | —                                                                                                          |
-| Starting an Agent                          | `session/spawn.ts`, `session/placement.ts`, `worktree.ts`, `harness.ts` (the `Harnesses` registry; the adapters are `packages/plugin-harnesses`) | session → Agent in a Run; Workspace types                                       | `sessions.test.ts`, `worktree-group.test.ts`                                                               |
-| Delivery and outcomes                      | `session/executions.ts` (prompt), `session/delivery.ts`, `inbox.ts`                                                                              | execution state → Message `outcome`; coordinator → entry session                | `sessions.test.ts`, `self-heal.test.ts`                                                                    |
-| Results                                    | `replies.ts`                                                                                                                                     | add Run id                                                                      | —                                                                                                          |
-| Interrupt and stop                         | `session/delivery.ts`, `session/archive.ts`, `remove.ts`, `processes.ts`                                                                         | archive → `stop`; `--archive-on-idle` → `once`                                  | `remove.test.ts`, `stop-entry.test.ts`                                                                     |
-| Entry session launch and resume            | `launch.ts`, `session/entry.ts`, `session/restart.ts`                                                                                            | coordinator → entry session of a Project                                        | `stop-entry.test.ts`                                                                                       |
-| Rules                                      | `rules.ts`                                                                                                                                       | subagent rules; entry session rules become builtin skills                       | —                                                                                                          |
-| Knowledge                                  | `project.ts`                                                                                                                                     | directory realpath → Project id                                                 | `project.test.ts`                                                                                          |
-| Models                                     | `models.ts`                                                                                                                                      | Availability capability                                                         | —                                                                                                          |
-| Integrations                               | `integration.ts`, `packages/claude`, `claude-inbox.ts`, `packages/pi-omac`                                                                       | forward the §8 events; agent instead of session                                 | `integration.test.ts`, `claude-inbox-*.test.ts`, `claude-integration-stop.test.ts`, `cursor-allow.test.ts` |
-| Guard                                      | `guard.ts`                                                                                                                                       | `plugin-guard` on `agent.tool`; roles main / subagent                           | `guard.test.ts`                                                                                            |
-| Plugin loading                             | `plugins.ts`, `plugin-sources.ts`, `platform-bun/src/plugin-source.ts`                                                                           | V2 API and the §7 kinds; keep counters, traces, reload                          | `plugins.test.ts`, `plugin-reload.test.ts`, `plugin-binary.test.ts`                                        |
-| Test fakes                                 | `packages/cli/test/fakes.ts`                                                                                                                     | fake herdr Layer for the new services                                           | —                                                                                                          |
+| vibest                           | Pattern                                                                         | Source                                 |
+| -------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------- |
+| Service graph and scopes (§5)    | typed dependency graph over Layers, replacement-based configuration             | `effect/layer-node.ts`                 |
+| Plugin API (§7)                  | `Plugin.define` with `{ id, effect \| setup }`, registration through `ctx`      | `packages/plugin/src/effect/plugin.ts` |
+| Catalog state (§7)               | synchronous editors replayed in registration order, batched change notification | `plugin/registry.ts`                   |
+| Hook dispatch (§7)               | sequential, single mutable event, decision fields (transform, refuse, decision) | `plugin/hooks.ts`                      |
+| Plugin supervisor and order (§7) | `(id, revision)`, reactivation, builtin / user / configuration order            | `plugin/supervisor.ts`                 |
+| Global configuration (§7)        | global directory only (vibest has no project tier)                              | `config/`                              |
 
-Every omac feature is kept, the Pi coordinator TUI included; the harnesses are Claude Code, Pi,
-and Cursor. Replaced only as the refactor lands:
-the one-coordinator-per-repository schema (Projects, Runs, and Agents replace it) and omac's single
-`session.start.before` hook (§7).
-
-## 16. Milestones
-
-The phases, their order, and when each is done are in `plan.md`.
-
-## 17. Open questions
-
-1. Adapter capabilities, verified on real CLIs: native instructions, resume, usage limits, read-only modes, and
-   every §8 event omac does not use yet, for Claude Code, Cursor, and Pi.
-2. Limit state: adapter capability per harness, or a shared source (herdr's `agent-quota` plugin, provider usage
-   endpoints) that adapters fall back to?
-3. Machines: answered in `runtime-port.md` (runtime plugins connect; no vibest agent on remote machines).
-4. Time-based waits (Agents not yet started, waiting for a reset, recurring Runs): plugin deadlines in `storage`, or a core
-   schedule modeled on OpenCode's `in` / `at` / `every` / `cron`?
-5. The single herdr agent view: how vibest shares it with other herdr plugins.
-6. Projects without git repositories are new (omac requires git): which omac rules (worktree, cleanup, git
-   state in results) apply, and how the entry session is placed.
-
-## Appendix A. Patterns borrowed from OpenCode V2
-
-Paths are in `anomalyco/opencode` at `f0944f0`. These are sources to read when implementing, not vocabulary.
-
-| vibest                                         | Pattern                                                                                                         | Source                                                                                                                                             |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Domain in core, implementation in plugins (D2) | schema contracts with internal plugins implementing them                                                        | `packages/schema/src/goal.ts` with `packages/core/src/plugin/goal.ts`; `packages/schema/src/provider.ts` with `packages/core/src/plugin/provider/` |
-| Package layering (§2)                          | one-way runtime dependencies; client never imports core or server                                               | `AGENTS.md:2`, `packages/schema/AGENTS.md`                                                                                                         |
-| Result to parent (§3.1)                        | a subagent result wakes its parent                                                                              | `SessionIdleBackground` in `packages/plugin/src/effect/session.ts`                                                                                 |
-| Service graph and scopes (§5)                  | typed dependency graph over Layers, scope tags, replacement-based configuration                                 | `packages/util/src/effect/layer-node.ts`, `app-node.ts`, `packages/server/src/routes.ts:118-150`                                                   |
-| Per-Project graph (§5)                         | one compiled graph per key in a `LayerMap`, evicted on failure                                                  | `packages/core/src/instance.ts`, `location-service-map.ts`, `instance/service.ts`                                                                  |
-| Plugin API (§7)                                | `Plugin.define`, `Registration`, `transform` / `reload`, `hook`, domains as `Pick`s of client APIs              | `packages/plugin/src/effect/plugin.ts`, `registration.ts`, `packages/plugin/AGENTS.md`                                                             |
-| Catalog state (§7)                             | synchronous editors replayed in registration order, batched change notification                                 | `packages/core/src/state.ts`, `packages/plugin/src/effect/provider.ts`                                                                             |
-| Hook dispatch (§7)                             | sequential, single mutable event, decision fields, no timeout (transform, refuse, decision)                     | `packages/core/src/plugin/hooks.ts`                                                                                                                |
-| `agent.fail`, `agent.prompt` (§7)              | retry decision, prompt rewrite                                                                                  | `retry`, `prompt` in `packages/plugin/src/effect/session.ts`                                                                                       |
-| Registry, supervisor, order (§7)               | `(id, revision)`, prefix reactivation, fallback, latch, builtin / user / configuration order                    | `packages/core/src/plugin.ts`, `plugin/supervisor.ts:152-162`, `plugin/internal.ts`                                                                |
-| AgentDefinition (§3)                           | definition with `mode`                                                                                          | `packages/schema/src/agent.ts`                                                                                                                     |
-| Subscription limits (§3)                       | per-window meter (V2: `{ percent, limited, resetsAt }`)                                                         | `packages/schema/src/usage-limits.ts`                                                                                                              |
-| IDs (§3)                                       | prefixed branded IDs with sortable bodies and `create()`                                                        | `packages/schema/src/identifier.ts`, `session-id.ts`                                                                                               |
-| Global configuration (§7)                      | global directory only (vibest has no project tier)                                                              | `packages/core/src/config/discovery.ts`                                                                                                            |
-| Plugin entries (§7)                            | ordered `plugins` directives: name, path, `{ package, options }`, `-id` to remove; options on `context.options` | `packages/schema/src/config/plugin.ts`, `packages/core/src/config/plugin/source.ts`, `packages/plugin/src/effect/plugin.ts`                        |
-| Configuration through plugins (§7)             | configuration files projected into catalogs by builtin plugins                                                  | `packages/core/src/config/plugin/agent.ts`                                                                                                         |
-
-Where vibest differs: protocol, persistence, delivery, and daemon come from omac (§15), not from OpenCode;
-graphs are per Project, not per directory; decision points survive restarts; notify hooks have a timeout; no
-coding-agent domain; harness adapters sit on top of an external runtime (herdr). Plugin activation is a gate with
-a 10 s bound that refuses with `PluginsNotActive`, not an unbounded wait.
+Where vibest differs: protocol, persistence, delivery, and the daemon are vibest's own; there is no coding-agent
+domain; harness adapters sit on top of an external runtime.
