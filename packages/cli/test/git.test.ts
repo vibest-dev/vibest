@@ -422,7 +422,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         const file = path.join(dir, "vibest.db")
         const home = path.join(dir, "home")
         yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           const layout = yield* Layout
           const resolve = (directory: string, move?: boolean) =>
             Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located, move))
@@ -506,7 +506,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         const path = yield* Path.Path
         const dir = yield* tempDirectory("vibest-move-")
         yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           const layout = yield* Layout
           const resolve = (directory: string, move?: boolean, through = db) =>
             Effect.flatMap(locateProject(directory), (located) => resolveProject(through, located, move))

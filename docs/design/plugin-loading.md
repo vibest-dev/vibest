@@ -58,7 +58,7 @@ fires a plugin's machine hooks in its own tests.
 
 ## Running hooks
 
-`plugin/hooks.ts` is the host's one hook registry (the `Hooks.Service` node): it registers and runs both `agent.*` and
+`plugin/hooks.ts` is the host's one hook registry (the `Hooks.node` service): it registers and runs both `agent.*` and
 `machine.*` hooks. Every registration is keyed by the activation that made it and removed with that activation's scope;
 dispatch takes the registrations of the active activations in plugin load order, and in registration order within one
 activation, so a late registration or a retired revision whose teardown overran its deadline never changes the order

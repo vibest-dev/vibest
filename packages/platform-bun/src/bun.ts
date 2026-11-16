@@ -18,7 +18,7 @@ import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
-import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugin"
+import { Builtins, builtinsNode, PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
 import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
@@ -375,7 +375,7 @@ export const replacements: LayerNode.Replacements = [
     }),
   ),
   Machines.machineTransportNode.replace(Layer.succeed(Machines.MachineTransport, transport)),
-  PluginLoader.node.replace(Layer.sync(PluginLoader, makePluginLoader)),
+  pluginLoaderNode.replace(Layer.sync(PluginLoader, makePluginLoader)),
   builtinsNode.replace(
     LayerNode.make({
       name: "vibest/Builtins",

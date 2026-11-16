@@ -204,7 +204,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const listed = yield* fake.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 1, status: "available", resetTime: null }],
@@ -281,7 +281,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const listed = yield* fresh.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 1, status: "available", resetTime: 5 }],
@@ -307,7 +307,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const kept = yield* denied.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 9, status: "available", resetTime: null }],
@@ -330,7 +330,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const row = yield* hung.provide(
         Effect.gen(function* () {
-          const subs = yield* Subscriptions
+          const subs = yield* Subscriptions.Service
           yield* subs.report({
             harness: "claude",
             limits: [{ window: "5h", percent: 8, status: "available", resetTime: null }],
@@ -356,7 +356,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
 
   it.effect("a harness subscription that never answers is cut off after 30 s and the next harness is still read", () =>
     Effect.gen(function* () {
-      const subs = yield* Subscriptions
+      const subs = yield* Subscriptions.Service
       const polling = yield* Effect.forkChild(subs.poll)
       yield* TestClock.adjust("30 seconds")
       yield* Fiber.join(polling)
@@ -400,7 +400,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       yield* fake.provide(
         Effect.gen(function* () {
           const context = yield* Layer.build(Subscriptions.layer.pipe(Layer.provide(fake.layer)))
-          const subs = Context.get(context, Subscriptions)
+          const subs = Context.get(context, Subscriptions.Service)
           yield* TestClock.adjust("59 seconds")
           yield* subs.list
           assert.strictEqual(fake.spawned.length, 1)
@@ -433,7 +433,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           }),
       })
       const listed = yield* Effect.gen(function* () {
-        const subs = yield* Subscriptions
+        const subs = yield* Subscriptions.Service
         const plugins = yield* makePlugins([{ source: "see", revision: "-", options: {}, plugin }])
         yield* plugins.start({
           project: "/r",
@@ -471,7 +471,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       Effect.gen(function* () {
         const layout = yield* Layout
         const repo = yield* makeRepository
-        yield* (yield* Subscriptions).report({
+        yield* (yield* Subscriptions.Service).report({
           harness: "pi",
           provider: "example-proxy",
           limits: [{ window: "monthly", percent: 12, status: "available", resetTime: null }],

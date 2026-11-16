@@ -30,6 +30,7 @@
     "effect-herdr-sdk": "workspace:*"
   },
   "devDependencies": {
+    "@vibest/protocol": "workspace:*",
     "@vibest/runtime-herdr": "workspace:*",
     "@vibest/runtime-herdr-core": "workspace:*"
   }

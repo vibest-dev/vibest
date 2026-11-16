@@ -26,7 +26,7 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Watch
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     const listing = yield* Listing.Service
     const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()
 

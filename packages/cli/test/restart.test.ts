@@ -53,7 +53,7 @@ describe("vibest update's plan for vibestd", () => {
 })
 
 const busyPiSubagent = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const sessions = yield* Session.Service
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
@@ -93,7 +93,7 @@ describe("restart in place", () => {
       yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* ran.reached
       assert.deepStrictEqual(yield* processes.signaled, [pid])
-      assert.isTrue(yield* (yield* SessionLive).restarting.has(id))
+      assert.isTrue(yield* (yield* SessionLive.Service).restarting.has(id))
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false, status: "idle" }))
       yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.check(id)
@@ -114,7 +114,7 @@ describe("restart in place", () => {
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
       assert.strictEqual((yield* herdr.callsTo("open")).length, opened, "no new terminal")
       const row = (yield* db.session.getSession(id))!
-      assert.isFalse(yield* (yield* SessionLive).restarting.has(id))
+      assert.isFalse(yield* (yield* SessionLive.Service).restarting.has(id))
       assert.notStrictEqual(row.process?.pid, pid)
       assert.strictEqual(executionStateOf(row), "open")
       assert.include(
@@ -166,7 +166,7 @@ describe("restart in place", () => {
 
   const workingEntry = (harness: "cursor" | "pi") =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
       yield* db.session.startEntry(
@@ -276,7 +276,7 @@ describe("restart in place", () => {
   test(
     "an entry session the runtime calls idle still continues when the update command is running in its process tree",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const sessions = yield* Session.Service
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
@@ -313,7 +313,7 @@ describe("restart in place", () => {
   test(
     "a ready report records the integration it names, not whatever an older report left noted",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const projectId = yield* projectOf(yield* makeRepository)
       yield* db.session.startEntry(
         projectId,

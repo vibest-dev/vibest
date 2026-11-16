@@ -23,10 +23,10 @@ export const make = Effect.gen(function* () {
   const { reach, routed, spawnOn } = yield* Routing
   const { listed, watched, snapshotProjects } = yield* Listing.Service
   const sessions = yield* Session.Service
-  const db = yield* Db
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const watchFeed = yield* WatchFeed.Service
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const integration = yield* Integration.Service
   const seenLocked = yield* KeyedMutex.make<string>()
 

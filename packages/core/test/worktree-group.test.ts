@@ -73,7 +73,7 @@ const marker = (dir: string) =>
   })
 
 const directoryOf = (id: string) =>
-  Effect.flatMap(Db, (db) => db.session.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
+  Effect.flatMap(Db.Service, (db) => db.session.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
 
 describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a name is reserved by creating its directory, so whatever already sits at a path takes that name", () => {
   test(
@@ -82,7 +82,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const db = yield* Db
+      const db = yield* Db.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const repository = yield* repositoryDirectoryName(repo)
@@ -127,7 +127,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const held = yield* herdr.hold("open")
@@ -149,7 +149,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const db = yield* Db
+      const db = yield* Db.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const key = yield* projectOf(repo)
@@ -175,7 +175,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const sessions = yield* Session.Service
-      const db = yield* Db
+      const db = yield* Db.Service
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -213,7 +213,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Db.Service
       const sessions = yield* Session.Service
       const layout = yield* Layout
       const repo = yield* makeRepository
@@ -253,7 +253,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
   test(
     "a spawn interrupted after its directory was reserved and before its admission leaves no directory and no row",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const files = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
@@ -300,7 +300,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
   test(
     "a spawn interrupted right after its admission still has exactly one launch owner",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
       const repo = yield* makeRepository

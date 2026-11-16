@@ -22,12 +22,14 @@ import { Harness, harnessOptions } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
-import { Plugins, pluginsNode } from "../plugin.ts"
+import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 import { runtimeEnv } from "./placement.ts"
+
+export * as EntrySession from "./entry.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
@@ -54,11 +56,11 @@ const firstStart = new LaunchFailed({
 })
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
-  const bus = yield* Bus
+  const db = yield* Db.Service
+  const bus = yield* Bus.Service
   const runtimes = yield* Runtimes.Service
-  const restarting = (yield* SessionLive).restarting
-  const plugins = yield* Plugins
+  const restarting = (yield* SessionLive.Service).restarting
+  const plugins = yield* Plugins.Service
   const agents = yield* Agents.Service
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
@@ -411,7 +413,7 @@ const make = Effect.gen(function* () {
           detach: db.session.detachEntry(projectId, runtime, place.address),
           reattach: db.session.reattachEntry(projectId, runtime, place.address),
           wait: HARNESS_EXIT_WAIT,
-        }).pipe(Effect.provideService(Bus, bus), Effect.provideService(Processes.Service, processes))
+        }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
       }),
     )
   })
@@ -419,25 +421,27 @@ const make = Effect.gen(function* () {
   return { running, launch, start, claim, focus, stop }
 })
 
-export class EntrySession extends Context.Service<EntrySession, Effect.Success<typeof make>>()("vibest/EntrySession") {
-  static readonly layer = Layer.effect(EntrySession, make)
+export type Interface = Effect.Success<typeof make>
 
-  static readonly node = LayerNode.make({
-    service: EntrySession,
-    layer: EntrySession.layer,
-    deps: [
-      Agents.node,
-      Bus.node,
-      Db.node,
-      Harness.node,
-      Harnesses.node,
-      pluginsNode,
-      Processes.node,
-      Runtimes.node,
-      SessionLive.node,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
-  })
-}
+export class Service extends Context.Service<Service, Interface>()("vibest/EntrySession") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Agents.node,
+    Bus.node,
+    Db.node,
+    Harness.node,
+    Harnesses.node,
+    Plugins.node,
+    Processes.node,
+    Runtimes.node,
+    SessionLive.node,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

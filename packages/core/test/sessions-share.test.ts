@@ -14,7 +14,7 @@ import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-h
 describe.concurrent("Session", () => {
   const sharersOfDirectory = (ownerId: string) =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const shared = yield* db.session.sessionDirectory(ownerId)
       return yield* Effect.filter(
         (yield* db.session.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),

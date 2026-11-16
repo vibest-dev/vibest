@@ -39,6 +39,9 @@ import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+import { RunCoordinator } from "./run-coordinator.ts"
+
+export * as Delivery from "./delivery.ts"
 
 export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused", {
   message: Schema.String,
@@ -47,17 +50,17 @@ export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused"
 export const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
   Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
 
-const make = Effect.gen(function* () {
-  const db = yield* Db
+export const make = Effect.gen(function* () {
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const inbox = yield* Inbox.Service
   const fs = yield* FileSystem.FileSystem
-  const sessionLive = yield* SessionLive
-  const locks = yield* SessionLocks
-  const { prompt, interruptAgent } = yield* Executions
-  const exits = yield* Exits
-  const { worktreeOf, handTask, resume } = yield* Placement
+  const sessionLive = yield* SessionLive.Service
+  const locks = yield* SessionLocks.Service
+  const { prompt, interruptAgent } = yield* Executions.Service
+  const exits = yield* Exits.Service
+  const { worktreeOf, handTask, resume } = yield* Placement.Service
   const reactor = yield* Reactor.make
   const { locked } = locks
   const { undelivered } = inbox
@@ -259,33 +262,42 @@ const make = Effect.gen(function* () {
     return { id: heir.local }
   })
 
-  const queued = (id: string, inboxId: number | undefined) =>
+  const undeliverable = (id: string, rows: ReadonlySet<number>) => (cause: Cause.Cause<unknown>) =>
     Effect.gen(function* () {
-      const row = (yield* db.inbox.pendingInbox(id)).find((r) => r.id === inboxId)
-      if (row === undefined) return
-      const failed = (cause: Cause.Cause<unknown>) =>
-        Effect.gen(function* () {
-          const transient = Cause.findErrorOption(cause).pipe(
-            Option.exists(
-              (e) =>
-                Predicate.isTagged(e, "RuntimeUnreachable") ||
-                (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
-            ),
-          )
-          if (
-            Cause.hasInterruptsOnly(cause) ||
-            transient ||
-            !(yield* db.inbox.pendingInbox(id)).some((r) => r.id === row.id)
-          )
-            return
-          const session = yield* db.session.getSession(id)
-          if (session !== undefined) yield* inbox.undelivered(session, [row], errorMessage(cause))
-        })
-      yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
+      if (rows.size === 0) return yield* Effect.failCause(cause)
+      const transient = Cause.findErrorOption(cause).pipe(
+        Option.exists(
+          (e) =>
+            Predicate.isTagged(e, "RuntimeUnreachable") ||
+            (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
+        ),
+      )
+      if (Cause.hasInterruptsOnly(cause) || transient) return
+      const stuck = (yield* db.inbox.pendingInbox(id)).filter((r) => rows.has(r.id))
+      const session = yield* db.session.getSession(id)
+      if (stuck.length > 0 && session !== undefined) yield* inbox.undelivered(session, stuck, errorMessage(cause))
     })
 
-  const deliverNext = (id: string) =>
-    locked(id)(db.inbox.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe()
+  type Wake = { readonly rows: ReadonlySet<number>; readonly ended: boolean }
+
+  const due = (id: string, wake: Wake) =>
+    Effect.gen(function* () {
+      if (wake.ended && (yield* db.inbox.hasQueued(id))) return true
+      return wake.rows.size > 0 && (yield* db.inbox.pendingInbox(id)).some((r) => wake.rows.has(r.id))
+    })
+
+  const deliverWoken = (id: string, wake: Wake) =>
+    locked(id)(
+      due(id, wake).pipe(
+        Effect.flatMap((ready) => (ready ? deliver(id) : Effect.void)),
+        Effect.catchCause(undeliverable(id, wake.rows)),
+      ),
+    ).pipe(Reactor.logFailure(`deliver ${id}`))
+
+  const wakes = yield* RunCoordinator.make<string, Wake>({
+    drain: deliverWoken,
+    merge: (pending, next) => ({ rows: new Set([...pending.rows, ...next.rows]), ended: pending.ended || next.ended }),
+  })
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
@@ -350,9 +362,11 @@ const make = Effect.gen(function* () {
   })
 
   yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? Effect.void : deliverNext(event.sessionId!),
+    event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
   )
-  yield* reactor.on([InboxQueued], (event) => queued(event.sessionId!, event.seq))
+  yield* reactor.on([InboxQueued], (event) =>
+    wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),
+  )
 
   yield* db.inbox.recoverDelivering(
     (sessionId, messages) =>
@@ -362,26 +376,26 @@ const make = Effect.gen(function* () {
   return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }
 })
 
-export class Delivery extends Context.Service<Delivery, Effect.Success<typeof make>>()("vibest/Delivery") {
-  static readonly make = make
+export type Interface = Effect.Success<typeof make>
 
-  static readonly layer = Layer.effect(Delivery, make)
+export class Service extends Context.Service<Service, Interface>()("vibest/Delivery") {}
 
-  static readonly node = LayerNode.make({
-    service: Delivery,
-    layer: Delivery.layer,
-    deps: [
-      Bus.node,
-      Db.node,
-      Executions.node,
-      Exits.node,
-      Harnesses.node,
-      Inbox.node,
-      Placement.node,
-      Runtimes.node,
-      SessionLive.node,
-      SessionLocks.node,
-      PlatformNode.fileSystem,
-    ],
-  })
-}
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [
+    Bus.node,
+    Db.node,
+    Executions.node,
+    Exits.node,
+    Harnesses.node,
+    Inbox.node,
+    Placement.node,
+    Runtimes.node,
+    SessionLive.node,
+    SessionLocks.node,
+    PlatformNode.fileSystem,
+  ],
+})

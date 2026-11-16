@@ -23,7 +23,7 @@ export type HookCaller = {
 }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const sessions = yield* Session.Service
   const harnesses = yield* Harnesses.Service
   const agents = yield* Agents.Service

@@ -25,7 +25,7 @@ const fact = (
   input: { readonly sessionId?: string; readonly projectId?: string; readonly at?: number; readonly data: object },
 ) =>
   Effect.gen(function* () {
-    const bus = yield* Bus
+    const bus = yield* Bus.Service
     return yield* bus.publish(Catalog[type] as never, input as never)
   }).pipe(Effect.orDie)
 
@@ -39,7 +39,7 @@ const memoryDb = () =>
 
 const ENTRY = { agent: "coordinator" } as const
 
-const complete = (db: Db["Service"], id: string) =>
+const complete = (db: Db.Interface, id: string) =>
   Effect.gen(function* () {
     const open = yield* db.session.openExecution(id)
     if (open !== undefined) yield* db.session.closeExecution(id, open, "completed")
@@ -50,7 +50,7 @@ describe("Db", () => {
     "one entry session per project; fresh starts a new one and ends the old one; a harness switch clears the conversation; a conversation report names an existing session",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const first = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
         assert.isNull(first.harnessSessionId)
         yield* db.session.noteConversation(first.sessionId, "s1")
@@ -98,7 +98,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(memoryDb())),
   )
 
-  const memory = <A, E>(program: Effect.Effect<A, E, Bus | Db | SqlClient.SqlClient>) =>
+  const memory = <A, E>(program: Effect.Effect<A, E, Bus.Service | Db.Service | SqlClient.SqlClient>) =>
     program.pipe(Effect.provide(memoryDb()))
 
   it.effect(
@@ -106,7 +106,7 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           const parent = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
           yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
             cwd: "/w",
@@ -203,7 +203,7 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           const sql = yield* SqlClient.SqlClient
           const execution = (id: string) =>
             sql<{
@@ -263,7 +263,7 @@ describe("Db", () => {
   it.effect("startObserved keeps an execution that is already open and does not record the typed text", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const sql = yield* SqlClient.SqlClient
         yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
         yield* db.session.startObserved("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "kept", 1)
@@ -281,7 +281,7 @@ describe("Db", () => {
   it.effect("an observed end that needs the integration's ready report waits for the process to report ready", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         yield* db.session.insertSession(session(id), yield* projectOf("r"))
         yield* db.session.startObserved(id, "typed", 1)
@@ -303,7 +303,7 @@ describe("Db", () => {
   it.effect("a rolled back endObserved leaves the live status working", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const sql = yield* SqlClient.SqlClient
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         const parent = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
@@ -333,7 +333,7 @@ describe("Db", () => {
   it.effect("a rolled back patchLive ready leaves the live integration unchanged", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const sql = yield* SqlClient.SqlClient
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         yield* db.session.insertSession(session(id), yield* projectOf("r"))
@@ -351,7 +351,7 @@ describe("Db", () => {
     "the task is the first inbox row; the open execution is the message row with no ended_at; status is memory only",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const sql = yield* SqlClient.SqlClient
         yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
           cwd: "/w",
@@ -423,7 +423,7 @@ describe("Db", () => {
     "an execution-error notice goes to the nearest creator that has not ended; with none left it writes no row",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const sql = yield* SqlClient.SqlClient
         const project = yield* projectOf("r")
         const [grand, parent, child] = [
@@ -461,7 +461,7 @@ describe("Db", () => {
     "a peer item for an ended session goes to its nearest living creator, once; with none only a dropped row stays",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Db.Service
         const sql = yield* SqlClient.SqlClient
         const project = yield* projectOf("r")
         const ended = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -495,7 +495,7 @@ describe("Db", () => {
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest execution", () =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Db.Service
       const execution = (id: string, at: number, end?: { at: number; outcome: string; reply?: string }) =>
         Effect.gen(function* () {
           const start = yield* fact("execution.started", { sessionId: id, at, data: {} })
@@ -572,7 +572,7 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           const sql = yield* SqlClient.SqlClient
           const noticeStatus = (content: string) =>
             Effect.map(
@@ -672,7 +672,7 @@ describe("Db", () => {
         )
         assert.deepStrictEqual(yield* header(file), { applicationId: 0, userVersion: 0, objects: 0 })
         yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           assert.isTrue(
             yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r")),
           )
@@ -695,12 +695,12 @@ describe("Db", () => {
     () =>
       Effect.gen(function* () {
         const file = yield* fileAt(yield* tempDirectory("vibest-projection-"), "vibest.db")
-        const sessions = Effect.flatMap(Db, (db) => db.session.listSessions({ stopped: true })).pipe(
+        const sessions = Effect.flatMap(Db.Service, (db) => db.session.listSessions({ stopped: true })).pipe(
           Effect.map((rows) => rows.map((row) => row.id)),
           Effect.provide(database(file)),
         )
         yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
         }).pipe(Effect.provide(database(file)))
         yield* writeSql(file, [
@@ -796,7 +796,7 @@ describe("Db", () => {
       Effect.gen(function* () {
         const file = yield* fileAt(yield* tempDirectory("vibest-import-check-"), "vibest.db")
         yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
         }).pipe(Effect.provide(database(file)))
         yield* Platform.daemon.checkDatabase(file)
@@ -965,7 +965,7 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Db.Service
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
           yield* db.session.insertSession(
             session(id, { harnessId: "claude", harnessSessionId: "pre" }),

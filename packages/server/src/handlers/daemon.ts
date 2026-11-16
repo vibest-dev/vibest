@@ -32,16 +32,16 @@ export const shutdownNode = LayerNode.unbound(Shutdown)
 
 export const make = Effect.gen(function* () {
   const { cliOnly } = yield* CallerChecks.Service
-  const db = yield* Db
+  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
-  const plugins = yield* Plugins
-  const subscriptions = yield* Subscriptions
+  const plugins = yield* Plugins.Service
+  const subscriptions = yield* Subscriptions.Service
   const identity = yield* Identity
   const updateStatus = yield* UpdateCheck.Service
   const { version } = yield* App.Service
   const shutdown = yield* Shutdown
   const drain = yield* Drain.Service
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.inbox.deliveringInbox, shutdown })
   return {

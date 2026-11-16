@@ -12,7 +12,7 @@ export const logFailure =
     )
 
 export const make = Effect.gen(function* () {
-  const bus = yield* Bus
+  const bus = yield* Bus.Service
   const handlers = yield* FiberSet.make()
   const timers = yield* FiberMap.make<string>()
   return {

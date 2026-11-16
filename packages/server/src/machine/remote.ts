@@ -54,7 +54,7 @@ const REFUSED = [
 type Away = { readonly machine: ListedMachine; readonly sessions: ReadonlyArray<SessionInfo> }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Db.Service
   const machines = yield* Machines.Service
   const self = yield* Identity.Service
   const git = yield* Git.Service
