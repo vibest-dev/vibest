@@ -19,6 +19,7 @@
     },
     "@vibest/claude#build": { "cache": false },
     "@vibest/cursor#build": { "cache": false },
+    "@vibest/agy#build": { "cache": false },
     "@vibest/pi#build": { "cache": false },
     "@vibest/cli-darwin-arm64#build": {
       "outputs": ["bin/vibest"],

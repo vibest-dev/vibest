@@ -1,0 +1,28 @@
+{
+  "name": "@vibest/agy",
+  "version": "0.0.1-dev",
+  "private": true,
+  "description": "vibest's Antigravity CLI plugin: the session's state and conversation id, reported from agy's session-only status line.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
+    "directory": "packages/integration/agy"
+  },
+  "files": [
+    "src",
+    "status.sh",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "exports": {
+    "./plugin": "./src/plugin.ts"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "prepack": "bun run build",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/integration/agy"
+  }
+}

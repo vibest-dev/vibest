@@ -1,3 +1,4 @@
+import { agy } from "./agy.ts"
 import { claude } from "./claude.ts"
 import { cursor } from "./cursor.ts"
 import { harnessPlugin } from "./harness-plugin.ts"
@@ -8,4 +9,4 @@ import { piSubscription } from "./subscriptions/pi.ts"
 export const piPlugin = harnessPlugin(pi, piSubscription)
 export const claudePlugin = harnessPlugin(claude, claudeSubscription)
 
-export { claude, cursor, pi }
+export { agy, claude, cursor, pi }

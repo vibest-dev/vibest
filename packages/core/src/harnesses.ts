@@ -39,3 +39,6 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Harne
 export const layer = Layer.effect(Service, make)
 
 export const node = LayerNode.make({ service: Service, layer, deps: [] })
+
+export const runtimeLifecycle = (definition: HarnessDefinition | undefined) =>
+  definition !== undefined && definition.executionEnd === undefined

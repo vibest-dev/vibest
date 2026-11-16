@@ -690,11 +690,12 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       startObserved: Effect.fn("Db.session.startObserved")(
-        (id: string, typed: string | undefined, at: number, process?: number) =>
+        (id: string, typed: string | undefined, at: number, process?: number, anonymous = false) =>
           tx(
             Effect.gen(function* () {
               if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return
-              const open = (yield* openExecution(id)) ?? (typed ? yield* startExecution(id, at, typed) : undefined)
+              const open =
+                (yield* openExecution(id)) ?? (typed || anonymous ? yield* startExecution(id, at, typed) : undefined)
               if (open === undefined) return
               yield* accept(id, open)
               yield* setStatus(id, "working")
