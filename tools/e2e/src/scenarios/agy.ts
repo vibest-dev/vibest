@@ -279,10 +279,17 @@ const checks: ReadonlyArray<Check> = [
       const a = await agyWorld(w, "herdr", "agy-entry", "agy")
       try {
         const entry = await a.entryIdle()
+        const settled = () =>
+          (row<{ n: number }>(
+            w,
+            "SELECT (SELECT count(*) FROM inbox WHERE session_id = ?1 AND status IN ('pending', 'delivering')) + (SELECT count(*) FROM execution WHERE session_id = ?1 AND outcome IS NULL) AS n",
+            entry,
+          )?.n ?? 1) === 0
+        await until("the entry's own first task completed", settled, 300_000)
         const answered = async (send: () => Promise<unknown>) => {
           const done = completed(w, entry)
           await send()
-          await until("the message's execution completed", () => completed(w, entry) > done, 300_000)
+          await until("the message's execution completed", () => completed(w, entry) > done && settled(), 300_000)
         }
         await answered(() => w.ok(["send", entry, "--", PONG(1)], { cwd: a.repo }))
 
