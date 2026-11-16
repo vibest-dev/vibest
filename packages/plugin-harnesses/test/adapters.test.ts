@@ -70,7 +70,7 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(agyModels(["Fetching available models...", "Error: Please sign in to view available models."]))
   })
 
-  it("agy reads its usage windows as used percent with the reset time", () => {
+  it("agy reads its usage windows as used percent with the reset time; it is limited only when no model group has quota left", () => {
     const usage = {
       command: {
         data: {
@@ -86,6 +86,21 @@ describe("HarnessAdapter", () => {
         },
       },
     }
+    const claudeGroup = (left: number) => ({
+      name: "Claude Models",
+      buckets: [{ window: "5h", remaining_fraction: left }],
+    })
+    const withClaude = (left: number) => ({
+      command: { data: { groups: [...usage.command.data.groups, claudeGroup(left)] } },
+    })
+    assert.deepStrictEqual(
+      agyLimits(withClaude(0.5)).map((w) => w.status),
+      ["available", "available", "available"],
+    )
+    assert.deepStrictEqual(
+      agyLimits(withClaude(0)).map((w) => w.status),
+      ["available", "limited", "limited"],
+    )
     assert.deepStrictEqual(agyLimits(usage), [
       {
         window: "Gemini Models weekly",

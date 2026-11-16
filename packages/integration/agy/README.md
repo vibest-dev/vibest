@@ -26,6 +26,8 @@ credentials are not read or changed by vibest.
 - The guard is fail-open where agy is: a hook agy cannot start, or one past its 30 s timeout, is skipped and the tool
   runs, with nothing else asking first (`--dangerously-skip-permissions`).
 - The added folder shows in agy's workspace list, and the agent can read it.
+- Usage: vibest counts agy as limited only when every model group in `agy /usage` has an exhausted window; a session
+  that hits one model's limit ends at its `Stop` with agy's error.
 
 Outside a vibest agent (no `VIBEST_SESSION_ID`) the hooks report nothing.
 
