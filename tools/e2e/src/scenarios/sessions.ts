@@ -242,7 +242,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S6",
     title:
-      "a just-finished --archive-on-idle session loses its worktree, with no notice and nothing it sent still waiting; vibest run --archive-on-completion is a usage error; vibest archive of a clean subagent closes its pane, its harness process exits and removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one",
+      "a just-finished --archive-on-idle session loses its worktree, with no notice and nothing it sent still waiting; vibest run --archive-on-completion is a usage error; vibest archive of a clean subagent closes its pane, its harness process exits and removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one; archiving a --share session while the first one lives finishes it with the shared worktree kept, and the reconcile after vibestd restarts posts no notice for it",
     run: async (w) => {
       const p = await piProject(w, "s6")
       try {
@@ -338,6 +338,33 @@ const checks: ReadonlyArray<Check> = [
             askedOut.reasons.includes("worktree kept as asked (--keep-worktree)") &&
             (await exists(asked.worktree)),
           `--keep-worktree: ${JSON.stringify(askedOut)}`,
+        )
+
+        const implementer = await ready("implementer")
+        const reviewer = await p.runSub("reviewer", "--share", implementer.id.slice(0, 8))
+        await answered(w, p, reviewer, "reviewer")
+        await until("reviewer idle", () => p.idle(reviewer), 30_000)
+        const sharedOut = await archive(w, p, reviewer)
+        expect(
+          sharedOut.pane === "closed" &&
+            sharedOut.processes === "exited" &&
+            sharedOut.worktree === "kept" &&
+            sharedOut.reasons.includes(`worktree kept: session ${implementer.id} still works in it`) &&
+            p.exited(reviewer),
+          `--share: ${JSON.stringify(sharedOut)}`,
+        )
+        const from = (await p.log()).length
+        await w.stopDaemon()
+        await p.startDaemon()
+        await until(
+          "the reconcile after the restart",
+          async () => /reconcile all: \d+ live sessions/.test((await p.log()).slice(from)),
+          30_000,
+        )
+        expect(p.notices(reviewer, "") === 0, "a notice for the archived --share session")
+        expect(
+          (await ls(w, p)).some((e) => e.id === implementer.id) && (await exists(implementer.worktree)),
+          "the implementer or its worktree is gone",
         )
       } finally {
         await p.close()
