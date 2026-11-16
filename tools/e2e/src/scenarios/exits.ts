@@ -277,17 +277,25 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S24",
     title:
-      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent is stopped, curl takes for it): the next vibestd ends that execution not_started, fails the row once with one notice, and does not deliver it again",
+      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent and its pane's shell are stopped, so the shell keeps no job control over it, and curl takes for it): the next vibestd ends that execution not_started, fails the row once with one notice, and does not deliver it again",
     run: async (w) => {
       const p = await piProject(w, "s24")
+      let shell: number | undefined
       let stopped: number | undefined
       try {
         p.model.release()
         const sub = await p.runSub("first")
         await until("idle", () => p.idle(sub), 60_000)
-        stopped = p.pid(sub) ?? undefined
-        expect(stopped !== undefined, "the subagent has no pid")
-        process.kill(stopped!, "SIGSTOP")
+        const harness = p.pid(sub) ?? undefined
+        expect(harness !== undefined, "the subagent has no pid")
+        shell = Number(
+          Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(harness)])
+            .stdout.toString()
+            .trim(),
+        )
+        process.kill(shell, "SIGSTOP")
+        stopped = harness
+        process.kill(harness!, "SIGSTOP")
         const message = ask("cut")
         await p.vibestSend(sub, message)
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, sub)!.p
@@ -330,6 +338,7 @@ const checks: ReadonlyArray<Check> = [
         expect(copies?.n === 1, `the row exists ${copies?.n} times`)
       } finally {
         if (stopped !== undefined) process.kill(stopped, "SIGCONT")
+        if (shell !== undefined) process.kill(shell, "SIGCONT")
         await p.close()
       }
     },
@@ -421,7 +430,6 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const p = await piProject(w, "s29")
       try {
-        p.model.release()
         const daemon = await w.daemonPid()
         const sub = await p.runSub("t1")
         const placed = () =>
@@ -434,6 +442,7 @@ const checks: ReadonlyArray<Check> = [
           expect(Date.now() < deadline, `${sub}: its terminal never opened`)
         await w.killDaemon(daemon)
         await p.startDaemon()
+        p.model.release()
         await until(
           "one completed execution",
           () => p.executionEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed",

@@ -706,9 +706,9 @@ export const expectReplied = async (w: World, sub: string) => {
     "session.created",
     "process.started",
     "inbox.queued",
-    "process.placed",
     "execution.started",
     "inbox.moved",
+    "process.placed",
     "execution.ended",
   ])
   const task = row<{ status: string; execution: number | null }>(
