@@ -143,6 +143,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   pickup check after typing, reconciliation and interrupt all read it the same way (`Runtimes.sessionState`), so a
   runtime with no status for a harness (herdr-core) needs no harness-specific branch: a typed message is accepted by
   the harness's report of it, never by the runtime not knowing.
+- First input in the launch argv: a harness definition with `firstInput` gets a starting process's first message (a
+  new session's task, or the queued messages that resume an exited one) as launch arguments instead of typed text.
+  vibestd opens the execution at launch and waits for the harness's report to accept it, answering the definition's
+  startup dialogs meanwhile; no report within the ready timeout ends it `not_started`. agy uses it
+  (`--prompt-interactive`): agy reports nothing before its first input, so on a runtime with no state for it nothing
+  else could say it is ready. In-place restart and moves still type.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). `readyOnStart: "integration"` makes a process
   that starts a new conversation wait for the ready report even when the runtime already shows it idle: a runtime can

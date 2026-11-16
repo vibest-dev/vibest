@@ -67,9 +67,9 @@ export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const sessionLive = yield* SessionLive.Service
   const locks = yield* SessionLocks.Service
-  const { prompt, interruptAgent } = yield* Executions.Service
+  const { prompt, interruptAgent, launched } = yield* Executions.Service
   const exits = yield* Exits.Service
-  const { worktreeOf, handTask, resume } = yield* Placement.Service
+  const { worktreeOf, handTask, resume, takesFirstInput } = yield* Placement.Service
   const reactor = yield* Reactor.make
   const { locked } = locks
   const { undelivered } = inbox
@@ -78,6 +78,13 @@ export const make = Effect.gen(function* () {
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
+    hand: (
+      text: string,
+      onHandover: Effect.Effect<void>,
+    ) => Effect.Effect<
+      string | undefined,
+      Effect.Error<ReturnType<typeof prompt>> | Effect.Error<ReturnType<typeof resume>>
+    > = (text, onHandover) => prompt(h, session, terminal, text, onHandover),
   ) {
     const task = yield* db.inbox.untakenTask(session.id)
     if (task !== undefined) return yield* handTask(h, session, terminal, task)
@@ -88,10 +95,7 @@ export const make = Effect.gen(function* () {
     const ids = batch.map((r) => r.id)
     const claimed: Array<number> = []
     let handedInto: number | undefined
-    yield* prompt(
-      h,
-      session,
-      terminal,
+    yield* hand(
       batch.map((r) => r.message).join("\n\n"),
       Effect.flatMap(db.session.openExecution(session.id), (execution) =>
         db.inbox.claim(session.id, ids).pipe(
@@ -183,6 +187,10 @@ export const make = Effect.gen(function* () {
           id,
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
+      if ((yield* db.inbox.untakenTask(id)) === undefined && (yield* takesFirstInput(session)))
+        return yield* deliverQueued(h, session, terminal, (text, onHandover) =>
+          resume(h, session, text).pipe(Effect.flatMap((opened) => launched(h, session, opened, onHandover))),
+        )
       yield* resume(h, session)
     }
     const fresh = (yield* db.session.getSession(id)) ?? session

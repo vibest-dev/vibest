@@ -273,6 +273,10 @@ release. Each release lists what broke, who is affected and how to migrate under
 - Harness definitions take `guardCall(event)` (plugin authors): it turns a harness's own pre-tool event into the shape
   vibest's guard reads (`tool_name`, `tool_input`, `cwd`); `undefined` lets a tool the guard has no rule for through.
   agy uses it.
+- Harness definitions take `firstInput(text)` (plugin authors): a starting process (a new session, or a resume of an
+  exited one with queued messages) gets its first message as these launch arguments instead of typed text, and the
+  harness's report of it accepts the execution. agy uses `--prompt-interactive`, so agy runs on herdr-core, which has
+  no state for it.
 
 ### Changed
 

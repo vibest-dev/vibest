@@ -11,7 +11,10 @@ loads from the install's `harnesses/agy` folder, which vibest adds to each sessi
   agy's `error`. agy's `Stop` carries no answer, so there is no reply text: `vibest peek` shows it.
 - **the tool guard**: `PreToolUse` goes to `vibest integration guard --harness agy`; vibestd answers in agy's shape and
   a refused call does not run. When `vibest` fails, `hook.sh` answers `deny` itself.
-- **typed messages**: vibestd types messages into agy, and empties the input box first (`ctrl+e`, then `ctrl+u` 40
+- **the first message**: a process vibest starts (a new session, or a resume after its terminal is gone) gets its first
+  message as `agy --prompt-interactive <message>`, so agy takes it once it is ready itself: herdr-core has no state for
+  agy that could say so. While it waits, vibest's startup step accepts agy's folder trust dialog.
+- **typed messages**: later messages are typed into agy, and empties the input box first (`ctrl+e`, then `ctrl+u` 40
   times): a draft you left there unsent is cleared.
 - **agy's own subagents** run their own conversations in the same process and fire the same hooks; only the first
   conversation the process reports goes to vibestd.
@@ -26,6 +29,10 @@ credentials are not read or changed by vibest.
 - The guard is fail-open where agy is: a hook agy cannot start, or one past its 30 s timeout, is skipped and the tool
   runs, with nothing else asking first (`--dangerously-skip-permissions`).
 - The added folder shows in agy's workspace list, and the agent can read it.
+- Each new folder a session runs in (every worktree) is added to the profile's `trustedWorkspaces` by agy itself when
+  vibest accepts its trust dialog; the list grows by one entry per session, and vibest never reads or cleans it.
+- On herdr-core nothing shows agy blocked (sign-in, a plan waiting for approval), and an execution ended by Esc stays
+  open until the next `Stop` or `vibest interrupt`.
 - Usage: vibest counts agy as limited only when every model group in `agy /usage` has an exhausted window; a session
   that hits one model's limit ends at its `Stop` with agy's error.
 

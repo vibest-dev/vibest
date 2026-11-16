@@ -238,6 +238,41 @@ export const make = Effect.gen(function* () {
     return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
   }, Effect.scoped)
 
+  const launched = Effect.fn("Executions.launched")(function* (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+    onHandover: Effect.Effect<void> = Effect.void,
+  ) {
+    const adapter = yield* harnesses.get(harnessIdOf(session))
+    const open = yield* db.session.openExecution(session.id)
+    const execution =
+      open ??
+      (yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(session.id, at))).execution
+    yield* onHandover
+    const step = adapter.startup ? yield* adapter.startup : undefined
+    const answer =
+      step === undefined
+        ? Effect.void
+        : step({
+            screen: h.read(terminal, 40).pipe(Effect.orElseSucceed(() => "")),
+            sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
+          })
+    const taken = Effect.gen(function* () {
+      if ((yield* db.session.openExecution(session.id)) !== execution) return true
+      return yield* db.session.executionAccepted(session.id)
+    })
+    const took = yield* taken.pipe(
+      Effect.tap((done) => (done ? Effect.void : answer)),
+      Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
+      Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
+    )
+    if (took) return undefined
+    yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
+    yield* db.session.closeExecution(session.id, execution, "not_started")
+    return `task_not_started: ${session.id} did not start working on the message it was started with; ${peekHint(session.id)}`
+  })
+
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
     yield* db.session.endExecution(
       session.id,
@@ -246,7 +281,7 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish }
+  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, launched, finish }
 })
 
 export type Interface = Effect.Success<typeof make>

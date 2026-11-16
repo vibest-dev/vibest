@@ -78,6 +78,7 @@ export const agy: Harness.HarnessDefinition = {
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "esc",
+  firstInput: (text) => ["--prompt-interactive", text],
   clearKeys: ["ctrl+e", ...Array.from({ length: LINE_KILLS }, () => "ctrl+u")],
   startup: agyStartup,
   replyField: "text",

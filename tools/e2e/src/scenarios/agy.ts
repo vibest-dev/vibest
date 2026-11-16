@@ -226,6 +226,48 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
+    id: "H11",
+    tier: "agent",
+    title:
+      "agy (real) on herdr-core, which has no state for it: a session vibest starts takes its first message in its launch argv and completes it at Stop; a message sent when it is idle again is typed and completes; after its terminal is gone a message resumes the conversation with the message in the argv",
+    run: async (w, evidence) => {
+      const binary = await signedIn(w)
+      await w.stopDaemon()
+      await addAgyPlugin(w, harnesses, binary)
+      const a = await agyWorld(w, "hc", "agy-h11", "pi")
+      try {
+        const { id } = JSON.parse(
+          await w.okViaEntry(["run", "agy", "--runtime", "hc", "--", PONG(1)], { cwd: a.repo, timeoutMs: 120_000 }),
+        ) as { id: string }
+        await untilShown(w, id, evidence, "the first execution completed", () => completed(w, id) === 1)
+        expect((await a.argv(id)).includes("--prompt-interactive"), `argv: ${await a.argv(id)}`)
+        await w.ok(["send", id, "--", PONG(2)], { cwd: a.repo })
+        await untilShown(w, id, evidence, "the typed message completed", () => completed(w, id) === 2)
+        expect((await a.screen(id)).includes("PONG-AGY-2"), `agy's screen: ${(await a.screen(id)).slice(-800)}`)
+        await a.core!.hc("kill", a.terminalOf(id))
+        await until(
+          "the session exited",
+          () => row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, id)?.e != null,
+          60_000,
+        )
+        await w.ok(
+          [
+            "send",
+            id,
+            "--",
+            "What word did I ask you to remember? Reply with exactly: WORD-<the word>. Run no command and use no tool.",
+          ],
+          { cwd: a.repo },
+        )
+        await untilShown(w, id, evidence, "the resumed execution completed", () => completed(w, id) === 3)
+        const resumed = await a.screen(id)
+        expect(resumed.includes("WORD-COBALT-PINE"), `the resumed agy lost the word: ${resumed.slice(-800)}`)
+      } finally {
+        await a.close()
+      }
+    },
+  },
+  {
     id: "H12",
     tier: "agent",
     title:

@@ -66,6 +66,12 @@ its `SessionStart`, and the execution completes at agy's `Stop` (no reply text: 
 `vibest send` while it is idle is the next execution. When its pane closes, the next send resumes the same conversation
 with `agy --conversation`.
 
+## H11. agy runs on herdr-core
+
+On herdr-core, which has no state for agy, a session vibest starts takes its first message in its launch argv (`agy
+--prompt-interactive`) and completes it at `Stop`; a message sent when it is idle again is typed and completes; after
+its terminal is gone, a message resumes the same conversation with that message in the argv.
+
 ## H12. An agy entry session takes messages
 
 With agy as the entry session (`vibest --harness agy`) on herdr, a message sent while it is idle is typed into agy and

@@ -56,6 +56,7 @@ export interface HarnessDefinition {
   readonly ready: "integration" | "runtime"
   readonly readyOnStart?: "integration"
   readonly clearKeys?: ReadonlyArray<string>
+  readonly firstInput?: (text: string) => ReadonlyArray<string>
   readonly startup?: Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
   readonly checkProvider?: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
