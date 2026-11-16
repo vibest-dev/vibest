@@ -22,7 +22,7 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import { asProcess, entryCommand, restartArgv } from "../launch.ts"
+import { entryCommand, restartArgv } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import { Processes } from "../processes.ts"
@@ -125,7 +125,10 @@ export const make = Effect.gen(function* () {
           ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
         }),
       })
-      return restartArgv(command)
+      return (process: number | undefined) =>
+        restartArgv(
+          process === undefined ? command : { ...command, env: { ...command.env, VIBEST_PROCESS: String(process) } },
+        )
     }).pipe(
       Effect.provideService(Agents.Service, agents),
       Effect.provideService(Harness.Service, harness),
@@ -146,7 +149,7 @@ export const make = Effect.gen(function* () {
     readonly pid: number | undefined
     readonly harnessSessionId: string | null
     readonly argv: Effect.Effect<
-      ReadonlyArray<string>,
+      (process: number | undefined) => ReadonlyArray<string>,
       Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launching>>
     >
     readonly liveNow: LiveNow
@@ -208,10 +211,7 @@ export const make = Effect.gen(function* () {
         }),
       )
       if (signalled.sent === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
-      const ran = yield* h.run!(
-        t.terminal,
-        signalled.process === undefined ? argv : asProcess(argv, signalled.process),
-      ).pipe(Effect.exit)
+      const ran = yield* h.run!(t.terminal, argv(signalled.process)).pipe(Effect.exit)
       const cameBack = yield* Effect.scoped(
         Effect.gen(function* () {
           const started = yield* startedAgain(id, t.liveNow).pipe(Effect.forkScoped)
@@ -239,7 +239,7 @@ export const make = Effect.gen(function* () {
   }
 
   const againArgv = (session: SessionRow) =>
-    Effect.map(launching(session, (session.process?.conversation ?? null) !== null), (plan) => plan.argv)
+    Effect.map(launching(session, (session.process?.conversation ?? null) !== null), (plan) => () => plan.argv)
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {

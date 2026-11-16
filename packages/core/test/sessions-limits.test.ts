@@ -183,11 +183,7 @@ describe.concurrent("Session", () => {
       const moving = yield* Effect.forkChild(sessions.check(id))
       yield* until(herdr.callsTo("run"), (calls) => calls.length === 1)
       const [run] = yield* herdr.callsTo("run")
-      assert.deepStrictEqual(run!.argv.slice(0, 3), [
-        "env",
-        `VIBEST_PROCESS=${yield* db.session.currentProcessId(id)}`,
-        "first",
-      ])
+      assert.strictEqual(run!.argv[0], "first")
       assert.strictEqual(run!.argv.at(-2), "--first")
       assert.include(run!.argv.at(-1)!, "do it")
       const execution = yield* until(db.session.openExecution(id), (open) => open !== undefined)

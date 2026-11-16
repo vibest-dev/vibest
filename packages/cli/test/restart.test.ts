@@ -108,11 +108,7 @@ describe("restart in place", () => {
       yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
       const [run] = yield* herdr.callsTo("run")
-      assert.deepStrictEqual(run!.argv.slice(0, 3), [
-        "env",
-        `VIBEST_PROCESS=${yield* db.session.currentProcessId(id)}`,
-        "pi",
-      ])
+      assert.strictEqual(run!.argv[0], "pi")
       assert.includeMembers([...run!.argv], ["--session-id", (down.process?.conversation ?? null)!])
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })

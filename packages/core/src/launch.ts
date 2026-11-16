@@ -125,12 +125,6 @@ export const restartArgv = (command: {
   readonly env: Readonly<Record<string, string>>
 }) => ["env", ...identityPairs(command.env), command.file, ...command.args]
 
-export const asProcess = (argv: ReadonlyArray<string>, process: number) => [
-  "env",
-  `VIBEST_PROCESS=${process}`,
-  ...(argv[0] === "env" ? argv.slice(1) : argv),
-]
-
 export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
   const value = argv[argv.indexOf(name) + 1]
   return argv.includes(name) && value !== undefined && !value.startsWith("-") ? value : undefined
