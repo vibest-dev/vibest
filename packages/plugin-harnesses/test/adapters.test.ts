@@ -30,6 +30,14 @@ describe("HarnessAdapter", () => {
   const input = launchInput
   const message = "the task\non two lines"
 
+  it("cursor's launch ends with -- and the message after every option, so no option that takes several values swallows it", () => {
+    for (const resume of [false, true])
+      assert.deepStrictEqual(Harness.harnessArgv(cursor, { ...input, model: "m", resume }, message).slice(-2), [
+        "--",
+        message,
+      ])
+  })
+
   it("agy's launch ends with --prompt-interactive and the message, after every option, new or resumed", () => {
     for (const resume of [false, true])
       assert.deepStrictEqual(Harness.harnessArgv(agy, { ...input, model: "m", resume }, message).slice(-2), [

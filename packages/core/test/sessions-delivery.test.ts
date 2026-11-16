@@ -397,6 +397,7 @@ describe.concurrent("Session", () => {
       yield* sessions.send(id, "next")
       const calls = yield* until(herdr.callsTo("open"), (c) => c.length > starts)
       assert.deepStrictEqual(calls.at(-1)!.argv.slice(0, 2), ["cursor-agent", "--resume=c-123"])
+      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* writeEnd(id, "cursor", { conversation_id: "c-other", text: "status: completed" }, 5000)
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
@@ -459,29 +460,11 @@ describe.concurrent("Session", () => {
       const cursorTerminal = (yield* herdr.terminalOf(id))?.id
       const toCursor = (yield* herdr.callsTo("send")).filter((c) => c.terminal === cursorTerminal)
       const typed = toCursor.flatMap((c, i) => (c.text === undefined ? [] : [toCursor[i - 1]?.keys]))
-      assert.deepStrictEqual(typed, [["ctrl+u"], ["ctrl+u"]])
+      assert.deepStrictEqual(typed, [["ctrl+u"]])
       const pi = yield* spawnWorking(repo, "pi")
       const piTerminal = (yield* herdr.terminalOf(pi.id))?.id
       const toPi = (yield* herdr.callsTo("send")).filter((c) => c.terminal === piTerminal)
       assert.isFalse(toPi.some((c) => c.keys !== undefined))
-    }),
-  )
-
-  test(
-    "Cursor on a runtime that shows its terminal idle at once: a new session's first task still waits for its ready report",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sessions = yield* Session.Service
-      const db = yield* Db.Service
-      yield* Ref.set(herdr.onStarted, (session) =>
-        herdr.updateAgent(session, (a) => ({ ...a, status: "idle", registerPrompt: false })),
-      )
-      const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository, "cursor"))
-      yield* until(db.session.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
-      for (let i = 0; i < 20; i++) yield* untilVirtual(Effect.succeed(0), () => true)
-      assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
-      yield* db.session.patchLive(id, { ready: yield* Clock.currentTimeMillis })
-      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("do it")))
     }),
   )
 
@@ -554,7 +537,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "Cursor on a runtime with no status for it: the task waits for its ready report; typed, its first activity report accepts it and shows it working, with no resend; its execution end shows it idle, and an interrupt goes by its open execution",
+    "Cursor on a runtime with no status for it: the task is in its launch argv; its first activity report accepts it and shows it working, with no resend; its execution end shows it idle, and an interrupt goes by its open execution",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -567,12 +550,10 @@ describe.concurrent("Session", () => {
       yield* until(db.session.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
       for (let i = 0; i < 20; i++) yield* untilVirtual(Effect.succeed(0), () => true)
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
+      assert.include((yield* herdr.callsTo("open"))[0]!.argv.at(-1)!, "do it")
       const integration = yield* Integration.Service
       const who = { id, entry: false, harness: CURSOR.id }
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
-      yield* db.session.patchLive(id, { ready: yield* Clock.currentTimeMillis })
-      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("do it") === true))
-      assert.notStrictEqual((yield* db.session.getSession(id))!.status, "working")
       yield* integration.prompt(who, thought)
       assert.strictEqual((yield* db.session.getSession(id))!.status, "working")
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")

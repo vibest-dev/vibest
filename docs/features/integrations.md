@@ -49,8 +49,8 @@ reaches the model, and reading in its own Project folder is allowed.
 
 ## I10. Cursor reports to vibestd
 
-A real cursor-agent on the user's login reports to vibestd on herdr and on herdr-core: its first task is typed only
-after its plugin reported ready, `vibest ls` shows it working during an execution and idle after it, `vibest result` carries
+A real cursor-agent on the user's login reports to vibestd on herdr and on herdr-core: its first task is in its launch
+argv, `vibest ls` shows it working during an execution and idle after it, `vibest result` carries
 the reply, a message sent while the user's unsent text sits in its input box clears that text and is delivered, `vibest
 interrupt` ends the execution as interrupted with no notice (also when it lands right after vibest typed a message, and
 the next message is then delivered alone), and the plugin never writes to the terminal.
@@ -59,8 +59,8 @@ Checks `I10-herdr` and `I10-hc` (tier `agent`) script this on the user's Cursor 
 Cursor dispatched and its screen in each input-box state.
 
 Known limits, from Cursor itself: results come only from its response, so an execution it ends without one (an error,
-Ctrl+C) is `lost` on herdr and stays open on herdr-core until the next response or `vibest interrupt`; a resumed Cursor
-has no ready report; it never shows as blocked on herdr-core.
+Ctrl+C) is `lost` on herdr and stays open on herdr-core until the next response or `vibest interrupt`; it never shows
+as blocked on herdr-core.
 
 ## I11. Another vibest first on PATH
 

@@ -11,10 +11,10 @@ type AgentState = R.AgentState
 
 export const KIND = "herdr"
 
+const withMessage = (argv: ReadonlyArray<string>) => argv[0] === "sh" && argv[2]?.includes(`cat -- "$0"`) === true
+
 const execed = (argv: ReadonlyArray<string>): Array<string> =>
-  argv[0] === "sh" && argv[2]?.includes(`cat -- "$0"`)
-    ? [...argv.slice(4), fs.readFileSync(argv[3]!, "utf8")]
-    : [...argv]
+  withMessage(argv) ? [...argv.slice(4), fs.readFileSync(argv[3]!, "utf8")] : [...argv]
 
 export interface FakeAgent {
   readonly vibestSession?: string
@@ -293,7 +293,13 @@ export class FakeRuntime extends Context.Service<
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
             const record = HashMap.get(yield* Ref.get(agents), terminal.id)
             if (Option.isNone(record)) return
-            yield* updateAgent(terminal.id, (current) => ({ ...current, alive: true, status: "idle" }))
+            const working = withMessage(argv) && !options.promptsIgnored
+            yield* updateAgent(terminal.id, (current) => ({
+              ...current,
+              alive: true,
+              status: working ? "working" : "idle",
+              seq: working ? current.seq + 1 : current.seq,
+            }))
             const session = record.value.vibestSession
             if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
           }),
@@ -355,8 +361,8 @@ export class FakeRuntime extends Context.Service<
               const started: FakeAgent = {
                 ...prior,
                 ...(session !== undefined ? { vibestSession: session } : {}),
-                status: coordinator ? "working" : "idle",
-                seq: 0,
+                status: coordinator || (withMessage(input.argv) && !options.promptsIgnored) ? "working" : "idle",
+                seq: withMessage(input.argv) && !options.promptsIgnored ? 1 : 0,
                 alive: true,
               }
               yield* Ref.update(agents, (map) => {

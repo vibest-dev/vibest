@@ -942,10 +942,8 @@ conversation only, never on `--resume`), `preToolUse`, `afterAgentThought`, `pos
 `afterAgentResponse`; a prompt typed in the pane is not seen as it is submitted, but its first thought or tool report
 opens an execution for it (with no prompt text), which its response ends; and an execution Cursor ends without a
 response (an error, Ctrl+C) sends nothing: on a runtime with state it becomes `lost` once the runtime shows the pane
-idle with no end for 10 s, on herdr-core it stays open until the next response or `vibest interrupt`. `sessionStart` records the conversation and reports ready; the definition's `readyOnStart` makes a new
-session wait for it even on herdr, which calls the pane settled before Cursor has drawn its input box. A resumed
-Cursor reports nothing, so it is ready when the runtime shows it settled; on herdr-core, which shows no state, it has
-no ready signal. Cursor cannot take messages through its hooks, so they are typed: each typed message is preceded by
+idle with no end for 10 s, on herdr-core it stays open until the next response or `vibest interrupt`. `sessionStart` records the conversation and reports ready. A starting Cursor, new or resumed, takes its first message
+in its launch argv, so no start waits for a ready signal. Cursor cannot take messages through its hooks, so they are typed: each typed message is preceded by
 `ctrl+u` (the definition's `clearKeys`), which empties the input box of whatever is there, a draft of the user's
 included. The hook
 script acts only for a vibest session (`VIBEST_SESSION_ID`). The guard hook is fail-closed: a crash, timeout or missing answer

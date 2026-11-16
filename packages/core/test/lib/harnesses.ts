@@ -97,7 +97,7 @@ export const CURSOR: HarnessDefinition = {
   interruptKey: "ctrl+c",
   replyField: "text",
   ready: "runtime",
-  readyOnStart: "integration",
+  firstInput: ["--"],
   clearKeys: ["ctrl+u"],
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
@@ -122,10 +122,8 @@ export const CURSOR: HarnessDefinition = {
 export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", delivery: "pull" }
 export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", delivery: "pull" }
 
-const { readyOnStart: _readyOnStart, ...cursorAtStart } = CURSOR
-
 export const FIRST_IN_ARGV: HarnessDefinition = {
-  ...cursorAtStart,
+  ...CURSOR,
   id: "first",
   binary: "first",
   firstInput: ["--first"],

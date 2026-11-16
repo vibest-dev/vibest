@@ -54,7 +54,6 @@ export interface HarnessDefinition {
   readonly replyField: "text" | "last_assistant_message"
   readonly delivery: "typed" | "pull"
   readonly ready: "integration" | "runtime"
-  readonly readyOnStart?: "integration"
   readonly clearKeys?: ReadonlyArray<string>
   readonly firstInput?: ReadonlyArray<string>
   readonly startup?: Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>

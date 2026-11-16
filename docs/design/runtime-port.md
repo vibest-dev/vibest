@@ -155,7 +155,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   after the process is recorded and before it starts, so a report the harness sends at once finds it. If that start fails (the terminal does not open, or the in-place start fails), the execution it opened is closed
   `not_started` unless the harness already ended it, so a later message resumes the session again. vibestd then
   waits for the harness's report to accept it, answering the definition's startup dialogs meanwhile; no report within
-  the ready timeout ends it `not_started`. agy uses it (`--prompt-interactive`): agy reports nothing before its first
+  the ready timeout ends it `not_started`. agy (`--prompt-interactive`) and Cursor (`--`) use it: agy reports nothing before its first
   input, so on a runtime with no state for it nothing else could say it is ready. An in-place restart carries no
   message. The entry session's first input (`ENTRY_FIRST_INPUT` in `session/entry.ts`, given to a harness that takes
   the system prompt in a prompt) does not go through `Placement.launching`: it is queued and typed, so agy as the entry
@@ -166,11 +166,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   subagent started again in its own pane (a restart, a usage-limit move in place) keeps the pane's earlier value:
   herdr starts it as a named agent from its bare argv, which carries no environment.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
-  `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). `readyOnStart: "integration"` makes a process
-  that starts a new conversation wait for the ready report even when the runtime already shows it idle: a runtime can
-  call a terminal idle before the harness has drawn its input box, and text typed then goes to the shell. A resumed
-  process (one that starts on a recorded conversation) keeps `ready`, for a harness that reports nothing when it
-  resumes (Cursor's `sessionStart` runs only for a new conversation). A process that exits before its execution ends
+  `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). A process that exits before its execution ends
   loses the execution, as today.
 - Empty input box before typing: when a harness definition gives `clearKeys`, vibestd sends them right before it types
   a message (a first task, delivered messages, a retype), whatever the box holds: a draft the user left there is
@@ -189,8 +185,7 @@ Pi UI widget kinds describe how a prompt is drawn, not why it blocks, so vibest 
 question or auth; an unknown blocked reason would omit kind, and native reports are left unchanged.
 
 Cursor writes no terminal status. Its hooks run detached from the terminal (no `/dev/tty`), so its plugin reports to
-vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types a new session's first task only then, on
-herdr too: `readyOnStart`), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
+vibestd over RPC instead: `sessionStart` is `Session.Ready` (a starting Cursor takes its first message in its launch argv), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
 also hooks it) are an execution start, which vibestd shows as working, and `afterAgentResponse` is the execution end, shown as
 idle. Cursor 2026.11.13 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
 when user or project hooks also have one. It reports no permission/question/auth waits, so vibestd never shows it
@@ -198,8 +193,6 @@ blocked on herdr-core. What follows from that on herdr-core, which has no state 
 
 - An execution Cursor ends without a response (an error, Ctrl+C) stays open until the next response or
   `vibest interrupt`; on herdr the runtime's idle makes it `lost` after 10 s.
-- A resumed Cursor (`--resume` runs no `sessionStart`) has no ready signal: the first message after a resume is typed
-  without waiting for one.
 - A prompt a person typed in a Cursor pane opens an execution at its first thought or tool report (a report with no
   prompt text, `userPrompt` giving `{ text: "" }`, opens an execution with no input when none is open, on any runtime),
   so a message sent meanwhile waits for that execution's end, which the next response closes. A message sent in the
