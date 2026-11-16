@@ -155,12 +155,13 @@ export const make = Effect.gen(function* () {
       const owned =
         terminalOf(session).machine === "local" && validPid(harnessPid) ? yield* processes.tree(harnessPid) : undefined
       const pane = yield* closeTerminal()
+      const survivors: Array<number> = []
       if (pane !== "kept" && owned !== undefined) {
         const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(TREE_EXIT_WAIT)
         for (;;) {
-          const alive: Array<number> = []
-          for (const pid of owned) if ((yield* processes.liveness(pid)) !== "exited") alive.push(pid)
-          if (alive.length === 0 || (yield* Clock.currentTimeMillis) >= deadline) break
+          survivors.length = 0
+          for (const pid of owned) if ((yield* processes.liveness(pid)) !== "exited") survivors.push(pid)
+          if (survivors.length === 0 || (yield* Clock.currentTimeMillis) >= deadline) break
           yield* Effect.sleep(TREE_EXIT_POLL)
         }
       }
@@ -168,8 +169,15 @@ export const make = Effect.gen(function* () {
         pane === "kept"
           ? { state: "unknown" as const, why: "its terminal was not closed, so nothing is proven" }
           : yield* confirmExited
-      const processState: ProcessState = confirmed.state
-      if (processState === "exited" && exitedAt(session) === null) {
+      const ownState = (): ProcessState => {
+        if (exitedAt(session) !== null) return "exited"
+        if (owned === undefined) return confirmed.state
+        return survivors.length > 0 ? "alive" : "exited"
+      }
+      const processState: ProcessState = pane === "kept" ? "unknown" : ownState()
+      if (survivors.length > 0)
+        reasons.push(`process ${survivors.join(", ")} of ${id} still runs after its terminal closed`)
+      if (pane !== "kept" && exitedAt(session) === null) {
         yield* db.session.endProcess(id, "archived")
       }
       let shared = false
@@ -213,7 +221,7 @@ export const make = Effect.gen(function* () {
         const isLinked = root !== undefined && (yield* linked(root, worktree))
         const children = isLinked ? undefined : yield* listProjectRepositories(worktree).pipe(Effect.orDie)
         if (!isLinked && !children) return `${worktree} is not a worktree of its repository; left alone`
-        if (processState !== "exited") return `worktree kept: ${confirmed.why}`
+        if (confirmed.state !== "exited") return `worktree kept: ${confirmed.why}`
         if (children) {
           const notes: string[] = []
           for (const child of children) {
