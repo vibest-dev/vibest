@@ -289,28 +289,31 @@ describe("Db", () => {
     ),
   )
 
-  it.effect("an observed end that needs the integration's ready report waits for the process to report ready", () =>
-    memory(
-      Effect.gen(function* () {
-        const db = yield* Db.Service
-        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-        yield* db.session.insertSession(session(id), yield* projectOf("r"))
-        yield* db.session.startObserved(id, "typed", 1)
+  it.effect(
+    "an observed end that needs the ready report waits for it unless its reporter names the current process",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db.Service
+          const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          yield* db.session.insertSession(session(id), yield* projectOf("r"))
+          yield* db.session.startObserved(id, "typed", 1)
 
-        const end = {
-          harness: "pi",
-          at: 2,
-          status: "completed" as const,
-          reply: "done",
-          failure: undefined,
-          limited: false,
-          conversation: undefined,
-        }
+          const end = {
+            harness: "pi",
+            at: 2,
+            status: "completed" as const,
+            reply: "done",
+            failure: undefined,
+            limited: false,
+            conversation: undefined,
+          }
 
-        assert.isUndefined(yield* db.session.endObserved(id, { ...end, needsReady: true }))
-        assert.strictEqual(yield* db.session.endObserved(id, { ...end, needsReady: false }), "completed")
-      }),
-    ),
+          assert.isUndefined(yield* db.session.endObserved(id, { ...end, needsReady: true }))
+          const current = (yield* db.session.getSession(id))!.process!.id
+          assert.strictEqual(yield* db.session.endObserved(id, { ...end, needsReady: true }, current), "completed")
+        }),
+      ),
   )
 
   it.effect("a rolled back endObserved leaves the live status working", () =>

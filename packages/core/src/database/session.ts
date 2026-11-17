@@ -795,7 +795,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             if (current === undefined || current.start.harness !== end.harness) return undefined
 
-            if (end.needsReady && current.readyAt === null) return undefined
+            if (end.needsReady && current.readyAt === null && process !== current.id) return undefined
             const open = yield* openExecution(id)
 
             if (open === undefined && end.status === "interrupted") return undefined

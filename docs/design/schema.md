@@ -257,7 +257,10 @@ decided (`lost`, `not_started`, an exit, an interrupt it closed) has no `reply`.
 A reported end or start is written only for the session's current process: the harness's integration sends the
 process id vibestd started it as (`VIBEST_PROCESS`, or the one the ready report's answer gave after an in-place
 restart), and a report naming another process is dropped. A reported end is also written only for the harness the
-current process runs, and, for a harness whose integration reports ready, only after that process's ready report.
+current process runs, and, for a harness whose integration reports ready, only after that process's ready report
+unless the report names the current process: the integration sends its ready report on its own, so under load an
+execution's end can arrive before the ready report is written, and a report naming the current process is already
+known to come from it.
 A conversation id or integration version a report carries is recorded under the same process check. An
 end that arrives while the open execution is not yet accepted belongs to earlier activity (a Claude background task's
 end, for example): it neither closes that execution nor opens another, and its reply is not kept. vibestd's own closes write only while the
