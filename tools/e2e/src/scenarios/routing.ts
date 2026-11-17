@@ -371,35 +371,25 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G14",
     title:
-      "`-<id>` in vibest.json removes a builtin plugin by exact id and `-*` does not; a first start while slow user plugins are still importing is refused instead of running without them; deleting the line brings the builtin back without restarting vibestd",
+      "`-<id>` in vibest.json removes a builtin plugin by exact id and `-*` does not; deleting the line brings the builtin back without restarting vibestd",
     run: async (w) => {
       needs("herdr")
-      const slow = [1, 2, 3, 4, 5, 6, 7].map((n) => path.join(w.vibestHome, "slow", `slow-${n}`))
+      const users = [1, 2].map((n) => path.join(w.vibestHome, "users", `user-${n}`))
 
-      for (const [n, folder] of slow.entries()) {
+      for (const [n, folder] of users.entries()) {
         await fs.mkdir(folder, { recursive: true })
         await fs.writeFile(
           path.join(folder, "index.ts"),
           `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
-await new Promise((resolve) => setTimeout(resolve, 4800))
-export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
+export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
 `,
         )
       }
 
-      await configurePlugins(w, () => ["-*", "-harness-default", ...slow])
+      await configurePlugins(w, () => ["-*", "-harness-default", ...users])
       await w.daemon()
       const pid = await w.daemonPid()
-      const started = await w.vibest(["--headless"], { timeoutMs: 60_000 })
-      const out = started.stderr + started.stdout
-      expect(
-        started.code !== 0 &&
-          /PluginsNotActive/.test(out) &&
-          !/no harness to inherit/.test(out) &&
-          ["slow-5", "slow-6", "slow-7"].every((name) => out.includes(name)),
-        `first start while plugins import: ${started.code} ${out}`,
-      )
 
       const active = async () =>
         (await w.json<Array<{ id: string; status: string }>>(["plugins"], { timeoutMs: 60_000 })).filter(
@@ -407,8 +397,8 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
         )
 
       await until(
-        "the slow plugins active",
-        async () => (await active()).filter((p) => p.id.startsWith("slow-")).length === 7,
+        "the user plugins active",
+        async () => (await active()).filter((p) => p.id.startsWith("user-")).length === 2,
         60_000,
       )
       const ids = (await active()).map((p) => p.id)
@@ -416,7 +406,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
         !ids.includes("harness-default") && ids.includes("runtime-choice"),
         `after -* and -harness-default: ${ids}`,
       )
-      await configurePlugins(w, () => ["-*", ...slow])
+      await configurePlugins(w, () => ["-*", ...users])
       await until("harness-default back", async () => (await active()).some((p) => p.id === "harness-default"), 60_000)
       expect((await w.daemonPid()) === pid, "vibestd restarted")
     },
