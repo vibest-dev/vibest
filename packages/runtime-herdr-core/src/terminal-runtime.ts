@@ -3,8 +3,8 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { launchLine, reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
-import { Clock, Deferred, Duration, Effect, Predicate, PubSub, type Scope, Schedule, Stream } from "effect"
-import { type api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
+import { Clock, Deferred, Duration, Effect, Predicate, PubSub, type Scope, Schedule, Schema, Stream } from "effect"
+import { api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export type Terminal = VibestPlugin.Runtime.Terminal
 
@@ -112,13 +112,14 @@ export const parseTerminalId = (id: string, fallbackSocket: string) => {
 
 const NOT_FOUND_KINDS = new Set(["not_found", "finished", "machine_unknown"])
 
-export const failure = (error: HcFailure | { readonly message: string }): RuntimeApi.RuntimeError => {
-  const tag = (error as { readonly _tag?: string })._tag
+export const failure = (
+  error: HcFailure | { readonly _tag?: undefined; readonly message: string },
+): RuntimeApi.RuntimeError => {
+  if (Predicate.isTagged(error, "HcTransportError"))
+    return new RuntimeApi.RuntimeError({ code: "unreachable", message: error.message })
 
-  if (tag === "HcTransportError") return new RuntimeApi.RuntimeError({ code: "unreachable", message: error.message })
-
-  if (tag === "HcError") {
-    const { kind, method } = error as { readonly kind: string; readonly method: string }
+  if (Predicate.isTagged(error, "HcError")) {
+    const { kind, method } = error
     const code = NOT_FOUND_KINDS.has(kind) ? "not_found" : kind === "blocked" ? "busy" : "failed"
 
     return new RuntimeApi.RuntimeError({ code, message: `${method}: ${error.message}` })
@@ -135,6 +136,10 @@ export const FOLLOW_ATTEMPTS = 8
 const FOLLOW_BACKOFF = reconnectSchedule({ first: Duration.millis(500), max: Duration.seconds(30) })
 
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
+
+const decodeCreated = Schema.decodeUnknownSync(api.Terminal)
+const decodeStatus = Schema.decodeUnknownSync(Schema.Struct({ status: Schema.optional(Schema.NullOr(api.Status)) }))
+const decodeForeground = Schema.decodeUnknownSync(Schema.NullishOr(api.Foreground))
 
 type Core = {
   readonly hc: HcClient
@@ -190,7 +195,7 @@ export const make = (deps: {
       const { type, terminal, data } = notice.event
 
       if (type === "created") {
-        track(core, data as api.Terminal)
+        track(core, decodeCreated(data))
 
         return Effect.void
       }
@@ -198,7 +203,7 @@ export const make = (deps: {
       if (EXIT_EVENTS.has(type)) return exited(socket, core, terminal)
 
       if (type === "status") {
-        const state = agentStateOf((data as { readonly status?: api.Status | null }).status)
+        const state = agentStateOf(decodeStatus(data).status)
 
         return state === "unknown"
           ? Effect.void
@@ -216,7 +221,7 @@ export const make = (deps: {
         })
 
       if (type === "foreground") {
-        if (!atShell(data as api.Foreground)) {
+        if (!atShell(decodeForeground(data))) {
           core.busy.add(terminal)
 
           return core.hc

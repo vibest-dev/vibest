@@ -11,6 +11,8 @@ export type ParamsOf<M extends Method> = (typeof METHODS)[M]["params"]["Encoded"
 
 export type ResultOf<M extends Method> = (typeof METHODS)[M]["result"]["Type"]
 
+const RESULTS: { readonly [M in Method]: { readonly result: Schema.Codec<ResultOf<M>> } } = METHODS
+
 export class HcError extends Schema.TaggedError<HcError>()("HcError", {
   method: Schema.String,
   kind: Schema.String,
@@ -170,7 +172,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
     m.method === undefined && (m.id === id || m.id === null)
 
   const decodeResult = <M extends Method>(method: M, message: Message) =>
-    Schema.decodeUnknownEffect(METHODS[method].result as Schema.Codec<ResultOf<M>>)(message.result).pipe(
+    Schema.decodeUnknownEffect(RESULTS[method].result)(message.result).pipe(
       Effect.mapError((e) => new HcTransportError({ method, message: `the result does not match hc schema: ${e}` })),
     )
 
