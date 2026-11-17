@@ -13,18 +13,15 @@ export const input = (value: string, what: string) =>
     return text
   })
 
-const notText = (bytes: Uint8Array) => {
-  if (bytes.includes(0)) return true
-  if (bytes.length === 0) return false
+const textOf = (bytes: Uint8Array) => {
+  if (bytes.includes(0)) return undefined
   let controls = 0
   for (const byte of bytes) if (byte < 9 || (byte > 13 && byte < 32)) controls++
-  if (controls / bytes.length > 0.3) return true
+  if (bytes.length > 0 && controls / bytes.length > 0.3) return undefined
   try {
-    const text = new TextDecoder("utf8", { fatal: true }).decode(bytes)
-    const encoded = new TextEncoder().encode(text)
-    return encoded.byteLength !== bytes.byteLength || encoded.some((byte, i) => byte !== bytes[i])
+    return new TextDecoder("utf8", { fatal: true }).decode(bytes)
   } catch {
-    return true
+    return undefined
   }
 }
 
@@ -44,8 +41,9 @@ export const attachFiles = (prompt: string, files: ReadonlyArray<string>) =>
       const bytes = yield* fs
         .readFile(resolved)
         .pipe(Effect.mapError((e) => new FileInput({ message: `cannot read --file ${file}: ${e.message}` })))
-      if (notText(bytes)) return yield* new FileInput({ message: `--file ${file} is not text` })
-      blocks.push(`File: ${resolved}\n\n${new TextDecoder().decode(bytes)}`)
+      const text = textOf(bytes)
+      if (text === undefined) return yield* new FileInput({ message: `--file ${file} is not text` })
+      blocks.push(`File: ${resolved}\n\n${text}`)
     }
     const attached = blocks.join("\n\n")
     return prompt.endsWith("\n") ? `${prompt}\n${attached}` : `${prompt}\n\n${attached}`

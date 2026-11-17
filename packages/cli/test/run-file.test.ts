@@ -38,7 +38,7 @@ const agentEnv = (home: string, sessionId: string, projectId: string) => ({
 
 describe("vibest run --file", () => {
   it.effect(
-    "--file content reaches agent.start.before.prompt whole, including a prompt from stdin; a path only in the prompt is not read",
+    "--file content reaches agent.start.before.prompt whole, a UTF-8 BOM dropped, including a prompt from stdin; a path only in the prompt is not read",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -51,7 +51,7 @@ describe("vibest run --file", () => {
         const secret = path.join(repo, "secret.txt")
         const taskBody = "line one\nline two with 'quotes' and $HOME\n"
         yield* fs.writeFileString(task, taskBody)
-        yield* fs.writeFileString(notes, "second file\n")
+        yield* fs.writeFileString(notes, "\uFEFFsecond file\n")
         yield* fs.writeFileString(secret, "do not read this\n")
         const entry = yield* db.session.startEntry(
           yield* projectOf(repo),
