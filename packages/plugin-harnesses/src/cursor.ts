@@ -43,7 +43,7 @@ export const cursor: Harness.HarnessDefinition = {
   interruptKey: "ctrl+c",
   replyField: "text",
   ready: "runtime",
-  firstInput: ["--"],
+  promptArgs: ["--"],
   clearKeys: ["ctrl+u"],
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [

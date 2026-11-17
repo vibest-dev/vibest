@@ -1,4 +1,5 @@
-import { Harness as PluginHarness } from "@vibest/plugin/effect"
+import { Harness as PluginHarness, type Launch } from "@vibest/plugin/effect"
+import { launchLine } from "@vibest/plugin/effect/launch"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
@@ -12,11 +13,12 @@ import {
   projectText,
   SystemPromptDirUnsafe,
   systemPrompt,
+  systemPromptFile,
   systemPromptRoot,
   withTask,
-  writeFirstInput,
-  writeSystemPrompt,
 } from "./system-prompt.ts"
+
+export { launchLine, type Launch }
 
 export const definitionIn = (agents: AgentsShape, id: string) => {
   const found = agents.find(id)
@@ -27,6 +29,9 @@ export const definitionOf = (id: string) => Effect.flatMap(Agents.Service, (agen
 
 const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.catch((e) => (e instanceof SystemPromptDirUnsafe ? Effect.fail(e) : Effect.die(e))))
+
+export const withProcess = (launch: Launch, process: number | undefined): Launch =>
+  process === undefined ? launch : { ...launch, env: { ...launch.env, VIBEST_PROCESS: String(process) } }
 
 export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   readonly harness: HarnessId
@@ -73,7 +78,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     vibest,
     ...(yield* projectText(layout.project(saved.projectId))),
   })
-  const systemPromptFile = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, promptText))
+  const promptPath = yield* unsafeOnly(systemPromptFile(saved.sessionId))
   yield* (yield* FileSystem.FileSystem)
     .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
     .pipe(Effect.ignore)
@@ -86,65 +91,29 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
   const message = input.message ?? (saved.firstInput === undefined ? undefined : withTask(promptText, saved.firstInput))
-  const argv = PluginHarness.harnessArgv(
-    adapter,
-    {
-      worktree: input.root,
-      projectDir: layout.project(saved.projectId),
-      systemPromptFile,
-      provider: input.provider,
-      model: input.model,
-      sessionId: saved.harnessSessionId,
-      resume: saved.harnessSessionId !== null,
-      pluginDir,
-      vibest,
-      env: commandEnv,
-    },
-    message,
-  )
-  const [file, ...args] =
-    message === undefined
-      ? argv
-      : messageFromFile(argv.slice(0, -1), yield* unsafeOnly(writeFirstInput(saved.sessionId, message)))
   return {
-    file: file!,
-    args,
+    harness: input.harness,
+    argv: PluginHarness.harnessArgv(
+      adapter,
+      {
+        worktree: input.root,
+        projectDir: layout.project(saved.projectId),
+        systemPromptFile: promptPath,
+        provider: input.provider,
+        model: input.model,
+        sessionId: saved.harnessSessionId,
+        resume: saved.harnessSessionId !== null,
+        pluginDir,
+        vibest,
+        env: commandEnv,
+      },
+      message,
+    ),
+    ...(message === undefined ? {} : { prompt: message }),
+    system: promptText,
     env: commandEnv,
   }
 })
-
-export const IDENTITY_ENV = [
-  "VIBEST_SESSION_ID",
-  "VIBEST_PROCESS",
-  "VIBEST_PROJECT_ID",
-  "VIBEST_PROJECT_DIR",
-  "VIBEST_HARNESS",
-  "VIBEST_RUNTIME",
-  "VIBEST_HOME",
-  "VIBEST_COMMAND",
-] as const
-
-export const identityPairs = (env: Readonly<Record<string, string>>) =>
-  IDENTITY_ENV.flatMap((key) => {
-    const value = env[key]
-    return value === undefined ? [] : [`${key}=${value}`]
-  })
-
-const MESSAGE_FROM_FILE = 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"'
-
-export const messageFromFile = (argv: ReadonlyArray<string>, file: string) => [
-  "sh",
-  "-c",
-  MESSAGE_FROM_FILE,
-  file,
-  ...argv,
-]
-
-export const launchLine = (command: {
-  readonly file: string
-  readonly args: ReadonlyArray<string>
-  readonly env: Readonly<Record<string, string>>
-}) => ["env", ...identityPairs(command.env), command.file, ...command.args]
 
 export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
   const value = argv[argv.indexOf(name) + 1]
@@ -166,8 +135,10 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
     .open({
       project: input.root,
       cwd: input.root,
-      argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"],
-      env: { ...input.env, VIBEST_HOME: input.home },
+      launch: {
+        argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"],
+        env: { ...input.env, VIBEST_HOME: input.home },
+      },
       label: input.label,
       ...(input.focus === true ? { focus: true } : {}),
       ...(target !== undefined ? { target } : {}),

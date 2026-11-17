@@ -143,14 +143,9 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   pickup check after typing, reconciliation and interrupt all read it the same way (`Runtimes.sessionState`), so a
   runtime with no status for a harness (herdr-core) needs no harness-specific branch: a typed message is accepted by
   the harness's report of it, never by the runtime not knowing.
-- First input in the launch argv: a harness definition with `firstInput` gets a starting process's first message (a
-  new session's task, the queued messages that resume an exited one, or the task a usage-limit move carries, in a new
-  terminal or in place) as launch arguments instead of typed text. `Harness.harnessArgv` (`@vibest/plugin`) is the only
-  place that joins a definition's arguments and a message: always `[binary, ...launchArgs, ...firstInput, message]`,
-  so no option that takes several values can swallow the message. Core writes the message to `first-input.md` beside
-  the session's `system-prompt.md` and launches one line without control characters,
-  `sh -c 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"' <first-input.md> <binary> <args...> <firstInput...>`: `exec`
-  leaves the harness as the process, and a multi-line message reaches it on every runtime. Every start goes through one function
+- First input in the launch: a harness definition's `promptArgs` are the arguments after which the first message always comes last. `Harness.harnessArgv` (`@vibest/plugin`) is the only
+  place that joins a definition's arguments and a message: always `[binary, ...launchArgs, ...promptArgs, message]`,
+  so no option that takes several values can swallow the message. `open` and `run` receive `launch: { harness, argv, prompt?, system?, env }` instead of a wrapped argv: `argv` is that harness argv with the message text last, `prompt` is the first message, `system` is the system prompt text. No field on `launch` carries a file path. A runtime that types a line calls `launchLine(launch)` (`@vibest/plugin`, re-exported from core), which writes `system-prompt.md` and `first-input.md` and returns `env VIBEST_PROCESS=<n> <identity pairs> sh -c 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"' <first-input.md> <binary> <args...> <promptArgs...>`: run through sh, that line yields exactly `launch.argv`. A runtime that can exec an argv may use `launch.argv` directly after calling `launchLine` so the files exist. Every start goes through one function
   (`Placement.launching`): it builds the argv and, for a first input, opens the execution and hands the message to it
   after the process is recorded and before it starts, so a report the harness sends at once finds it. If that start fails (the terminal does not open, or the in-place start fails), the execution it opened is closed
   `not_started` unless the harness already ended it, so a later message resumes the session again. vibestd then

@@ -2,9 +2,10 @@ import childProcess from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
+import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { runtimeContract } from "@vibest/plugin/testing"
-import { Effect, Ref, type Scope, Stream } from "effect"
+import { Effect, Ref, Stream } from "effect"
 import { Hc, SocketConnector } from "effect-herdr-core-sdk"
 import * as HcBun from "effect-herdr-core-sdk/bun"
 
@@ -51,8 +52,8 @@ const until = <A, E>(read: Effect.Effect<A, E>, ok: (a: A) => boolean, what: str
     }
   })
 
-const withRuntime = <A, E>(
-  body: (runtime: Effect.Success<ReturnType<typeof make>>, hc: Hc["Service"]) => Effect.Effect<A, E, Scope.Scope>,
+const withRuntime = <A, E, R>(
+  body: (runtime: Effect.Success<ReturnType<typeof make>>, hc: Hc["Service"]) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
     const connector = yield* SocketConnector
@@ -65,7 +66,12 @@ const withRuntime = <A, E>(
       typedLaunch: "2 seconds",
     })
     return yield* body(runtime, hc)
-  }).pipe(Effect.scoped, Effect.provide(HcBun.layer))
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(HcBun.layer),
+    Effect.provide(NodeFileSystem.layer),
+    Effect.provide(NodePath.layer),
+  )
 
 describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", () => {
   beforeAll(() => {
@@ -92,7 +98,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
       withRuntime((runtime) =>
         Effect.gen(function* () {
           const cwd = fs.realpathSync(root)
-          const input = { project: "/work/My Project", cwd, argv: [], env: {}, label: "main" }
+          const input = { project: "/work/My Project", cwd, launch: { argv: [], env: {} }, label: "main" }
           const opened = []
           for (const request of [
             input,
@@ -100,7 +106,10 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             ...Array.from({ length: 2 }, () => ({
               ...input,
               label: "a09e0000 修复登录",
-              env: { VIBEST_SESSION_ID: "a09e0000-0000-4000-8000-000000000000", VIBEST_HARNESS: "pi" },
+              launch: {
+                argv: [],
+                env: { VIBEST_SESSION_ID: "a09e0000-0000-4000-8000-000000000000", VIBEST_HARNESS: "pi" },
+              },
             })),
           ])
             opened.push(yield* runtime.open(request))
@@ -128,12 +137,11 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
       withRuntime((runtime, hc) =>
         Effect.gen(function* () {
           const cwd = fs.realpathSync(root)
-          const main = yield* runtime.open({ project: cwd, cwd, argv: [], env: {}, label: "main" })
+          const main = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "main" })
           const child = yield* runtime.open({
             project: cwd,
             cwd,
-            argv: ["cat"],
-            env: {},
+            launch: { argv: ["cat"], env: {} },
             label: "child",
             near: main,
           })
@@ -167,8 +175,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           const terminal = yield* runtime.open({
             project: cwd,
             cwd,
-            argv: [],
-            env: { VBT_KEEP: marker },
+            launch: { argv: [], env: { VBT_KEEP: marker } },
             label: "keep",
           })
           const pid = (yield* hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }))
@@ -179,7 +186,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             (t) => t.state === "live" && typeof t.pid === "number" && t.pid !== pid,
             "the core did not replace the killed shell",
           )
-          yield* runtime.run!(terminal, ["sh", "-c", 'printf "kept-%s\\n" "$VBT_KEEP"'])
+          yield* runtime.run!(terminal, { argv: ["sh", "-c", 'printf "kept-%s\\n" "$VBT_KEEP"'], env: {} })
           yield* until(
             runtime.read(terminal, 40),
             (s) => s.includes(`kept-${marker}`),
@@ -205,7 +212,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             Effect.forkScoped,
           )
           yield* Effect.sleep("300 millis")
-          const main = yield* runtime.open({ project: cwd, cwd, argv: [], env: {}, label: "main" })
+          const main = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "main" })
           yield* runtime.present!(main, { [PRESENT_ENTRY_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
           const labels = (yield* hc.call("terminal.get", { terminal: parseTerminalId(main.id, socketPath).address }))
             .labels
@@ -216,7 +223,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             [LABEL.space]: "project-1",
             [LABEL.tab]: "session-1",
           })
-          yield* runtime.run!(main, ["sleep", "1"])
+          yield* runtime.run!(main, { argv: ["sleep", "1"], env: {} })
           yield* until(Ref.get(seen), (all) => all.includes(`exited:${main.id}`), "no exited event after sleep ended")
           assert.isFalse((yield* runtime.process(main)).running)
           yield* runtime.close(main)

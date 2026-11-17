@@ -1,6 +1,5 @@
-import fs from "node:fs"
-
-import { Runtime as R } from "@vibest/plugin/effect"
+import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
+import { launchLine, type Launch, Runtime as R } from "@vibest/plugin/effect"
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
 
 type Runtime = R.RuntimeDefinition
@@ -11,20 +10,17 @@ type AgentState = R.AgentState
 
 export const KIND = "herdr"
 
-const envPrefix = (argv: ReadonlyArray<string>) =>
-  argv[0] === "env" ? 1 + argv.slice(1).findIndex((part) => !/^[A-Z_]+=/.test(part)) : 0
+const envPairs = (env: Readonly<Record<string, string>>) => Object.entries(env).map(([key, value]) => `${key}=${value}`)
 
-const withMessage = (argv: ReadonlyArray<string>) => {
-  const at = envPrefix(argv)
-  return argv[at] === "sh" && argv[at + 2]?.includes(`cat -- "$0"`) === true
-}
-
-const execed = (argv: ReadonlyArray<string>): Array<string> => {
-  const at = envPrefix(argv)
-  return withMessage(argv) ? [...argv.slice(at + 4), fs.readFileSync(argv[at + 3]!, "utf8")] : argv.slice(at)
-}
-
-const envPairs = (argv: ReadonlyArray<string>) => argv.slice(1, envPrefix(argv))
+const wrote = (launch: Launch) =>
+  launch.prompt === undefined && launch.system === undefined
+    ? Effect.void
+    : launchLine(launch).pipe(
+        Effect.asVoid,
+        Effect.mapError((e) => new R.RuntimeError({ code: "failed", message: e.message })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(NodePath.layer),
+      )
 
 export interface FakeAgent {
   readonly vibestSession?: string
@@ -242,8 +238,8 @@ export class FakeRuntime extends Context.Service<
 
       const reachable = yield* Ref.make(true)
       const skipPromptUpdates = yield* Ref.make(0)
-      const registers = (argv: ReadonlyArray<string>) =>
-        withMessage(argv) && !options.promptsIgnored
+      const registers = (launch: Launch) =>
+        launch.prompt !== undefined && !options.promptsIgnored
           ? Ref.modify(skipPromptUpdates, (n) => [n === 0, n > 0 ? n - 1 : 0] as const)
           : Effect.succeed(false)
 
@@ -298,16 +294,17 @@ export class FakeRuntime extends Context.Service<
           return agent
         })
 
-      const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
+      const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
         call(
           "run",
-          { terminal: terminal.id, argv: execed(argv), env: envPairs(argv) },
+          { terminal: terminal.id, argv: launch.argv, env: envPairs(launch.env) },
           terminal.id,
           Effect.gen(function* () {
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
+            yield* wrote(launch)
             const record = HashMap.get(yield* Ref.get(agents), terminal.id)
             if (Option.isNone(record)) return
-            const working = yield* registers(argv)
+            const working = yield* registers(launch)
             yield* updateAgent(terminal.id, (current) => ({
               ...current,
               alive: true,
@@ -334,8 +331,8 @@ export class FakeRuntime extends Context.Service<
             {
               project: input.project,
               cwd: input.cwd,
-              argv: execed(input.argv),
-              env: { ...input.env },
+              argv: input.launch.argv,
+              env: { ...input.launch.env },
               label: input.label,
               near: input.near?.id,
               split: input.split,
@@ -343,7 +340,7 @@ export class FakeRuntime extends Context.Service<
               ...(input.remote === true ? { remote: true } : {}),
               ...(input.target !== undefined ? { target: input.target } : {}),
             },
-            input.env.VIBEST_SESSION_ID,
+            input.launch.env.VIBEST_SESSION_ID,
             Effect.gen(function* () {
               if (options.startError) return yield* fail("open", "failed", options.startError)
               const near = input.near === undefined ? Option.none() : HashMap.get(yield* Ref.get(panes), input.near.id)
@@ -366,13 +363,14 @@ export class FakeRuntime extends Context.Service<
                 taken = HashMap.has(yield* Ref.get(panes), paneId)
               }
               yield* addPane(paneId, workspaceId, input.cwd)
-              const session = input.env.VIBEST_SESSION_ID
+              yield* wrote(input.launch)
+              const session = input.launch.env.VIBEST_SESSION_ID
               const prior =
                 session === undefined
                   ? undefined
                   : HashMap.toEntries(yield* Ref.get(agents)).find(([, agent]) => agent.vibestSession === session)?.[1]
-              const coordinator = session === undefined && input.argv.some((part) => part.includes("vibest"))
-              const working = yield* registers(input.argv)
+              const coordinator = session === undefined && input.launch.argv.some((part) => part.includes("vibest"))
+              const working = yield* registers(input.launch)
               const started: FakeAgent = {
                 ...prior,
                 ...(session !== undefined ? { vibestSession: session } : {}),

@@ -22,7 +22,7 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import { entryCommand, launchLine } from "../launch.ts"
+import { entryCommand, withProcess, type Launch } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import { Processes } from "../processes.ts"
@@ -126,10 +126,7 @@ export const make = Effect.gen(function* () {
         }),
         message: continuing(interrupted),
       })
-      return (process: number | undefined) =>
-        launchLine(
-          process === undefined ? command : { ...command, env: { ...command.env, VIBEST_PROCESS: String(process) } },
-        )
+      return (process: number | undefined) => withProcess(command, process)
     }).pipe(
       Effect.provideService(Agents.Service, agents),
       Effect.provideService(Harness.Service, harness),
@@ -150,7 +147,7 @@ export const make = Effect.gen(function* () {
     readonly pid: number | undefined
     readonly harnessSessionId: string | null
     readonly argv: Effect.Effect<
-      (process: number | undefined) => ReadonlyArray<string>,
+      (process: number | undefined) => Launch,
       Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launching>>
     >
     readonly liveNow: LiveNow
@@ -240,7 +237,7 @@ export const make = Effect.gen(function* () {
         (session.process?.conversation ?? null) !== null,
         message === undefined ? undefined : { text: message, onHandover: Effect.void },
       ),
-      (plan) => plan.argv,
+      (plan) => plan.launch,
     )
   }
 

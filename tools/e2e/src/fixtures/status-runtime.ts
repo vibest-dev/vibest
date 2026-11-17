@@ -2,7 +2,8 @@ import childProcess from "node:child_process"
 import path from "node:path"
 import util from "node:util"
 
-import { Plugin, Runtime } from "@vibest/plugin/effect"
+import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
+import { launchLine, Plugin, Runtime } from "@vibest/plugin/effect"
 import { Effect, Stream } from "effect"
 
 const execFile = util.promisify(childProcess.execFile)
@@ -17,33 +18,54 @@ const hc = (...argv: Array<string>) =>
     catch: (e) => new Runtime.RuntimeError({ code: "failed", message: String(e) }),
   })
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
+const wrote = (launch: Runtime.Launch) =>
+  launch.prompt === undefined && launch.system === undefined
+    ? Effect.void
+    : launchLine(launch).pipe(
+        Effect.asVoid,
+        Effect.mapError((e) => new Runtime.RuntimeError({ code: "failed", message: e.message })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(NodePath.layer),
+      )
 const runtime: Runtime.RuntimeDefinition = {
   id: "status-fixture",
   status: () => Effect.succeed({ status: "online" }),
   open: (input) =>
-    hc(
-      "run",
-      "--bg",
-      "--no-parent",
-      "--no-notify",
-      "--cwd",
-      input.cwd,
-      "--",
-      "env",
-      ...Object.entries(input.env).map(([k, v]) => k + "=" + v),
-      "python3",
-      "-I",
-      path.join(root, "status-pty.py"),
-      path.join(root, "status-output", crypto.randomUUID()),
-      ...input.argv,
-    ).pipe(Effect.map((raw) => ({ id: prefix + "/" + JSON.parse(raw).address }))),
+    wrote(input.launch).pipe(
+      Effect.andThen(
+        hc(
+          "run",
+          "--bg",
+          "--no-parent",
+          "--no-notify",
+          "--cwd",
+          input.cwd,
+          "--",
+          "env",
+          ...Object.entries(input.launch.env).map(([k, v]) => k + "=" + v),
+          "python3",
+          "-I",
+          path.join(root, "status-pty.py"),
+          path.join(root, "status-output", crypto.randomUUID()),
+          ...input.launch.argv,
+        ),
+      ),
+      Effect.map((raw) => ({ id: prefix + "/" + JSON.parse(raw).address })),
+    ),
   send: (terminal, input) =>
     hc(
       ...(input.text !== undefined
         ? ["send", id(terminal), input.text]
         : ["keys", id(terminal), ...(input.keys ?? [])]),
     ).pipe(Effect.asVoid),
-  run: (terminal, argv) => hc("send", id(terminal), argv.map(quote).join(" ")).pipe(Effect.asVoid),
+  run: (terminal, launch) =>
+    launchLine(launch).pipe(
+      Effect.mapError((e) => new Runtime.RuntimeError({ code: "failed", message: e.message })),
+      Effect.provide(NodeFileSystem.layer),
+      Effect.provide(NodePath.layer),
+      Effect.flatMap((line) => hc("send", id(terminal), line.map(quote).join(" "))),
+      Effect.asVoid,
+    ),
   read: (terminal, lines) => hc("read", id(terminal), "--lines", String(lines)),
   process: (terminal) =>
     hc("get", id(terminal)).pipe(Effect.map((raw) => ({ running: JSON.parse(raw).state === "live" }))),

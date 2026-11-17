@@ -104,7 +104,7 @@ export const claude: Harness.HarnessDefinition = {
   startup: claudeStartup,
   replyField: "last_assistant_message",
   delivery: "pull",
-  firstInput: ["--"],
+  promptArgs: ["--"],
   ready: "integration",
   checkProvider: noProvider("claude"),
   launchArgs: (i) => [

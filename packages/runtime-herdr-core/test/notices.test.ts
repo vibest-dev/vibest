@@ -193,7 +193,7 @@ describe("runtime-herdr-core against a fake core", () => {
       const core = yield* fakeCore
       yield* core.follow
       assert.isFalse((yield* core.runtime.process(core.terminal)).running)
-      yield* core.runtime.run!(core.terminal, ["echo", "hi"])
+      yield* core.runtime.run!(core.terminal, { argv: ["echo", "hi"], env: {} })
       assert.isTrue((yield* core.runtime.process(core.terminal)).running)
       assert.isTrue((yield* core.runtime.process(core.terminal)).running)
       const restarted = yield* make({
@@ -216,7 +216,7 @@ describe("runtime-herdr-core against a fake core", () => {
       const core = yield* fakeCore
       yield* Ref.set(core.foreground, sleeping)
       const sub = yield* core.follow
-      const running = yield* Effect.forkChild(core.runtime.run!(core.terminal, ["echo", "next"]))
+      const running = yield* Effect.forkChild(core.runtime.run!(core.terminal, { argv: ["echo", "next"], env: {} }))
       yield* Effect.sleep("300 millis")
       assert.strictEqual(yield* sentCount(core.calls), 0)
       yield* Ref.set(core.foreground, shell)

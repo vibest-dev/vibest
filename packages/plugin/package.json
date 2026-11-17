@@ -16,6 +16,7 @@
   "exports": {
     ".": "./src/promise/index.ts",
     "./effect": "./src/effect/index.ts",
+    "./effect/launch": "./src/effect/launch.ts",
     "./promise/adapter": "./src/promise/adapter.ts",
     "./testing": "./src/testing.ts"
   },

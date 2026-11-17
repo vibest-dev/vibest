@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
     "@vibest/client": "workspace:*",
     "@vibest/protocol": "workspace:*"

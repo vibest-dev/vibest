@@ -320,7 +320,7 @@ describe("runtime-herdr machines: remote terminal ids", () => {
         runtime.process(terminal),
         runtime.close(terminal),
         runtime.focus!(terminal),
-        runtime.run!(terminal, ["pi"]),
+        runtime.run!(terminal, { argv: ["pi"], env: {} }),
         runtime.state!(terminal),
         runtime.session!(terminal),
         runtime.present!(terminal, { agent: "a" }),

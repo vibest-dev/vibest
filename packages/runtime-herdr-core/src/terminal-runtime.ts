@@ -1,5 +1,6 @@
+import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { launchLine, reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, PubSub, type Scope, Schedule, Stream } from "effect"
@@ -71,7 +72,7 @@ const slug = (text: string) =>
     .replace(/^-+|-+$/g, "")
 
 export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0) => {
-  const id = input.env["VIBEST_SESSION_ID"]
+  const id = input.launch.env["VIBEST_SESSION_ID"]
   const session = id !== undefined && ID.test(id) ? id : undefined
   const title =
     session !== undefined && input.label.startsWith(`${shortId(session)} `)
@@ -79,7 +80,7 @@ export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0)
       : input.label
   const base =
     session !== undefined
-      ? slug(title) || slug(input.env["VIBEST_HARNESS"] ?? "") || "agent"
+      ? slug(title) || slug(input.launch.env["VIBEST_HARNESS"] ?? "") || "agent"
       : slug(
           input.project
             .replace(/[\\/]+$/, "")
@@ -271,27 +272,34 @@ export const make = (deps: {
         Effect.asVoid,
       )
 
+    const typed = (launch: VibestPlugin.Launch) =>
+      launchLine(launch).pipe(
+        Effect.mapError((e) => new RuntimeApi.RuntimeError({ code: "failed", message: e.message })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(NodePath.layer),
+      )
+
     const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
         const socket = near?.socket ?? deps.socket
         const core = yield* coreAt(socket)
         const hc = core.hc
-        const project = input.env["VIBEST_PROJECT_ID"]
-        const session = input.env["VIBEST_SESSION_ID"]
+        const project = input.launch.env["VIBEST_PROJECT_ID"]
+        const session = input.launch.env["VIBEST_SESSION_ID"]
         let attempt = 0
         const started = yield* failWith(
           Effect.suspend(() =>
             hc.call("terminal.run", {
               name: terminalName(input, attempt++),
               cwd: input.cwd,
-              env: { ...input.env },
+              env: { ...input.launch.env },
               labels: {
                 [LABEL.runtime]: KIND,
                 [LABEL.seen]: "0",
                 ...(project !== undefined ? { [LABEL.project]: project } : {}),
                 ...(session !== undefined ? { [LABEL.session]: session } : {}),
-                ...(input.argv.length > 0 ? { [LABEL.typed]: String(Date.now()) } : {}),
+                ...(input.launch.argv.length > 0 ? { [LABEL.typed]: String(Date.now()) } : {}),
               },
               keep: true,
               no_notify: true,
@@ -305,8 +313,8 @@ export const make = (deps: {
           ),
         )
         const terminal: Terminal = { id: terminalId(socket, started.address) }
-        if (input.argv.length > 0) {
-          yield* typeLine(hc, started.address, input.argv).pipe(
+        if (input.launch.argv.length > 0) {
+          yield* typeLine(hc, started.address, yield* typed(input.launch)).pipe(
             Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
           )
         }
@@ -399,11 +407,11 @@ export const make = (deps: {
         }),
       )
 
-    const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
+    const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
       Effect.gen(function* () {
         const { hc, core, address } = yield* reach(terminal)
         yield* backToShell(core, address, terminal)
-        yield* typeLine(hc, address, argv)
+        yield* typeLine(hc, address, yield* typed(launch))
         yield* failWith(
           hc.call("terminal.label", { terminal: address, labels: { [LABEL.typed]: String(Date.now()) } }),
         ).pipe(Effect.asVoid)

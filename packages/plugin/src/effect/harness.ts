@@ -55,7 +55,7 @@ export interface HarnessDefinition {
   readonly delivery: "typed" | "pull"
   readonly ready: "integration" | "runtime"
   readonly clearKeys?: ReadonlyArray<string>
-  readonly firstInput: ReadonlyArray<string>
+  readonly promptArgs: ReadonlyArray<string>
   readonly startup?: Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
   readonly checkProvider?: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
@@ -83,5 +83,5 @@ export interface HarnessDomain {
 export const harnessArgv = (definition: HarnessDefinition, input: LaunchInput, message?: string) => [
   definition.binary,
   ...definition.launchArgs(input),
-  ...(message === undefined ? [] : [...definition.firstInput, message]),
+  ...(message === undefined ? [] : [...definition.promptArgs, message]),
 ]
