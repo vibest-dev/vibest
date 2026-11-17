@@ -101,7 +101,7 @@ and `integration stop` ends cleanly. Pi only: the entry session TUI (tool groups
 - **Tiers.** `gate` (the default) and `agent` (I5: a real model; an agent
   runs it and attaches the evidence). An id named on the command line runs whatever its tier. A check that merges
   others names them (`covers`), and naming a covered id runs it: D1 covers D2–D4, H1 covers H2 and H3, I7 covers I4, S15
-  covers S11. Naming T1 runs T1-claude and T1-pi.
+  covers S11. Naming T1 runs T1-pi.
 - **Result cache.** A check that passed is not run again while its key is unchanged; it prints `CACHED`. The key hashes
   the vibest binary that runs (for npm and curl the installed launcher and the compiled binary it starts), the harness
   plugins tree but for the files Claude writes into it when it loads the plugin (`claude/tsconfig.json`,

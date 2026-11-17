@@ -222,12 +222,11 @@ and `error`. Successful `done` is intentionally not normalized to `idle`: both a
 the distinction for its unseen mark. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` disables this native reporting too.
 Live-checked on Claude Code 2.1.318 and 2.1.319; older versions have no guaranteed coverage or fallback writer.
 
-`pnpm e2e T1` launches the built integrations in real Claude and Pi with held fake models, through a test-only
+`pnpm e2e T1` launches the built integration in a real Pi with a held fake model, through a test-only
 runtime plugin into its own herdr-core. Its HOME,
 HC_SESSION, HC_SOCKET and XDG directories are under the test root. The fixture is not a shipped runtime adapter:
 it tests terminal reports, not exit-event recovery. Raw output and timestamped input/output captures stay in
-evidence files, never the runner terminal. Claude ignores keys at its first dialog draw; the check waits for
-visible dialog text, pauses, reads it again, then answers only the scratch action.
+evidence files, never the runner terminal. Claude's own native statuses are Claude's and herdr-core's protocol, not vibest's, and no E2E check asserts them.
 
 Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: launch a real
 Claude and Pi entry session with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
