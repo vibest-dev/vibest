@@ -2,8 +2,7 @@ import childProcess from "node:child_process"
 import path from "node:path"
 import util from "node:util"
 
-import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
-import { launchLine, Plugin, Runtime } from "@vibest/plugin/effect"
+import { Plugin, Runtime } from "@vibest/plugin/effect"
 import { Effect, Stream } from "effect"
 
 const execFile = util.promisify(childProcess.execFile)
@@ -45,13 +44,11 @@ const runtime: Runtime.RuntimeDefinition = {
         : ["keys", id(terminal), ...(input.keys ?? [])]),
     ).pipe(Effect.asVoid),
   run: (terminal, launch) =>
-    launchLine(launch).pipe(
-      Effect.mapError((e) => new Runtime.RuntimeError({ code: "failed", message: e.message })),
-      Effect.provide(NodeFileSystem.layer),
-      Effect.provide(NodePath.layer),
-      Effect.flatMap((line) => hc("send", id(terminal), line.map(quote).join(" "))),
-      Effect.asVoid,
-    ),
+    hc(
+      "send",
+      id(terminal),
+      ["env", ...Object.entries(launch.env).map(([k, v]) => k + "=" + v), ...launch.argv].map(quote).join(" "),
+    ).pipe(Effect.asVoid),
   read: (terminal, lines) => hc("read", id(terminal), "--lines", String(lines)),
   process: (terminal) =>
     hc("get", id(terminal)).pipe(Effect.map((raw) => ({ running: JSON.parse(raw).state === "live" }))),
