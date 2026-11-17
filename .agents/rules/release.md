@@ -19,7 +19,8 @@
    or a CHANGELOG.md section `## <version>`, and `plan` refuses one without them; a beta's notes are optional. Each job
    writes the version into every package.json of `VERSIONED` in its own checkout with bumpp (`bumpp --release <version>
    <files> --no-commit --no-tag --no-push --yes`, a dev dependency at an exact version), never committing, tagging or
-   pushing, and checks that every one carries it. The run fails when the version is already tagged or on npm. It runs the release gate on that tree: the whole of `pnpm verify --no-cache`,
+   pushing, and checks that every one carries it. The run fails when the version is already tagged or on npm. It runs
+   the release gate on that tree: the whole of `pnpm verify --no-cache`,
    the single entry for all verification, whose stages run as parallel jobs on GitHub-hosted runners. `build` packs once
    (`--stage build,archive,pack`): the linux-x64 curl archive and every npm tarball, checks the tarballs, records the
    SHA-256 of every file and keeps them. `typecheck` and `test` are jobs of their own. `e2e` runs every E2E check on the
