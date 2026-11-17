@@ -7,7 +7,7 @@ import type { Schema } from "effect"
 import type { Check } from "../check.ts"
 import { answerFolderTrust } from "../drivers/claude.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
-import { expect, herdrPane, row, Skip, until } from "../world.ts"
+import { expect, fail, herdrPane, row, Skip, until } from "../world.ts"
 import { alive } from "../world/alive.ts"
 
 const herdr = (socket: string, method: string, params: Schema.JsonObject) =>
@@ -158,7 +158,11 @@ const move = (harness: "claude" | "pi"): Check => ({
         const resumed = entryProcess()?.conversation
         expect(resumed === conversation, `B resumed ${resumed}, not ${conversation}`)
       } else {
-        await until("Pi in B shows A's conversation", async () => (await screen(socket, b)).includes(prompt), 60_000)
+        await until(
+          "Pi in B shows A's conversation",
+          async () => (await screen(socket, b)).includes(prompt),
+          60_000,
+        ).catch(async (e: Error) => fail(`${e.message}; B's screen:\n${await screen(socket, b)}`))
       }
 
       await until("A's harness gone", () => !alive(first.pid!), 20_000)
