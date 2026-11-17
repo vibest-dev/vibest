@@ -13,38 +13,23 @@ export const input = (value: string, what: string) =>
     return text
   })
 
-const textOf = (bytes: Uint8Array) => {
-  if (bytes.includes(0)) return undefined
-  let controls = 0
-  for (const byte of bytes) if (byte < 9 || (byte > 13 && byte < 32)) controls++
-  if (bytes.length > 0 && controls / bytes.length > 0.3) return undefined
-  try {
-    return new TextDecoder("utf8", { fatal: true }).decode(bytes)
-  } catch {
-    return undefined
-  }
-}
-
-export const attachFiles = (prompt: string, files: ReadonlyArray<string>) =>
+export const readAttachments = (files: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    if (files.length === 0) return prompt
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const blocks: Array<string> = []
-    for (const file of files) {
-      const resolved = path.resolve(file)
-      const info = yield* fs
-        .stat(resolved)
-        .pipe(Effect.mapError((e) => new FileInput({ message: `cannot read --file ${file}: ${e.message}` })))
-      if (info.type !== "File") return yield* new FileInput({ message: `--file ${file} is not a text file` })
-      if (Number(info.size) > FILE_CAP) return yield* new FileInput({ message: `--file ${file} is larger than 10 MiB` })
-      const bytes = yield* fs
-        .readFile(resolved)
-        .pipe(Effect.mapError((e) => new FileInput({ message: `cannot read --file ${file}: ${e.message}` })))
-      const text = textOf(bytes)
-      if (text === undefined) return yield* new FileInput({ message: `--file ${file} is not text` })
-      blocks.push(`File: ${resolved}\n\n${text}`)
-    }
-    const attached = blocks.join("\n\n")
-    return prompt.endsWith("\n") ? `${prompt}\n${attached}` : `${prompt}\n\n${attached}`
+    return yield* Effect.forEach(files, (file) =>
+      Effect.gen(function* () {
+        const resolved = path.resolve(file)
+        const unreadable = (e: { readonly message: string }) =>
+          new FileInput({ message: `cannot read --file ${file}: ${e.message}` })
+        const info = yield* fs.stat(resolved).pipe(Effect.mapError(unreadable))
+        if (info.type !== "File") return yield* new FileInput({ message: `--file ${file} is not a regular file` })
+        if (Number(info.size) > FILE_CAP)
+          return yield* new FileInput({ message: `--file ${file} is larger than 10 MiB` })
+        return {
+          name: path.basename(resolved),
+          content: yield* fs.readFile(resolved).pipe(Effect.mapError(unreadable)),
+        }
+      }),
+    )
   })

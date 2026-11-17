@@ -24,10 +24,10 @@ Show the plan in full, including open questions. Do not implement until the user
 Save the agreed plan, verbatim, with your file tool as `$VIBEST_PROJECT_DIR/artifacts/pipeline-<topic>-plan.md` (a new file name if that one exists). Then:
 
 ```
-vibest run [<harness>] --title 'Implement <topic>' --file <absolute plan path> -- 'Implement the plan exactly. Run the tests and typecheck, commit on a branch, push, and send me the branch and hash. Do not open a pull request.'
+vibest run [<harness>] --title 'Implement <topic>' --file <absolute plan path> -- 'Implement the attached plan exactly. Run the tests and typecheck, commit on a branch, push, and send me the branch and hash. Do not open a pull request.'
 ```
 
-Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name; pass that path to `--file`, not only inside the prompt. Do not pass `--archive-on-idle`: this session stays for review and the pull request. When it sends its message, check the diff and the tests yourself before review.
+Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name; vibest copies the file for the session and ends its task with a line naming the copy. Do not pass `--archive-on-idle`: this session stays for review and the pull request. When it sends its message, check the diff and the tests yourself before review.
 
 ## 4. Review
 

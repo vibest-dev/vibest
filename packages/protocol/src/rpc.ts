@@ -312,6 +312,9 @@ export class VibestRpcs extends RpcGroup.make(
           runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),
           machine: Schema.optional(Schema.String),
+          files: Schema.optional(
+            Schema.Array(Schema.Struct({ name: Schema.String, content: Schema.Uint8ArrayFromBase64 })),
+          ),
         },
         success: Schema.Struct({
           id: Schema.String,
@@ -899,4 +902,5 @@ export const CAPABILITIES = {
   events: true,
   projects: true,
   spawnRuntime: true,
+  spawnFiles: true,
 } as const

@@ -42,6 +42,30 @@ export * as Spawn from "./spawn.ts"
 
 export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
+export interface Attachment {
+  readonly name: string
+  readonly content: Uint8Array
+}
+
+const UNNAMED = new Set(["", ".", ".."])
+
+export const attachmentNames = (names: ReadonlyArray<string>) => {
+  const taken = new Set<string>()
+  return names.map((given) => {
+    const name = UNNAMED.has(given) ? "file" : given
+    const dot = name.lastIndexOf(".")
+    const stem = dot > 0 ? name.slice(0, dot) : name
+    const extension = dot > 0 ? name.slice(dot) : ""
+    let unique = name
+    for (let n = 2; taken.has(unique); n++) unique = `${stem}-${n}${extension}`
+    taken.add(unique)
+    return unique
+  })
+}
+
+export const withAttachedFiles = (prompt: string, paths: ReadonlyArray<string>) =>
+  paths.length === 0 ? prompt : `${prompt}${prompt.endsWith("\n") ? "\n" : "\n\n"}Attached files: ${paths.join(", ")}`
+
 export interface SpawnInput {
   readonly machine: RuntimeMachine
   readonly root: string
@@ -60,6 +84,7 @@ export interface SpawnInput {
   readonly request?: string | undefined
   readonly commit?: string | undefined
   readonly origin?: PeerStart | undefined
+  readonly files?: ReadonlyArray<Attachment> | undefined
 }
 
 export interface Spawned extends Routing {
@@ -182,11 +207,19 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
         namedShare !== undefined && namedShare.projectId === input.projectId && !archived(namedShare)
           ? namedShare
           : undefined
+      const id = yield* db.session.newSessionId
+      const attachments = input.files ?? []
+      const sessionFolder = layout.sessionFolder(input.projectId, id)
+      const filesFolder = path.join(sessionFolder, "files")
+      const files = attachmentNames(attachments.map((file) => path.basename(file.name))).map((name) =>
+        path.join(filesFolder, name),
+      )
       const decision = yield* plugins.start({
         project: root,
         agent,
         parentSessionId: input.parentSessionId,
-        prompt: input.prompt,
+        prompt: withAttachedFiles(input.prompt, files),
+        files,
         harness: input.harness ?? (from === undefined ? undefined : harnessIdOf(from)),
         provider: input.provider ?? from?.process?.provider ?? undefined,
         model: input.model ?? from?.process?.model ?? undefined,
@@ -243,7 +276,6 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
             : { id: input.origin.reportTo }
       const task = sender === undefined ? decision.prompt : sessionEnvelope(sender, decision.prompt)
       const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
-      const id = yield* db.session.newSessionId
       const now = yield* Clock.currentTimeMillis
       const held = yield* Deferred.make<void>()
       const reserveWorktree = (folders: boolean) =>
@@ -284,6 +316,23 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
             `no unused 4-hex worktree name under ${repository} after ${ALLOCATION_NAME_ATTEMPTS} attempts`,
           )
         })
+      const dropAttachments =
+        attachments.length === 0
+          ? Effect.void
+          : fs.remove(sessionFolder, { recursive: true, force: true }).pipe(Effect.ignore)
+      const writeAttachments =
+        attachments.length === 0
+          ? Effect.void
+          : fs.makeDirectory(filesFolder, { recursive: true }).pipe(
+              Effect.andThen(
+                Effect.forEach(attachments, (file, i) => fs.writeFile(files[i]!, file.content), { discard: true }),
+              ),
+              Effect.onError(() => dropAttachments),
+              Effect.mapError(
+                (e) =>
+                  new AllocationFailed({ message: `cannot copy the attached files into ${filesFolder}: ${e.message}` }),
+              ),
+            )
       const admit = (shared: string | undefined) =>
         Effect.scoped(
           Effect.gen(function* () {
@@ -321,15 +370,21 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
             }
             return yield* Effect.uninterruptible(
               Effect.gen(function* () {
-                const inserted = yield* db.session.insertSession(draft, input.projectId, {
-                  max: options.maxSessions,
-                  cwd,
-                  task,
-                  parentSessionId: input.parentSessionId,
-                  request: input.request,
-                  origin: input.origin,
-                  archiveOnIdle: input.archive === true,
-                })
+                yield* writeAttachments
+                const inserted = yield* db.session
+                  .insertSession(draft, input.projectId, {
+                    max: options.maxSessions,
+                    cwd,
+                    task,
+                    parentSessionId: input.parentSessionId,
+                    request: input.request,
+                    origin: input.origin,
+                    archiveOnIdle: input.archive === true,
+                  })
+                  .pipe(
+                    Effect.tap((inserted) => (inserted === true ? Effect.void : dropAttachments)),
+                    Effect.onError(() => dropAttachments),
+                  )
                 if (inserted === false) return yield* new LimitReached({ limit: options.maxSessions! })
                 if (inserted === "parent-ended")
                   return yield* new NoSuchSession({

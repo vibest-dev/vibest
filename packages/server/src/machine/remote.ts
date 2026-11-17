@@ -49,6 +49,7 @@ const REFUSED = [
   ["share", "--share"],
   ["archive", "--archive-on-idle"],
   ["runtimeSession", "--session"],
+  ["files", "--file"],
 ] as const
 
 type Away = { readonly machine: ListedMachine; readonly sessions: ReadonlyArray<SessionInfo> }

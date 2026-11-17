@@ -42,14 +42,14 @@ lists every plugin, builtins first, with its status and counters.
 
 ## Context
 
-| Member                | What it does                                                                                                                                                      |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `options`             | the plugin's options                                                                                                                                              |
-| `agent.hook`          | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (assign `move`) |
-| `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                |
-| `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
-| `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                              |
-| `event.subscribe`     | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                            |
+| Member                | What it does                                                                                                                                                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options`             | the plugin's options                                                                                                                                                                                                                               |
+| `agent.hook`          | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`; read `files`, the absolute paths of the files attached with `vibest run --file`) and `fail` (assign `move`) |
+| `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                                                                                                 |
+| `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                                                                                                 |
+| `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                                                                                                               |
+| `event.subscribe`     | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                                                                                                             |
 
 **Hooks** run in plugin order; each callback gets the event, changes it by assigning to its fields, and has 5 seconds. A callback that times out or fails changes nothing. **Transforms** take a synchronous
 editor (`add`; the harness editor also has `update`) and apply in registration order, so a later plugin sees and may

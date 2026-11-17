@@ -101,6 +101,7 @@ export const make = Effect.gen(function* () {
           runtime: input.runtime,
           parentSessionId: c.sessionId,
           request: input.request,
+          files: input.files,
         })
       }),
 

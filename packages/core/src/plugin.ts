@@ -376,7 +376,12 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       return yield* Effect.gen(function* () {
         const current = yield* subscriptions.list
         const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
-        const event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
+        const event: VibestPlugin.AgentStartBefore = {
+          ...input,
+          files: input.files ?? [],
+          machines,
+          subscriptions: current,
+        }
         const decidedBy: Record<string, string> = {}
         const route = (draft: VibestPlugin.AgentStartBefore, plugin: string) => {
           const fields = routed(event, draft)

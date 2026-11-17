@@ -9,7 +9,9 @@ export interface PluginNote extends VibestPlugin.MachineNote {
   readonly plugin?: string
 }
 
-export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">
+export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions" | "files"> & {
+  readonly files?: ReadonlyArray<string>
+}
 
 export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions" | "move">
 

@@ -130,7 +130,7 @@ const run = Spec.make("run", {
     ),
     file: Flag.String("file").pipe(
       Flag.withDescription(
-        "Read this text file and append it to the prompt, under a header naming its path. Repeat for each file. A file over 10 MiB, or one that cannot be read or is not text, refuses the run. A path named only in the prompt is not read",
+        "Attach this file: it is copied into the project folder for the new session, and the task ends with a line naming the copy, for the agent to read. Repeat for each file. A file over 10 MiB, or one that cannot be read, refuses the run",
       ),
       Flag.atLeast(0),
     ),
