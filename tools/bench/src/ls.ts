@@ -6,7 +6,7 @@ import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
-import { Effect, Layer, Predicate, type Schema } from "effect"
+import { Effect, Layer, Predicate, Schema } from "effect"
 
 const checkout = path.resolve(import.meta.dirname, "../../..")
 const binary = path.join(checkout, "packages/cli/dist/vibest")
@@ -68,9 +68,15 @@ const run = async (cwd: string, argv: ReadonlyArray<string>, env: Record<string,
   return { code, stdout, stderr }
 }
 
+const decodePidFile = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Unknown) })),
+)
+
+const decodeRows = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.Unknown)))
+
 const stop = async (home: string) => {
   const text = await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "")
-  const pid = text === "" ? undefined : (JSON.parse(text) as { pid?: Schema.Json }).pid
+  const pid = text === "" ? undefined : decodePidFile(text).pid
 
   if (!Predicate.isNumber(pid) || pid <= 0) return
 
@@ -149,7 +155,7 @@ const time = async (cwd: string, args: ReadonlyArray<string>, env: Record<string
 
     if (r.code !== 0)
       throw new Error(`vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
-    const rows = JSON.parse(r.stdout) as Array<unknown>
+    const rows = decodeRows(r.stdout)
 
     if (i === 0 && rows.length !== n) throw new Error(`vibest ${args.join(" ")} listed ${rows.length}, want ${n}`)
     samples.push(ms)
@@ -191,7 +197,9 @@ const one = async (n: number) => {
     if (started.code !== 0) throw new Error(`vibest daemon exited ${started.code}: ${started.stderr || started.stdout}`)
     await Bun.sleep(idleMs)
     const ls = await time(directory, ["ls"], env, n)
-    const pid = (JSON.parse(await fs.readFile(path.join(home, "vibestd.pid"), "utf8")) as { pid: number }).pid
+    const pid = decodePidFile(await fs.readFile(path.join(home, "vibestd.pid"), "utf8")).pid
+
+    if (!Predicate.isNumber(pid)) throw new Error("vibestd.pid has no pid")
     const before = cpuSeconds(pid)
     await Bun.sleep(cpuMs)
     const cpu = cpuSeconds(pid) - before

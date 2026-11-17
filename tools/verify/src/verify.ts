@@ -4,6 +4,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { Schema } from "effect"
+
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
 const flagSlots = new Set<number>()
@@ -110,13 +112,15 @@ const tarballsIn = (folder: string) =>
 const packedName = (tarball: string): string =>
   JSON.parse(childProcess.execFileSync("tar", ["-xzOf", tarball, "package/package.json"], { encoding: "utf8" })).name
 
+const decodeWorkspace = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Array(Schema.Struct({ path: Schema.String, private: Schema.optional(Schema.Boolean) }))),
+)
+
 const alreadyPacked = tarballsIn(packs).length > 0
 
 const toPack = keptPacks
-  ? (
-      JSON.parse(
-        childProcess.execFileSync("pnpm", ["-r", "ls", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
-      ) as Array<{ path: string; private?: boolean }>
+  ? decodeWorkspace(
+      childProcess.execFileSync("pnpm", ["-r", "ls", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
     )
       .filter((p) => !p.private)
       .map((p) => p.path)
