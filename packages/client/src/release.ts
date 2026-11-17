@@ -41,12 +41,11 @@ export type Channel = "stable" | "beta"
 
 export const channelOf = (version: string): Channel => (version.includes("-") ? "beta" : "stable")
 
-const isStable = (v: string) => /^\d+\.\d+\.\d+$/.test(v)
-const isRelease = (v: string) => /^\d+\.\d+\.\d+(-beta\.\d+)?$/.test(v)
+const isStable = (v: string) => isSemver(v) && !v.includes("-")
 
 export const newestIn = (channel: Channel, versions: ReadonlyArray<string>) =>
   versions
-    .filter(channel === "stable" ? isStable : isRelease)
+    .filter(channel === "stable" ? isStable : isSemver)
     .reduce<string | undefined>((a, v) => (a === undefined || compareVersions(v, a) > 0 ? v : a), undefined)
 
 const GITHUB_RELEASES = "https://github.com/vibest-dev/vibest/releases"
