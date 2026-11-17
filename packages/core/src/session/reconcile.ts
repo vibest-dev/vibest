@@ -22,12 +22,12 @@ import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
 import {
   agentState,
-  alive,
   paneTail,
   peekHint,
   reportedWhenUnknown,
   Runtimes,
   stateOf,
+  type Runtime,
   type Terminal,
 } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
@@ -74,6 +74,23 @@ export const make = Effect.gen(function* () {
       }),
     )
 
+  const harnessExited = Effect.fn("Reconcile.harnessExited")(function* (
+    h: Runtime,
+    terminal: Terminal,
+    pid: number | null | undefined,
+  ) {
+    const shown = yield* h.process(terminal).pipe(
+      Effect.map((p) => (p.running ? "harness" : "shell")),
+      Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.code === "not_found" ? "closed" : "harness")),
+    )
+
+    const harness = Predicate.isNumber(pid) ? yield* processes.liveness(pid) : "unknown"
+
+    if (harness === "exited") return true
+
+    return shown === "closed" || (shown === "shell" && harness !== "alive")
+  })
+
   const check = Effect.fn("Reconcile.check")(function* (id: string) {
     const session = yield* db.session.getSession(id)
 
@@ -104,16 +121,7 @@ export const make = Effect.gen(function* () {
     if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(harnessIdOf(session)))
       yield* db.session.acceptExecution(id, execution)
 
-    const exited =
-      state === undefined &&
-      (yield* Effect.gen(function* () {
-        const terminalRunning = yield* alive(h, terminal)
-        const reportedPid = session.process?.pid
-
-        return (
-          !terminalRunning || (Predicate.isNumber(reportedPid) && (yield* processes.liveness(reportedPid)) === "exited")
-        )
-      }))
+    const exited = state === undefined && (yield* harnessExited(h, terminal, session.process?.pid))
 
     if (limited !== undefined && (yield* exits.afterLimit(h, session, limited, exited))) return
 
