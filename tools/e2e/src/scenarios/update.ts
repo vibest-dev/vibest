@@ -63,13 +63,26 @@ const olderProtocol = (bytes: Buffer, protocol: number) => {
   swapOnce(bytes, from, from.replace(/\d+$/, String(protocol - 1).padStart(String(protocol).length)))
 }
 
+const olderVersion = (bytes: Buffer, version: string) => {
+  const found = [
+    ...bytes
+      .toString("latin1")
+      .matchAll(new RegExp(`var VERSION\\d* = "${buildVersion.replaceAll(".", "\\.")}";`, "g")),
+  ]
+
+  expect(found.length === 1, `expected one var VERSION = "${buildVersion}", found ${found.length}`)
+  const from = found[0]![0]
+
+  swapOnce(bytes, from, from.replace(buildVersion, version))
+}
+
 const olderVibest = async (w: World, share: string, version: string, protocol: number) => {
   const dir = path.join(share, "versions", version)
   const bin = path.join(dir, "bin", "vibest")
   await fs.mkdir(path.dirname(bin), { recursive: true })
   const bytes = Buffer.from(await fs.readFile(compiled))
   olderProtocol(bytes, protocol)
-  swapOnce(bytes, `"${buildVersion}"`, `"${version}"`)
+  olderVersion(bytes, version)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
 
   if (process.platform === "darwin") {
