@@ -53,13 +53,15 @@ function format<A>(input: A) {
 
 const levels = { DEBUG: "Debug", INFO: "Info", WARN: "Warn", ERROR: "Error" } as const
 
+const levelNamed = new Map(Object.entries(levels))
+
 const minimumLogLevel = Layer.effect(
   References.MinimumLogLevel,
   Config.option(Config.String("VIBEST_LOG_LEVEL")).pipe(
     Effect.map((value) => {
       const name = Option.getOrElse(value, () => "").toUpperCase()
 
-      return name in levels ? levels[name as keyof typeof levels] : levels.INFO
+      return levelNamed.get(name) ?? levels.INFO
     }),
     Effect.orElseSucceed(() => levels.INFO),
   ),
