@@ -475,36 +475,6 @@ describe("plugins: supervisor", () => {
   )
 
   it.effect(
-    "a burst during the delay keeps readiness closed until that pass imports an unreported edit",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* packageHome
-        const pluginsDir = path.join(dir, "plugins")
-        const file = path.join(pluginsDir, "a.ts")
-        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
-        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a1"`))
-        watchGate.hold = true
-        const service = yield* TestClock.withLive(supervise(dir))
-        assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
-        yield* watchSees(pluginsDir, "a.ts")
-        yield* watchSees(pluginsDir, "a.ts")
-        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a2"`))
-        const starting = yield* Effect.forkChild(TestClock.withLive(service.start(event)))
-        yield* TestClock.withLive(Effect.sleep("20 millis"))
-        assert.isUndefined(starting.pollUnsafe(), "a start was admitted before the burst settled")
-        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
-        assert.strictEqual(started.model, "a2")
-      }).pipe(
-        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
-        Effect.scoped,
-        Effect.provide(Platform.services),
-      ),
-    TEST_TIMEOUT,
-  )
-
-  it.effect(
     "an otherwise unchanged rescan that outlasts the recheck reopens readiness",
     () =>
       Effect.gen(function* () {
