@@ -136,6 +136,18 @@
       }
     },
     {
+      "files": [
+        "packages/core/src/effect/layer-node-erased.ts",
+        "packages/schema/src/event-fact.ts",
+        "packages/cli/src/framework/spec-erased.ts",
+        "packages/cli/src/framework/runtime-erased.ts",
+        "packages/effect-herdr-sdk/src/herdr-result.ts"
+      ],
+      "rules": {
+        "typescript/consistent-type-assertions": "off"
+      }
+    },
+    {
       "files": ["**/test/**", "**/*.test.ts", "tools/e2e/**"],
       "rules": {
         "typescript/consistent-type-assertions": "off"
