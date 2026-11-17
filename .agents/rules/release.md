@@ -56,8 +56,8 @@
    updates to the newest stable only, a beta (and a build from `main`, `0.0.1-dev`) to the newest release of either
    channel, so a beta user moves to a stable once it is newer; `--stable` and `--beta` choose explicitly. An npm install
    reads the same from `@vibest/cli`'s dist-tags (`latest` for stable, the newer of `latest` and `beta` for either
-   channel). Both channels stay in this same workflow file: npm trusted publishing binds each package to one workflow file
-   name, `release.yml`, so the file is never renamed.
+   channel). Both channels stay in this same workflow file: npm trusted publishing binds each package to one workflow
+   file name, `release.yml`, so the file is never renamed.
 5. **Bugs are fixed on `main` and rolled forward.** There are no release branches: a bug found in a release is fixed on
    `main` like any change, and a new release ships it, cut from a known-good commit of `main` that contains the fix. A
    released version is never rebuilt, re-tagged or patched in place.
