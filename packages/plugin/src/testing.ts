@@ -150,9 +150,9 @@ export const runtimeContract = (
       runtime.process(ended).pipe(Effect.exit),
       (exit) => {
         if (Exit.isFailure(exit)) {
-          const error = Cause.squash(exit.cause) as { readonly code?: string }
+          const error = Cause.squash(exit.cause)
 
-          return error.code === "not_found"
+          return Predicate.hasProperty(error, "code") && error.code === "not_found"
         }
 
         return !exit.value.running

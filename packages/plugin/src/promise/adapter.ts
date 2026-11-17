@@ -1,19 +1,26 @@
 import { Effect, Predicate, type Scope, Stream } from "effect"
 
+import type { AgentFailures, AgentHooks, AgentRefused } from "../domain.ts"
 import type { Context as EffectContext } from "../effect/index.ts"
-import type { Registration as EffectRegistration } from "../effect/registration.ts"
+import type { Registration as EffectRegistration, Transform } from "../effect/registration.ts"
 import type { Cleanup, Context, Plugin } from "./plugin.ts"
 import type { Definitions, Registration } from "./registration.ts"
 
 type Awaitable<A> = Promise<A> | A
 
-const isRefusal = (cause: unknown) => Predicate.isTagged(cause, "AgentRefused")
+const isRefusal = (cause: unknown): cause is AgentRefused => Predicate.isTagged(cause, "AgentRefused")
 
 const settle = <A>(callback: () => Awaitable<A>) => Effect.promise(() => Promise.resolve().then(callback))
 
-const refusable = <A>(callback: () => Awaitable<A>) =>
+type Refusals = {
+  readonly [N in keyof AgentHooks]: (refusal: AgentRefused) => Effect.Effect<never, AgentFailures[N]>
+}
+
+const refusalAs: Refusals = { "start.before": Effect.fail, fail: Effect.die }
+
+const refusable = <N extends keyof AgentHooks, A>(name: N, callback: () => Awaitable<A>) =>
   Effect.tryPromise({ try: () => Promise.resolve().then(callback), catch: (e) => e }).pipe(
-    Effect.catch((e) => (isRefusal(e) ? Effect.fail(e as never) : Effect.die(e))),
+    Effect.catch((e) => (isRefusal(e) ? refusalAs[name](e) : Effect.die(e))),
   )
 
 export const fromPromise =
@@ -56,16 +63,14 @@ export const fromPromise =
         },
       })
 
-      const definitions = <Editor>(
-        domain: EffectContext["runtime"] | EffectContext["harness"],
-      ): Definitions<Editor> => ({
-        transform: (callback) => register(domain.transform(callback as never)),
+      const definitions = <Editor>(domain: { readonly transform: Transform<Editor> }): Definitions<Editor> => ({
+        transform: (callback) => register(domain.transform(callback)),
       })
 
       const context: Context = {
         options: host.options,
         agent: {
-          hook: (name, callback) => register(host.agent.hook(name, (event) => refusable(() => callback(event)))),
+          hook: (name, callback) => register(host.agent.hook(name, (event) => refusable(name, () => callback(event)))),
           transform: (callback) => register(host.agent.transform(callback)),
         },
         machine: {
