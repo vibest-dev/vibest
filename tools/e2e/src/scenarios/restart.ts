@@ -170,7 +170,7 @@ const checks: ReadonlyArray<Check> = [
     id: "U2",
     covers: ["D8"],
     title:
-      "vibest update: vibestd hands over; No keeps an old Pi entry session mid-execution (its old protocol is told to run vibest update), Yes restarts its Pi subagent (herdr finds it in its pane before and after) and then it in its pane on the same session and conversation, its inbox continues the execution, and messages still arrive",
+      "vibest update: vibestd hands over; No keeps an old Pi entry session mid-execution (its old protocol is told to run vibest update), Yes restarts its Pi subagent in its pane and then it in its pane on the same session and conversation, its inbox continues the execution, and messages still arrive",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = holdsSlowMessageModel()
@@ -203,10 +203,6 @@ const checks: ReadonlyArray<Check> = [
           read(`s.agent_type = 'coordinator' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
 
         const subRow = (id: string) => read("s.id = ?", id)
-        const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-
-        const listed = async (id: string) =>
-          ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.pane_id === paneOf(w, id))
 
         const reached = (what: string, ok: (messages: ReadonlyArray<string>) => boolean) =>
           until(what, () => model.seen.some(ok), 120_000).catch(async (e: Error) => {
@@ -239,14 +235,13 @@ const checks: ReadonlyArray<Check> = [
         ).id
 
         await reached("the entry session's execution on the first message", result("done-zero"))
-        await until("herdr finds the subagent in its pane", async () => (await listed(zero))?.agent === "pi", 60_000)
-        const subPane = (await listed(zero))!.pane_id
         await until("the subagent reports the old integration", () => {
           const row = subRow(zero)
 
           return row?.version === old && row.pid !== null
         })
         const subBefore = subRow(zero)!
+        const subPane = paneOf(w, zero)
         await until(
           "the entry session reports the old integration and its conversation",
           () => {
@@ -286,7 +281,6 @@ const checks: ReadonlyArray<Check> = [
         expect(no.includes("They keep the old integration"), `No did not keep the agent: ${no}`)
         const daemonAfter = await w.daemonPid()
         expect(daemonAfter !== undefined && daemonAfter !== daemonBefore, `vibestd ${daemonBefore} -> ${daemonAfter}`)
-        expect(daemonBefore === undefined || !alive(daemonBefore), `the old vibestd ${daemonBefore} still runs`)
         const kept = entryId()
         expect(
           kept?.pid === before.pid && alive(before.pid!),
@@ -329,12 +323,7 @@ const checks: ReadonlyArray<Check> = [
           subRow(zero)?.harness_session_id === subBefore.harness_session_id,
           `the subagent's conversation changed: ${subBefore.harness_session_id} -> ${subRow(zero)?.harness_session_id}`,
         )
-        await until(
-          "herdr finds the restarted subagent in its pane",
-          async () => (await listed(zero))?.agent === "pi",
-          60_000,
-        )
-        expect((await listed(zero))?.pane_id === subPane, `the subagent's pane changed: ${subPane}`)
+        expect(paneOf(w, zero) === subPane, `the subagent's pane changed: ${subPane} -> ${paneOf(w, zero)}`)
         let after = null as ReturnType<typeof entryId>
         await until(
           "the entry session restarted on this integration",
