@@ -9,8 +9,9 @@ import { EXECUTIONS, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { session, place } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Catalog, type FactType } from "@vibest/schema/event"
-import { Effect, Exit, Layer } from "effect"
+import { Clock, Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -636,10 +637,27 @@ describe("Db", () => {
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             message: "n",
           })
-          yield* db.session.clearEntry(RUNTIME, place.address)
+          yield* db.session.clearEntry(RUNTIME, place.address, yield* Clock.currentTimeMillis)
           assert.strictEqual(yield* noticeStatus("n"), "dropped")
         }),
       ),
+  )
+
+  it.effect("a terminal exit seen before the entry session started again there leaves the new process running", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db.Service
+        const project = yield* projectOf("r")
+        yield* db.session.startEntry(project, "claude", false, place, ENTRY)
+        const exitedBy = yield* Clock.currentTimeMillis
+        yield* TestClock.adjust("1 second")
+        yield* db.session.startEntry(project, "claude", false, place, ENTRY)
+        yield* db.session.clearEntry(RUNTIME, place.address, exitedBy)
+        assert.strictEqual(yield* db.session.entryAt(RUNTIME, place.address), project)
+        yield* db.session.clearEntry(RUNTIME, place.address, yield* Clock.currentTimeMillis)
+        assert.isUndefined(yield* db.session.entryAt(RUNTIME, place.address))
+      }),
+    ),
   )
 
   it.effect(

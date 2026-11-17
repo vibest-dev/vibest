@@ -349,13 +349,14 @@ export const statements = Effect.gen(function* () {
       ORDER BY s.created_at, s.id
       LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
 
-  const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+  const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string, startedBy?: number) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
         JOIN project q ON q.entry_session_id = s.id
         JOIN process p ON p.session_id = s.id AND p.id = s.process_id
         WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL
-          ${except === undefined ? sql`` : sql`AND s.project_id != ${except}`}`
+          ${except === undefined ? sql`` : sql`AND s.project_id != ${except}`}
+          ${startedBy === undefined ? sql`` : sql`AND p.started_at <= ${startedBy}`}`
 
       return rows.filter((r) => !moving.has(r.project))
     })

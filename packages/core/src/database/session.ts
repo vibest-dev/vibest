@@ -81,9 +81,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
     const { queueInbox, insertInboxRow, dropWaiting } = inbox
 
-    const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+    const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string, startedBy?: number) =>
       Effect.gen(function* () {
-        for (const entry of yield* entrySessionsAt(runtime, address, except)) {
+        for (const entry of yield* entrySessionsAt(runtime, address, except, startedBy)) {
           yield* endProcess(entry.id, "exited")
           yield* dropWaiting(entry.project)
         }
@@ -644,8 +644,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           }),
       ),
 
-      clearEntry: Effect.fn("Db.session.clearEntry")((runtime: string, address: RuntimeAddress) =>
-        tx(clearEntryAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
+      clearEntry: Effect.fn("Db.session.clearEntry")((runtime: string, address: RuntimeAddress, startedBy: number) =>
+        tx(clearEntryAt(runtime, address, undefined, startedBy)).pipe(Effect.asVoid, Effect.orDie),
       ),
 
       canResumeConversation,
