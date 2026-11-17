@@ -301,11 +301,6 @@ const heldSubagent = async (w: World) => {
 
     const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
 
-    const kept = async () => {
-      expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
-      expect(await found(), `herdr no longer finds the subagent in its pane; vibestd.log:\n${await log()}`)
-    }
-
     {
       const terminal = () =>
         (
@@ -317,8 +312,9 @@ const heldSubagent = async (w: World) => {
         ).id ?? ""
 
       await until("its terminal recorded while the first execution is held", () => terminal() !== "", 60_000)
-      expect(model.held() > 0, "the first execution ended before the terminal was recorded")
-      await kept()
+      await until("herdr finds the subagent in its pane", found, 30_000)
+      expect(model.held() > 0, "the first execution ended before herdr found the subagent")
+      expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
     }
 
     const peek = await w.vibest(["peek", sub], { cwd: repo })
