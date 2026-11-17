@@ -13,7 +13,8 @@ export const printFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       if (CliError.isCliError(e)) return Effect.void
 
       if (!Predicate.hasProperty(e, "_tag")) return Console.error(String(e))
-      const { _tag, message } = e as { readonly _tag: string; readonly message?: string }
+      const { _tag } = e
+      const message = Predicate.hasProperty(e, "message") ? e.message : undefined
 
       return Console.error(message ? `${_tag}: ${message}` : _tag)
     }),
