@@ -1,10 +1,10 @@
 import { Cause, Config, Context, Effect, Layer, Option, type Path, Random, Schema, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 
-import type { PushFrame } from "./generated/events.js"
 import { PROTOCOL } from "./generated/index.js"
 import type { Method, MethodParams, Subscription } from "./generated/params.js"
 import type { METHOD_RESULT, ResponseResult, ResultByTag } from "./generated/results.js"
+import { resultOf } from "./herdr-result.js"
 import { SocketConnector } from "./socket-connector.js"
 import { defaultSocketPath, socketEndpoint, type SocketPathOptions } from "./socket-path.js"
 
@@ -37,7 +37,7 @@ export class HerdrProtocolMismatch extends Schema.TaggedError<HerdrProtocolMisma
 export interface HerdrClient {
   readonly socketPath: string
   readonly call: <M extends Method>(method: M, params: ParamsOf<M>) => Effect.Effect<ResultOf<M>, HerdrFailure>
-  readonly subscribe: (subscriptions: ReadonlyArray<Subscription>) => Stream.Stream<PushFrame, HerdrFailure>
+  readonly subscribe: (subscriptions: ReadonlyArray<Subscription>) => Stream.Stream<Frame, HerdrFailure>
 }
 
 export class Herdr extends Context.Service<Herdr, HerdrClient>()("effect-herdr-sdk/Herdr") {
@@ -76,7 +76,12 @@ const Response = Schema.Struct({
   error: Schema.optional(Schema.Struct({ code: Schema.String, message: Schema.String })),
 })
 
+export type HerdrResponse = typeof Response.Type
+
 const Push = Schema.Struct({ event: Schema.String, data: Schema.Unknown })
+
+export type Frame = typeof Push.Type
+
 const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Union([Response, Push])))
 const Request = Schema.Struct({ id: Schema.String, method: Schema.String, params: Schema.Unknown })
 const encodeRequest = Schema.encodeEffect(Schema.fromJsonString(Request))
@@ -124,10 +129,10 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
 
       if (found.value.error) return yield* serverError(method, found.value.error)
 
-      return found.value.result as ResultOf<M>
+      return resultOf<M>(found.value)
     }).pipe(Effect.scoped)
 
-  const subscribe = (subscriptions: ReadonlyArray<Subscription>): Stream.Stream<PushFrame, HerdrFailure> => {
+  const subscribe = (subscriptions: ReadonlyArray<Subscription>): Stream.Stream<Frame, HerdrFailure> => {
     const method = "events.subscribe"
 
     return Effect.gen(function* () {
@@ -135,12 +140,12 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
       const lines = yield* open(method, { id, method, params: { subscriptions } })
 
       return lines.pipe(
-        Stream.flatMap((m): Stream.Stream<PushFrame, HerdrFailure> =>
+        Stream.flatMap((m): Stream.Stream<Frame, HerdrFailure> =>
           isResponse(m)
             ? (m.id === id || m.id === "") && m.error
               ? Stream.fail(serverError(method, m.error))
               : Stream.empty
-            : Stream.make(m as PushFrame),
+            : Stream.make(m),
         ),
       )
     }).pipe(Stream.unwrap)

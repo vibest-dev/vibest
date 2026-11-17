@@ -2,7 +2,7 @@ import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { launchLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { shellQuote } from "@vibest/schema/layout"
-import type { RuntimeLocation } from "@vibest/schema/session"
+import type { RuntimeLocation, RuntimeUnreachable } from "@vibest/schema/session"
 import {
   Cause,
   Config,
@@ -17,7 +17,7 @@ import {
   Stream,
 } from "effect"
 import type { FileSystem } from "effect"
-import type { HerdrFailure, HerdrClient, PushFrame, results } from "effect-herdr-sdk"
+import type { Frame, HerdrFailure, HerdrClient, results } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"
@@ -84,18 +84,17 @@ export const failure = (
   error:
     | HerdrFailure
     | { readonly _tag: "HerdrProtocolMismatch"; readonly message: string }
-    | { readonly message: string },
+    | RuntimeUnreachable
+    | { readonly _tag?: undefined; readonly message: string },
 ): RuntimeError => {
-  const tag = (error as { readonly _tag?: string })._tag
-
-  if (tag === "HerdrTransportError" || tag === "RuntimeUnreachable")
+  if (Predicate.isTagged(error, "HerdrTransportError") || Predicate.isTagged(error, "RuntimeUnreachable"))
     return new RuntimeApi.RuntimeError({ code: "unreachable", message: error.message })
 
-  if (tag === "HerdrProtocolMismatch")
+  if (Predicate.isTagged(error, "HerdrProtocolMismatch"))
     return new RuntimeApi.RuntimeError({ code: "incompatible", message: error.message })
 
-  if (tag === "HerdrError") {
-    const herdr = error as { readonly code: string; readonly method?: string }
+  if (Predicate.isTagged(error, "HerdrError")) {
+    const herdr = error
 
     const code =
       herdr.code === "agent_not_found" || herdr.code === "pane_not_found"
@@ -124,6 +123,27 @@ export const processStillRunning = (
 
 const stateOf = (status: results.AgentStatus): AgentState => (status === "done" ? "idle" : status)
 
+const AgentStatus: Schema.Codec<results.AgentStatus> = Schema.Literals([
+  "idle",
+  "working",
+  "blocked",
+  "done",
+  "unknown",
+])
+
+const decodeAgentFrame = Schema.decodeUnknownOption(
+  Schema.Struct({
+    type: Schema.optional(Schema.String),
+    pane_id: Schema.optional(Schema.String),
+    agent_status: Schema.optional(Schema.NullOr(AgentStatus)),
+    agent: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+)
+
+const decodePaneFrame = Schema.decodeUnknownOption(
+  Schema.Struct({ type: Schema.String, pane_id: Schema.optional(Schema.String) }),
+)
+
 const TICK = Schedule.spaced("500 millis")
 
 const OUTPUT_TIMEOUT = Duration.seconds(30)
@@ -137,7 +157,7 @@ const cut = (value: string | undefined): string | undefined =>
 
 export interface PoolDeps {
   readonly pool: HerdrPool["Service"]
-  readonly spawner: InstanceType<typeof ChildProcessSpawner.ChildProcessSpawner>
+  readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
   readonly fs: FileSystem.FileSystem | undefined
   readonly scope: Scope.Scope
 }
@@ -193,13 +213,11 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         yield* client(session).pipe(
           Effect.flatMap((h) =>
             h.subscribe([{ type: "pane.agent_status_changed", pane_id: paneId }, { type: "pane.agent_detected" }]).pipe(
-              Stream.runForEach((frame: PushFrame) => {
-                const data = frame.data as {
-                  readonly type?: string
-                  readonly pane_id?: string
-                  readonly agent_status?: results.AgentStatus | null
-                  readonly agent?: string | null
-                }
+              Stream.runForEach((frame: Frame) => {
+                const decoded = decodeAgentFrame(frame.data)
+
+                if (Option.isNone(decoded)) return Effect.void
+                const data = decoded.value
 
                 if (frame.event === "pane.agent_status_changed" && data.agent_status)
                   return PubSub.publish(events, {
@@ -227,7 +245,10 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
     yield* pool.events.pipe(
       Stream.runForEach(({ session, frame }) => {
-        const data = frame.data as { readonly type: string; readonly pane_id?: string }
+        const decoded = decodePaneFrame(frame.data)
+
+        if (Option.isNone(decoded)) return Effect.void
+        const data = decoded.value
 
         return data.pane_id && (data.type === "pane_closed" || data.type === "pane_exited")
           ? PubSub.publish(events, {
@@ -253,7 +274,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
     const doctor: NonNullable<Runtime["doctor"]> = (harnesses) => {
       const herdr = (args: ReadonlyArray<string>) =>
-        (spawner.string(ChildProcess.make("herdr", [...args])) as Effect.Effect<string, unknown>).pipe(Effect.option)
+        spawner.string(ChildProcess.make("herdr", [...args])).pipe(Effect.option)
 
       return Effect.all([herdr(["--version"]), herdr(["integration", "status"])]).pipe(
         Effect.map(([version, status]): RuntimeApi.RuntimeReport => {
