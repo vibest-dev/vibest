@@ -18,6 +18,7 @@ export interface Node<
 }
 
 export type Any = Node<string, Command.Command<any, any, any, any, any>, Children>
+
 export type Children = Readonly<Record<string, Any>>
 
 type ChildrenOf<Commands extends ReadonlyArray<Any>> = {
@@ -32,9 +33,12 @@ export function make<
   const command = Command.make(name, options.params ?? ({} as Config))
   const described = options.description ? command.pipe(Command.withDescription(options.description)) : command
   const spec = options.alias ? described.pipe(Command.withAlias(options.alias)) : described
+
   const commands = Object.fromEntries(
     (options.commands ?? []).map((command) => [command.name, command]),
   ) as ChildrenOf<Commands>
+
   return { name, spec, commands }
 }
+
 export * as Spec from "./spec.ts"

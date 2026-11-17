@@ -10,6 +10,7 @@ describe("KeyedMutex", () => {
       const locks = yield* KeyedMutex.make<number>()
       const order: Array<string> = []
       const gate = yield* Deferred.make<void>()
+
       const first = yield* Effect.forkChild(
         locks.withLock(1)(
           Effect.sync(() => order.push("first in")).pipe(
@@ -18,6 +19,7 @@ describe("KeyedMutex", () => {
           ),
         ),
       )
+
       yield* Effect.yieldNow
       const second = yield* Effect.forkChild(locks.withLock(1)(Effect.sync(() => order.push("second"))))
       yield* locks.withLock(2)(Effect.sync(() => order.push("other key")))
@@ -36,9 +38,11 @@ describe("KeyedMutex", () => {
       const locks = yield* KeyedMutex.make<string>()
       const holding = yield* Deferred.make<void>()
       const gate = yield* Deferred.make<void>()
+
       const holder = yield* Effect.forkChild(
         locks.withLock("a")(Deferred.succeed(holding, undefined).pipe(Effect.andThen(Deferred.await(gate)))),
       )
+
       yield* Deferred.await(holding)
       const waiter = yield* Effect.forkChild(locks.withLock("a")(Effect.void))
       yield* Effect.yieldNow
@@ -55,9 +59,11 @@ describe("KeyedMutex", () => {
     Effect.gen(function* () {
       const locks = yield* KeyedMutex.make<string>()
       const holding = yield* Deferred.make<void>()
+
       const holder = yield* Effect.forkChild(
         locks.withLock("a")(Deferred.succeed(holding, undefined).pipe(Effect.andThen(Effect.never))),
       )
+
       yield* Deferred.await(holding)
       yield* Fiber.interrupt(holder)
       assert.strictEqual(yield* locks.size, 0)
@@ -72,11 +78,13 @@ describe("KeyedMutex registration", () => {
     Effect.gen(function* () {
       const locks = yield* KeyedMutex.make<string>()
       const registered = () => Effect.runSync(locks.size) === 1
+
       const fiber = yield* Effect.forkChild(
         locks
           .withLock("a")(Effect.never)
           .pipe(Effect.provideService(Scheduler.Scheduler, interruptOnceReady(registered))),
       )
+
       yield* Fiber.await(fiber)
       assert.strictEqual(yield* locks.size, 0)
     }),

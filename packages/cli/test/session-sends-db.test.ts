@@ -32,6 +32,7 @@ const setup = Effect.gen(function* () {
   const project = yield* projectOf("r")
   const entry = yield* db.session.startEntry(project, "pi", false, place, { agent: "coordinator" })
   yield* db.session.insertSession(session(A), project, { cwd: "/w", task: "a", parentSessionId: entry.sessionId })
+
   return { db, project, entryId: entry.sessionId }
 })
 
@@ -80,6 +81,7 @@ describe("sends from sessions", () => {
           assert.isTrue(yield* db.inbox.maySend(B, A))
           const creator = yield* db.session.creatorLabel(B)
           assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}` })
+
           const prompt = systemPrompt({
             system: "",
             id: B,
@@ -89,6 +91,7 @@ describe("sends from sessions", () => {
             memories: "",
             creator,
           })
+
           assert.include(prompt, `send ${A} --`)
           assert.include(prompt, "nearest session above it that is still running")
         }),
@@ -139,6 +142,7 @@ describe("sends from sessions", () => {
         yield* db.session.insertSession(session(ended), project, { parentSessionId: middle })
         yield* db.session.archive(middle)
         yield* db.session.archive(ended)
+
         const item = {
           id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
           recipient: ended,
@@ -146,6 +150,7 @@ describe("sends from sessions", () => {
           sender: "mb/cccccccc",
           content: "report",
         }
+
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "queued")
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "duplicate")
         assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE session_id = ${ended}`, [

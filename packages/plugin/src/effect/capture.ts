@@ -19,6 +19,7 @@ interface CaptureOptions {
 const collected = (command: string, args: ReadonlyArray<string>, options: CaptureOptions | undefined) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
     const handle = yield* spawner.spawn(
       ChildProcess.make(command, args, {
         ...(options?.stdin === undefined ? {} : { stdin: options.stdin }),
@@ -28,6 +29,7 @@ const collected = (command: string, args: ReadonlyArray<string>, options: Captur
         ...(options?.forceKillAfter === undefined ? {} : { forceKillAfter: options.forceKillAfter }),
       }),
     )
+
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         Stream.mkString(Stream.decodeText(handle.stdout)),
@@ -36,6 +38,7 @@ const collected = (command: string, args: ReadonlyArray<string>, options: Captur
       ],
       { concurrency: "unbounded" },
     )
+
     return { exitCode, stdout, stderr } satisfies Captured
   }).pipe(Effect.scoped)
 
@@ -45,6 +48,7 @@ export const capture = (
   options?: CaptureOptions,
 ): Effect.Effect<Captured | undefined, PlatformError.PlatformError, ChildProcessSpawner.ChildProcessSpawner> => {
   const ran = collected(command, args, options)
+
   return options?.timeout === undefined
     ? ran
     : ran.pipe(Effect.timeoutOption(options.timeout), Effect.map(Option.getOrUndefined))

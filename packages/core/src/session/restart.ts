@@ -43,9 +43,11 @@ export interface Outdated {
   readonly working: boolean
   readonly blocked: string | null
 }
+
 export const RESTART_TIMEOUT = Duration.seconds(60)
 export const AFTER_WAIT = Duration.seconds(10)
 export const RESTART_CONCURRENCY = 4
+
 export const CONTINUE =
   "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
 
@@ -107,10 +109,13 @@ export const make = Effect.gen(function* () {
   const entryArgv = (entry: SessionRow, interrupted: boolean) =>
     Effect.gen(function* () {
       yield* db.session.patchLive(entry.id, { ready: null })
+
       const root =
         (yield* db.project.projectDirectory(entry.projectId)) || (yield* db.session.sessionDirectory(entry.id)) || ""
+
       const savedId = entry.process?.conversation ?? null
       const place = placedTerminal(entry)
+
       const command = yield* entryCommand({
         harness: harnessIdOf(entry),
         agent: entry.agent,
@@ -126,6 +131,7 @@ export const make = Effect.gen(function* () {
         }),
         message: continuing(interrupted),
       })
+
       return (process: number | undefined) => withProcess(command, process)
     }).pipe(
       Effect.provideService(Agents.Service, agents),
@@ -165,15 +171,20 @@ export const make = Effect.gen(function* () {
     const again = liveNow.pipe(
       Effect.map((live) => live?.pid !== undefined && live.ready !== undefined && current(live.integration)),
     )
+
     const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
+
     const reported = (event: BusEvent) => {
       if (event.type !== "process.ready" || event.sessionId !== id) return false
       const { pid, integration } = event.data
+
       if (typeof pid !== "number" || typeof integration !== "object" || integration === null) return false
       const version = "version" in integration ? integration.version : undefined
       const protocol = "protocol" in integration ? integration.protocol : undefined
+
       return typeof version === "string" && typeof protocol === "number" && current({ version, protocol })
     }
+
     return awaitEvent(
       look,
       (event) =>
@@ -190,33 +201,42 @@ export const make = Effect.gen(function* () {
   const inPlace = (t: Target): Effect.Effect<Restarted> => {
     const { id, projectId, label } = t
     const failed = (why: string): Restarted => ({ id, projectId, ok: false, message: `${label} ${why}` })
+
     return Effect.gen(function* () {
       const blocked = blockedOf(t.adapter, t.h, t.pid, t.harnessSessionId)
+
       if (blocked !== undefined) return failed(`not restarted: ${blocked}`)
       const h = t.h!
       const pid = t.pid!
       const argv = yield* t.argv
+
       const signalled = yield* locked(id)(
         Effect.gen(function* () {
           yield* restarting.mark(id)
           const sent = yield* processes.terminate(pid)
+
           if (sent === "denied") {
             yield* restarting.clear(id)
+
             return { sent, process: undefined }
           }
+
           return { sent, process: yield* db.session.restartProcess(id) }
         }),
       )
+
       if (signalled.sent === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
       const ran = yield* h.run!(t.terminal, argv(signalled.process)).pipe(Effect.exit)
       const back = Exit.isSuccess(ran) && (yield* startedAgain(id, t.liveNow))
       yield* restarting.clear(id)
+
       if (!back)
         return failed(
           Exit.isFailure(ran)
             ? `did not start again: ${errorMessage(ran.cause)}${t.hint}`
             : `did not start again on this vibest within ${Duration.format(RESTART_TIMEOUT)}${t.hint}`,
         )
+
       return {
         id,
         projectId,
@@ -231,6 +251,7 @@ export const make = Effect.gen(function* () {
 
   const againArgv = (session: SessionRow, interrupted: boolean) => {
     const message = continuing(interrupted)
+
     return Effect.map(
       launching(
         session,
@@ -244,9 +265,11 @@ export const make = Effect.gen(function* () {
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
       const session = yield* db.session.getSession(id)
+
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
       const interrupted = executionStateOf(session) === "open"
+
       return yield* inPlace({
         id,
         projectId: session.projectId,
@@ -268,14 +291,18 @@ export const make = Effect.gen(function* () {
       const { id, projectId } = entry
       const label = `${id} (entry session)`
       const place = placedTerminal(entry)
+
       if (place === undefined)
         return { id, projectId, ok: false, message: `${label} not restarted: it has no terminal` } satisfies Restarted
       const h = yield* routed(place.runtime)
+
       const seen =
         h === undefined
           ? "unknown"
           : yield* agentState(h, place.address).pipe(Effect.orElseSucceed((): AgentSeen => "unknown"))
+
       const interrupted = wasWorking || stateOf(seen) === "working"
+
       return yield* inPlace({
         id,
         projectId,
@@ -288,6 +315,7 @@ export const make = Effect.gen(function* () {
         argv: entryArgv(entry, interrupted),
         liveNow: Effect.gen(function* () {
           const row = yield* db.session.entryOf(projectId)
+
           return row?.id === id ? reportedOf(row) : undefined
         }),
         hint: "",
@@ -298,10 +326,13 @@ export const make = Effect.gen(function* () {
   const entryRunning = (entry: SessionRow) =>
     Effect.gen(function* () {
       const place = placedTerminal(entry)
+
       if (place === undefined) return undefined
       const h = yield* routed(place.runtime)
+
       if (h === undefined) return undefined
       const seen = yield* agentState(h, place.address).pipe(Effect.option)
+
       return Option.isNone(seen) || seen.value === "absent" ? undefined : seen.value
     })
 
@@ -328,6 +359,7 @@ export const make = Effect.gen(function* () {
         harnessSessionId: row.process?.conversation ?? null,
         working: Effect.succeed<boolean | undefined>(executionStateOf(row) === "open"),
       }))
+
     const entries = (yield* db.session.entrySessions)
       .filter((entry) => reports(harnessIdOf(entry)) && !current(entry.process?.integration ?? undefined))
       .map((entry) => ({
@@ -342,9 +374,12 @@ export const make = Effect.gen(function* () {
           Effect.map((seen) => (seen === undefined ? undefined : stateOf(seen) === "working")),
         ),
       }))
+
     const listed: Array<Outdated> = []
+
     for (const candidate of [...sessions, ...entries]) {
       const working = yield* candidate.working
+
       if (working === undefined) continue
       listed.push({
         id: candidate.id,
@@ -361,6 +396,7 @@ export const make = Effect.gen(function* () {
           ) ?? null,
       })
     }
+
     return listed
   })
 
@@ -369,6 +405,7 @@ export const make = Effect.gen(function* () {
       id,
       Effect.gen(function* () {
         const entry = (yield* db.session.entrySessions).find((candidate) => candidate.id === id)
+
         return yield* entry === undefined ? restartAgent(id) : restartEntry(entry, working)
       }),
     )
@@ -378,13 +415,16 @@ export const make = Effect.gen(function* () {
       const outcomes = yield* Effect.forEach(new Set(ids), (id) => restartOwned(id, working.includes(id)), {
         concurrency: RESTART_CONCURRENCY,
       })
+
       for (const o of outcomes) yield* o.ok ? Effect.logInfo(o.message) : Effect.logWarning(o.message)
+
       return outcomes
     }),
   )
 
   const runningTheCommand = (entry: SessionRow, command: number) => {
     const pid = pidOf(entry)
+
     return pid === undefined
       ? Effect.succeed(false)
       : processes.tree(pid).pipe(Effect.map((tree) => tree?.includes(command) === true))
@@ -393,14 +433,17 @@ export const make = Effect.gen(function* () {
   const restartLater = Effect.fn("Restart.restartLater")((ids: ReadonlyArray<string>, after: number | undefined) =>
     Effect.gen(function* () {
       const working: Array<string> = []
+
       for (const entry of yield* db.session.entrySessions) {
         if (!ids.includes(entry.id)) continue
+
         if (
           stateOf((yield* entryRunning(entry)) ?? "unknown") === "working" ||
           (after !== undefined && (yield* runningTheCommand(entry, after)))
         )
           working.push(entry.id)
       }
+
       const waited =
         after === undefined
           ? Effect.void
@@ -410,6 +453,7 @@ export const make = Effect.gen(function* () {
                 Effect.repeat({ until: (l) => l !== "alive", schedule: UPDATE_CLI_EXIT_POLL }),
                 Effect.timeoutOption(AFTER_WAIT),
               )
+
       yield* waited.pipe(Effect.andThen(restart(ids, working)), Effect.forkIn(scope))
     }).pipe(Effect.asVoid),
   )

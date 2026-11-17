@@ -26,7 +26,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 import { commandOf, note } from "../../../../tools/reap.ts"
+
 export const VERSION = "0.0.0-local"
+
 import { FakeGit } from "@vibest/core/test/lib/fake-git"
 import { FakeRuntime } from "@vibest/core/test/lib/fake-runtime"
 
@@ -53,7 +55,9 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
   new Proxy(client, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver)
+
       if (typeof value !== "function") return value
+
       return (input: unknown, options?: { headers?: Record<string, string> }) => {
         const payload =
           input !== null &&
@@ -63,6 +67,7 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
           (prop === "Spawn" || prop === "Launch" || prop === "Project.EntrySession" || prop === "Project.RunningEntry")
             ? { ...input, runtime: TEST_HERDR }
             : input
+
         return (value as (payload: unknown, options?: { headers?: Record<string, string> }) => unknown).call(
           target,
           payload,
@@ -76,8 +81,10 @@ export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db.Service
     const projectId = yield* db.session.projectOfSession(sessionId)
+
     if (projectId === undefined) return null
     const entry = yield* db.session.entryOf(projectId)
+
     return entry?.id === sessionId ? (entry.process?.conversation ?? null) : null
   })
 
@@ -88,6 +95,7 @@ export const withStdin = (input: string, command: string, args: ReadonlyArray<st
     const fs = yield* FileSystem.FileSystem
     const file = `${yield* tempDirectory("vibest-stdin-")}/stdin`
     yield* fs.writeFileString(file, input).pipe(Effect.orDie)
+
     return ["-c", STDIN_FROM_FILE, "sh", file, command, ...args] as const
   })
 
@@ -98,11 +106,14 @@ const mainTs = `${import.meta.dirname}/../../../cli/src/main.ts`
 export const noteRecorded = (daemonInfo: string) =>
   Effect.gen(function* () {
     const running = Option.getOrUndefined(yield* readDaemonInfo(daemonInfo))
+
     if (!running) return
     const live = commandOf(running.pid).trim()
+
     if (!live.includes("daemon --foreground")) return
     const recorded = running.command ?? []
     const marker = recorded.length > 0 && recorded.every((part) => live.includes(part)) ? recorded.join(" ") : live
+
     if (marker === "" || /[\t\n]/.test(marker)) return
     note(running.pid, marker)
   }).pipe(Effect.ignore)
@@ -110,6 +121,7 @@ export const noteRecorded = (daemonInfo: string) =>
 export const runVibest = (cwd: string, env: Record<string, string>, args: ReadonlyArray<string>, stdin = "") =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
     const handle = yield* spawner.spawn(
       ChildProcess.make("sh", yield* withStdin(stdin, process.execPath, [mainTs, ...args]), {
         cwd,
@@ -118,12 +130,16 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
         stdin: "ignore",
       }),
     )
+
     if (args[0] === "daemon") note(Number(handle.pid), mainTs)
     const text = (s: Stream.Stream<Uint8Array, unknown>) => Stream.mkString(Stream.decodeText(s))
+
     const [stdout, stderr, code] = yield* Effect.all([text(handle.stdout), text(handle.stderr), handle.exitCode], {
       concurrency: 3,
     })
+
     if (env.VIBEST_HOME !== undefined) yield* noteRecorded(`${env.VIBEST_HOME}/vibestd.pid`)
+
     return { stdout, stderr, code }
   }).pipe(Effect.scoped, Effect.orDie)
 
@@ -138,9 +154,11 @@ export {
   type PluginEntry,
   type TestServices,
 } from "@vibest/core/test/lib/session"
+
 import { sessionFrom, type TestOptions } from "@vibest/core/test/lib/session"
 
 export type { TestOptions }
+
 export {
   GaveUp,
   EXECUTIONS,
@@ -159,9 +177,11 @@ export const pingOf = (socket: string) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 40; attempt++) {
       const ping = yield* readPing(socket)
+
       if (Option.isSome(ping)) return ping.value
       yield* Effect.sleep("250 millis")
     }
+
     return yield* Effect.die(new Error(`no Ping answer on ${socket}`))
   })
 
@@ -169,9 +189,11 @@ export const recordedInfo = (daemonInfo: string, instance: string | undefined) =
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 200; attempt++) {
       const info = yield* readDaemonInfo(daemonInfo)
+
       if (Option.isSome(info) && info.value.instance === instance) return info.value
       yield* Effect.sleep("50 millis")
     }
+
     return yield* Effect.die(new Error(`${daemonInfo} never recorded vibestd ${instance}`))
   })
 
@@ -180,11 +202,15 @@ const endDaemonPid = async (pid: number) => {
     process.kill(pid, "SIGTERM")
   } catch (e) {
     if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+
     return
   }
+
   for (const deadline = Date.now() + 2_000; Platform.liveness(pid) !== "exited" && Date.now() < deadline;)
     await new Promise((resolve) => setTimeout(resolve, 50))
+
   if (Platform.liveness(pid) === "exited") return
+
   try {
     process.kill(pid, "SIGKILL")
   } catch (e) {
@@ -194,8 +220,11 @@ const endDaemonPid = async (pid: number) => {
 
 const ours = (pid: number, recorded: ReadonlyArray<string> | undefined) => {
   const live = commandOf(pid)
+
   if (!live.includes("daemon --foreground")) return false
+
   if (recorded !== undefined && recorded.every((part) => live.includes(part))) return true
+
   return live.includes(mainTs)
 }
 
@@ -203,6 +232,7 @@ export const stopRecorded = (daemonInfo: string) =>
   Effect.gen(function* () {
     yield* noteRecorded(daemonInfo)
     const running = Option.getOrUndefined(yield* readDaemonInfo(daemonInfo))
+
     if (!running || !ours(running.pid, running.command)) return
     yield* Effect.promise(() => endDaemonPid(running.pid))
   }).pipe(Effect.ignore)
@@ -220,6 +250,7 @@ export const wire = Effect.gen(function* () {
   const lines: Array<Line> = []
   const received: Array<Line> = []
   const waiting: Array<(line: Line) => void> = []
+
   const conn = yield* Effect.acquireRelease(
     Effect.promise(
       () =>
@@ -229,12 +260,15 @@ export const wire = Effect.gen(function* () {
           socket.setEncoding("utf8")
           socket.on("data", (chunk: string) => {
             buffer += chunk
+
             for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
               const text = buffer.slice(0, end)
               buffer = buffer.slice(end + 1)
+
               if (text === "") continue
               const line = JSON.parse(text) as Line
               const waiter = waiting.shift()
+
               if (waiter) waiter(line)
               else received.push(line)
             }
@@ -245,6 +279,7 @@ export const wire = Effect.gen(function* () {
     ),
     (socket) => Effect.sync(() => socket.destroy()),
   )
+
   return {
     lines,
     send: (message) =>

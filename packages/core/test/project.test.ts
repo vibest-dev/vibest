@@ -14,6 +14,7 @@ const withProjectInTempHome = <A, E>(
   Effect.gen(function* () {
     const home = yield* tempDirectory("vibest-project-")
     const layout = Layer.succeed(Layout, yield* Layout.make(home))
+
     return yield* program.pipe(Effect.provide(Project.layer.pipe(Layer.provideMerge(layout))))
   })
 
@@ -26,11 +27,13 @@ describe("Project", () => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const dir = layout.project(scope.id)
+
         const write = (rel: string, content: string) =>
           Effect.gen(function* () {
             yield* fs.makeDirectory(path.dirname(path.join(dir, rel)), { recursive: true })
             yield* fs.writeFileString(path.join(dir, rel), content)
           })
+
         yield* write("docs/b/deep.md", "---\ndescription: deep doc\n---\nNeedle here")
         yield* write("docs/a.txt", "first line\nno match")
         yield* write("artifacts/w1-notes.md", "needle in artifacts")

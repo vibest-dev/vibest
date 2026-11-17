@@ -9,11 +9,14 @@ describe("RunCoordinator", () => {
       const started = yield* Deferred.make<void>()
       const done = yield* Deferred.make<void>()
       const drains: Array<{ key: string; wake: ReadonlyArray<number> }> = []
+
       const coordinator = yield* RunCoordinator.make<string, ReadonlyArray<number>>({
         drain: (key, wake) =>
           Effect.gen(function* () {
             drains.push({ key, wake })
+
             if (key !== "a") return
+
             if (drains.filter((d) => d.key === "a").length === 1) {
               yield* Deferred.succeed(started, undefined)
               yield* Deferred.await(gate)
@@ -21,8 +24,10 @@ describe("RunCoordinator", () => {
           }),
         merge: (pending, next) => [...pending, ...next],
       })
+
       yield* coordinator.wake("a", [0])
       yield* Deferred.await(started)
+
       for (let i = 1; i <= 50; i++) yield* coordinator.wake("a", [i])
       yield* coordinator.wake("b", [99])
       yield* Effect.yieldNow

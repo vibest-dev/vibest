@@ -3,7 +3,9 @@ import { Schema } from "effect"
 import { InboxKind } from "./event.ts"
 
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
+
 export type AgentStatus = typeof AgentStatus.Type
+
 export const ExecutionState = Schema.Literals([
   "none",
   "open",
@@ -13,26 +15,32 @@ export const ExecutionState = Schema.Literals([
   "lost",
   "not_started",
 ])
+
 export type ExecutionState = typeof ExecutionState.Type
+
 export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"])
+
 export type InboxStatus = typeof InboxStatus.Type
 
 export const RuntimeAddress = Schema.Struct({
   machine: Schema.String,
   id: Schema.String,
 })
+
 export type RuntimeAddress = typeof RuntimeAddress.Type
 
 export const RuntimeLocation = Schema.Union([
   Schema.Struct({ socketPath: Schema.String }),
   Schema.Struct({ session: Schema.String }),
 ])
+
 export type RuntimeLocation = typeof RuntimeLocation.Type
 
 export const RuntimeMachine = Schema.Struct({
   id: Schema.String,
   target: Schema.optional(Schema.String),
 })
+
 export type RuntimeMachine = typeof RuntimeMachine.Type
 
 export const InboxRow = Schema.Struct({
@@ -43,6 +51,7 @@ export const InboxRow = Schema.Struct({
   message: Schema.String,
   status: InboxStatus,
 })
+
 export type InboxRow = typeof InboxRow.Type
 
 export type Taken = {
@@ -78,6 +87,7 @@ export class NoSuchSession extends Schema.TaggedError<NoSuchSession>()("NoSuchSe
   id: Schema.String,
   message: Schema.String,
 }) {}
+
 export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("AmbiguousSession", {
   prefix: Schema.String,
   matches: Schema.Array(Schema.String),
@@ -86,9 +96,11 @@ export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("Am
     return `${this.prefix} matches ${this.matches.join(", ")}; give more characters of the session id`
   }
 }
+
 export class MoveRefused extends Schema.TaggedError<MoveRefused>()("MoveRefused", {
   message: Schema.String,
 }) {}
+
 export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()("AllocationFailed", {
   message: Schema.String,
 }) {}
@@ -97,29 +109,35 @@ export class SessionBusy extends Schema.TaggedError<SessionBusy>()("SessionBusy"
   id: Schema.String,
   message: Schema.String,
 }) {}
+
 export class LimitReached extends Schema.TaggedError<LimitReached>()("LimitReached", { limit: Schema.Number }) {
   override get message() {
     return `VIBEST_MAX_SESSIONS=${this.limit} sessions are already open (working or kept); vibest archive one first`
   }
 }
+
 export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
   id: Schema.String,
   message: Schema.String,
 }) {}
+
 export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("NoCallingSession", {}) {
   override get message() {
     return "vibest run is run by an agent in a session; to start working, run vibest in a terminal"
   }
 }
+
 export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAgent", {
   agent: Schema.String,
   known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
 }) {
   override get message() {
     const known = this.known.map((definition) => `${definition.id} (${definition.description})`).join("; ")
+
     return `no agent definition ${this.agent}; registered: ${known || "none"}`
   }
 }
+
 export const runnableNote = (runnable: ReadonlyArray<string>) =>
   runnable.length === 0 ? "" : `; this machine can run: ${runnable.join(", ")}`
 
@@ -149,6 +167,7 @@ export const describeSpawn = (s: {
 }) => {
   const plugins = [...new Set(Object.values(s.decidedBy))]
   const by = plugins.length === 0 ? "" : ` (chosen by plugin ${plugins.join(", ")})`
+
   return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
 }
 
@@ -165,4 +184,5 @@ export const HarnessChoice = Schema.Struct({
   problem: Schema.NullOr(Schema.String),
   models: Schema.Array(HarnessModel),
 })
+
 export type HarnessChoice = typeof HarnessChoice.Type

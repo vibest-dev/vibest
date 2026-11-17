@@ -8,11 +8,14 @@ import { historyFiles } from "../world/user-env.ts"
 
 const contentHash = async (file: string, keys: ReadonlyArray<string> | undefined) => {
   const bytes = await fs.readFile(file).catch(() => undefined)
+
   if (bytes === undefined) return "missing"
+
   const hashed =
     keys === undefined
       ? bytes
       : JSON.stringify(keys.map((k) => [k, (JSON.parse(bytes.toString("utf8")) as Record<string, unknown>)[k]]))
+
   return crypto.createHash("sha256").update(hashed).digest("hex")
 }
 
@@ -31,6 +34,7 @@ export const historyNaming = async (worlds: ReadonlyArray<string>, files = histo
     await Promise.all(
       files.map(async (file) => {
         const text = await fs.readFile(file, "latin1").catch(() => "")
+
         return worlds.some((w) => text.includes(path.basename(w))) ? [file] : []
       }),
     )

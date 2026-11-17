@@ -13,6 +13,7 @@ describe("SessionLive.restarting.own", () => {
       for (let op = 1; op <= 30; op++) {
         const live = yield* SessionLive.make
         const counted = { calls: 0 }
+
         const fiber = yield* Effect.forkChild(
           live.restarting.own("a", Effect.succeed(restarted)).pipe(
             Effect.provideService(
@@ -21,10 +22,13 @@ describe("SessionLive.restarting.own", () => {
             ),
           ),
         )
+
         yield* Fiber.await(fiber)
+
         const next = yield* TestClock.withLive(
           live.restarting.own("a", Effect.succeed(restarted)).pipe(Effect.timeoutOption("1 second")),
         )
+
         assert.isTrue(Option.isSome(next), `a restart of a after an interrupt at boundary ${op} runs`)
       }
     }),

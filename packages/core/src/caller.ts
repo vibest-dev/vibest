@@ -20,16 +20,22 @@ export const entryPlace = (o: {
   readonly hits: ReadonlyArray<CallerHit>
 }): EntryPlace => {
   const named = (id: string) => o.hits.find((hit) => hit.id === id)
+
   if (o.runtime !== undefined) {
     const hit = named(o.runtime)
+
     if (hit === undefined) return { in: "launch", runtime: o.runtime }
+
     return hit.terminal === undefined
       ? { in: "refused", message: `this ${shown(o.runtime, hit.name)} place could not be named` }
       : { in: "terminal", runtime: o.runtime, terminal: hit.terminal }
   }
+
   const chosen = o.hits[0]
+
   if (chosen === undefined)
     return { in: "refused", message: "no runtime was detected in this environment; pass --runtime" }
+
   return chosen.terminal === undefined
     ? {
         in: "refused",
@@ -41,6 +47,7 @@ export const entryPlace = (o: {
 const present = (keys: ReadonlyArray<string>, env: Readonly<Record<string, string | undefined>>) =>
   keys.every((key) => {
     const value = env[key]
+
     return value !== undefined && value !== ""
   })
 
@@ -58,6 +65,7 @@ export const specHits = (
     const matches = specs.filter((spec) => present(spec.env, env))
     const chosen = runtime === undefined ? matches[0] : matches.find((hit) => hit.id === runtime)
     const terminal = chosen === undefined ? undefined : yield* chosen.terminal(env)
+
     return matches.map((hit): CallerHit => ({
       id: hit.id,
       ...(hit.name === undefined ? {} : { name: hit.name }),
@@ -70,13 +78,17 @@ export const filterCallerEnv = (
   env: Readonly<Record<string, string | undefined>>,
 ): Record<string, string | undefined> => {
   const out: Record<string, string | undefined> = {}
+
   for (const spec of specs) for (const key of spec.env) if (!(key in out) && env[key] !== undefined) out[key] = env[key]
+
   return out
 }
 
 const declared = (keys: ReadonlyArray<string>, env: Readonly<Record<string, string | undefined>>) => {
   const out: Record<string, string | undefined> = {}
+
   for (const key of keys) out[key] = env[key]
+
   return out
 }
 
@@ -88,7 +100,9 @@ export const callerTarget = (
   for (const spec of specs) {
     if (typeof spec.target !== "function") continue
     const target = spec.target(declared(spec.env, env), named)
+
     if (target !== undefined) return target
   }
+
   return undefined
 }

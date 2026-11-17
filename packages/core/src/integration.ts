@@ -37,6 +37,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const event = definition.conversationOf === undefined ? undefined : jsonObject(raw)
       const conversation = event && definition.conversationOf?.(event)
+
       if (conversation && (yield* db.session.noteConversation(who.id, conversation, who.process)))
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
@@ -44,35 +45,48 @@ const make = Effect.gen(function* () {
   const terminalClosed = (id: string) =>
     Effect.gen(function* () {
       const session = yield* db.session.getSession(id)
+
       if (session === undefined || terminalOf(session).id === "") return false
       const runtime = yield* runtimes.route(runtimeOf(session)).pipe(Effect.option)
+
       return Option.isSome(runtime) && !(yield* alive(runtime.value, terminalOf(session)))
     })
 
   const executionEnd = Effect.fn("Integration.executionEnd")(function* (who: HookCaller, raw: string) {
     const definition = harnesses.find(who.harness)
+
     if (definition === undefined) return
     const end = executionEndOf(definition, raw, yield* Clock.currentTimeMillis)
+
     if (!end) return yield* noteConversation(definition, who, raw)
+
     if (end.status === "interrupted" && (yield* terminalClosed(who.id))) {
       yield* Effect.log(`execution end ${who.id} (${end.harness}, interrupted as its terminal closed: an exit)`)
+
       return yield* sessions.check(who.id)
     }
+
     const written = yield* db.session.endObserved(who.id, end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })
 
   const prompt = Effect.fn("Integration.prompt")(function* (who: HookCaller, raw: string) {
     const definition = harnesses.find(who.harness)
+
     if (definition === undefined) return
     yield* noteConversation(definition, who, raw)
     const prompt = promptOf(definition, raw)
+
     if (prompt === undefined) return
+
     if ("execution" in prompt) {
       if (prompt.refused) return yield* sessions.typeTaken(who.id, prompt.execution)
+
       if (yield* db.session.acceptExecution(who.id, prompt.execution)) yield* db.session.setStatus(who.id, "working")
+
       return
     }
+
     yield* sessions.userPrompt(who.id, prompt.text, yield* Clock.currentTimeMillis, who.process)
   })
 
@@ -93,7 +107,9 @@ const make = Effect.gen(function* () {
   const guard = Effect.fn("Integration.guard")(
     function* (sessionId: string, raw: string) {
       const row = yield* db.session.sessionIdentity(sessionId)
+
       if (row === undefined) return `no session ${sessionId}; the tool call is refused.`
+
       return yield* Guard.check({ id: row.id, agent: row.agent, projectDir: layout.project(row.projectId) }, raw)
     },
     Effect.provideService(Agents.Service, agents),

@@ -29,6 +29,7 @@ export const listed = async (w: World, id: string, cwd = w.repository) =>
       })
       .then((l) => l.sessions)
   ).find((e) => e.id === id)
+
 export const executionState = async (w: World, id: string, cwd = w.repository) =>
   (await listed(w, id, cwd))?.executionState
 
@@ -38,12 +39,14 @@ export const latest = async (w: World, id: string, cwd = w.repository) => {
       reply?: { execution: number; status: string; text: string | null; failure: string | null } | null
     }>(["result", id], { cwd })
   ).reply
+
   return reply ? { id: reply.execution, status: reply.status, message: reply.text || reply.failure || "" } : undefined
 }
 
 const ends = async (w: World, id: string) =>
   (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).split("\n").flatMap((l) => {
     const found = new RegExp(`execution end ${id} \\((\\w+), (\\w+)`).exec(l)
+
     return found ? [{ harness: found[1]!, interrupted: found[2] === "interrupted" }] : []
   })
 
@@ -61,16 +64,19 @@ export const withSession = async (
   await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined } })
   await w.entry({ ...options, session, processEnv: { CLAUDE_CONFIG_DIR: undefined } })
   let id = ""
+
   try {
     const run = await w.okViaEntry(["run", harness, ...flags, "--session", session, "--", task], {
       timeoutMs: 120_000,
       ...options,
     })
+
     id = (JSON.parse(run) as { id: string }).id
     await body({ id, socket })
   } finally {
     if (id) await w.vibest(["archive", id], { timeoutMs: 60_000, ...options })
     await w.stopDaemon()
+
     if (
       await fs.stat(path.dirname(socket)).then(
         () => true,
@@ -108,6 +114,7 @@ const installBesidePlugin = async (w: World, config: string) => {
       hooks: { SessionStart: [{ hooks: [{ type: "command", command: `touch '${besideRan}'` }] }] },
     }),
   )
+
   for (const argv of [
     ["claude", "plugin", "marketplace", "add", market],
     ["claude", "plugin", "install", "e2e-beside@e2e-local"],
@@ -115,6 +122,7 @@ const installBesidePlugin = async (w: World, config: string) => {
     const r = await w.run(w.root, argv, { env: { CLAUDE_CONFIG_DIR: config } })
     expect(r.code === 0, `${argv.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
   }
+
   return besideRan
 }
 
@@ -136,14 +144,18 @@ const checks: ReadonlyArray<Check> = [
       const zdot = path.join(w.root, "zdotdir-other")
       await fs.mkdir(zdot, { recursive: true })
       const env = { PATH: `${other}:${w.env().PATH}`, ZDOTDIR: zdot }
+
       const pi = fakeOpenAI(
         (who, _dir, _done, last) => (who === "pi" && last === undefined ? "pong\nstatus: completed" : "ok"),
         {},
       )
+
       const claude = fakeAnthropic((r) =>
         r.tools.length > 0 && subagentFolder(r.system) !== undefined ? "pong\nstatus: completed" : "ok",
       )
+
       const session = `${w.herdrSession}-other`
+
       try {
         const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
         await w.daemon({ env })
@@ -154,6 +166,7 @@ const checks: ReadonlyArray<Check> = [
           processEnv: env,
           timeoutMs: 90_000,
         })
+
         const run = async (flags: ReadonlyArray<string>) =>
           (
             JSON.parse(
@@ -163,17 +176,21 @@ const checks: ReadonlyArray<Check> = [
               }),
             ) as { id: string }
           ).id
+
         const subs = [
           await run(["pi", "--env", piEnv]),
           await run(["claude", ...envArgs(await claudeEnv(w, "other", claude.url))]),
         ]
+
         for (const id of subs) {
           await until(`${id}'s result`, async () => (await executionState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
         }
+
         const entry = (
           await w.json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"]).then((l) => l.sessions)
         ).find((e) => e.agent === "coordinator")
+
         expect(entry !== undefined, "no entry session")
         await until(
           "the Pi entry session's ready report",
@@ -231,6 +248,7 @@ const checks: ReadonlyArray<Check> = [
       "vibest finds its plugins: npm's launcher passes them, the bare binary looks beside its bin/; with none it refuses each harness, and says why",
     run: async (w) => {
       const beside = await w.vibest(["doctor"], { env: { VIBEST_HARNESSES: undefined }, timeoutMs: 120_000 })
+
       for (const h of ["pi", "claude"])
         expect(!new RegExp(`^  . ${h} .*plugin`, "m").test(beside.stdout), `${h}:\n${beside.stdout}`)
       const solo = path.join(w.root, "solo", "bin")
@@ -239,19 +257,24 @@ const checks: ReadonlyArray<Check> = [
       await fs.chmod(path.join(solo, "vibest"), 0o755)
       const home = path.join(w.root, "solo-home")
       await fs.mkdir(home)
+
       const r = await w.run(w.repository, [path.join(solo, "vibest"), "doctor"], {
         env: { VIBEST_HARNESSES: undefined, VIBEST_HOME: home },
         timeoutMs: 120_000,
       })
+
       const pid = JSON.parse(await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "{}")) as {
         pid?: number
       }
+
       if (pid.pid) {
         try {
           process.kill(pid.pid, "SIGTERM")
         } catch {}
       }
+
       const resolvedSolo = await fs.realpath(path.join(w.root, "solo"))
+
       for (const h of ["pi", "claude"])
         expect(
           new RegExp(
@@ -271,11 +294,15 @@ const checks: ReadonlyArray<Check> = [
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const ran = path.join(w.root, "pi-herdr-ran.txt")
       const results: Array<string> = []
+
       const model = fakeOpenAI((who, _dir, done, last) => {
         if (last !== undefined) results.push(last)
+
         if (who !== "pi") return "ok"
+
         return done === 0 ? { tool: "bash", input: { command: `herdr pane list > ${ran}` } } : "pong\nstatus: completed"
       }, {})
+
       try {
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-i3", model.url)}`
         await withSession(w, "pi", ["--env", env], "guard and result", async ({ id }) => {
@@ -302,6 +329,7 @@ const checks: ReadonlyArray<Check> = [
       for (const bin of ["cursor-agent", "herdr"])
         if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
       const login = await w.run(w.repository, ["cursor-agent", "status"])
+
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
       await addCursorPlugin(w, harnesses)
@@ -315,6 +343,7 @@ const checks: ReadonlyArray<Check> = [
           hooks: { sessionStart: [{ command: `echo "ran $VIBEST_PROCESS" >> '${projectHookLog}'; echo {}` }] },
         }),
       )
+
       for (const argv of [
         ["git", "add", "."],
         ["git", "commit", "-q", "-m", "project hooks"],
@@ -322,6 +351,7 @@ const checks: ReadonlyArray<Check> = [
         const r = await w.run(repo, argv)
         expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
       }
+
       await withSession(
         w,
         "cursor",
@@ -338,13 +368,17 @@ const checks: ReadonlyArray<Check> = [
           const worktree = await fs.realpath((await listed(w, id, repo))!.worktree)
           expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
           const transcripts = path.join(w.home, ".cursor", "projects", worktree.slice(1).replace(/[^a-zA-Z0-9]/g, "-"))
+
           const files = (await fs.readdir(transcripts, { recursive: true }).catch(() => [] as Array<string>)).filter(
             (f) => f.endsWith(".jsonl"),
           )
+
           expect(files.length > 0, `no Cursor transcript in ${transcripts}`)
+
           const tried = (await Promise.all(files.map((f) => fs.readFile(path.join(transcripts, f), "utf8")))).some(
             (t) => /"tool_use".*herdr pane list/.test(t),
           )
+
           await w.writeEvidence(
             path.join(evidence, "I5-herdr-call.json"),
             `${JSON.stringify({ tried, transcripts })}\n`,
@@ -372,15 +406,20 @@ const checks: ReadonlyArray<Check> = [
       const HOLD = "Keep working on this until you are stopped."
       const BACKGROUND = "Start a background shell, then keep working until you are stopped."
       let held = 0
+
       const model = fakeAnthropic((r) => {
         if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
+
         if (text(lastUser(r)).includes(BACKGROUND))
           return { tool: "Bash", input: { command: "sleep 120", run_in_background: true, description: "background" } }
+
         if (!text(lastUser(r)).includes(HOLD) && !r.messages.some((m) => text(m).includes(BACKGROUND)))
           return "status: completed\nsummary: e2e answer"
         held++
+
         return new Promise<Step>(() => {})
       })
+
       try {
         const flags = await claudeEnv(w, "executions", model.url)
         const besideRan = await installBesidePlugin(w, claudeConfigOf(flags))
@@ -395,9 +434,11 @@ const checks: ReadonlyArray<Check> = [
           await w.ok(["send", id, HOLD])
           await until("the held execution at the model", () => held === 1, 60_000)
           await until("the held execution open", settled("open"), 60_000)
+
           const esc = await w.run(w.root, ["herdr", "agent", "send-keys", paneOf(w, id)!, "esc"], {
             env: { HERDR_SOCKET_PATH: socket },
           })
+
           expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
           await until("the interrupted result", settled("interrupted"), 60_000)
           const second = await latest(w, id)
@@ -406,6 +447,7 @@ const checks: ReadonlyArray<Check> = [
             `Esc result: ${JSON.stringify(second)}`,
           )
           expect((await aborted()) === 1, `execution ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
+
           const notices = () =>
             row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)
               ?.n
@@ -450,16 +492,22 @@ const checks: ReadonlyArray<Check> = [
       let release: () => void = () => undefined
       const gate = new Promise<void>((resolve) => (release = resolve))
       let holding = false
+
       const model = fakeAnthropic((r) => {
         if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
         const last = text(lastUser(r))
+
         if (last.includes("FIRST-HOLD")) {
           holding = true
+
           return gate.then((): Step => "status: completed\nsummary: first-answer")
         }
+
         if (last.includes("SECOND-ASK")) return "status: completed\nsummary: second-answer"
+
         return "status: completed\nsummary: e2e answer"
       })
+
       try {
         const flags = await claudeEnv(w, "taking", model.url)
         await withSession(w, "claude", envArgs(flags), "Answer once.", async ({ id }) => {
@@ -470,11 +518,13 @@ const checks: ReadonlyArray<Check> = [
           await until("its execution open", settled("open"), 60_000)
           await w.ok(["send", id, "SECOND-ASK"])
           await Bun.sleep(3_000)
+
           const waiting = row<{ status: string; execution: number | null }>(
             w,
             "SELECT status, execution_id AS execution FROM inbox WHERE session_id = ? AND content LIKE '%SECOND-ASK%'",
             id,
           )
+
           expect(
             waiting?.status === "pending" && waiting.execution === null,
             `the send made while busy: ${JSON.stringify(waiting)}`,
@@ -485,11 +535,13 @@ const checks: ReadonlyArray<Check> = [
             async () => (await latest(w, id))?.message.includes("second-answer") === true,
             120_000,
           )
+
           const executions = rows<{ id: number; outcome: string; reply: string }>(
             w,
             "SELECT id, outcome, reply FROM execution WHERE session_id = ? ORDER BY id",
             id,
           )
+
           expect(
             executions.length === 3 && executions.every((e) => e.outcome === "completed"),
             `executions: ${JSON.stringify(executions)}`,
@@ -498,11 +550,13 @@ const checks: ReadonlyArray<Check> = [
             executions[1]!.reply.includes("first-answer") && executions[2]!.reply.includes("second-answer"),
             `replies: ${JSON.stringify(executions)}`,
           )
+
           const delivered = rows<{ content: string; status: string; execution: number }>(
             w,
             "SELECT content, status, execution_id AS execution FROM inbox WHERE session_id = ? AND kind = 'send' ORDER BY id",
             id,
           )
+
           expect(
             delivered.length === 2 &&
               delivered.every((d) => d.status === "delivered") &&
@@ -524,7 +578,9 @@ const checks: ReadonlyArray<Check> = [
       "Claude whose --settings only grants its project folder (fake model): the plugin's tool.call guard refuses a session's herdr call and its Read, find, grep and Grep of another project, still lets it read its own project folder, and no refused file's text reaches the model",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+
       type Info = { directory: string; preferences: string; memories: string; artifacts: string }
+
       const other = await w.json<Info>(["project", "info"], { cwd: await newRepository(w, "secret") })
       await fs.mkdir(other.memories, { recursive: true })
       await fs.writeFile(other.preferences, "The secret word is lighthouse.\n")
@@ -534,8 +590,10 @@ const checks: ReadonlyArray<Check> = [
       await fs.writeFile(path.join(own.artifacts, "guard-ok.md"), "ok-own\n")
       const ran = path.join(w.root, "herdr-ran.txt")
       const herdrReason = "Sessions do not run a terminal runtime; vibest manages it."
+
       const offLimits =
         "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
+
       const calls = (tools: ReadonlyArray<string>): ReadonlyArray<{ step: Exclude<Step, string>; reason?: string }> => [
         { step: { tool: "Bash", input: { command: `herdr --help > ${ran}` } }, reason: herdrReason },
         { step: { tool: "Read", input: { file_path: other.preferences } }, reason: offLimits },
@@ -546,10 +604,13 @@ const checks: ReadonlyArray<Check> = [
           : []),
         { step: { tool: "Read", input: { file_path: path.join(own.artifacts, "guard-ok.md") } } },
       ]
+
       const model = fakeAnthropic((r) => {
         if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
+
         return calls(r.tools)[r.results.length]?.step ?? "status: completed\nsummary: guard test"
       })
+
       try {
         await withSession(
           w,
@@ -571,6 +632,7 @@ const checks: ReadonlyArray<Check> = [
             made.forEach((c, i) => {
               const answer = answers.get(`toolu_${i}`)
               expect(answer !== undefined, `no answer to ${c.step.tool} ${JSON.stringify(c.step.input)}`)
+
               if (c.reason === undefined)
                 expect(
                   answer!.is_error !== true && resultText(answer!).includes("ok-own"),
@@ -587,6 +649,7 @@ const checks: ReadonlyArray<Check> = [
             expect(!(await Bun.file(ran).exists()), "herdr ran: herdr-ran.txt exists")
             const message = (await latest(w, id))?.message ?? ""
             expect(/summary: guard test/.test(message), `the session's result: ${message}`)
+
             const pane = (
               await w
                 .json<{ sessions: Array<{ id: string; address?: { id: string } }> }>(["ls"])
@@ -594,12 +657,15 @@ const checks: ReadonlyArray<Check> = [
             )
               .find((e) => e.id === id)
               ?.address?.id.split("/")[1]
+
             const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {
               foreground_processes?: Array<{ name: string; argv?: Array<string> | null }>
             }
+
             const argv = (info.foreground_processes ?? []).find((p) =>
               /claude/.test(`${p.name} ${p.argv?.[0] ?? ""}`),
             )?.argv
+
             expect(argv !== undefined && argv !== null, `no claude in the session's pane: ${JSON.stringify(info)}`)
             const settings = argv![argv!.indexOf("--settings") + 1] ?? "{}"
             expect(

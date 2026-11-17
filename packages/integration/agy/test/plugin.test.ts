@@ -7,35 +7,44 @@ import { afterAll, assert, describe, it } from "vitest"
 import { files, PLUGIN } from "../src/plugin.ts"
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-agy-"))
+
 for (const [name, text] of Object.entries(files)) {
   fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
   fs.writeFileSync(path.join(dir, name), text)
 }
+
 const root = path.join(dir, PLUGIN)
 const bin = path.join(dir, "bin")
 const calls = path.join(dir, "calls.log")
+
 fs.mkdirSync(bin)
+
 fs.writeFileSync(
   path.join(bin, "vibest"),
   `#!/bin/sh\necho "$* <$(cat)>" >> ${calls}\necho "\${FAKE_OUT:-}"\nexit "\${FAKE_EXIT:-0}"\n`,
   { mode: 0o755 },
 )
+
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 const agent = { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd", VIBEST_PROCESS: "3" }
 
 const run = (event: string, payload: Record<string, unknown>, env: Record<string, string> = agent) => {
   fs.rmSync(calls, { force: true })
+
   const hooks = JSON.parse(files[`${PLUGIN}/hooks.json`]!).vibest as Record<
     string,
     Array<{ command?: string; hooks?: Array<{ command: string }> }>
   >
+
   const entry = hooks[event]![0]!
+
   const p = Bun.spawnSync(["sh", "-c", entry.command ?? entry.hooks![0]!.command], {
     cwd: root,
     env: { PATH: `${bin}:/usr/bin:/bin`, TMPDIR: dir, VIBEST_HOME: dir, ...env },
     stdin: new TextEncoder().encode(JSON.stringify({ hookEventName: event, ...payload }, null, 2)),
   })
+
   return {
     code: p.exitCode,
     stdout: p.stdout.toString().trim(),

@@ -23,6 +23,7 @@ export class Layout extends Context.Service<
   static readonly make = (home: string) =>
     Effect.gen(function* () {
       const path = yield* Path.Path
+
       return Layout.of({
         home,
         database: path.join(home, "vibest.db"),
@@ -46,9 +47,11 @@ export class Layout extends Context.Service<
     Layout,
     Effect.gen(function* () {
       const path = yield* Path.Path
+
       const home = yield* Config.String("VIBEST_HOME").pipe(
         Config.orElse(() => Config.String("HOME").pipe(Config.map((h) => path.join(h, ".vibest")))),
       )
+
       return yield* Layout.make(home)
     }),
   )

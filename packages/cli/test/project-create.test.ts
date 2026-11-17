@@ -38,6 +38,7 @@ import { clients } from "../src/client.ts"
 const scopedRealPathTempDirectory = (prefix: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
+
     return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
   }).pipe(Effect.orDie)
 
@@ -51,6 +52,7 @@ const test = <E>(
   timeout?: number,
 ) => {
   const run = () => program.pipe(Effect.provide(FakeGit.layers.pipe(Layer.provideMerge(Platform.services))))
+
   return timeout === undefined ? it.effect(name, run) : it.effect(name, run, timeout)
 }
 
@@ -62,14 +64,17 @@ const repositoryWithOneCommitOnMain = (parent: string, name: string) =>
     yield* fs.makeDirectory(root, { recursive: true })
     yield* fs.writeFileString(path.join(root, "README.md"), `${name}\n`)
     yield* (yield* FakeGit).repository(root)
+
     return root
   }).pipe(Effect.orDie)
 
 const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const exit = yield* Effect.exit(effect)
+
     if (Exit.isSuccess(exit)) return assert.fail("expected a failure")
     const error = Cause.findErrorOption(exit.cause)
+
     return Option.isSome(error) ? error.value.message : assert.fail(`not a failure: ${exit.cause}`)
   })
 
@@ -184,6 +189,7 @@ describe("multi-repository project", () => {
       yield* (yield* FakeGit).update(app, { origin: "git@github.com:O/App.git" })
       const link = path.join(parent, "link")
       yield* fs.symlink(root, link)
+
       for (const at of [root, link])
         assert.deepStrictEqual(yield* projectRepositories(at), [
           { path: app, remote: "git@github.com:O/App.git" },
@@ -224,10 +230,12 @@ describe("multi-repository isolated workspace", () => {
       assert.match(created.stderr, new RegExp(`warning: ${app}: uncommitted changes were not copied`))
       assert.match(created.stderr, /M README\.md/)
       assert.notMatch(created.stderr, /sdk/)
+
       const project = JSON.parse(created.stdout) as {
         directory: string
         folders: ReadonlyArray<{ name: string; uncommitted: ReadonlyArray<string> }>
       }
+
       assert.strictEqual(project.directory, directory)
       assert.deepStrictEqual(
         project.folders.map((f) => f.name),
@@ -236,6 +244,7 @@ describe("multi-repository isolated workspace", () => {
       assert.deepStrictEqual(project.folders[0]!.uncommitted, [" M README.md"])
 
       const again = path.join(directory, "nope")
+
       const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [
         "project",
         "create",
@@ -243,12 +252,14 @@ describe("multi-repository isolated workspace", () => {
         "--from",
         sdk,
       ])
+
       assert.strictEqual(agent.code, 1)
       assert.match(agent.stderr, /^Forbidden: /)
       assert.isFalse(yield* fs.exists(again))
 
       const usage = yield* runVibest(sources, env, ["project", "create", path.join(directory, "missing")])
       assert.strictEqual(usage.code, 2)
+
       const bad = yield* runVibest(sources, env, [
         "project",
         "create",
@@ -256,6 +267,7 @@ describe("multi-repository isolated workspace", () => {
         "--from",
         path.join(sources, "nope"),
       ])
+
       assert.strictEqual(bad.code, 1)
       assert.match(bad.stderr, /^ProjectCreateFailed: /)
     }),
@@ -275,6 +287,7 @@ describe("multi-repository isolated workspace", () => {
       yield* fs.makeDirectory(root)
       const app = yield* repositoryWithOneCommitOnMain(root, "app")
       const sdk = yield* repositoryWithOneCommitOnMain(root, "sdk")
+
       const entry = yield* db.session.startEntry(
         yield* projectOf(root),
         "pi",
@@ -297,6 +310,7 @@ describe("multi-repository isolated workspace", () => {
         },
         ["run", "--runtime", "herdr", "pi", "--", "do it"],
       )
+
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = JSON.parse(spawned.stdout) as { id: string }
       yield* until(
@@ -356,16 +370,19 @@ describe("multi-repository isolated workspace", () => {
       const app = yield* repositoryWithOneCommitOnMain(root, "app")
       yield* repositoryWithOneCommitOnMain(root, "sdk")
       const raw = yield* connect(layout.socket)
+
       const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Project.EntrySession"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
         terminal: "coord",
       })
+
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
       ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+
       yield* until(
         db.session.getSession(id),
         (row) => !!row && ((row.process?.placedAt ?? null) !== null || exitedAt(row) !== null),
@@ -395,16 +412,19 @@ describe("multi-repository isolated workspace", () => {
       yield* createIsolatedWorktrees((yield* listProjectRepositories(root))!, workspace)
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
+
       const { sessionId, projectId } = yield* cli["Project.EntrySession"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
         terminal: "coord",
       })
+
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: workspace, projectId: String(projectId) }),
       ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+
       yield* until(db.session.getSession(id), (row) => (row ? executionStateOf(row) : undefined) === "open")
       assert.strictEqual((yield* db.session.getSession(id))!.projectId, (yield* db.project.projectAt(root))?.id)
       assert.isUndefined(yield* db.project.projectAt(workspace))

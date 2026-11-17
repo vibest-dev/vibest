@@ -51,10 +51,14 @@ export const peerHeaders = (peer: string, project?: string, by?: string): Record
 })
 
 export const TAKE_ROUTE = "/inbox/take"
+
 export type HookKind = "execution-end" | "prompt" | "guard"
+
 export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
+
 export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
   const m = /^\/hooks\/([a-z]+)\/(execution-end|prompt|guard)$/.exec(path)
+
   return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
 }
 
@@ -84,9 +88,11 @@ export const sessionHeaders = (who: SessionIdentity): Record<string, string> => 
     [CALLER_HEADER]: "session",
     [SESSION_HEADER]: who.sessionId,
   }
+
   const put = (name: string, value: string | undefined) => {
     if (value) headers[name] = value
   }
+
   put(PROJECT_HEADER, who.projectId)
   put(HARNESS_SESSION_HEADER, who.harnessSessionId)
   put(HARNESS_HEADER, who.harness)
@@ -94,6 +100,8 @@ export const sessionHeaders = (who: SessionIdentity): Record<string, string> => 
   put(RUNTIME_HEADER, who.runtime)
   put(PLUGIN_VERSION_HEADER, who.pluginVersion)
   put(PROCESS_HEADER, who.process)
+
   if (who.repositoryRoot !== undefined) headers[REPOSITORY_HEADER] = who.repositoryRoot
+
   return headers
 }

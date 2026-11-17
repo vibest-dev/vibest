@@ -28,6 +28,7 @@ const make = Effect.gen(function* () {
   const session = yield* SessionStatements.statements
   const remote = yield* Remote.statements
   const inbox = yield* Inbox.statements(session, remote)
+
   return {
     project: yield* Project.make,
     session: yield* Session.make(session, inbox, remote),

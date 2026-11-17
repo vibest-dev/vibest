@@ -16,10 +16,13 @@ export const userPaths = (home: string) => ({
   cursorConfig: path.join(home, ".cursor", "cli-config.json"),
   cursorHooks: path.join(home, ".cursor", "hooks.json"),
 })
+
 type UserPaths = ReturnType<typeof userPaths>
+
 const user = userPaths(os.homedir())
 
 const CLAUDE_SETTINGS = ["permissions", "env", "language", "worktree", "autoMode", "attribution", "cleanupPeriodDays"]
+
 const CLAUDE_STATE = [
   "hasCompletedOnboarding",
   "lastOnboardingVersion",
@@ -28,6 +31,7 @@ const CLAUDE_STATE = [
   "hasSeenAutoModeOutsideReadPrompt",
   "autoModeEnvSetup",
 ]
+
 const PI_SETTINGS = [
   "defaultThinkingLevel",
   "defaultTools",
@@ -37,6 +41,7 @@ const PI_SETTINGS = [
   "tuiMode",
   "theme",
 ]
+
 const CURSOR_BEHAVIOUR = ["version", "approvalMode", "sandbox", "permissions", "network"]
 
 export const userFilesRead: ReadonlyArray<{ readonly file: string; readonly keys?: ReadonlyArray<string> }> = [
@@ -50,8 +55,10 @@ export const userFilesRead: ReadonlyArray<{ readonly file: string; readonly keys
 
 const readJson = async (file: string): Promise<Record<string, unknown>> => {
   const text = await fs.readFile(file, "utf8").catch(() => undefined)
+
   if (text === undefined) return {}
   const parsed = JSON.parse(text) as unknown
+
   return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
     ? (parsed as Record<string, unknown>)
     : {}
@@ -69,6 +76,7 @@ const localNeverProxied = (env: Record<string, unknown>) => {
       env[name] = [...new Set([...String(env[name] ?? "").split(","), "127.0.0.1", "localhost"].filter(Boolean))].join(
         ",",
       )
+
   return env
 }
 
@@ -80,11 +88,14 @@ const fakeModelCannotAnswerAutoModeClassifier = {
 export const claudeShadow = async (dir: string, profile: Profile, from: UserPaths = user) => {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   const keyApproved = { customApiKeyResponses: { approved: [FAKE_ANTHROPIC_KEY.slice(-20)], rejected: [] } }
+
   if (profile === "first-run") {
     await writeJson(path.join(dir, ".claude.json"), { hasCompletedOnboarding: true, ...keyApproved })
     await writeJson(path.join(dir, "settings.json"), fakeModelCannotAnswerAutoModeClassifier)
+
     return dir
   }
+
   const settings = pick(await readJson(from.claudeSettings), CLAUDE_SETTINGS)
   const permissions = (settings.permissions ?? {}) as Record<string, unknown>
   await writeJson(path.join(dir, "settings.json"), {
@@ -102,6 +113,7 @@ export const claudeShadow = async (dir: string, profile: Profile, from: UserPath
     ...pick(await readJson(from.claudeState), CLAUDE_STATE),
     ...keyApproved,
   })
+
   return dir
 }
 
@@ -118,9 +130,12 @@ export const userPrivateValues = async (from: UserPaths = user) => {
     readJson(from.piSettings),
     readJson(from.cursorConfig),
   ])
+
   const field = (o: unknown, key: string) =>
     o !== null && typeof o === "object" ? (o as Record<string, unknown>)[key] : undefined
+
   const cursorModel = field(cursor, "model")
+
   return [
     ...new Set(
       strings(
@@ -155,6 +170,7 @@ export const piShadow = async (
     ...settings,
     ...(defaults ? { defaultProvider: defaults.provider, defaultModel: defaults.model } : {}),
   })
+
   if (Object.keys(providers).length > 0)
     await writeJson(path.join(dir, "models.json"), {
       providers: Object.fromEntries(
@@ -169,7 +185,9 @@ export const piShadow = async (
         ]),
       ),
     })
+
   if (profile === "user") await fs.copyFile(user.piTrust, path.join(dir, "trust.json")).catch(() => undefined)
+
   return dir
 }
 
@@ -180,5 +198,6 @@ export const cursorShadow = async (dir: string, profile: Profile, from: UserPath
     path.join(dir, "cli-config.json"),
     Object.keys(own).length > 0 ? own : { version: 1, permissions: { allow: [], deny: [] } },
   )
+
   return dir
 }

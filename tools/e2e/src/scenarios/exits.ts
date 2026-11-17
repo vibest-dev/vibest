@@ -39,6 +39,7 @@ export const piProject = async (w: World, name: string) => {
       )?.c != null,
     60_000,
   )
+
   const runSub = async (task: string, ...flags: Array<string>) =>
     (
       JSON.parse(
@@ -49,15 +50,21 @@ export const piProject = async (w: World, name: string) => {
         }),
       ) as { id: string }
     ).id
+
   const pane = (id: string) => {
     const runtime = q<{ r: string | null }>(`SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, id)?.r
+
     return ((JSON.parse(runtime ?? "{}") as { id?: string }).id ?? "").split("/")[1] ?? ""
   }
+
   const pid = (id: string) => q<{ pid: number | null }>(`SELECT pid FROM ${SESSIONS} s WHERE id = ?`, id)?.pid ?? null
+
   const executionEnds = (id: string) =>
     q<{ n: number }>("SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome IS NOT NULL", id)?.n ?? 0
+
   const sent = (id: string) =>
     q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE sender_session_id = ?", id)?.n ?? 0
+
   const lastEnd = (id: string) => {
     return q<{ status: string; reply: string | null; failure: string | null }>(
       `SELECT outcome AS status, reply, failure FROM execution WHERE session_id = ? AND outcome IS NOT NULL
@@ -65,29 +72,36 @@ export const piProject = async (w: World, name: string) => {
       id,
     )
   }
+
   const exited = (id: string) =>
     q<{ n: number }>(`SELECT count(*) AS n FROM ${SESSIONS} s WHERE id = ? AND exited_at IS NOT NULL`, id)?.n === 1
+
   const sendRow = (id: string, message: string) =>
     q<{ id: number; status: string }>(
       "SELECT id, status FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
       id,
       message,
     )
+
   const notices = (id: string, text: string) =>
     q<{ n: number }>(
       "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice' AND instr(content, ?) > 0",
       id,
       text,
     )?.n ?? 0
+
   const idle = (id: string) =>
     q<{ id: number }>("SELECT id FROM execution WHERE session_id = ? AND outcome IS NULL", id) === undefined &&
     executionEnds(id) > 0
+
   const vibestSend = (id: string, message: string) => w.ok(["send", id, "--", message], { cwd: repo, env })
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
+
   const close = async () => {
     model.stop()
     await dropHerdrSession(w, session)
   }
+
   return {
     model,
     socket,
@@ -120,6 +134,7 @@ const killedMidExecution = async (
   kill: (p: Awaited<ReturnType<typeof piProject>>, id: string) => Promise<void>,
 ) => {
   const p = await piProject(w, name)
+
   try {
     const sub = await p.runSub("held")
     await until("the subagent's execution held", () => p.model.held() > 0, 60_000)
@@ -142,6 +157,7 @@ const killedMidExecution = async (
     )
     await recordMs(evidence, name.toUpperCase(), "exitSeenMs", Date.now() - t0)
     expect(p.sent(sub) === 1, `${p.sent(sub)} rows sent by the killed session, not its one notice`)
+
     return { p, sub }
   } catch (e) {
     await p.close()
@@ -152,15 +168,19 @@ const killedMidExecution = async (
 const rpc = (socket: string, method: string, params: object, headers: ReadonlyArray<[string, string]>) =>
   new Promise<unknown>((resolve, reject) => {
     let buf = ""
+
     const sock = net.createConnection(socket, () =>
       sock.write(JSON.stringify({ jsonrpc: "2.0", id: "1", method, params, headers }) + "\n"),
     )
+
     sock.on("data", (chunk) => {
       buf += chunk.toString()
       const nl = buf.indexOf("\n")
+
       if (nl < 0) return
       const reply = JSON.parse(buf.slice(0, nl)) as { result?: unknown; error?: unknown }
       sock.destroy()
+
       if ("error" in reply) reject(new Error(`${method}: ${JSON.stringify(reply.error)}`))
       else resolve(reply.result)
     })
@@ -181,6 +201,7 @@ const checks: ReadonlyArray<Check> = [
       const { p } = await killedMidExecution(w, evidence, "s21", async (p, id) => {
         await herdr(p.socket, "pane.close", { pane_id: p.pane(id) })
       })
+
       await p.close()
     },
   },
@@ -190,6 +211,7 @@ const checks: ReadonlyArray<Check> = [
       "pane killed while the session is idle: the session exited, its completed execution stays completed, and the creator gets exactly one notice that it exited",
     run: async (w) => {
       const p = await piProject(w, "s51")
+
       try {
         p.model.release()
         const sub = await p.runSub("idle")
@@ -211,12 +233,14 @@ const checks: ReadonlyArray<Check> = [
     title: "harness killed (kill -9, the pane stays): as S21, and the pane still exists",
     run: async (w, evidence) => {
       let pane = ""
+
       const { p } = await killedMidExecution(w, evidence, "s22", async (p, id) => {
         const pid = p.pid(id)
         expect(pid !== null, `no pid recorded for ${id}`)
         pane = p.pane(id)
         process.kill(pid!, "SIGKILL")
       })
+
       try {
         const panes = (await herdr(p.socket, "pane.list", {})).panes as Array<{ pane_id: string }>
         expect(
@@ -235,6 +259,7 @@ const checks: ReadonlyArray<Check> = [
       "vibestd restarted mid-execution: (a) restart while held, then release; (b) kill -9 vibestd right after the execution end is logged; both: exactly one completed execution that points at its report and sends nothing",
     run: async (w) => {
       const p = await piProject(w, "s23")
+
       try {
         const one = async (sub: string, what: string) => {
           await until(
@@ -250,6 +275,7 @@ const checks: ReadonlyArray<Check> = [
           const end = p.lastEnd(sub)!
           expect(typeof end.reply === "string", `${what}: execution ${JSON.stringify(end)}`)
         }
+
         const a = await p.runSub("a")
         await until("(a) held", () => p.model.held() > 0, 60_000)
         const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
@@ -282,6 +308,7 @@ const checks: ReadonlyArray<Check> = [
       const p = await piProject(w, "s24")
       let shell: number | undefined
       let stopped: number | undefined
+
       try {
         p.model.release()
         const sub = await p.runSub("first")
@@ -302,11 +329,13 @@ const checks: ReadonlyArray<Check> = [
         const taken = await curl(w, "/inbox/take", { entryId: sub, projectId }, "pi")
         expect(taken.status === 200, `take answered ${taken.status}: ${JSON.stringify(taken.body)}`)
         expect(p.sendRow(sub, message)?.status === "delivered", "the taken row is not delivered")
+
         const open = row<{ id: number; accepted: number | null }>(
           w,
           "SELECT id, accepted_at AS accepted FROM execution WHERE session_id = ? AND outcome IS NULL",
           sub,
         )
+
         expect(open !== undefined && open.accepted === null, `the taken execution: ${JSON.stringify(open)}`)
         await w.killDaemon(await w.daemonPid())
         await p.startDaemon()
@@ -329,15 +358,18 @@ const checks: ReadonlyArray<Check> = [
         await Bun.sleep(3_000)
         expect(p.sendRow(sub, message)?.status === "failed", "the failed row moved again")
         expect(p.notices(sub, "was not delivered") === 1, "more than one notice")
+
         const copies = row<{ n: number }>(
           w,
           "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ?",
           sub,
           message,
         )
+
         expect(copies?.n === 1, `the row exists ${copies?.n} times`)
       } finally {
         if (stopped !== undefined) process.kill(stopped, "SIGCONT")
+
         if (shell !== undefined) process.kill(shell, "SIGCONT")
         await p.close()
       }
@@ -349,6 +381,7 @@ const checks: ReadonlyArray<Check> = [
       "herdr hands over to a new server: the reset reconcile runs, a pane closed after it is seen exited (the time it took is recorded), and a send to another idle subagent is delivered",
     run: async (w, evidence) => {
       const p = await piProject(w, "s25")
+
       try {
         p.model.release()
         const gone = await p.runSub("gone")
@@ -375,8 +408,10 @@ const checks: ReadonlyArray<Check> = [
       "vibestd killed (kill -9) while a subagent's start has no terminal yet: the next vibestd ends it launch_failed with one notice; its worktree is removed, or kept with the reason when the harness's tab survived",
     run: async (w) => {
       const p = await piProject(w, "s28")
+
       try {
         p.model.release()
+
         const startTerminal = (id: string) =>
           row<{ t: string; ended: number }>(
             w,
@@ -384,34 +419,43 @@ const checks: ReadonlyArray<Check> = [
             FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
             id,
           )
+
         let sub = ""
+
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           const id = await p.runSub(`cut${attempt}`)
           const now = startTerminal(id)
+
           if (now?.t === "" && now.ended === 0) {
             await w.killDaemon(daemon)
             sub = id
           } else await until(`${id} idle`, () => p.idle(id), 60_000)
         }
+
         expect(sub !== "", "every try opened its terminal before vibestd could be killed")
         const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
         expect(worktree !== "", `no worktree recorded for ${sub}`)
         await p.startDaemon()
         await until("the cut-off start's notice", () => p.notices(sub, "never finished starting") === 1, 30_000)
+
         const end = row<{ reason: string }>(
           w,
           "SELECT end_reason AS reason FROM process WHERE session_id = ? AND end_reason != 'superseded'",
           sub,
         )
+
         expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
+
         const text =
           row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", sub)
             ?.c ?? ""
+
         const kept = await fs.stat(worktree).then(
           () => true,
           () => false,
         )
+
         expect(
           kept ? text.includes("has its working directory in it") : text.includes("its worktree was removed"),
           `worktree ${kept ? "kept" : "removed"}, notice: ${text}`,
@@ -429,15 +473,18 @@ const checks: ReadonlyArray<Check> = [
       "vibestd killed (kill -9) as soon as a subagent's terminal is placed: its task is in the launch argv, so the model is asked it once and it is the input of one execution, which ends; it sends nothing when it completed, and one notice to its creator when the harness's reports fell in the outage",
     run: async (w) => {
       const p = await piProject(w, "s29")
+
       try {
         const daemon = await w.daemonPid()
         const sub = await p.runSub("t1")
+
         const placed = () =>
           row<{ n: number }>(
             w,
             "SELECT count(*) AS n FROM process WHERE session_id = ? AND coalesce(terminal, '') != ''",
             sub,
           )?.n === 1
+
         for (const deadline = Date.now() + 60_000; !placed(); await Bun.sleep(1))
           expect(Date.now() < deadline, `${sub}: its terminal never opened`)
         await w.killDaemon(daemon)
@@ -449,12 +496,14 @@ const checks: ReadonlyArray<Check> = [
         expect(p.model.asked("t1") === 1, `the task was asked ${p.model.asked("t1")} times`)
         const told = p.lastEnd(sub)?.status === "completed" ? 0 : 1
         expect(p.sent(sub) === told, `${p.sent(sub)} rows sent by the session, outcome ${p.lastEnd(sub)?.status}`)
+
         const input = row<{ n: number }>(
           w,
           `SELECT count(*) AS n FROM event e JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.inbox'
             WHERE e.aggregate = ? AND e.type = 'inbox.moved' AND i.kind = 'task' AND e.data ->> '$.execution' IS NOT NULL`,
           sub,
         )?.n
+
         expect(input === 1, `the task is the input of ${input} executions`)
       } finally {
         await p.close()
@@ -467,19 +516,24 @@ const checks: ReadonlyArray<Check> = [
       "vibest archive cut off after its mark (vibestd killed with the session's ended_at set, its process not ended): the next vibestd closes the tab and ends the process archived, keeping the worktree; vibest archive then removes it",
     run: async (w) => {
       const p = await piProject(w, "s30")
+
       try {
         p.model.release()
+
         const marked = (id: string) =>
           row<{ e: number | null }>(w, "SELECT ended_at AS e FROM session WHERE id = ?", id)?.e != null
+
         const processEnded = (id: string) =>
           row<{ n: number }>(
             w,
             "SELECT count(*) AS n FROM process WHERE session_id = ? AND ended_at IS NOT NULL AND end_reason != 'superseded'",
             id,
           )?.n === 1
+
         let sub = ""
         let pane = ""
         let worktree = ""
+
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const id = await p.runSub(`archived${attempt}`)
           await until(`${id} idle`, () => p.idle(id), 90_000)
@@ -488,29 +542,36 @@ const checks: ReadonlyArray<Check> = [
           expect(tab !== "" && dir !== "", `no pane or worktree recorded for ${id}`)
           const daemon = await w.daemonPid()
           const archiving = w.vibest(["archive", id], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+
           for (const deadline = Date.now() + 60_000; !marked(id); await Bun.sleep(1))
             expect(Date.now() < deadline, `${id}: vibest archive never set its mark`)
           await w.killDaemon(daemon)
           await archiving
+
           if (!processEnded(id)) [sub, pane, worktree] = [id, tab, dir]
           await p.startDaemon()
         }
+
         expect(sub !== "", "every try finished the archive before vibestd was killed")
+
         const ended = () =>
           row<{ reason: string }>(
             w,
             "SELECT end_reason AS reason FROM process WHERE session_id = ? AND end_reason != 'superseded'",
             sub,
           )?.reason
+
         await until("its process ended", () => ended() !== undefined, 30_000)
         expect(ended() === "archived", `its process ended ${ended()}`)
         const panes = (await herdr(p.socket, "pane.list", {})).panes as Array<{ pane_id: string }>
         expect(!panes.some((x) => x.pane_id === pane), `pane ${pane} is still open`)
+
         const exists = () =>
           fs.stat(worktree).then(
             () => true,
             () => false,
           )
+
         expect(await exists(), `the worktree ${worktree} was removed`)
         expect(p.notices(sub, "") === 0, "a notice for a clean finish")
         await w.ok(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
@@ -526,11 +587,13 @@ const checks: ReadonlyArray<Check> = [
       "Send repeated over vibest.sock with one request id (as vibest send retries a lost answer): the same answer, one row, one delivery, the task asked once and two executions",
     run: async (w) => {
       const p = await piProject(w, "s32")
+
       try {
         p.model.release()
         const sub = await p.runSub("first")
         await until("idle", () => p.idle(sub), 60_000)
         const message = ask("again")
+
         const send = () =>
           rpc(
             path.join(w.vibestHome, "vibest.sock"),
@@ -542,6 +605,7 @@ const checks: ReadonlyArray<Check> = [
               ["vibest-repository", p.repo],
             ],
           )
+
         const first = await send()
         const second = await send()
         expect(
@@ -551,11 +615,13 @@ const checks: ReadonlyArray<Check> = [
         await until("delivered", () => p.sendRow(sub, message)?.status === "delivered", 30_000)
         await until("its second execution", () => p.executionEnds(sub) === 2 && p.idle(sub), 60_000)
         await nothingMoreComesWithin(2_000)
+
         const rows = row<{ n: number }>(
           w,
           "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send'",
           sub,
         )?.n
+
         expect(rows === 1, `${rows} send rows`)
         expect(p.model.asked("again") === 1, `the message was asked ${p.model.asked("again")} times`)
         expect(
@@ -574,6 +640,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w, evidence) => {
       const p = await piProject(w, "s27")
       let processOutsideThePane: ReturnType<typeof Bun.spawn> | undefined
+
       try {
         p.model.release()
         const sub = await p.runSub("archive")

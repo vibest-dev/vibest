@@ -27,6 +27,7 @@ describe("vibest CLI without vibestd", () => {
         assert.deepStrictEqual([r.code, r.stdout], [1, ""])
         assert.match(r.stderr, /^DaemonUnavailable: vibestd is unreachable on .*; ask the user to check it/)
         assert.isFalse(yield* fs.exists(vibestHome))
+
         for (const dir of [".claude", ".cursor", ".pi"]) assert.isFalse(yield* fs.exists(path.join(home, dir)), dir)
       }).pipe(Effect.provide(Platform.services)),
     TIMEOUT,
@@ -36,37 +37,45 @@ describe("vibest CLI without vibestd", () => {
     Effect.gen(function* () {
       const home = yield* tempDirectory("vibest-requests-")
       const sends: Array<{ id: string; request?: string }> = []
+
       const server = net.createServer((sock) => {
         let buf = ""
         sock.on("data", (chunk) => {
           buf += chunk.toString()
+
           for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
             const req = JSON.parse(buf.slice(0, nl)) as { id?: string; method?: string; params?: never }
             buf = buf.slice(nl + 1)
             const reply = (body: object) => sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
+
             if (req.method === "Ping")
               reply({ result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities } })
             else if (req.method === "Send") {
               sends.push(req.params!)
               const out = answer(sends.length)
+
               if (out === undefined) sock.destroy()
               else reply(out)
             }
           }
         })
       })
+
       yield* Effect.acquireRelease(
         Effect.callback<void>((resume) => void server.listen(`${home}/vibest.sock`, () => resume(Effect.void))),
         () => Effect.sync(() => server.close()),
       )
+
       const send = vibest(home, { HOME: home, VIBEST_HOME: home }, [
         "send",
         "abcd1234-abcd-4abc-8abc-abcd1234abcd",
         "--",
         "hi",
       ])
+
       return { sends, send }
     })
+
   const id = "abcd1234-abcd-4abc-8abc-abcd1234abcd"
   it.effect(
     "send whose connection drops after the request: sent once more with the same request id, the output unchanged",
@@ -102,8 +111,10 @@ describe("vibest CLI without vibestd", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-guard-cli-" })
+
         const guard = (env: Record<string, string>, stdin: string) =>
           vibest(cwd, { HOME: cwd, VIBEST_HOME: cwd, ...env }, ["integration", "guard", "--harness", "cursor"], stdin)
+
         const noAgent = yield* guard({}, JSON.stringify({ tool_name: "Shell", tool_input: { command: "git status" } }))
         assert.notStrictEqual(noAgent.code, 0, noAgent.stderr)
         assert.strictEqual(noAgent.stdout, "")

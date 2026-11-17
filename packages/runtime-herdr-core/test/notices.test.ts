@@ -24,6 +24,7 @@ import { LABEL, TYPED_LAUNCH_MS, make, terminalId } from "../src/terminal-runtim
 
 const shell = { argv: ["/bin/zsh"], cwd: "/tmp", name: "zsh", pid: 100 }
 const sleeping = { argv: ["sleep", "5"], cwd: "/tmp", name: "sleep", pid: 101 }
+
 type Foreground = typeof shell
 
 const recordedTerminal = (foreground: Foreground, labels: Readonly<Record<string, string>>) =>
@@ -87,16 +88,20 @@ const fakeCore = Effect.gen(function* () {
     Effect.gen(function* () {
       const pull = yield* Socket.readerString(socket)
       const writer = yield* socket.writer
+
       const line = yield* Stream.fromPull(
         Effect.succeed(pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))),
       ).pipe(Stream.splitLines, Stream.runHead)
+
       const text = Option.getOrElse(line, () => "")
       const request = yield* Request(text)
       yield* Ref.update(calls, (all) => [...all, request.method])
       const reply = (result: string) => writer.write(`{"id":${request.id},"jsonrpc":"2.0","result":${result}}\n`)
+
       const terminalJson = Effect.gen(function* () {
         return recordedTerminal(yield* Ref.get(foreground), yield* Ref.get(labels))
       })
+
       if (request.method === "events.subscribe") {
         yield* reply(`{"channel":null,"seq":0,"terminals":[${yield* terminalJson}]}`)
         const closed = yield* Deferred.make<void>()
@@ -109,9 +114,11 @@ const fakeCore = Effect.gen(function* () {
       else if (request.method === "terminal.send") yield* reply('{"started":null,"status":null,"turn":0}')
       else if (request.method === "terminal.label") {
         const params = (JSON.parse(text) as { params?: { labels?: Record<string, string> } }).params
+
         if (params?.labels !== undefined) yield* Ref.update(labels, (cur) => ({ ...cur, ...params.labels }))
         yield* reply(yield* terminalJson)
       }
+
       yield* writer.write(new Socket.CloseEvent())
     }).pipe(Effect.scoped, Effect.ignore)
 
@@ -127,12 +134,15 @@ const fakeCore = Effect.gen(function* () {
     Effect.forkScoped,
   )
   assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
+
   const follow = Effect.gen(function* () {
     yield* runtime.process(terminal)
     const sub = yield* Queue.take(subscribers)
     assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
+
     return sub
   })
+
   return {
     follow,
     runtime,
@@ -189,11 +199,13 @@ describe("runtime-herdr-core against a fake core", () => {
       yield* core.runtime.run!(core.terminal, { argv: ["echo", "hi"], env: {} })
       assert.isTrue((yield* core.runtime.process(core.terminal)).running)
       assert.isTrue((yield* core.runtime.process(core.terminal)).running)
+
       const restarted = yield* make({
         connect: core.connect,
         socket: core.socketPath,
         scope: yield* Effect.scope,
       })
+
       assert.isTrue((yield* restarted.process(core.terminal)).running)
       yield* Ref.update(core.labels, (cur) => ({ ...cur, [LABEL.typed]: String(Date.now() - TYPED_LAUNCH_MS - 1) }))
       assert.isFalse((yield* core.runtime.process(core.terminal)).running)

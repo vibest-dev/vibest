@@ -35,6 +35,7 @@ const markApplied = (sql: SqlClient.SqlClient, id: string) =>
 
 export const installLedger = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+
   for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA]) yield* sql.unsafe(statement)
   yield* setMeta(sql, "catalog", CATALOG_VERSION)
   yield* setMeta(sql, "projection", PROJECTION_VERSION)
@@ -47,6 +48,7 @@ const bootstrap = (sql: SqlClient.SqlClient) =>
       if ((yield* objectCount) > 0) return
       yield* installLedger
       yield* createTable(sql)
+
       for (const migration of migrations) yield* markApplied(sql, migration.id)
     }),
   )
@@ -54,6 +56,7 @@ const bootstrap = (sql: SqlClient.SqlClient) =>
 export const applyOnly = (input: ReadonlyArray<Migration>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     for (const migration of input)
       yield* sql.withTransaction(
         Effect.gen(function* () {
@@ -82,6 +85,7 @@ const openLedger = (sql: SqlClient.SqlClient) =>
 
 export const apply = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+
   if ((yield* inspectSchema) === "empty") yield* bootstrap(sql)
   yield* applyOnly(migrations)
   yield* inspectSchema

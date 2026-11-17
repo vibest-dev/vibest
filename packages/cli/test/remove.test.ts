@@ -35,6 +35,7 @@ const workingSession = Effect.gen(function* () {
   const db = yield* Db.Service
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
+
   const { id } = yield* sessions.spawn({
     agent: "general",
     machine: { id: "local" },
@@ -46,6 +47,7 @@ const workingSession = Effect.gen(function* () {
     runtime: "herdr",
     harness: "pi",
   })
+
   yield* until(
     db.session.getSession(id),
     (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
@@ -54,7 +56,9 @@ const workingSession = Effect.gen(function* () {
   const pane = (yield* herdr.agent(id))!.terminal
   const row = (yield* db.session.getSession(id))!
   const worktree = yield* db.session.sessionDirectory(row.id)
+
   if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
+
   return { id, repo, pane, sessions, db, herdr, worktree, rules: yield* systemPromptFile(id) }
 })
 
@@ -64,6 +68,7 @@ const idleSession = Effect.gen(function* () {
   yield* writeEnd(id, "pi", { text: "status: completed" })
   yield* herdr.endExecution(id)
   yield* sessions.check(id)
+
   return w
 })
 
@@ -74,6 +79,7 @@ const removeAdvancingClock = (sessions: Session.Interface, id: string) =>
       Effect.sync(() => fiber.pollUnsafe()),
       (exit) => exit !== undefined,
     )
+
     return yield* Fiber.join(fiber)
   })
 
@@ -88,6 +94,7 @@ const removeTimingCwd = (sessions: Session.Interface, id: string) =>
       Effect.sync(() => fiber.pollUnsafe()),
       (exit) => exit !== undefined,
     )
+
     return [yield* Fiber.join(fiber), (yield* Clock.currentTimeMillis) - started] as const
   })
 
@@ -149,6 +156,7 @@ describe.concurrent("vibest rm: process proof", () => {
     "worktree already gone: its rules file is removed once its processes are proven exited, and the report stays",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
+
       const worktreeDeletedOutsideVibest = (w: Effect.Success<typeof idleSession>) =>
         Effect.gen(function* () {
           yield* fs.remove(w.worktree, { recursive: true })
@@ -158,6 +166,7 @@ describe.concurrent("vibest rm: process proof", () => {
 
       const reportedExecutionEndEvent = (id: string) =>
         eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
+
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ id: a.pane })
       yield* worktreeDeletedOutsideVibest(a)
@@ -350,6 +359,7 @@ describe.concurrent("Processes", () => {
   const ok = (stdout: string) => ({ exitCode: 0, stdout, stderr: "" })
   const self = 7
   const dirs = ["/private/w/abcd", "/w/abcd"]
+
   const listing =
     record(self, "/home") +
     record(101, "/w/abcd") +
@@ -361,12 +371,14 @@ describe.concurrent("Processes", () => {
     const throwing = (e: unknown) => () => {
       throw e
     }
+
     assert.strictEqual(
       livenessOf(() => {}),
       "alive",
     )
     assert.strictEqual(livenessOf(throwing(Object.assign(new Error("x"), { code: "ESRCH" }))), "exited")
     assert.strictEqual(livenessOf(throwing(Object.assign(new Error("x"), { code: "EPERM" }))), "alive")
+
     for (const e of [Object.assign(new Error("x"), { code: "EINVAL" }), new Error("x"), null, "ESRCH"])
       assert.strictEqual(livenessOf(throwing(e)), "unknown")
   })
@@ -400,6 +412,7 @@ describe.concurrent("Processes", () => {
       lsofSet("p101") + record(102, "/x"),
     ])
       assert.isUndefined(cwdHolders(ok(record(self, "/home") + odd), self, dirs), JSON.stringify(odd))
+
     for (const odd of [
       "/proc/42/cwd (readlink: Permission denied)",
       "/proc/42/cwd (readlink: Keine Berechtigung)",
@@ -417,8 +430,10 @@ describe.concurrent("Processes", () => {
     const unreadable = (pid: number, parent: number, command: string) =>
       lsofSet(`p${pid}`, `R${parent}`, `c${command}`) +
       lsofSet("fcwd", `n/proc/${pid}/cwd (readlink: Permission denied)`)
+
     const manager = unreadable(1162, 1, "systemd") + unreadable(1181, 1162, "(sd-pam)")
     assert.deepStrictEqual(cwdHolders(ok(record(self, "/home") + manager + record(101, "/w/abcd")), self, dirs), [101])
+
     for (const [odd, why] of [
       [unreadable(1181, 1162, "(sd-pam)"), "an (sd-pam) with no user manager above it"],
       [unreadable(1162, 900, "systemd") + unreadable(1181, 1162, "(sd-pam)"), "a systemd that pid 1 did not start"],
@@ -460,6 +475,7 @@ describe.concurrent("Processes", () => {
         "  40  10 sleep",
       ].join("\n"),
     )
+
     assert.deepStrictEqual(
       sessionTree(30, rows).toSorted((a, b) => a - b),
       [20, 30, 31],
@@ -493,6 +509,7 @@ describe.concurrent("Processes", () => {
           yield* Effect.addFinalizer(() => shell.kill().pipe(Effect.ignore))
           const sleepPid = Number((yield* shell.stdout.pipe(Stream.decodeText, Stream.take(1), Stream.mkString)).trim())
           const shellPid = Number(shell.pid)
+
           const processes = yield* Effect.gen(function* () {
             return yield* Processes.Service
           }).pipe(
@@ -507,6 +524,7 @@ describe.concurrent("Processes", () => {
               }),
             ),
           )
+
           const tree = yield* processes.tree(sleepPid)
           assert.deepStrictEqual(
             tree?.toSorted((a, b) => a - b),
@@ -519,6 +537,7 @@ describe.concurrent("Processes", () => {
     it.effect("signal 0 is only ever asked about a positive integer PID; no user id, no listing", () =>
       Effect.gen(function* () {
         const asked: Array<number> = []
+
         const platform = {
           liveness: (pid: number) => (asked.push(pid), "alive" as const),
           terminate: () => {
@@ -527,9 +546,11 @@ describe.concurrent("Processes", () => {
           pid: self,
           uid: undefined,
         }
+
         const p = yield* Effect.gen(function* () {
           return yield* Processes.Service
         }).pipe(Effect.provide(processesOn(platform)))
+
         for (const pid of [0, -1, 1.5, Number.NaN]) assert.strictEqual(yield* p.liveness(pid), "unknown")
         assert.strictEqual(yield* p.liveness(7), "alive")
         assert.deepStrictEqual(asked, [7])
@@ -548,6 +569,7 @@ describe.concurrent("Processes", () => {
           const child = yield* spawner.spawn(ChildProcess.make("sleep", ["30"], { cwd: dir }))
           yield* Effect.addFinalizer(() => child.kill().pipe(Effect.ignore))
           const pid = Number(child.pid)
+
           const processes = yield* Effect.gen(function* () {
             return yield* Processes.Service
           }).pipe(
@@ -562,10 +584,13 @@ describe.concurrent("Processes", () => {
               }),
             ),
           )
+
           assert.strictEqual(yield* processes.liveness(pid), "alive")
+
           const lsof = yield* spawner.spawn(
             ChildProcess.make("lsof", ["+w", "-a", "-p", String(pid), "-d", "cwd", "-Fpfn0"]),
           )
+
           const [stdout, exitCode] = yield* Effect.all([Stream.mkString(Stream.decodeText(lsof.stdout)), lsof.exitCode])
           const real = yield* fs.realPath(dir)
           assert.deepStrictEqual(
@@ -597,9 +622,11 @@ describe.concurrent("Processes", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const file = `${yield* tempDirectory("vibest-helper-")}/pid`
+
         const run = yield* runFor("sh", ["-c", `trap "" TERM; echo $$ > '${file}'; exec sleep 30`], "30 seconds").pipe(
           Effect.timeoutOption("1 second"),
         )
+
         assert.isTrue(Option.isNone(run))
         const pid = Number((yield* fs.readFileString(file)).trim())
         assert.isTrue(pid > 0)

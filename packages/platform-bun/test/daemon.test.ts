@@ -37,6 +37,7 @@ const listen = (socket: string, answersPing: boolean) =>
             sock.on("data", (chunk) => {
               buf += chunk.toString()
               const nl = buf.indexOf("\n")
+
               if (nl < 0 || !answersPing) return
               const req = JSON.parse(buf.slice(0, nl)) as { id?: string }
               sock.write(
@@ -44,6 +45,7 @@ const listen = (socket: string, answersPing: boolean) =>
               )
             })
           })
+
           server.listen(socket, () => resolve(server))
         }),
     ),
@@ -134,16 +136,20 @@ describe.concurrent("vibestd.pid lock", () => {
         const ping = yield* pingOf(layout.socket)
         const running = [...starts]
         const exited: Array<{ readonly code: number; readonly stdout: string; readonly stderr: string }> = []
+
         for (const deadline = Date.now() + 10_000; running.length > 1 && Date.now() < deadline;) {
           for (let i = running.length - 1; i >= 0; i--) {
             if (running[i]!.pollUnsafe() === undefined) continue
             exited.push(yield* Fiber.join(running.splice(i, 1)[0]!))
           }
+
           if (running.length > 1) yield* Effect.sleep("20 millis")
         }
+
         assert.strictEqual(exited.length, 3)
         assert.strictEqual(running.length, 1)
         assert.isUndefined(running[0]!.pollUnsafe())
+
         for (const run of exited) assert.strictEqual(run.code, 0)
         assert.strictEqual(Platform.liveness(ping.pid!), "alive")
         yield* recordedInfo(layout.daemonInfo, ping.instance)
@@ -206,6 +212,7 @@ describe.concurrent("vibestd.pid lock", () => {
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
+
         const slowClose = [
           ...Platform.replacements,
           ...hostReplacements,
@@ -217,6 +224,7 @@ describe.concurrent("vibestd.pid lock", () => {
                 Effect.gen(function* () {
                   const server = yield* SocketServer
                   yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
+
                   return server
                 }),
               ).pipe(Layer.provideMerge(Layer.unwrap(Effect.map(Layout, (l) => Platform.socketServer(l.socket))))),
@@ -224,6 +232,7 @@ describe.concurrent("vibestd.pid lock", () => {
             }),
           ),
         ]
+
         const old = yield* run(Platform.daemon, slowClose).pipe(
           Effect.provideService(Layout, layout),
           Effect.provideService(VibestCommand, ["vibestd-under-test"]),
@@ -232,6 +241,7 @@ describe.concurrent("vibestd.pid lock", () => {
           ),
           Effect.forkScoped,
         )
+
         yield* pingOf(layout.socket)
         const stopping = yield* Effect.forkScoped(Fiber.interrupt(old))
         yield* Effect.sleep("200 millis")
@@ -253,6 +263,7 @@ describe.concurrent("vibestd.pid lock", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
+
         const contend = (file: string) =>
           Effect.promise(() =>
             execFile(process.execPath, [`${import.meta.dirname}/lock-contender.ts`, file], {
@@ -260,10 +271,12 @@ describe.concurrent("vibestd.pid lock", () => {
               timeout: 10_000,
             }),
           ).pipe(Effect.map(({ stdout }) => stdout.trim()))
+
         yield* Effect.gen(function* () {
           const write = yield* Platform.daemon.lock(layout.daemonInfo)
           yield* write!('{"pid":1}')
           assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), '{"pid":1}')
+
           for (let i = 0; i < 3; i++) {
             Bun.gc(true)
             assert.strictEqual(yield* contend(layout.daemonInfo), "BUSY")

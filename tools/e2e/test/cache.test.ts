@@ -37,6 +37,7 @@ describe("cache key", () => {
     await fs.mkdir(path.join(root, "harnesses"))
     await fs.writeFile(launcher, "launcher")
     await fs.writeFile(compiled, "core 1")
+
     const key = await cacheKeys({
       login: {},
       binaries: [launcher, compiled],
@@ -44,8 +45,10 @@ describe("cache key", () => {
       method: "npm",
       userFiles: {},
     })
+
     const before = await key("daemon", "D1")
     await fs.writeFile(compiled, "core 2")
+
     const after = await (
       await cacheKeys({
         login: {},
@@ -55,15 +58,18 @@ describe("cache key", () => {
         userFiles: {},
       })
     )("daemon", "D1")
+
     expect(after).not.toBe(before)
   }, 60_000)
 
   test("a run whose invariants failed caches none of its passes", async () => {
     const into = path.join(await temp(), "cache")
+
     const passes = [
       { key: "k1", id: "D1" },
       { key: "k2", id: "S1" },
     ]
+
     await rememberPasses(passes, ["evidence holds a user model, provider or account value: H1.json"], into)
     expect(await fs.readdir(into).catch(() => [])).toEqual([])
     await rememberPasses(passes, [], into)

@@ -10,17 +10,21 @@ const make = Effect.gen(function* () {
   let phase: "open" | "draining" | "accepted" = "open"
   let reopened = yield* Deferred.make<void>()
   const active = new Map<object, string>()
+
   const track = (label: string) => {
     const token = {}
     active.set(token, label)
+
     return Effect.suspend(() => (active.delete(token) ? bus.observe({ type: "drain.released" }) : Effect.void))
   }
+
   const enter = (label: string, settlement: boolean): Effect.Effect<Effect.Effect<void>> =>
     Effect.suspend(() =>
       phase === "open" || (settlement && phase === "draining")
         ? Effect.succeed(track(label))
         : Deferred.await(reopened).pipe(Effect.andThen(enter(label, settlement))),
     )
+
   return {
     track,
     work: Effect.fn("Drain.work")(<A, E, R>(label: string, body: Effect.Effect<A, E, R>, settlement = false) =>
@@ -38,6 +42,7 @@ const make = Effect.gen(function* () {
     begin: Effect.sync(() => {
       if (phase !== "open") return false
       phase = "draining"
+
       return true
     }),
     phase: Effect.sync(() => phase),
@@ -45,6 +50,7 @@ const make = Effect.gen(function* () {
     accept: Effect.sync(() => {
       if (phase !== "draining" || active.size !== 0) return false
       phase = "accepted"
+
       return true
     }),
     reopen: Effect.gen(function* () {

@@ -1,7 +1,13 @@
 export * from "../domain.ts"
+
 export * as Harness from "../effect/harness.ts"
+
 export * as Plugin from "./plugin.ts"
+
 export * as Runtime from "../effect/runtime.ts"
+
 export type { Context } from "./plugin.ts"
+
 export type { EventDomain } from "./event.ts"
+
 export type { Registration } from "./registration.ts"

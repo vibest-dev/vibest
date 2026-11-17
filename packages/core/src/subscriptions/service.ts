@@ -17,6 +17,7 @@ const SUBSCRIPTION_TIMEOUT = "30 seconds"
 const MACHINE = "local" as const
 
 type Row = Subscription
+
 type Usage = { readonly limits: ReadonlyArray<SubscriptionLimit>; readonly error?: string } | { readonly error: string }
 
 const keyOf = (harness: string, provider: string) => `${harness}\0${provider}`
@@ -46,6 +47,7 @@ const wrote = (
 ): Row => {
   const limits = usage && "limits" in usage ? usage.limits : (prev?.limits ?? [])
   const error = usage && "error" in usage ? usage.error : undefined
+
   return { harness, provider, machine: MACHINE, account, limits, updatedAt: now, ...(error ? { error } : {}) }
 }
 
@@ -57,12 +59,14 @@ export const make = Effect.gen(function* () {
   const harnesses = yield* Harnesses.Service
   const harness = yield* Harness.Service
   const rows = yield* Ref.make(new Map<string, Row>())
+
   const modify = (harness: HarnessId, provider: string, f: (prev: Row | undefined, now: number) => Row) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
       yield* Ref.update(rows, (map) => {
         const next = new Map(map)
         next.set(keyOf(harness, provider), f(map.get(keyOf(harness, provider)), now))
+
         return next
       })
     })
@@ -75,10 +79,13 @@ export const make = Effect.gen(function* () {
 
   const report = Effect.fn("Subscriptions.report")(function* (input: SubscriptionReport) {
     const harness = input.harness
+
     if (harnesses.find(harness) === undefined || !Array.isArray(input.limits) || !input.limits.every(isLimit)) {
       yield* Effect.logWarning(`subscription report ignored for ${JSON.stringify(input.harness)}`)
+
       return
     }
+
     const provider = input.provider ?? ""
     yield* modify(harness, provider, (prev, now) => ({
       harness,
@@ -93,11 +100,14 @@ export const make = Effect.gen(function* () {
   const read = (definition: HarnessDefinition, home: string) =>
     Effect.gen(function* () {
       const id = definition.id
+
       const read = yield* definition.subscription!(home, definition.binary).pipe(
         Effect.timeoutOption(SUBSCRIPTION_TIMEOUT),
       )
+
       if (Option.isNone(read))
         return yield* Effect.logWarning(`subscriptions: ${id} poll timed out after ${SUBSCRIPTION_TIMEOUT}`)
+
       for (const row of read.value)
         yield* modify(id, row.provider, (prev, now) =>
           row.account === undefined
@@ -116,8 +126,10 @@ export const make = Effect.gen(function* () {
               ),
         )
     }).pipe(logFailure(`subscriptions: ${definition.id} poll failed`))
+
   const poll = Effect.gen(function* () {
     const home = yield* homeDir
+
     for (const definition of harnesses.all)
       if (definition.subscription && (yield* harness.available(definition.id))) yield* read(definition, home)
   })
@@ -136,17 +148,22 @@ export const layer = Layer.effect(
     const lock = yield* Semaphore.make(1)
     let polledAt = Number.NEGATIVE_INFINITY
     let running: Fiber.Fiber<void> | undefined
+
     const refresh = lock.withPermit(
       Effect.gen(function* () {
         if (running !== undefined && running.pollUnsafe() === undefined) return running
         const now = yield* Clock.currentTimeMillis
+
         if (now - polledAt < Duration.toMillis(MINUTE) || harnesses.all.length === 0) return undefined
         polledAt = now
         running = yield* Effect.forkIn(service.poll, scope)
+
         return running
       }),
     )
+
     yield* refresh
+
     return Service.of({
       ...service,
       list: refresh.pipe(

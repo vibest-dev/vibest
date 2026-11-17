@@ -18,7 +18,9 @@ export const alive = (pid: number) => {
   } catch {
     return false
   }
+
   const state = childProcess.spawnSync("ps", ["-p", String(pid), "-o", "state="], { encoding: "utf8" }).stdout.trim()
+
   return state !== "" && !state.startsWith("Z")
 }
 
@@ -32,9 +34,12 @@ const signal = (pid: number, sig: NodeJS.Signals) => {
 
 export const note = (pid: number | undefined, marker: string, scope = "", children = "") => {
   const file = process.env.VIBEST_REAP_FILE
+
   if (file === undefined || pid === undefined || !Number.isInteger(pid) || pid <= 1) return
+
   if (marker === "" || [marker, scope, children].some((field) => /[\t\n]/.test(field))) return
   const started = startedAt(pid)
+
   if (started === "" || started.includes("\t") || started.includes("\n")) return
   fs.appendFileSync(file, `${pid}\t${marker}\t${scope}\t${started}\t${children}\n`)
 }
@@ -43,20 +48,26 @@ type Row = { pid: number; marker: string; scope: string; started: string; childr
 
 const rows = (file: string, scope?: string) => {
   let text = ""
+
   try {
     text = fs.readFileSync(file, "utf8")
   } catch {
     return []
   }
+
   const found: Array<Row> = []
+
   for (const line of text.split("\n")) {
     if (line === "") continue
     const [pidText, marker, rowScope = "", started = "", children = ""] = line.split("\t")
     const pid = Number(pidText)
+
     if (marker === undefined || marker === "" || started === "" || !Number.isInteger(pid) || pid <= 1) continue
+
     if (scope !== undefined && rowScope !== scope) continue
     found.push({ pid, marker, scope: rowScope, started, children })
   }
+
   return found
 }
 
@@ -70,6 +81,7 @@ const childrenOf = (parent: number, marker: string) =>
     .flatMap((line) => {
       const [, pid, ppid, started, command] =
         /^\s*(\d+)\s+(\d+)\s+(\w{3} \w{3} +\d+ [\d:]+ \d{4})\s+(.*)$/.exec(line) ?? []
+
       return Number(ppid) === parent && started !== undefined && command !== undefined && command.includes(marker)
         ? [{ pid: Number(pid), started, command: command.trim() }]
         : []
@@ -77,8 +89,10 @@ const childrenOf = (parent: number, marker: string) =>
 
 export const noteChildren = (file: string) => {
   const known = rows(file)
+
   for (const row of known) {
     if (row.children === "" || !stillTheSame(row)) continue
+
     for (const child of childrenOf(row.pid, row.children))
       if (!/[\t\n]/.test(child.command) && !known.some((k) => k.pid === child.pid && k.started === child.started))
         fs.appendFileSync(file, `${child.pid}\t${child.command}\t${row.scope}\t${child.started}\t\n`)
@@ -88,11 +102,13 @@ export const noteChildren = (file: string) => {
 const owned = (file: string, scope?: string) => {
   const seen = new Set<number>()
   const found: Array<{ pid: number; marker: string; started: string; command: string }> = []
+
   for (const row of rows(file, scope)) {
     if (seen.has(row.pid) || !stillTheSame(row)) continue
     seen.add(row.pid)
     found.push({ ...row, command: commandOf(row.pid).trim() })
   }
+
   return found
 }
 
@@ -106,20 +122,25 @@ const waitDead = async (pid: number, ms: number) => {
 export const endOwned = (pid: number | undefined, marker: string) => {
   if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return
   const command = commandOf(pid)
+
   if (command === "" || !command.includes(marker)) return
+
   const group = Number(
     childProcess.spawnSync("ps", ["-p", String(pid), "-o", "pgid="], { encoding: "utf8" }).stdout.trim(),
   )
+
   if (group === pid) signal(-pid, "SIGKILL")
   else signal(pid, "SIGKILL")
 }
 
 export const endNoted = async (file: string, scope?: string) => {
   noteChildren(file)
+
   for (const row of owned(file, scope)) {
     if (!stillTheSame(row)) continue
     signal(row.pid, "SIGTERM")
     await waitDead(row.pid, 2_000)
+
     if (!stillTheSame(row)) continue
     signal(row.pid, "SIGKILL")
     await waitDead(row.pid, 1_000)
@@ -132,6 +153,7 @@ export const startWatch = (parent: number, file: string) => {
     [url.fileURLToPath(import.meta.url), "--watch", String(parent), file],
     { detached: true, stdio: "ignore" },
   )
+
   child.unref()
 }
 
@@ -140,6 +162,7 @@ const watch = async (parent: number, file: string) => {
     noteChildren(file)
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
+
   await endNoted(file)
 }
 
@@ -149,6 +172,7 @@ const runEnded = (owner: number, file: string) => {
   if (!alive(owner)) return true
   const ownerStarted = Date.parse(startedAt(owner))
   const fileCreated = fs.statSync(file, { throwIfNoEntry: false })?.birthtimeMs
+
   return fileCreated !== undefined && ownerStarted > fileCreated + 1_000
 }
 
@@ -156,6 +180,7 @@ export const reapEndedRuns = async (dir = os.tmpdir()) => {
   for (const name of fs.readdirSync(dir)) {
     const owner = ownerPid(name)
     const file = path.join(dir, name)
+
     if (
       owner === undefined ||
       fs.lstatSync(file, { throwIfNoEntry: false })?.isFile() !== true ||

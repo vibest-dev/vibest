@@ -36,8 +36,10 @@ const scalar = (type: string, s: JSONSchema): Emitted => {
       return { ts: "null", schema: "Schema.Null" }
     case "array": {
       const item = s.items ? emit(s.items) : UNKNOWN
+
       return { ts: `ReadonlyArray<${item.ts}>`, schema: `Schema.Array(${item.schema})` }
     }
+
     case "object":
       return object(s)
     default:
@@ -59,9 +61,11 @@ export const struct = (
 
 const object = (s: JSONSchema): Emitted => {
   const props: Record<string, JSONSchema> = s.properties ?? {}
+
   if (Object.keys(props).length === 0)
     return record(typeof s.additionalProperties === "object" ? emit(s.additionalProperties) : UNKNOWN)
   const required = new Set<string>(s.required ?? [])
+
   return struct(Object.entries(props).map(([name, v]) => ({ name, optional: !required.has(name), value: emit(v) })))
 }
 
@@ -69,16 +73,20 @@ export const emit = (s: JSONSchema): Emitted => {
   if (typeof s.$ref === "string") {
     if (!s.$ref.startsWith(COMPONENT_REF)) return UNKNOWN
     const name = s.$ref.slice(COMPONENT_REF.length)
+
     return { ts: name, schema: `Schema.suspend((): Schema.Codec<${name}> => ${name})` }
   }
+
   if (Array.isArray(s.enum))
     return {
       ts: s.enum.map((v: unknown) => JSON.stringify(v)).join(" | "),
       schema: `Schema.Literals([${s.enum.map((v: unknown) => JSON.stringify(v)).join(", ")}])`,
     }
   const alternatives: ReadonlyArray<JSONSchema> | undefined = s.anyOf ?? s.oneOf
+
   if (alternatives !== undefined) {
     const nonNull = alternatives.filter((a) => a.type !== "null")
+
     const inner =
       nonNull.length === 1
         ? emit(nonNull[0]!)
@@ -86,13 +94,18 @@ export const emit = (s: JSONSchema): Emitted => {
             ts: nonNull.map((a) => `(${emit(a).ts})`).join(" | "),
             schema: `Schema.Union([${nonNull.map((a) => emit(a).schema).join(", ")}])`,
           }
+
     return nonNull.length === alternatives.length ? inner : nullable(inner)
   }
+
   const types: ReadonlyArray<string> = Array.isArray(s.type) ? s.type : s.type ? [s.type] : []
+
   if (types.length === 0) return s.properties ? object(s) : UNKNOWN
   const nonNull = types.filter((t) => t !== "null")
+
   if (nonNull.length !== 1) return nonNull.length === 0 ? scalar("null", s) : UNKNOWN
   const inner = scalar(nonNull[0]!, s)
+
   return nonNull.length === types.length ? inner : nullable(inner)
 }
 
@@ -107,12 +120,16 @@ const declare = (name: string, value: Emitted) =>
 
 export const emitApi = (doc: OpenRpc, generation: number, minimum: string): string => {
   const components = Object.entries(doc.components.schemas).map(([name, s]) => declare(name, emit(s)))
+
   const methods = doc.methods.map((m) => {
     const params = `${pascal(m.name)}Params`
     const result = emit(m.result.schema)
+
     const resultName =
       typeof m.result.schema.$ref === "string" && result.ts !== "unknown" ? result.ts : `${pascal(m.name)}Result`
+
     const kinds = [...new Set(m.errors.flatMap((e) => (e.data?.kind ? [e.data.kind] : [])))]
+
     return {
       name: m.name,
       params,
@@ -127,6 +144,7 @@ export const emitApi = (doc: OpenRpc, generation: number, minimum: string): stri
       ],
     }
   })
+
   return `import { Schema } from "effect"
 
 export const VERSION = ${JSON.stringify(doc.info.version)} as const

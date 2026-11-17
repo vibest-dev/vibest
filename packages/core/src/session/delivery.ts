@@ -88,15 +88,21 @@ export const make = Effect.gen(function* () {
   ) {
     const into =
       hand ?? ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover))
+
     const task = yield* db.inbox.untakenTask(session.id)
+
     if (task !== undefined) {
       const first = yield* taskInput(session, task)
       const notStarted = yield* into(first.text, first.onHandover)
+
       if (notStarted) yield* notice(session, notStarted)
+
       return
     }
+
     if (hand === undefined && inbox.pulls(harnessIdOf(session))) return
     const pending = yield* db.inbox.pendingInbox(session.id)
+
     if (pending.length === 0) return
     const batch = nextBatch(pending)
     const ids = batch.map((r) => r.id)
@@ -117,7 +123,9 @@ export const make = Effect.gen(function* () {
     ).pipe(
       Effect.flatMap((notStarted) => {
         const rows = batch.filter((r) => claimed.includes(r.id))
+
         if (rows.length === 0) return Effect.void
+
         return notStarted
           ? undelivered(session, rows, notStarted)
           : db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
@@ -150,7 +158,9 @@ export const make = Effect.gen(function* () {
                 ),
         NotReady: (e) => {
           const rows = batch.filter((r) => claimed.includes(r.id))
+
           if (rows.length > 0) return undelivered(session, rows, e.message)
+
           return db.inbox
             .pendingInbox(session.id)
             .pipe(
@@ -174,7 +184,9 @@ export const make = Effect.gen(function* () {
 
   const deliver = Effect.fn("Delivery.deliver")(function* (id: string) {
     const session = yield* getRow(id)
+
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
+
     if (
       (session.entry && inbox.pulls(harnessIdOf(session))) ||
       executionStateOf(session) === "open" ||
@@ -187,28 +199,37 @@ export const make = Effect.gen(function* () {
     const terminal = terminalOf(session)
     const seen = yield* agentState(h, terminal)
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
+
     if (state !== undefined && busy(state)) return
+
     if (state === undefined && !(yield* alive(h, terminal))) {
       if (exitedAt(session) === null) return yield* exits.settle(h, id)
+
       if ((yield* db.inbox.pendingInbox(id)).length === 0) return
+
       if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && !(session.process?.conversation ?? null))
         return yield* new NoSuchSession({
           id,
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
+
       return yield* deliverQueued(h, session, terminal, (text, onHandover) => resume(h, session, { text, onHandover }))
     }
+
     const fresh = (yield* db.session.getSession(id)) ?? session
     yield* deliverQueued(h, fresh, terminalOf(fresh))
   })
 
   const send = Effect.fn("Delivery.send")(function* (id: string, message: string, request?: string, sender?: string) {
     const session = yield* getRow(id)
+
     if (request !== undefined && (yield* db.inbox.queuedBy(id, request))) return
     const worktree = yield* worktreeOf(session)
+
     if (archived(session) || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
       return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
     const row = yield* db.inbox.insertSend(id, message, request, sender)
+
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
 
@@ -228,6 +249,7 @@ export const make = Effect.gen(function* () {
     sender?: string,
   ) {
     if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender)
+
     return yield* toEntry(id, message, request)
   })
 
@@ -238,55 +260,69 @@ export const make = Effect.gen(function* () {
     request?: string,
   ) {
     const toOrigin = yield* db.remote.sendToOrigin(sender.sessionId, input, message, request)
+
     if (toOrigin === false)
       return yield* new NoSuchSession({
         id: input,
         message: `${input} is on another machine that vibestd does not know; nothing was sent`,
       })
+
     if (toOrigin === true) return { id: input }
     const id = yield* db.session.resolveSession(input)
     const target = yield* db.session.sessionIdentity(id)
+
     if (target?.projectId !== sender.projectId)
       return yield* new SendRefused({
         message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
       })
     const creator = (yield* db.session.creatorOf(sender.sessionId)) ?? undefined
     const mine = creator !== undefined && "local" in creator ? creator.local : undefined
+
     if (!(yield* db.inbox.maySend(sender.sessionId, id)))
       return yield* new SendRefused({
         message: `${id} is not the agent that started you, and you did not start it${mine === undefined ? "" : `; you may send to ${mine}`}`,
       })
     const session = yield* db.session.getSession(id)
     const stopped = !session || archived(session)
+
     if (!(stopped && mine === id)) {
       if (stopped && !target.entry) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+
       if (target.entry) yield* toEntry(id, message, request, sender.sessionId)
       else yield* send(id, message, request, sender.sessionId)
+
       return { id }
     }
+
     const heir = yield* db.session.nearestAlive(sender.sessionId)
+
     if (heir === undefined)
       return yield* new NoSuchSession({
         id,
         message: `${id} has ended and no session above it is running; the user reads your last reply with vibest result`,
       })
+
     if ("peer" in heir) {
       if (!(yield* db.remote.sendToPeer(sender.sessionId, heir.peer, heir.session, message, request)))
         return yield* new NoSuchSession({
           id,
           message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,
         })
+
       return { id: heir.session }
     }
+
     if ((yield* db.session.sessionIdentity(heir.local))?.entry)
       yield* toEntry(heir.local, message, request, sender.sessionId)
     else yield* send(heir.local, message, request, sender.sessionId)
+
     return { id: heir.local }
   })
 
   const undeliverable = (id: string, rows: ReadonlySet<number>) => (cause: Cause.Cause<unknown>) =>
     Effect.gen(function* () {
       if (rows.size === 0) return yield* Effect.failCause(cause)
+
       const transient = Cause.findErrorOption(cause).pipe(
         Option.exists(
           (e) =>
@@ -294,9 +330,11 @@ export const make = Effect.gen(function* () {
             (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
         ),
       )
+
       if (Cause.hasInterruptsOnly(cause) || transient) return
       const stuck = (yield* db.inbox.pendingInbox(id)).filter((r) => rows.has(r.id))
       const session = yield* db.session.getSession(id)
+
       if (stuck.length > 0 && session !== undefined) yield* inbox.undelivered(session, stuck, errorMessage(cause))
     })
 
@@ -305,6 +343,7 @@ export const make = Effect.gen(function* () {
   const due = (id: string, wake: Wake) =>
     Effect.gen(function* () {
       if (wake.ended && (yield* db.inbox.hasQueued(id))) return true
+
       return wake.rows.size > 0 && (yield* db.inbox.pendingInbox(id)).some((r) => wake.rows.has(r.id))
     })
 
@@ -323,31 +362,38 @@ export const make = Effect.gen(function* () {
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
+
     return yield* locked(id)(
       Effect.gen(function* () {
         const session = yield* getRow(id)
         const h = yield* runtimes.route(runtimeOf(session))
         const terminal = terminalOf(session)
         const execution = yield* db.session.openExecution(id)
+
         if (execution === undefined)
           return {
             message: `${id} is not working; its execution had already finished and its reply is recorded`,
           }
         const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
+
         if (!(yield* db.session.executionAccepted(id)) && !busy(state))
           return { message: `${id} is not working; nothing to interrupt` }
+
         if (!(yield* interruptAgent(h, session, terminal)))
           return yield* new SessionBusy({
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
         const closed = yield* db.session.closeExecution(id, execution, "interrupted")
+
         if (closed) yield* db.session.setStatus(id, "idle")
         const last = closed ? undefined : yield* db.session.latestReply(id)
+
         if (!closed && !(last?.execution === execution && last.status === "interrupted"))
           return {
             message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
           }
+
         return { message: `${id} interrupted; its terminal, worktree and session are kept` }
       }),
     ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) }))
@@ -369,9 +415,11 @@ export const make = Effect.gen(function* () {
     yield* locks.withLock(id)(
       Effect.gen(function* () {
         const session = yield* db.session.getSession(id)
+
         if (session === undefined) return
         const r = yield* sessionLive.track(id)
         const rows = yield* db.inbox.unacceptedBatch(id, execution)
+
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
         const h = yield* runtimes.route(runtimeOf(session))
         yield* Ref.set(r.prompting, true).pipe(

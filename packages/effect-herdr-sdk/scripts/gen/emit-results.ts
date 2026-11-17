@@ -6,6 +6,7 @@ const typeName = (tag: string) => "Result_" + tag.replace(/[^a-zA-Z0-9]/g, "_")
 
 export function emitResults(schema: JSONSchema, header: string): string {
   const ok = schema.schemas.success_response as JSONSchema
+
   const variants: Array<{ tag: string; name: string; ts: string }> = ok.$defs.ResponseResult.oneOf.map(
     (v: JSONSchema) => ({
       tag: v.properties.type.const as string,
@@ -13,6 +14,7 @@ export function emitResults(schema: JSONSchema, header: string): string {
       ts: tsType(v),
     }),
   )
+
   return `${header}
 ${emitDefs(ok.$defs, new Set(["ResponseResult"]))}
 

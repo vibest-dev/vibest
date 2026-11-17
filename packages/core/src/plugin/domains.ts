@@ -11,7 +11,9 @@ import type { Subscription } from "@vibest/schema/subscription"
 import type { Effect, Stream } from "effect"
 
 export type RuntimeDefinition = PluginRuntime.RuntimeDefinition
+
 export type HarnessDefinition = PluginHarness.HarnessDefinition
+
 export type AgentDefinition = PluginAgentDefinition
 
 export type Caller = PluginRuntime.RuntimeCaller & { readonly id: string; readonly name?: string }

@@ -56,12 +56,14 @@ describe("projectText: preferences.md and the memory index injected into every a
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const dir = yield* tempDirectory("vibest-prompt-")
+
         const write = (rel: string, content: string) =>
           Effect.gen(function* () {
             const file = path.join(dir, rel)
             yield* fs.makeDirectory(path.dirname(file), { recursive: true })
             yield* fs.writeFileString(file, content)
           })
+
         yield* write("preferences.md", "Prefer short diffs.\n")
         yield* write("instructions.md", "SECRET_INSTRUCTIONS_SHOULD_NOT_APPEAR\n")
         yield* write("memories/front.md", '---\nname: front\ndescription: "from frontmatter"\n---\n# ignored title\n')
@@ -124,6 +126,7 @@ describe("projectText: preferences.md and the memory index injected into every a
         const dir = yield* tempDirectory("vibest-prompt-cap-")
         const memories = path.join(dir, "memories")
         yield* fs.makeDirectory(memories)
+
         for (let i = 0; i < 201; i++)
           yield* fs.writeFileString(path.join(memories, `${String(i).padStart(3, "0")}.md`), `lesson ${i}\n`)
         const unreadablePastTheCap = path.join(memories, "200.md")

@@ -10,7 +10,9 @@ import { Subscriptions } from "../subscriptions/service.ts"
 import { Hooks } from "./hooks.ts"
 
 type Short = keyof VibestPlugin.AgentHooks
+
 type AgentHook = `agent.${Short}`
+
 const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
 
 const factsFor =
@@ -19,12 +21,15 @@ const factsFor =
     const asked: ReadonlyArray<string> = input?.types ?? []
     const known = new Set(asked.filter((type) => Object.hasOwn(Catalog, type)))
     const unknown = asked.filter((type) => !known.has(type))
+
     const warned =
       unknown.length === 0
         ? Effect.void
         : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown fact types ${unknown.join(", ")}`)
+
     if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
     const definitions = known.size === 0 ? Object.values(Catalog) : [...known].map((type) => Catalog[type as FactType])
+
     return Stream.unwrap(
       Effect.andThen(warned, Effect.map(bus.subscribe(definitions), Stream.fromSubscription)),
     ) as Stream.Stream<FactOf<T>>
@@ -44,12 +49,14 @@ export const make = Effect.gen(function* () {
   const harnesses = yield* Harnesses.Service
   const agents = yield* Agents.Service
   const bus = yield* Bus.Service
+
   return ({ plugin, activation, options, stats }: Input): VibestPlugin.Context => {
     const register = <N extends Hooks.Name>(
       name: N,
       callback: Hooks.Entry<N>["callback"],
       runtime: string | undefined = undefined,
     ) => hooks.register(name, { plugin, activation, stats, runtime, callback })
+
     const hook: VibestPlugin.AgentDomain["hook"] = (short, callback) => {
       if (typeof short !== "string" || !HOOKS.includes(short)) {
         return Effect.die(
@@ -58,8 +65,10 @@ export const make = Effect.gen(function* () {
           ),
         )
       }
+
       return register(`agent.${short as Short}`, callback as unknown as Hooks.Entry<AgentHook>["callback"])
     }
+
     const machine: VibestPlugin.MachineDomain["hook"] = (name, callback, options) => {
       if (name !== "connect" && name !== "remove")
         return Effect.die(
@@ -67,8 +76,10 @@ export const make = Effect.gen(function* () {
             `unsupported hook ${JSON.stringify(`machine.${String(name)}`)}; supported: machine.connect, machine.remove`,
           ),
         )
+
       return register(`machine.${name}`, callback, options?.runtime)
     }
+
     return {
       options,
       agent: { hook, transform: agents.transform },

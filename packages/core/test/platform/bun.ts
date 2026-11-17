@@ -14,6 +14,7 @@ const user = Layer.succeed(UserPlatform, {
   uid: process.getuid?.(),
   lstat: async (file) => {
     const st = await fs.lstat(file)
+
     return { symlink: st.isSymbolicLink(), directory: st.isDirectory(), uid: st.uid, mode: st.mode }
   },
 })

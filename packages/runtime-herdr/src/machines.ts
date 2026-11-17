@@ -55,6 +55,7 @@ const decodeProfiles = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.A
 export const profiles = (cli: Cli): Effect.Effect<ReadonlyArray<Profile>, string> =>
   Effect.flatMap(cli(["machine", "list", "--json"]), (ran) => {
     const found = ran.code === 0 ? Option.getOrUndefined(decodeProfiles(ran.stdout)) : undefined
+
     return found === undefined ? Effect.fail(`herdr machine list here: ${said(ran)}`) : Effect.succeed(found)
   })
 
@@ -64,6 +65,7 @@ export const sameTarget = (a: string, b: string) => {
       .trim()
       .replace(/^ssh:\/\//, "")
       .replace(/\/+$/, "")
+
   return plain(a) === plain(b)
 }
 
@@ -80,10 +82,13 @@ export const locate = (
   Effect.gen(function* () {
     const session = peer.link.session
     const target = peer.target
+
     if (session === undefined) return { missing: false, terminals: NONE, note: `${peer.id} gave no herdr link` }
     const rows = yield* profiles(cli)
     const profile = mirrorOf(rows, target, session)
+
     if (profile === undefined) return { missing: true, terminals: NONE }
+
     if (!profile.enabled)
       return {
         missing: false,
@@ -92,11 +97,14 @@ export const locate = (
         note: `herdr here has ${profile.label} disabled; fix: herdr machine enable ${profile.id}`,
       }
     const terminals = new Map<string, Terminal>()
+
     for (const [id, there] of sessions) {
       const parsed = parseTerminal({ id: there })
       const shown = parsed === undefined ? undefined : mirrorOf(rows, target, parsed.session)
+
       if (shown?.enabled === true) terminals.set(id, { id: `${there}@${shown.label}` })
     }
+
     return {
       missing: false,
       terminals,
@@ -110,10 +118,12 @@ export const locate = (
 export const link = (pool: HerdrPool["Service"]) =>
   Effect.gen(function* () {
     const session = REMOTE_SESSION
+
     const pong = yield* pool.client(session).pipe(
       Effect.flatMap((h) => h.call("ping", {})),
       Effect.orElseSucceed(() => undefined),
     )
+
     return {
       session,
       ...(pong === undefined ? {} : { version: pong.version }),

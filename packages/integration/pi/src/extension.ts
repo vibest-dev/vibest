@@ -42,26 +42,31 @@ const guarded = (sessionId: string) =>
       Effect.gen(function* () {
         const headers = yield* claimHeaders(Claim.session({ sessionId, pluginVersion: VERSION }))
         const input = encodeJson({ tool_name: e.toolName, tool_input: e.input, cwd: ctx.cwd })
+
         const exit = yield* hookCall(layout.socket, headers, (client) =>
           client["Integration.Guard"]({ harness: "pi", input }),
         )
+
         if (Exit.isFailure(exit))
           return {
             block: true,
             reason: `vibest could not check this tool call (${Cause.pretty(exit.cause)}); it is refused.`,
           }
         const reason = exit.value.answer
+
         return typeof reason === "string" && reason ? { block: true, reason } : undefined
       }),
     )
   })
 
 type AgentMessage = AgentEndEvent["messages"][number]
+
 type AssistantMessage = Extract<AgentMessage, { readonly role: "assistant" }>
 
 const lastReply = (messages: ReadonlyArray<AgentMessage>) => {
   const message = messages.findLast((m): m is AssistantMessage => m.role === "assistant")
   const text = (message?.content ?? []).flatMap((c) => (c.type === "text" ? [c.text] : [])).join("")
+
   return { text, error: message?.stopReason === "error" ? message.errorMessage || "error" : "" }
 }
 
@@ -89,8 +94,10 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
       yield* pi.handle("message_start", (e, ctx) =>
         Effect.gen(function* () {
           const message = e.message
+
           if (message.role !== "custom" || message.customType !== "vibest") return
           const details = message.details as { readonly execution?: unknown } | undefined
+
           if (typeof details?.execution !== "number") return
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
           const event = encodeJson({ type: "accepted", execution: details.execution })
@@ -122,9 +129,11 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
   const layout = yield* Layout
   const scope = yield* Effect.scope
   const reported = yield* Ref.make("")
+
   const send = (ctx: ExtensionContext) =>
     Effect.gen(function* () {
       const harnessSessionId = ctx.sessionManager.getSessionId()
+
       if (ctx.mode !== "tui" || (yield* Ref.get(reported)) === harnessSessionId) return
       const headers = yield* piHeaders(sessionId, ctx)
       yield* connect(layout.socket).pipe(
@@ -150,6 +159,7 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
         Effect.forkIn(scope),
       )
     })
+
   yield* pi.handle("session_start", (event, ctx) =>
     event.reason === "new" || event.reason === "resume" || event.reason === "fork" ? send(ctx) : Effect.void,
   )
@@ -173,6 +183,7 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
       yield* pi.handle("session_start", (_e, ctx) =>
         ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
       )
+
       const identity = (ctx: ExtensionContext) =>
         Effect.map(Ref.get(processId), (current) =>
           Claim.session({
@@ -182,19 +193,24 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
             ...(current === undefined ? {} : { process: current }),
           }),
         )
+
       const takeNext = (ctx: ExtensionContext) =>
         Effect.gen(function* () {
           if (!ctx.isIdle()) return
+
           const taken = yield* withVibest(yield* identity(ctx), (client) => client["Inbox.Take"](undefined), {
             start: false,
           })
+
           if (taken === null) return
           yield* pi.sendMessage(
             { customType: "vibest", content: taken.text, display: false, details: { execution: taken.execution } },
             { triggerTurn: true },
           )
         }).pipe(Effect.ignore)
+
       yield* pi.handle("agent_settled", (_e, ctx) => takeNext(ctx))
+
       const subscribe = (ctx: ExtensionContext) =>
         Effect.flatMap(identity(ctx), (who) =>
           withVibest(
@@ -213,6 +229,7 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
           }),
           Effect.repeat(Schedule.spaced("2 seconds")),
         )
+
       yield* Deferred.await(started).pipe(
         Effect.flatMap((ctx) =>
           subscribe(ctx).pipe(
@@ -270,9 +287,11 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
 export const extension = Layer.unwrap(
   Effect.gen(function* () {
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
+
     if (!sessionId) return Layer.empty
     const processId = yield* Ref.make(Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROCESS"))))
     const guard: Role = Layer.merge(Layer.effectDiscard(guarded(sessionId)), ready(sessionId, processId))
+
     return terminal(sessionId).pipe(
       Layer.provideMerge(
         Layer.mergeAll(session(sessionId, processId), inbox(sessionId, processId)).pipe(Layer.provideMerge(guard)),

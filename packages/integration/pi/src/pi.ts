@@ -49,10 +49,12 @@ export class Pi extends Context.Service<
         ) =>
           Effect.gen(function* () {
             const run = yield* FiberSet.makeRuntimePromise<R>()
+
             const on = api.on as (
               event: K,
               handler: (e: Events[K]["event"], ctx: ExtensionContext) => Promise<Events[K]["result"]>,
             ) => () => void
+
             yield* Effect.acquireRelease(
               Effect.sync(() => on(event, (e, ctx) => run(f(e, ctx)))),
               (off) => Effect.sync(off),

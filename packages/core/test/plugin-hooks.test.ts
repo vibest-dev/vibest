@@ -1,0 +1,213 @@
+import { assert, describe, it } from "@effect/vitest"
+import { Agents } from "@vibest/core/agents"
+import { type Candidate, makeHost } from "@vibest/core/plugin"
+import { Hooks } from "@vibest/core/plugin/hooks"
+import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
+import { Duration, Deferred, Effect, Fiber } from "effect"
+import { TestClock } from "effect/testing"
+
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
+import { memoryBus } from "./platform/bun.ts"
+
+const candidate = (
+  source: string,
+  revision: string,
+  plugin: Candidate["plugin"],
+  options: Record<string, unknown> = {},
+): Candidate => ({ source, revision, options, plugin })
+
+const event = {
+  project: "/r",
+  agent: "general",
+  parentSessionId: undefined,
+  prompt: "p",
+  harness: undefined,
+  provider: undefined,
+  model: undefined,
+  machine: { id: "local" },
+  runtime: undefined,
+  parentRuntime: undefined,
+  machines: [],
+  attempts: [],
+  harnesses: [
+    { harness: "pi", available: true },
+    { harness: "claude", available: true },
+    { harness: "cursor", available: true },
+  ],
+}
+
+const host = <A, E>(
+  f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E>,
+  timeout?: Duration.Input,
+) =>
+  makeHost(timeout === undefined ? {} : { timeout }).pipe(
+    Effect.flatMap(f),
+    Effect.scoped,
+    Effect.provide(subscriptionsLayer),
+    Effect.provide(harnessesLayer()),
+    Effect.provide(runtimesLayer),
+    Effect.provide(Agents.layer),
+    Effect.provide(memoryBus),
+    Effect.provide(Hooks.layer),
+  )
+
+describe("plugins: hook events are detached copies", () => {
+  const hooked = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void>) =>
+    candidate(id, "1", Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) }))
+
+  const failInput = {
+    project: "/r",
+    agent: "general",
+    parentSessionId: undefined,
+    harnesses: event.harnesses,
+    attempts: [],
+    sessionId: "s",
+    reason: "limited" as const,
+    error: "limited",
+    input: "p",
+    harness: "claude",
+    provider: undefined,
+  }
+
+  it.effect("a reference a plugin keeps cannot change the result or the trace after its callback succeeded", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const kept: { machine?: { id: string } } = {}
+        yield* h.activate([
+          hooked("keeper", (e) =>
+            Effect.sync(() => {
+              kept.machine = { id: "chosen" }
+              e.machine = kept.machine
+            }),
+          ),
+        ])
+        const decision = yield* h.service.start(event)
+        kept.machine!.id = "changed later"
+        assert.strictEqual(decision.machine.id, "chosen")
+        assert.deepStrictEqual(decision.trace[0]!.changes[0]!.to, { id: "chosen" })
+      }),
+    ),
+  )
+
+  it.effect("writes to nested data before a failure and before and after a timeout never reach the input", () =>
+    host(
+      (h) =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>()
+          const input = structuredClone(event)
+          const late: { write?: () => void } = {}
+          yield* h.activate([
+            hooked("crash", (e) =>
+              Effect.sync(() => void Object.assign(e.harnesses[0]!, { available: false })).pipe(
+                Effect.andThen(Effect.die("boom")),
+              ),
+            ),
+          ])
+          assert.strictEqual((yield* h.service.start(input).pipe(Effect.flip))._tag, "AgentRefused")
+          assert.deepStrictEqual(input, event)
+          yield* h.activate([
+            hooked("timeout", (e) =>
+              Effect.sync(() => {
+                Object.assign(e.harnesses[1]!, { available: false })
+                late.write = () => void Object.assign(e.harnesses[2]!, { available: false })
+              }).pipe(Effect.andThen(Deferred.await(gate))),
+            ),
+          ])
+          const starting = yield* Effect.forkChild(h.service.start(input).pipe(Effect.flip))
+          yield* TestClock.adjust("20 millis")
+          assert.strictEqual((yield* Fiber.join(starting))._tag, "AgentRefused")
+          late.write!()
+          assert.deepStrictEqual(input, event)
+        }),
+      "20 millis",
+    ),
+  )
+
+  it.effect("a later fail hook can clear an earlier move and is named as the decider", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const failing = (id: string, move: { harness: string } | undefined) =>
+          candidate(
+            id,
+            "1",
+            Plugin.define({
+              id,
+              effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = move))),
+            }),
+          )
+
+        yield* h.activate([failing("sets", { harness: "pi" }), failing("clears", undefined)])
+        const result = yield* h.service.fail(failInput)
+        assert.isUndefined(result.move)
+        assert.deepStrictEqual(result.trace[1]!.changes, [
+          { field: "move", from: { harness: "pi" }, overwrote: "sets" },
+        ])
+      }),
+    ),
+  )
+})
+
+describe("plugins: one registry across activations", () => {
+  const modelOf = (id: string, model: string, setup: Effect.Effect<void, never, never> = Effect.void) =>
+    Plugin.define({
+      id,
+      effect: (ctx) =>
+        setup.pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = model))))),
+    })
+
+  it.effect("a retired revision whose teardown overran its deadline leaves no hook beside its replacement", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>()
+
+        const stuck = Plugin.define({
+          id: "g",
+          effect: (ctx) =>
+            ctx.agent
+              .hook("start.before", (e) => Effect.sync(() => void (e.model = "retired")))
+              .pipe(Effect.andThen(Effect.addFinalizer(() => Deferred.await(gate)))),
+        })
+
+        yield* h.activate([candidate("g", "1", stuck)])
+        const reloading = yield* Effect.forkChild(h.activate([candidate("g", "2", modelOf("g", "current"))]))
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(reloading)
+        const decision = yield* h.service.start(event)
+        assert.deepStrictEqual(
+          decision.trace.map((t) => t.plugin),
+          ["g"],
+        )
+        assert.strictEqual(decision.model, "current")
+        yield* Deferred.succeed(gate, undefined)
+      }),
+    ),
+  )
+
+  it.effect("a hook registered late runs in its plugin's load order, not in registration order", () =>
+    host((h) =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>()
+
+        const late = Plugin.define({
+          id: "a",
+          effect: (ctx) =>
+            Deferred.await(gate).pipe(
+              Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = "a")))),
+              Effect.forkScoped,
+              Effect.asVoid,
+            ),
+        })
+
+        yield* h.activate([candidate("a", "1", late), candidate("b", "1", modelOf("b", "b"))])
+        yield* Deferred.succeed(gate, undefined)
+        yield* Effect.yieldNow
+        const decision = yield* h.service.start(event)
+        assert.deepStrictEqual(
+          decision.trace.map((t) => t.plugin),
+          ["a", "b"],
+        )
+        assert.strictEqual(decision.model, "b")
+      }),
+    ),
+  )
+})

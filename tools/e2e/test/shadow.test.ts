@@ -7,10 +7,12 @@ import { claudeShadow, cursorShadow, userFilesRead, userPaths, userPrivateValues
 
 const fakeHome = async (files: Record<string, unknown>) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-test-"))
+
   for (const [rel, value] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(home, rel)), { recursive: true })
     await fs.writeFile(path.join(home, rel), JSON.stringify(value))
   }
+
   return userPaths(home)
 }
 
@@ -35,6 +37,7 @@ describe("shadows", () => {
         },
       },
     })
+
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-out-"))
     await claudeShadow(dir, "user", from)
     const settings = await read(path.join(dir, "settings.json"))
@@ -56,6 +59,7 @@ describe("shadows", () => {
       modelSelectionHistory: ["user-model-id"],
       authInfo: { email: "someone@example.com", userId: 1, authId: "auth0|abc" },
     }
+
     const from = await fakeHome({ ".cursor/cli-config.json": own })
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-out-"))
     await cursorShadow(dir, "user", from)
@@ -77,6 +81,7 @@ describe("shadows", () => {
         authInfo: { email: "someone@example.com", displayName: "Sam Person", userId: 98765432 },
       },
     })
+
     expect((await userPrivateValues(from)).sort()).toEqual(
       [
         "98765432",

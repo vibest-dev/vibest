@@ -36,36 +36,47 @@ const clip = (text: string) => (text.length <= SUMMARY_LIMIT ? text : text.slice
 const memorySummary = (text: string) => {
   const lines = text.split(/\r?\n/)
   let rest = lines
+
   if (lines[0]?.trim() === "---") {
     const end = lines.findIndex((line, i) => i > 0 && line.trim() === "---")
+
     if (end > 0) {
       const field = lines.slice(1, end).find((line) => /^\s*description\s*:/.test(line))
+
       const value = field
         ?.replace(/^\s*description\s*:\s*/, "")
         .trim()
         .replace(/^(['"])(.*)\1$/, "$2")
         .trim()
+
       if (value) return clip(value)
       rest = lines.slice(end + 1)
     }
   }
+
   const line = rest.find((l) => {
     const t = l.trim()
+
     return t !== "" && t !== "---"
   })
+
   return clip((line ?? "").trim().replace(/^#+\s*/, ""))
 }
 
 const memoryIndex = (entries: ReadonlyArray<readonly [string, string]>, left: number) => {
   if (entries.length === 0) return ""
+
   const lines = [
     "Each line is a file in the project folder; read it with your file tools when its line is relevant to the work.",
     ...entries.map(([rel, body]) => {
       const summary = memorySummary(body)
+
       return summary === "" ? `- memories/${rel}` : `- memories/${rel} — ${summary}`
     }),
   ]
+
   if (left > 0) lines.push(`${left} ${left === 1 ? "entry" : "entries"} left out; the folder holds them all.`)
+
   return lines.join("\n")
 }
 
@@ -74,21 +85,28 @@ const invocation = (vibest: ReadonlyArray<string>) => vibest.map(shellQuote).joi
 export const projectText = Effect.fn("projectText")(function* (projectDir: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+
   const preferences = yield* fs.readFileString(path.join(projectDir, "preferences.md")).pipe(
     Effect.map((s) => s.trim()),
     Effect.orElseSucceed(() => ""),
   )
+
   const memoriesDir = path.join(projectDir, "memories")
+
   const names = (yield* fs.readDirectory(memoriesDir, { recursive: true }).pipe(Effect.orElseSucceed(() => [])))
     .filter((f) => f.endsWith(".md"))
     .map((f) => ({ file: f, rel: f.split(path.sep).join("/") }))
     .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+
   const shown = names.slice(0, INDEX_LIMIT)
   const entries: Array<readonly [string, string]> = []
+
   for (const name of shown) {
     const body = yield* fs.readFileString(path.join(memoriesDir, name.file)).pipe(Effect.orElseSucceed(() => undefined))
+
     if (body !== undefined) entries.push([name.rel, body])
   }
+
   return {
     preferences: truncate(preferences, "preferences"),
     memories: memoryIndex(entries, names.length - shown.length),

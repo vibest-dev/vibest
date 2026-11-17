@@ -114,6 +114,7 @@ export const CURSOR: HarnessDefinition = {
   executionEnd: (event) => (event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined),
   userPrompt: (event) => {
     if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
+
     return event.hook_event_name === "beforeSubmitPrompt" && typeof event.prompt === "string" && event.prompt.trim()
       ? { text: event.prompt }
       : undefined

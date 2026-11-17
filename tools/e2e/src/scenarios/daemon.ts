@@ -22,6 +22,7 @@ const raw = (w: World, request: object) =>
     socket.on("data", (chunk) => {
       buffer += chunk.toString()
       const line = buffer.split("\n")[0]
+
       if (buffer.includes("\n") && line) {
         socket.destroy()
         resolve(JSON.parse(line) as Record<string, unknown>)
@@ -46,6 +47,7 @@ const startWithHungPlugin = async (w: World) => {
       (p) => p.id === "hung-teardown" && p.status === "active",
     ),
   )
+
   return (await running(w)).pid!
 }
 
@@ -84,6 +86,7 @@ const checks: ReadonlyArray<Check> = [
         expect((await running(w)).status === "not running", "status says running before any start")
         expect((await w.daemonPid()) === undefined, "a vibestd.pid appeared")
       }
+
       {
         await w.ok(["daemon"])
         const first = await running(w)
@@ -93,6 +96,7 @@ const checks: ReadonlyArray<Check> = [
         expect(second.pid === first.pid, `pid changed: ${first.pid} → ${second.pid}`)
         expect((await w.daemonPid()) === first.pid, "vibestd.pid does not name the running vibestd")
       }
+
       {
         const before = (await running(w)).pid
         const r = await w.run(w.repository, [binary, "daemon", "--foreground"], { timeoutMs: 15_000 })
@@ -103,14 +107,17 @@ const checks: ReadonlyArray<Check> = [
         )
         expect((await running(w)).pid === before, "the first vibestd changed")
       }
+
       {
         const before = (await running(w)).pid!
         {
           const r = await w.tty(["daemon", "restart"], "y\n")
           expect(r.code === 0, `daemon restart exited ${r.code}: ${r.stdout}${r.stderr}`)
         }
+
         await until("a new vibestd", async () => {
           const d = await running(w)
+
           return d.status === "running" && d.pid !== before
         })
         expect(!alive(before), `old vibestd ${before} still alive`)
@@ -126,11 +133,14 @@ const checks: ReadonlyArray<Check> = [
         const pid = await startWithHungPlugin(w)
         await exitsAtDeadline(w, pid, async () => process.kill(pid, "SIGTERM"))
       }
+
       {
         const pid = await startWithHungPlugin(w)
+
         const info = JSON.parse(await fs.readFile(path.join(w.vibestHome, "vibestd.pid"), "utf8")) as {
           instance: string
         }
+
         await exitsAtDeadline(w, pid, async () => {
           const reply = await raw(w, {
             jsonrpc: "2.0",
@@ -143,15 +153,18 @@ const checks: ReadonlyArray<Check> = [
               ["vibest-repository", w.repository],
             ],
           })
+
           expect(!("error" in reply), `Daemon.Stop was refused: ${JSON.stringify(reply)}`)
         })
       }
+
       {
         const before = await startWithHungPlugin(w)
         const r = await w.tty(["daemon", "restart"], "y\n", { timeoutMs: 120_000 })
         expect(r.code === 0, `daemon restart exited ${r.code}: ${r.stdout}${r.stderr}`)
         await until("a new vibestd answers", async () => {
           const d = await running(w)
+
           return d.status === "running" && d.pid !== before
         })
         await until("the old vibestd gone", () => !alive(before), 20_000)
@@ -163,6 +176,7 @@ const checks: ReadonlyArray<Check> = [
     title: "a request without the protocol header, or an old one, is refused",
     run: async (w) => {
       await w.ok(["daemon"])
+
       for (const headers of [undefined, [["vibest-protocol", "0"]]]) {
         const reply = await raw(w, {
           jsonrpc: "2.0",
@@ -171,8 +185,10 @@ const checks: ReadonlyArray<Check> = [
           params: {},
           ...(headers ? { headers } : {}),
         })
+
         expect(JSON.stringify(reply).includes("ProtocolRejected"), `not refused: ${JSON.stringify(reply)}`)
       }
+
       expect((await running(w)).status === "running", "vibestd stopped answering")
     },
   },
@@ -193,6 +209,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const p = await piProject(w, "d10")
       let follower: ReturnType<typeof Bun.spawn> | undefined
+
       try {
         p.model.release()
         const sub = await p.runSub("d10")
@@ -208,10 +225,12 @@ const checks: ReadonlyArray<Check> = [
         )
         const all = printed((await events()).stdout)
         const rising = new Map<string, number>()
+
         for (const f of all) {
           expect(f.seq > (rising.get(f.aggregate) ?? 0), `${f.aggregate} seq ${f.seq} did not rise in the whole log`)
           rising.set(f.aggregate, f.seq)
         }
+
         expect(
           own.every((f) => all.some((a) => a.aggregate === sub && a.seq === f.seq && a.type === f.type)),
           "the whole log lacks facts of the session",
@@ -254,6 +273,7 @@ const checks: ReadonlyArray<Check> = [
         void (async () => {
           for await (const chunk of follower!.stdout as ReadableStream<Uint8Array>) heard += decoder.decode(chunk)
         })()
+
         const lines = () => printed(heard.slice(0, heard.lastIndexOf("\n") + 1))
         await until("the follower printed the facts so far", () => lines().length >= own.length - cut, 30_000)
         await p.vibestSend(sub, ask("d10-again"))

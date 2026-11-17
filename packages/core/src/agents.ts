@@ -15,6 +15,7 @@ export const unknownAgent = (id: string, loaded: ReadonlyArray<AgentDefinition>)
 
 export const make: Effect.Effect<AgentsShape> = Effect.sync(() => {
   const registry = Registry.definitions<AgentDefinition>("agent")
+
   return {
     get all() {
       return registry.get()

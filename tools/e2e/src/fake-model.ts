@@ -50,6 +50,7 @@ export const nextEntryRun = () => crypto.randomUUID()
 
 const entryCommand = (m: Message | undefined) => {
   const found = m?.role === "user" && !text(m).includes('"tool_result"') ? ENTRY_RUN.exec(text(m)) : null
+
   return found ? { id: `entry-run-${found[1]}`, command: Buffer.from(found[2]!, "base64").toString("utf8") } : undefined
 }
 
@@ -58,6 +59,7 @@ export const isEntryRunResult = (m: Message) =>
 
 export const entryRun = (messages: ReadonlyArray<Message>) => {
   const run = entryCommand(messages.at(-1))
+
   return run === undefined ? undefined : toolCall(run.id, "bash", { command: run.command })
 }
 
@@ -68,9 +70,11 @@ export const entryModel = () => {
     idleTimeout: 0,
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+
       return new Response(entryRun(messages) ?? reply("ok"), { headers: sseHeaders })
     },
   })
+
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
@@ -82,6 +86,7 @@ const sendToCreatorIn = (system: string) => /run `([^`]+ send [0-9a-f-]{36}) -- 
 
 export const sendOrReply = (messages: ReadonlyArray<Message>, done: string) => {
   const send = sendToCreatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer")))
+
   return send && messages.at(-1)?.role !== "tool"
     ? toolCall("call-send", "bash", { command: `${send} -- '${done}'` })
     : reply(done)
@@ -89,6 +94,7 @@ export const sendOrReply = (messages: ReadonlyArray<Message>, done: string) => {
 
 export const claudeSendOrReply = (r: AnthropicRequest, done: string): Step => {
   const send = sendToCreatorIn(r.system)
+
   return send && !text(lastUser(r)).includes('"tool_result"')
     ? { tool: "Bash", input: { command: `${send} -- '${done}'` } }
     : done
@@ -106,46 +112,62 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
   let sessionId = ""
   let calls = 0
   const bash = (command: string) => toolCall(`call${++calls}`, "bash", { command })
+
   const answer = (messages: Array<Message>) => {
     const last = messages.at(-1)
     const body = text(last)
     const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+
     if (creatorIn(system) !== undefined) {
       const done = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))
+
       return done ? sendOrReply(messages, `done-${done[1]}`) : reply("ok")
     }
+
     if (last?.role === "tool" && !isEntryRunResult(last)) {
       const id = /"id":\s*\\?"([\w-]+)\\?"/.exec(body)?.[1]
+
       if (id && !sessionId) sessionId = id
+
       return reply("ok")
     }
+
     if (body.includes("<agent-")) {
       if (body.includes("done-zero")) return bash(`vibest run ${sub} -- '${ask("one")}'`)
+
       if (body.includes("done-one")) return bash(`vibest send ${sessionId} -- '${ask("two")}'`)
+
       return reply("ok")
     }
+
     return reply("ok")
   }
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const entryAnswer = entryRun(messages)
+
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       seen.push(`${messages.at(-1)?.role}: ${text(messages.at(-1))}`)
       const last = messages.at(-1)
       const marker = /done-(\w+)/.exec(text(last))?.[1]
+
       if (options.heldMs !== undefined && last?.role === "user") {
         const from = Date.now()
         await Bun.sleep(options.heldMs)
         const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+
         if (marker !== undefined && (creatorIn(system) !== undefined || !text(last).includes("<agent-")))
           answered.push({ marker, from, to: Date.now() })
       }
+
       return new Response(answer(messages), { headers: sseHeaders })
     },
   })
+
   return {
     seen,
     answered,
@@ -160,6 +182,7 @@ export const heldModel = () => {
   const requestsPerTask = new Map<string, number>()
   const promptOfTask = new Map<string, string>()
   let released = false
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -167,15 +190,19 @@ export const heldModel = () => {
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const entryAnswer = entryRun(messages)
+
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const last = text(messages.at(-1))
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
       const task = creatorIn(system) === undefined && last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
+
       if (!task) return new Response(reply("ok"), { headers: sseHeaders })
       requestsPerTask.set(task[1]!, (requestsPerTask.get(task[1]!) ?? 0) + 1)
       promptOfTask.set(task[1]!, last)
       const answer = reply(`done-${task[1]}\nstatus: completed`)
+
       if (released) return new Response(answer, { headers: sseHeaders })
+
       return new Response(
         new ReadableStream({
           start: (c) => {
@@ -192,6 +219,7 @@ export const heldModel = () => {
       )
     },
   })
+
   return {
     held: () => held.length,
     asked: (task: string) => requestsPerTask.get(task) ?? 0,
@@ -201,6 +229,7 @@ export const heldModel = () => {
     },
     release: () => {
       released = true
+
       for (const go of held.splice(0)) go()
     },
     url: `http://127.0.0.1:${server.port}/v1`,
@@ -214,6 +243,7 @@ export const heldModel = () => {
 export const holdsSlowMessageModel = () => {
   const seen: Array<ReadonlyArray<string>> = []
   const held: Array<() => void> = []
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -221,10 +251,12 @@ export const holdsSlowMessageModel = () => {
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const entryAnswer = entryRun(messages)
+
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       seen.push(messages.map((m) => `${m.role}: ${text(m)}`))
       const last = text(messages.at(-1))
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+
       if (creatorIn(system) === undefined && last.includes("<agent-") && last.includes("done-slow"))
         return new Response(
           new ReadableStream({
@@ -237,13 +269,17 @@ export const holdsSlowMessageModel = () => {
           }),
           { headers: sseHeaders },
         )
+
       if (creatorIn(system) !== undefined) {
         const done = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))
+
         return new Response(done ? sendOrReply(messages, `done-${done[1]}`) : reply("ok"), { headers: sseHeaders })
       }
+
       return new Response(reply("ok"), { headers: sseHeaders })
     },
   })
+
   return {
     seen,
     held: () => held.length,
@@ -257,6 +293,7 @@ export const holdsSlowMessageModel = () => {
 
 export const usageLimitedModel = (limited: (path: string) => boolean) => {
   const seen: Array<string> = []
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -264,19 +301,23 @@ export const usageLimitedModel = (limited: (path: string) => boolean) => {
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const entryAnswer = entryRun(messages)
+
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const last = text(messages.at(-1))
       seen.push(`${new URL(req.url).pathname} ${last.slice(-80)}`)
+
       if (limited(new URL(req.url).pathname))
         return new Response(
           `data: ${JSON.stringify({ error: { message: "usage limit reached, try again later" } })}\n\n`,
           { headers: sseHeaders },
         )
+
       return new Response(reply(/done-limit/.test(last) ? "done-limit\nstatus: completed" : "ok"), {
         headers: sseHeaders,
       })
     },
   })
+
   return { seen, port: server.port, stop: () => server.stop(true) }
 }
 
@@ -286,12 +327,14 @@ export const fakeOpenAI = (
 ) => {
   let calls = 0
   const answer = (s: Step) => (typeof s === "string" ? reply(s) : toolCall(`call${++calls}`, s.tool, s.input))
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const entryAnswer = entryRun(messages)
+
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
       const folder = projectFolderIn(system)
@@ -300,18 +343,23 @@ export const fakeOpenAI = (
       const who = main ? "main" : sub ? "pi" : undefined
       const tools = messages.filter((m) => m.role === "tool" && !isEntryRunResult(m))
       const last = messages.at(-1)
+
       const mainExecutionNotStartedBySubagentMessage =
         who === "main" && tools.length === 0 && !text(last).includes("<agent-")
+
       if (who === undefined || mainExecutionNotStartedBySubagentMessage)
         return new Response(answer("ok"), { headers: sseHeaders })
+
       if (tools.length > 3) return new Response(answer("ok"), { headers: sseHeaders })
       dirs[who] = (main ?? sub)![1]!
       const result = last?.role === "tool" ? text(last) : undefined
+
       return new Response(answer(step(who, dirs[who]!, tools.length, result, creatorIn(system))), {
         headers: sseHeaders,
       })
     },
   })
+
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
@@ -334,43 +382,56 @@ export const resultText = (r: ToolResult) => (typeof r.content === "string" ? r.
 export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<Step>) => {
   let n = 0
   const requests: Array<AnthropicRequest> = []
+
   const sse = (events: ReadonlyArray<readonly [string, object]>) =>
     events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify({ type: e, ...d })}\n\n`).join("")
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     idleTimeout: 0,
     fetch: async (req) => {
       const url = new URL(req.url)
+
       if (req.method !== "POST" || !url.pathname.endsWith("/messages")) return Response.json({ input_tokens: 1 })
+
       const body = (await req.json()) as {
         stream?: boolean
         system?: unknown
         tools?: Array<{ name?: string }>
         messages?: Array<Message>
       }
+
       const messages = body.messages ?? []
+
       const results = messages
         .flatMap((m) => (Array.isArray(m.content) ? (m.content as Array<{ type?: string }>) : []))
         .filter((b): b is ToolResult & { type: string } => b.type === "tool_result")
+
       const request: AnthropicRequest = {
         system: JSON.stringify(body.system ?? ""),
         tools: (body.tools ?? []).map((t) => t.name ?? ""),
         messages,
         results,
       }
+
       requests.push(request)
       const sinceAssistant = messages.slice(messages.findLastIndex((m) => m.role === "assistant") + 1)
+
       const run = request.tools.includes("Bash")
         ? entryCommand({ role: "user", content: sinceAssistant.map(text).join("\n") })
         : undefined
+
       const s =
         run === undefined ? await respond(request) : { tool: "Bash", input: { command: run.command }, id: run.id }
+
       const content: Array<object> =
         typeof s === "string"
           ? [{ type: "text", text: s }]
           : [{ type: "tool_use", id: s.id ?? `toolu_${results.length}`, name: s.tool, input: s.input }]
+
       const stop = typeof s === "string" ? "end_turn" : "tool_use"
+
       const message = {
         id: `msg_${++n}`,
         type: "message",
@@ -380,12 +441,16 @@ export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<S
         stop_reason: stop,
         usage: { input_tokens: 1, output_tokens: 1 },
       }
+
       if (!body.stream) return Response.json(message)
+
       const events: Array<readonly [string, object]> = [
         ["message_start", { message: { ...message, content: [], stop_reason: null } }],
       ]
+
       content.forEach((c, index) => {
         const block = c as { type: string; text?: string; id?: string; name?: string; input?: object }
+
         if (block.type === "text") {
           events.push(["content_block_start", { index, content_block: { type: "text", text: "" } }])
           events.push(["content_block_delta", { index, delta: { type: "text_delta", text: block.text } }])
@@ -399,13 +464,16 @@ export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<S
             { index, delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input) } },
           ])
         }
+
         events.push(["content_block_stop", { index }])
       })
       events.push(["message_delta", { delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 1 } }])
       events.push(["message_stop", {}])
+
       return new Response(sse(events), { headers: sseHeaders })
     },
   })
+
   return { requests, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
 }
 
@@ -416,5 +484,6 @@ export const envArgs = (env: Record<string, string>) =>
 
 export const claudeEnv = async (w: World, name: string, url: string, dir = path.join(w.root, `claude-${name}`)) => {
   await claudeShadow(dir, w.profile)
+
   return { CLAUDE_CONFIG_DIR: dir, ANTHROPIC_BASE_URL: url, ANTHROPIC_API_KEY: FAKE_ANTHROPIC_KEY }
 }

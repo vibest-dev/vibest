@@ -116,6 +116,7 @@ Optionally end with a \`## Remember\` section: lessons worth keeping for future 
 `
 
 const GH_UNSAFE = new Set(["alias", "extension", "ext", "config", "auth"])
+
 const COORDINATOR_EDITS =
   "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
 
@@ -126,16 +127,21 @@ const inside = (path: string, folder: string) => path === folder || path.startsW
 const coordinatorGuard = (call: GuardCall) => {
   for (const [program, ...rest] of call.programs) {
     const name = nameOf(program)
+
     if (call.session.harnessBinaries.has(name))
       return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its executions as the coordinator's. Start agents with vibest run.`
+
     if (name === "gh" && GH_UNSAFE.has(firstWord(rest)))
       return `gh ${firstWord(rest)} changes gh's credentials or what it runs; ask the user to.`
   }
+
   if (call.writes !== undefined) {
     const folder = call.session.projectFolder
+
     if (folder === "" || call.writes.length === 0 || !call.writes.every((path) => inside(path, folder)))
       return COORDINATOR_EDITS
   }
+
   return undefined
 }
 

@@ -28,6 +28,7 @@ export const pre = Effect.gen(function* () {
   const pi = yield* piPlugin
   const claude = yield* claudePlugin
   const archiveOnIdle = yield* archiveOnIdlePlugin
+
   return [
     builtin(agentPlugin),
     builtin(pi),

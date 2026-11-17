@@ -14,15 +14,19 @@ const firstSegment = (source) => bareName(source).split("/")[0]
 
 const canonicalNames = (declarations) => {
   const byFirst = new Map()
+
   for (const d of declarations) {
     const first = firstSegment(d.source)
+
     if (!byFirst.has(first)) byFirst.set(first, new Set())
     byFirst.get(first).add(bareName(d.source))
   }
+
   return (source) => {
     const bare = bareName(source)
     const first = firstSegment(source)
     const contested = byFirst.get(first).size > 1 && bare !== first
+
     return camelize(contested ? bare : first)
   }
 }
@@ -33,7 +37,9 @@ const nodeImportStyle = {
 
     const reexport = (node) => {
       const source = node.source?.value
+
       if (typeof source !== "string" || !isBuiltin(source) || node.exportKind === "type") return
+
       if (node.specifiers?.length > 0 && node.specifiers.every((s) => s.exportKind === "type")) return
       context.report({
         node,
@@ -44,12 +50,15 @@ const nodeImportStyle = {
     return {
       ImportDeclaration(node) {
         const source = node.source.value
+
         if (typeof source !== "string" || !isBuiltin(source)) return
+
         if (node.importKind === "type") return
 
         declarations.push({ source, node })
 
         const short = camelize(firstSegment(source))
+
         for (const specifier of node.specifiers) {
           if (specifier.type === "ImportSpecifier" && specifier.importKind !== "type") {
             context.report({
@@ -70,10 +79,13 @@ const nodeImportStyle = {
 
       "Program:exit"() {
         const expectedFor = canonicalNames(declarations)
+
         for (const { source, node } of declarations) {
           const def = node.specifiers.find((s) => s.type === "ImportDefaultSpecifier")
+
           if (!def) continue
           const expected = expectedFor(source)
+
           if (def.local.name !== expected) {
             context.report({
               node: def,

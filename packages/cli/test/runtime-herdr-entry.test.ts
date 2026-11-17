@@ -47,6 +47,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 coldPiStartupAttempts,
               )
               const oldTerminal = TerminalRuntime.terminalOf(name, paneId, "vbt-gone-00000000")
+
               if (runtime.state !== undefined)
                 assert.strictEqual((yield* Effect.flip(runtime.state(oldTerminal))).code, "not_found")
               assert.strictEqual((yield* Effect.flip(runtime.close(oldTerminal))).code, "failed")

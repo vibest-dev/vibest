@@ -43,6 +43,7 @@ const handoff = {
 }
 
 const isWorkspace = (source) => /^(@vibest\/|effect-herdr-|#)/.test(source)
+
 const permits = (entry, source) =>
   entry.startsWith("=") ? source === entry.slice(1) : source === entry || source.startsWith(`${entry}/`)
 
@@ -57,7 +58,9 @@ const isHandoff = (file, node, source) =>
 
 const specifierOf = (source) => {
   if (typeof source?.value === "string") return source.value
+
   if (source?.type === "TemplateLiteral" && source.expressions.length === 0) return source.quasis[0].value.cooked
+
   return undefined
 }
 
@@ -65,19 +68,26 @@ export const packageImports = {
   create(context) {
     const file = context.filename.replaceAll("\\", "/")
     const match = /^(.*\/(?:packages\/((?:integration\/)?[^/]+)|(tools\/verify)))\/src\//.exec(file)
+
     if (match === null) return {}
     const [, root, packageName, tool] = match
     const name = packageName ?? tool
     const list = allowed[name]
+
     if (list === undefined) return {}
+
     const check = (node) => {
       const source = specifierOf(node.source)
+
       if (source === undefined) return
+
       if (source.startsWith(".")) {
         if (path.posix.resolve(path.posix.dirname(file), source).startsWith(`${root}/`)) return
         context.report({ node, message: `A relative import stays inside ${name}: import another package by its name.` })
+
         return
       }
+
       if (!isWorkspace(source) || list.some((entry) => permits(entry, source)) || isHandoff(file, node, source)) return
       const names = list.map((entry) => entry.replace(/^=/, ""))
       context.report({
@@ -85,6 +95,7 @@ export const packageImports = {
         message: `${name} imports ${names.length === 0 ? "no workspace package" : `only ${names.join(", ")}`}, not ${source} (architecture §2).`,
       })
     }
+
     return {
       ImportDeclaration: check,
       ExportNamedDeclaration: check,

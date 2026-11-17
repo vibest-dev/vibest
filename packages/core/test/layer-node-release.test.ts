@@ -18,6 +18,7 @@ const closeAfterBuilding = (release: Effect.Effect<void>) =>
     yield* Layer.buildWithScope(LayerNode.compile(hung(release), { releases }), scope)
     const closing = yield* Effect.forkChild(Scope.close(scope, Exit.void))
     yield* Effect.yieldNow
+
     return { releases, closing }
   })
 

@@ -21,11 +21,14 @@ export const make = Effect.gen(function* () {
   const changedRepositories = (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
     Effect.gen(function* () {
       const changed: Array<RepositoryRow> = []
+
       for (const r of repositories) {
         const [row] = yield* sql<{ projectId: string; remoteUrl: string | null }>`SELECT project_id, remote_url
           FROM project_repository WHERE path = ${r.path}`
+
         if (row === undefined || (row.projectId === id && row.remoteUrl !== (r.remote || null))) changed.push(r)
       }
+
       return repositoriesOf(changed)
     })
 
@@ -44,8 +47,10 @@ export const make = Effect.gen(function* () {
         tx(
           Effect.gen(function* () {
             const [existing] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
+
             if (existing !== undefined) {
               const changed = yield* changedRepositories(existing.id, repositories)
+
               if (changed.length > 0)
                 yield* publish(ProjectRepositoriesChanged, { projectId: existing.id, data: { repositories: changed } })
             } else {
@@ -55,7 +60,9 @@ export const make = Effect.gen(function* () {
                 data: { ...(directory ? { directory } : {}), repositories: repositoriesOf(repositories) },
               })
             }
+
             const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
+
             return row!.id
           }),
         ).pipe(Effect.orDie),
@@ -66,6 +73,7 @@ export const make = Effect.gen(function* () {
         tx(
           Effect.gen(function* () {
             const changed = yield* changedRepositories(id, repositories)
+
             if (changed.length > 0)
               yield* publish(ProjectRepositoriesChanged, { projectId: id, data: { repositories: changed } })
           }),
@@ -82,10 +90,12 @@ export const make = Effect.gen(function* () {
               projectId: id,
               data: { from, to, repositories: repositoriesOf(repositories) },
             })
+
             for (const session of yield* sql<{
               id: string
             }>`SELECT id FROM session WHERE project_id = ${id} AND ended_at IS NULL`)
               yield* observe({ type: "session.changed", sessionId: session.id })
+
             return from
           }),
         ).pipe(Effect.orDie),

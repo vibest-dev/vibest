@@ -9,11 +9,13 @@ export const caller = Effect.gen(function* () {
   const repositoryRoot = path.resolve(".")
   const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID"))) || undefined
   const claim: Claim = sessionId ? Claim.session({ sessionId, repositoryRoot }) : Claim.cli({ repositoryRoot })
+
   return { claim, agent: sessionId !== undefined, sessionId }
 })
 
 const userOnlyRefusal = (command: string, sessionId: string | undefined) => {
   const run = `vibest${command ? ` ${command}` : ""}`
+
   return [
     `an agent may not run ${run}; ask the user to.`,
     `This shell carries agent session ${sessionId}.`,

@@ -9,6 +9,7 @@ export default Runtime.handler(Commands.commands.project.commands.move, (o) =>
     yield* userOnly("project move")
     const from = (yield* Path.Path).resolve(o.from)
     const moved = yield* vibest((client) => client["Project.Move"]({ from }))
+
     for (const command of moved.manual)
       yield* Console.error(`a worktree of yours still names the old place; to repair it, run: ${command}`)
     yield* json(moved)

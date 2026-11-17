@@ -21,9 +21,12 @@ export default Runtime.handler(Commands.commands.daemon, ({ foreground, handoff 
           delete process.env[HANDOFF_ENV]
           yield* Console.log(`vibestd log: ${layout.log}`)
           yield* captureDaemonLog(layout.log)
+
           return yield* Daemon.run(host.daemon, host.replacements, { handoff })
         }
+
         const layout = yield* Layout
+
         if (!(yield* probe(layout.socket))) yield* startDaemon
         yield* Console.log(`vibestd is running on ${layout.socket}`)
       }),

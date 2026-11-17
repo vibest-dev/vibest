@@ -15,9 +15,11 @@ const herdr = (socket: string, method: string, params: Record<string, unknown>) 
     conn.on("data", (chunk) => {
       buffer += chunk.toString()
       const end = buffer.indexOf("\n")
+
       if (end === -1) return
       conn.end()
       const reply = JSON.parse(buffer.slice(0, end)) as { result?: unknown; error?: { message: string } }
+
       if (reply.error) reject(new Error(`${method}: ${reply.error.message}`))
       else resolve(reply.result)
     })
@@ -25,39 +27,51 @@ const herdr = (socket: string, method: string, params: Record<string, unknown>) 
   })
 
 type Proc = { pid: number; name: string; argv0?: string; argv?: Array<string> | null }
+
 const foreground = async (socket: string, pane: string): Promise<Array<Proc>> =>
   (
     (await herdr(socket, "pane.process_info", { pane_id: pane })) as {
       process_info: { foreground_processes?: Array<Proc> }
     }
   ).process_info.foreground_processes ?? []
+
 const screen = async (socket: string, pane: string): Promise<string> =>
   ((await herdr(socket, "pane.read", { pane_id: pane, source: "visible" })) as { read: { text: string } }).read.text
+
 const harnessArgv = async (socket: string, pane: string, harness: "claude" | "pi") => {
   for (const p of await foreground(socket, pane)) {
     const argv = p.argv ?? []
     const programNames = [p.name, p.argv0 ?? "", ...argv.slice(0, harness === "pi" ? 2 : 1)]
+
     if (programNames.some((n) => (harness === "claude" ? /claude/.test(n) : path.basename(n) === "pi"))) return argv
   }
+
   return undefined
 }
+
 const harnessFlag = async (socket: string, pane: string, harness: "claude" | "pi", flag: string) => {
   const argv = (await harnessArgv(socket, pane, harness)) ?? []
   const i = argv.indexOf(flag)
+
   return i === -1 ? undefined : argv[i + 1]
 }
+
 const type = async (socket: string, pane: string, text: string) => {
   await herdr(socket, "pane.send_text", { pane_id: pane, text })
   await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
 }
+
 const piWrote = async (agentDir: string, cwd: string) => {
   const real = await fs.realpath(cwd)
   const dir = path.join(agentDir, "sessions", `--${real.slice(1).replaceAll("/", "-")}--`)
+
   for (const file of await fs.readdir(dir).catch(() => [] as Array<string>)) {
     const text = await Bun.file(path.join(dir, file)).text()
     const head = JSON.parse(text.slice(0, text.indexOf("\n"))) as { cwd?: string }
+
     if (head.cwd === real && text.includes('"role":"assistant"')) return true
   }
+
   return false
 }
 
@@ -76,6 +90,7 @@ const move = (harness: "claude" | "pi"): Check => ({
     const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
     const env = {}
     await w.daemon({ env })
+
     try {
       await w.startEntry({
         harness,
@@ -93,11 +108,14 @@ const move = (harness: "claude" | "pi"): Check => ({
               panes: Array<{ pane_id: string }>
             }
           ).panes
+
           for (const p of panes)
             if (await harnessArgv(socket, p.pane_id, harness)) {
               a = p.pane_id
+
               return true
             }
+
           return false
         },
         60_000,
@@ -105,16 +123,20 @@ const move = (harness: "claude" | "pi"): Check => ({
         const panes = (
           (await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as { panes: Array<{ pane_id: string }> }
         ).panes
+
         const seen = await Promise.all(
           panes.map(
             async (p) =>
               `${p.pane_id}: ${JSON.stringify(await foreground(socket, p.pane_id))}\n${await screen(socket, p.pane_id)}`,
           ),
         )
+
         fail(`${e.message}; panes:\n${seen.join("\n")}`)
       })
+
       const status = async (pane: string) =>
         ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
+
       if (harness === "claude")
         await answerFolderTrust(
           () => screen(socket, a),
@@ -137,9 +159,12 @@ const move = (harness: "claude" | "pi"): Check => ({
                WHERE s.agent_type = 'coordinator' AND s.directory = ? AND s.ended_at IS NULL`,
               realRepository,
             )?.c ?? undefined
+
           if (conversation === undefined) return false
+
           for (const dir of await fs.readdir(projects).catch(() => [] as Array<string>))
             if (await Bun.file(path.join(projects, dir, `${conversation}.jsonl`)).exists()) return true
+
           return false
         },
         120_000,
@@ -150,6 +175,7 @@ const move = (harness: "claude" | "pi"): Check => ({
         async () => idleOrUnseenExecutionDone.includes(await status(a)),
         120_000,
       )
+
       const b = (
         (await herdr(socket, "pane.split", {
           target_pane_id: a,
@@ -162,6 +188,7 @@ const move = (harness: "claude" | "pi"): Check => ({
           focus: false,
         })) as { pane: { pane_id: string } }
       ).pane.pane_id
+
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
       await type(socket, b, `vibest --harness ${harness}`)
       await until(
@@ -170,6 +197,7 @@ const move = (harness: "claude" | "pi"): Check => ({
         60_000,
       )
       await type(socket, b, "y")
+
       if (harness === "claude") {
         await until(
           "Claude resumed in B",
@@ -185,22 +213,28 @@ const move = (harness: "claude" | "pi"): Check => ({
       } else {
         await until("Pi in B shows A's conversation", async () => (await screen(socket, b)).includes(prompt), 60_000)
       }
+
       await until("A's harness gone", async () => (await harnessArgv(socket, a, harness)) === undefined, 20_000)
       const kept = ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes
       expect(
         kept.some((p) => p.pane_id === a),
         `pane ${a} closed`,
       )
+
       const shellOnly = async () => {
         const procs = await foreground(socket, a)
+
         return procs.length > 0 && procs.every((p) => /^-?(zsh|bash|sh|fish)$/.test(path.basename(p.name)))
       }
+
       await until("only a shell in A", shellOnly, 30_000).catch(async () =>
         fail(`A runs ${JSON.stringify(await foreground(socket, a))}`),
       )
+
       const entryRows = (
         await w.json<{ sessions: Array<{ agent: string; address: { id: string } }> }>(["ls"]).then((l) => l.sessions)
       ).filter((e) => e.agent === "coordinator")
+
       expect(
         entryRows.length === 1 && entryRows[0]!.address.id.endsWith(b),
         `entry sessions: ${JSON.stringify(entryRows)}`,
@@ -209,6 +243,7 @@ const move = (harness: "claude" | "pi"): Check => ({
       pi.stop()
       claude.stop()
       await w.stopDaemon()
+
       if (
         await fs.stat(path.dirname(socket)).then(
           () => true,

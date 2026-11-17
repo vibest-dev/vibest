@@ -37,11 +37,13 @@ const claudeStatus = JSON.stringify({
   subscriptionType: "max",
   email: "a@b.c",
 })
+
 const claudeBody = {
   five_hour: { utilization: 4, resets_at: "2026-10-31T17:20:00.296129+00:00" },
   seven_day: { utilization: 100, resets_at: "2026-11-01T21:00:00.296147+00:00" },
   seven_day_opus: null,
 }
+
 const cursorBody = {
   billingCycleEnd: "1794886804000",
   planUsage: { totalPercentUsed: 35.891, autoPercentUsed: 36.289, apiPercentUsed: 23.94, limit: 40000 },
@@ -88,58 +90,73 @@ const fakeMachine = (options: {
   const requests: Array<{ readonly url: string; readonly authorization: string | undefined }> = []
   const logs: Array<unknown> = []
   const hanging = new Set(options.commandsThatNeverExit ?? [])
+
   const spawner = ChildProcessSpawner.make((command) => {
     if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
     const id = [command.command, ...command.args].join(" ")
     spawned.push({ command: command.command, args: command.args, stdin: command.options.stdin })
+
     return Effect.succeed(
       output(hanging.has(id) ? "" : (options.commands[id] ?? ""), hanging.has(id) ? Effect.never : Effect.succeed(0)),
     )
   })
+
   const http = HttpClient.make((request) => {
     requests.push({
       url: request.url,
       authorization: Option.getOrUndefined(Headers.get(request.headers, "authorization")),
     })
+
     if ((options.httpHang ?? []).includes(request.url)) return Effect.never
     const hit = options.http?.[request.url] ?? { status: 599, body: {} }
+
     return Effect.succeed(
       HttpClientResponse.fromWeb(request, new Response(JSON.stringify(hit.body), { status: hit.status })),
     )
   })
+
   const machine = Layer.mergeAll(
     Layer.succeed(HttpClient.HttpClient, http),
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
     options.fileSystem === undefined ? Layer.empty : Layer.succeed(FileSystem.FileSystem, options.fileSystem),
   )
+
   const onMachine = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provide(machine), Effect.provide(Platform.services), Effect.orDie)
+
   const registered = (assembled: typeof claudePlugin) =>
     Effect.gen(function* () {
       const plugin = yield* assembled
       const added: Array<HarnessTypes.HarnessDefinition> = []
       const editor = { add: (definition: HarnessTypes.HarnessDefinition) => added.push(definition) }
       const registration = { dispose: Effect.void }
+
       const ctx = {
         harness: {
           transform: (edit: (e: typeof editor) => unknown) => Effect.sync(() => (edit(editor), registration)),
         },
       } as unknown as Parameters<typeof plugin.effect>[0]
+
       yield* plugin.effect(ctx)
+
       return added[0]!
     }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+
   const cursorDefinition = {
     ...cursor,
     subscription: (dir: string) =>
       onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(spawner)(dir, problem))),
   }
+
   const definitions = Effect.all([registered(claudePlugin), registered(piPlugin)]).pipe(
     Effect.map(([claudeDefinition, piDefinition]) => [claudeDefinition, cursorDefinition, piDefinition]),
   )
+
   const fakes = Subscriptions.testLayer.pipe(
     Layer.provideMerge(Layer.unwrap(Effect.map(definitions, harnessesLayer))),
     Layer.provideMerge(harnessLayer(options.installed)),
   )
+
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.provide(fakes),
@@ -151,6 +168,7 @@ const fakeMachine = (options: {
         ),
       ),
     )
+
   return { spawned, requests, logs, layer: fakes, provide }
 }
 
@@ -162,6 +180,7 @@ const served = Server.layer.pipe(
 
 const home = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
+
   return yield* fs.makeTempDirectoryScoped({ prefix: "vibest-subs-" })
 }).pipe(Effect.provide(Platform.services), Effect.orDie)
 
@@ -176,6 +195,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         path.join(dir, "Library", "Keychains", "login.keychain-db"),
         "fake keychain; no real CLI",
       )
+
       const commands: Record<string, string> = {
         "claude auth status --json": claudeStatus,
         "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
@@ -196,12 +216,14 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           reason: "credentials_not_configured",
         }),
       }
+
       const fake = fakeMachine({
         installed: ["claude", "cursor", "pi"],
         commands,
         home: dir,
         http: { "https://api.anthropic.com/api/oauth/usage": { status: 200, body: claudeBody } },
       })
+
       const listed = yield* fake.provide(
         Effect.gen(function* () {
           const subs = yield* Subscriptions.Service
@@ -220,9 +242,11 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           })
           yield* subs.report({ harness: "nope", limits: [] })
           yield* subs.poll
+
           return yield* subs.list
         }),
       )
+
       assert.deepStrictEqual(
         listed.map((row) => [
           row.harness,
@@ -241,6 +265,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         ],
       )
       assert.deepStrictEqual(fake.requests, [])
+
       for (const spawn of fake.spawned) assert.strictEqual(spawn.stdin, "ignore", spawn.command)
       assert.deepStrictEqual(
         fake.spawned.map((spawn) => [spawn.command, ...spawn.args].join(" ")).sort(),
@@ -259,6 +284,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const fs = yield* FileSystem.FileSystem
       yield* fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true })
       yield* fs.writeFileString(`${dir}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
+
       const fresh = fakeMachine({
         installed: ["claude", "cursor"],
         home: dir,
@@ -279,6 +305,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           },
         },
       })
+
       const listed = yield* fresh.provide(
         Effect.gen(function* () {
           const subs = yield* Subscriptions.Service
@@ -287,9 +314,11 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
             limits: [{ window: "5h", percent: 1, status: "available", resetTime: 5 }],
           })
           yield* subs.poll
+
           return yield* subs.list
         }),
       )
+
       assert.deepStrictEqual(listed.find((row) => row.harness === "claude")?.limits, [])
       assert.strictEqual(listed.find((row) => row.harness === "claude")?.error, undefined)
       const cursorRow = listed.find((row) => row.harness === "cursor")
@@ -305,6 +334,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         commands: { "claude auth status --json": claudeStatus },
         http: { "https://api.anthropic.com/api/oauth/usage": { status: 401, body: { error: CLAUDE_SECRET } } },
       })
+
       const kept = yield* denied.provide(
         Effect.gen(function* () {
           const subs = yield* Subscriptions.Service
@@ -313,9 +343,11 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
             limits: [{ window: "5h", percent: 9, status: "available", resetTime: null }],
           })
           yield* subs.poll
+
           return (yield* subs.list)[0]!
         }),
       )
+
       assert.strictEqual(kept.error, undefined)
       assert.deepStrictEqual(kept.limits, [])
       assert.strictEqual(kept.account.plan, "max")
@@ -328,6 +360,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         commands: {},
         commandsThatNeverExit: ["claude auth status --json"],
       })
+
       const row = yield* hung.provide(
         Effect.gen(function* () {
           const subs = yield* Subscriptions.Service
@@ -338,9 +371,11 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           const pending = yield* Effect.forkChild(subs.poll)
           yield* TestClock.adjust("10 seconds")
           yield* Fiber.join(pending)
+
           return (yield* subs.list)[0]!
         }),
       )
+
       assert.strictEqual(row.error, "claude auth status failed")
       assert.strictEqual(row.limits[0]?.percent, 8)
       assert.strictEqual(hung.requests.length, 0)
@@ -420,6 +455,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
     Effect.gen(function* () {
       const limits = [{ window: "monthly", percent: 3, status: "limited" as const, resetTime: 9 }]
       let seen: unknown
+
       const plugin = Plugin.define({
         id: "see",
         effect: (ctx) =>
@@ -432,6 +468,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
             )
           }),
       })
+
       const listed = yield* Effect.gen(function* () {
         const subs = yield* Subscriptions.Service
         const plugins = yield* makePlugins([{ source: "see", revision: "-", options: {}, plugin }])
@@ -450,6 +487,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           attempts: [],
           harnesses: [{ harness: "pi", available: true }],
         })
+
         return { seen, list: yield* subs.list }
       }).pipe(
         Effect.provide(subscriptionsLayer),
@@ -459,6 +497,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         Effect.provide(memoryBus),
         Effect.scoped,
       )
+
       assert.deepStrictEqual(listed.seen, listed.list)
       assert.deepStrictEqual(listed.list[0]?.limits, limits)
       assert.strictEqual(listed.list[0]?.provider, "example-proxy")

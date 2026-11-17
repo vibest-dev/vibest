@@ -10,9 +10,11 @@ export default Runtime.handler(Commands.commands.project.commands.add, (o) =>
   Effect.gen(function* () {
     yield* userOnly("project add")
     const repositoryRoot = (yield* Path.Path).resolve(o.directory)
+
     const opened = yield* withVibest(Claim.cli({ repositoryRoot }), (client) => client["Project.Open"]({}), {
       start: true,
     })
+
     yield* json(opened)
   }),
 )

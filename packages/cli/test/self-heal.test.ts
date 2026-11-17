@@ -59,11 +59,13 @@ const isolatedHome = (home: string) =>
         PATH: process.env.PATH,
         VIBEST_NO_UPDATE_CHECK: process.env.VIBEST_NO_UPDATE_CHECK,
       }
+
       process.env.VIBEST_HOME = home
       process.env.PATH = PATH_WITHOUT_HARNESS_CLIS
       process.env.VIBEST_NO_UPDATE_CHECK = "1"
       delete process.env.VIBEST_SESSION_ID
       delete process.env.VIBEST_AGENT
+
       return saved
     }),
     (saved) =>
@@ -96,29 +98,36 @@ const fakeVibestd = (
       const methods: Array<string> = []
       const sockets: Array<net.Socket> = []
       let finishPing: (code: string) => void = () => {}
+
       const pingReply =
         pauseAcceptedSocketUntil === undefined
           ? undefined
           : new Promise<{ readonly code: string }>((resolve) => {
               finishPing = (code) => {
                 finishPing = () => {}
+
                 resolve({ code })
               }
             })
+
       const server = net.createServer((sock) => {
         sockets.push(sock)
         sock.on("error", (err) => {
           const code =
             typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined
+
           if (code === "EPIPE") finishPing("EPIPE")
           else if (code !== "ECONNRESET") throw err
         })
         let buf = ""
+
         const onChunk = (chunk: Buffer) => {
           buf += chunk.toString()
+
           for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
             const line = buf.slice(0, nl)
             buf = buf.slice(nl + 1)
+
             for (const req of [JSON.parse(line)].flat() as Array<{
               id?: unknown
               method?: string
@@ -126,11 +135,14 @@ const fakeVibestd = (
             }>) {
               if (req.method === undefined) continue
               methods.push(req.method)
+
               if (req.method === "Ping") sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: ping }) + "\n")
+
               if (req.method === "Daemon.Stop") onStop(sock, server, req.id, req)
             }
           }
         }
+
         if (pauseAcceptedSocketUntil === undefined) sock.on("data", onChunk)
         else {
           sock.pause()
@@ -141,6 +153,7 @@ const fakeVibestd = (
           })
         }
       })
+
       server.listen(socket, () => resume(Effect.succeed({ server, methods, sockets, pingReply })))
     }),
     ({ server, sockets }) =>
@@ -165,12 +178,14 @@ layer(Platform.services)(
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           yield* isolatedHome(layout.home)
           const ping = Effect.map(readPing(layout.socket), Option.getOrThrow)
+
           const replace = (stdio: Layer.Layer<Stdio.Stdio>, target = { version: VERSION, command: sourceArgv }) =>
             replaceDaemon(target).pipe(
               Effect.provide(stdio),
               Effect.flip,
               Effect.map((e) => e.message),
             )
+
           yield* Effect.gen(function* () {
             yield* startDaemon.pipe(Effect.provideService(VibestCommand, sourceArgv))
             yield* noteRecorded(layout.daemonInfo)
@@ -223,9 +238,11 @@ layer(Platform.services)(
     it.effect("an vibestd from before Daemon.Stop is never asked to stop: the user gets the manual steps", () =>
       Effect.gen(function* () {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
+
         const legacy = yield* fakeVibestd(layout.socket, { version: "0.0.0", runtimeSessions: [], runtimes: [] }, () =>
           assert.fail("asked to stop"),
         )
+
         const message = yield* replaceDaemon({
           version: VERSION,
           command: sourceArgv,
@@ -236,6 +253,7 @@ layer(Platform.services)(
           Effect.map((e) => e.message),
           TestClock.withLive,
         )
+
         assert.match(message, /cannot be asked to stop by this vibest .* stop it yourself with `kill -TERM <pid>`/)
         assert.deepStrictEqual([...new Set(legacy.methods)], ["Ping"])
       }),
@@ -246,6 +264,7 @@ layer(Platform.services)(
       () =>
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
+
           const pending = yield* Effect.gen(function* () {
             const db = yield* Db.Service
             yield* db.session.insertSession(
@@ -269,6 +288,7 @@ layer(Platform.services)(
               },
               yield* projectOf("seeded-project"),
             )
+
             return (yield* db.inbox.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
           }).pipe(
             Effect.provide(
@@ -280,6 +300,7 @@ layer(Platform.services)(
               ),
             ),
           )
+
           const env = { HOME: layout.home, VIBEST_HOME: layout.home }
           const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
           yield* Effect.gen(function* () {
@@ -290,10 +311,13 @@ layer(Platform.services)(
             assert.include(cli.stderr, "needs a yes on a terminal; nothing was stopped")
 
             const raw = yield* connect(layout.socket)
+
             const tag = <A, E extends { readonly _tag: string }>(e: Effect.Effect<A, E>) =>
               Effect.map(Effect.flip(e), (x) => x._tag)
+
             const stop = (instance: string, headers: Record<string, string>) =>
               raw["Daemon.Stop"]({ instance }, { headers })
+
             assert.strictEqual(yield* tag(stop(old.instance!, {})), "ProtocolRejected")
             assert.strictEqual(yield* tag(stop(old.instance!, protocolHeaders())), "InvalidCaller")
             assert.strictEqual(
@@ -306,6 +330,7 @@ layer(Platform.services)(
             assert.deepStrictEqual(yield* stop(old.instance!, cliHeaders(layout.home)), { instance: old.instance! })
             assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
             assert.isFalse(yield* probe(layout.socket))
+
             const rows = yield* Effect.flatMap(Db.Service, (db) =>
               db.inbox.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
             ).pipe(
@@ -318,6 +343,7 @@ layer(Platform.services)(
                 ),
               ),
             )
+
             assert.deepStrictEqual(rows, [pending])
           }).pipe(Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))), TestClock.withLive, Effect.scoped)
         }).pipe(Effect.scoped),
@@ -345,6 +371,7 @@ layer(Platform.services)(
                 server.close()
               },
             )
+
             const failed = yield* replaceDaemon({
               version: VERSION,
               command: sourceArgv,
@@ -355,6 +382,7 @@ layer(Platform.services)(
               Effect.flip,
               TestClock.withLive,
             )
+
             assert.strictEqual(failed.outcome, outcome, refusal)
             assert.isFalse(yield* probe(layout.socket), refusal)
             assert.isTrue(Option.isNone(yield* readDaemonInfo(layout.daemonInfo)), refusal)
@@ -378,6 +406,7 @@ layer(Platform.services)(
               server.close()
             },
           )
+
           const failed = yield* replaceDaemon({
             version: VERSION,
             command: sourceArgv,
@@ -388,6 +417,7 @@ layer(Platform.services)(
             Effect.flip,
             TestClock.withLive,
           )
+
           assert.strictEqual(failed.outcome, "busy")
           assert.deepInclude(headers[0] as Array<[string, string]>, ["vibest-protocol", String(PROTOCOL - 1)])
         }).pipe(Effect.scoped),
@@ -410,6 +440,7 @@ layer(Platform.services)(
           for (const [what, reply] of undecodableStopReplies) {
             const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
             yield* isolatedHome(layout.home)
+
             const old = yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -417,6 +448,7 @@ layer(Platform.services)(
                 sock.write(stopReply(id, reply))
               },
             )
+
             const exit = yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
               Effect.provide(typed("y\n")),
               Effect.provideService(Layout, layout),
@@ -424,7 +456,9 @@ layer(Platform.services)(
               Effect.timeout("30 seconds"),
               TestClock.withLive,
             )
+
             assert.isTrue(Exit.isFailure(exit), what)
+
             if (Exit.isSuccess(exit)) continue
             assert.isFalse(Cause.hasDies(exit.cause), `${what}: ${Cause.pretty(exit.cause)}`)
             const failed = Option.getOrThrow(Cause.findErrorOption(exit.cause))
@@ -451,6 +485,7 @@ layer(Platform.services)(
           ] as const) {
             const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
             yield* isolatedHome(layout.home)
+
             const old = yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -460,6 +495,7 @@ layer(Platform.services)(
                 server.close()
               },
             )
+
             yield* Effect.gen(function* () {
               yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
                 Effect.provide(typed("y\n")),
@@ -485,11 +521,13 @@ layer(Platform.services)(
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           yield* isolatedHome(layout.home)
+
           const old = yield* fakeVibestd(
             layout.socket,
             { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
             () => {},
           )
+
           const failed = yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
             Effect.provide(typed("y\n")),
             Effect.provideService(Layout, layout),
@@ -497,6 +535,7 @@ layer(Platform.services)(
             Effect.timeout("30 seconds"),
             TestClock.withLive,
           )
+
           assert.strictEqual(failed.outcome, "unknown")
           assert.match(
             failed.message,
@@ -515,6 +554,7 @@ layer(Platform.services)(
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           yield* isolatedHome(layout.home)
+
           const old = yield* fakeVibestd(
             layout.socket,
             { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -522,11 +562,13 @@ layer(Platform.services)(
               server.close()
             },
           )
+
           const replacing = yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
             Effect.provide(typed("y\n")),
             Effect.provideService(Layout, layout),
             Effect.forkChild,
           )
+
           yield* Effect.sleep("50 millis").pipe(
             Effect.repeat({ until: () => old.methods.includes("Daemon.Stop"), times: 100 }),
           )
@@ -546,6 +588,7 @@ layer(Platform.services)(
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
           yield* isolatedHome(layout.home)
+
           const old = yield* fakeVibestd(
             layout.socket,
             { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -553,6 +596,7 @@ layer(Platform.services)(
               server.close()
             },
           )
+
           yield* Effect.gen(function* () {
             yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
               Effect.provide(typed("y\n")),
@@ -576,17 +620,21 @@ layer(Platform.services)(
       () =>
         Effect.gen(function* () {
           let release = () => {}
+
           const pauseAcceptedSocketUntil = new Promise<void>((resolve) => {
             release = resolve
           })
+
           const dir = yield* tempDirectory("vibest-sock-")
           const socket = path.join(dir, "vibest.sock")
+
           const daemon = yield* fakeVibestd(
             socket,
             { version: VERSION, protocol: PROTOCOL, runtimeSessions: [], runtimes: [] },
             () => {},
             pauseAcceptedSocketUntil,
           )
+
           assert.isTrue(Option.isNone(yield* readPing(socket)))
           assert.isDefined(daemon.pingReply)
           release()

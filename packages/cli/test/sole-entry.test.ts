@@ -11,26 +11,33 @@ const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>) =>
     stdin,
     stdout: () => Sink.drain,
   })
+
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
 const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
   const calls: Array<string> = []
+
   const client = {
     "Project.RunningEntry": () =>
       Effect.sync(() => {
         calls.push("RunningEntry")
+
         return { harness: "claude" as const, place: "herdr w1:p1", runtime: "herdr", address: "{}" }
       }),
     "Project.StopEntry": () =>
       Effect.sync(() => {
         calls.push("StopEntry")
+
         return stop === "unsupported" ? { result: stop, reason: "it runs on another machine" } : { result: stop }
       }),
   } as unknown as Parameters<typeof soleEntry>[0]
+
   const start = Effect.sync(() => {
     calls.push("start")
+
     return "started"
   })
+
   return { calls, run: soleEntry(client, "w1:p2", start) }
 }
 
@@ -70,6 +77,7 @@ describe("soleEntry while the entry session runs in another terminal", () => {
           const exit = yield* Effect.exit(f.run)
           assert.isTrue(Exit.isFailure(exit), result)
           assert.deepStrictEqual(f.calls, ["RunningEntry", "StopEntry"], result)
+
           if (result === "unsupported") {
             assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")
             assert.notInclude(String(exit), "did not exit")

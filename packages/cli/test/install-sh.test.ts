@@ -26,8 +26,10 @@ it("install.sh keeps the new version, the one before it, and a version directory
     releaseArchiveReporting999,
     "bin",
   ])
+
   for (const v of ["1.0.0", "2.0.0", "3.0.0"]) fs.mkdirSync(path.join(share, "versions", v, "bin"), { recursive: true })
   fs.writeFileSync(path.join(share, "current"), "3.0.0\n")
+
   const pluginDirUser = childProcess.spawn(
     "sh",
     ["-c", "sleep 30; :", path.join(share, "versions", "1.0.0", "harnesses", "claude")],
@@ -35,6 +37,7 @@ it("install.sh keeps the new version, the one before it, and a version directory
       stdio: "ignore",
     },
   )
+
   try {
     const out = childProcess.spawnSync("sh", [script], {
       env: {
@@ -45,6 +48,7 @@ it("install.sh keeps the new version, the one before it, and a version directory
       },
       encoding: "utf8",
     })
+
     assert.strictEqual(out.status, 0, out.stderr)
     assert.deepStrictEqual(fs.readdirSync(path.join(share, "versions")).sort(), ["1.0.0", "3.0.0", "9.9.9"])
   } finally {

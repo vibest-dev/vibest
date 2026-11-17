@@ -44,6 +44,7 @@ export const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.inbox.deliveringInbox, shutdown })
+
   return {
     Ping: () =>
       machinesListing(runtimes, []).pipe(
@@ -89,29 +90,36 @@ export const make = Effect.gen(function* () {
     "Daemon.Stop": ({ instance }) =>
       Effect.gen(function* () {
         const c = yield* Caller
+
         if (!Predicate.isTagged(c, "Cli"))
           return yield* new Forbidden({
             method: "Daemon.Stop",
             message: "only the user stops vibestd (vibest daemon restart); an agent may not",
           })
+
         if (instance !== identity.instance)
           return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
+
         return yield* stopOnce(instance, "Daemon.Stop", Effect.void)
       }),
 
     "Daemon.Handoff": ({ instance, command }) =>
       Effect.gen(function* () {
         yield* cliOnly("Daemon.Handoff")
+
         if (instance !== identity.instance)
           return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
         const quoted = command.map(shellQuote).join(" ")
+
         const checked = yield* importCheck(command).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         )
+
         if (checked !== undefined)
           return yield* new LaunchFailed({
             message: `${quoted} cannot take over this vibestd (${checked}); it keeps running`,
           })
+
         return yield* stopOnce(
           instance,
           "Daemon.Handoff",

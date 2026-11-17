@@ -93,14 +93,18 @@ describe("the runtime registry", () => {
         const dropped: Array<string> = []
         const bus = yield* Bus.Service
         const seen = yield* bus.subscribe()
+
         const runtimes = yield* makeRuntimes.pipe(
           Effect.provideService(Runtimes.HostEnv, { drop: (names) => void dropped.push(...names) }),
         )
+
         const queue = yield* Queue.unbounded<RuntimeEvent>()
         yield* runtimes.transform((editor) => editor.add(definition("hc", ["HC_ID"])))
+
         const herdr = yield* runtimes.transform((editor) =>
           editor.add(definition("herdr", ["HERDR_ID"], Stream.fromQueue(queue))),
         )
+
         const env = { HC_ID: "t1", HERDR_ID: "p1" }
         assert.deepStrictEqual(
           entryPlace({ runtime: undefined, hits: yield* specHits(yield* runtimes.callers, env) }),
@@ -112,19 +116,25 @@ describe("the runtime registry", () => {
         )
         assert.includeMembers(dropped, ["HC_ID", "HERDR_ID"])
         const exited = (id: string): RuntimeEvent => ({ type: "exited", terminal: { id } })
+
         const until = (type: "terminal.exited" | "drain.released") =>
           Effect.gen(function* () {
             const passed: Array<string> = []
+
             for (;;) {
               const event = yield* PubSub.take(seen)
+
               if (event.type === "terminal.exited") passed.push(event.terminal.id)
+
               if (event.type === type) return passed
             }
           })
+
         yield* Queue.offer(queue, exited("first"))
         assert.deepStrictEqual(yield* until("terminal.exited"), ["first"])
         yield* herdr.dispose
         yield* Queue.offer(queue, exited("after"))
+
         for (let i = 0; i < 20; i++) yield* Effect.yieldNow
         yield* bus.observe({ type: "drain.released" })
         assert.deepStrictEqual(yield* until("drain.released"), [])
@@ -144,6 +154,7 @@ describe("caller runtimes", () => {
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
       })
+
       assert.deepStrictEqual(entryPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "herdr",
@@ -155,20 +166,24 @@ describe("caller runtimes", () => {
   it.effect("terminal() runs only for the first detected runtime, or the runtime --runtime names", () =>
     Effect.gen(function* () {
       const calls: Array<string> = []
+
       const watch = (id: string, env: ReadonlyArray<string>, terminal: string, fail = false): Caller => ({
         id,
         env,
         terminal: () => {
           calls.push(id)
+
           return fail ? Effect.fail(`${id} down`) : Effect.succeed(terminal)
         },
       })
+
       const env = {
         HC_TERMINAL_ID: "t1",
         HC_TERMINAL_SOCKET: "/hc.sock",
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
       }
+
       const hits = yield* specHits(
         [
           watch("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term"),
@@ -176,6 +191,7 @@ describe("caller runtimes", () => {
         ],
         env,
       )
+
       assert.deepStrictEqual(calls, ["hc"])
       assert.deepStrictEqual(entryPlace({ runtime: undefined, hits }), {
         in: "terminal",
@@ -183,6 +199,7 @@ describe("caller runtimes", () => {
         terminal: "hc-term",
       })
       calls.length = 0
+
       const named = yield* specHits(
         [
           watch("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term", true),
@@ -191,6 +208,7 @@ describe("caller runtimes", () => {
         env,
         "herdr",
       )
+
       assert.deepStrictEqual(calls, ["herdr"])
       assert.deepStrictEqual(entryPlace({ runtime: "herdr", hits: named }), {
         in: "terminal",
@@ -202,14 +220,18 @@ describe("caller runtimes", () => {
 
   it("callerTarget uses the socket path, a named session, or no target, and a plugin never sees keys it did not declare", () => {
     const seen: Array<Record<string, string | undefined>> = []
+
     const herdr = {
       env: ["HERDR_SOCKET_PATH"],
       target: (env: Readonly<Record<string, string | undefined>>, named?: string) => {
         seen.push({ ...env })
+
         if (named !== undefined) return `session:${named}`
+
         return env.HERDR_SOCKET_PATH === undefined ? undefined : `socket:${env.HERDR_SOCKET_PATH}`
       },
     }
+
     const env = { HERDR_SOCKET_PATH: "/h.sock", HERDR_PANE_ID: "p1", OTHER: "x" }
     assert.strictEqual(callerTarget([herdr], env), "socket:/h.sock")
     assert.deepStrictEqual(seen, [{ HERDR_SOCKET_PATH: "/h.sock" }])
@@ -235,6 +257,7 @@ describe("caller runtimes", () => {
       yield* fs.makeDirectory(base, { recursive: true })
       const dir = yield* fs.makeTempDirectoryScoped({ directory: base })
       yield* fs.makeDirectory(path.join(dir, "plugins"))
+
       const user = Plugin.define({
         id: "runtime-user",
         effect: (context) =>
@@ -249,6 +272,7 @@ describe("caller runtimes", () => {
             )
             .pipe(Effect.asVoid),
       })
+
       const replacements = [
         ...Platform.replacements,
         ...hostReplacements,
@@ -256,6 +280,7 @@ describe("caller runtimes", () => {
           Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
         ),
       ]
+
       const layout = yield* Layout.make(dir)
       yield* runDaemon(Platform.daemon, replacements).pipe(
         Effect.provideService(Layout, layout),
@@ -268,9 +293,11 @@ describe("caller runtimes", () => {
       yield* Effect.gen(function* () {
         while (process.env[key] !== undefined) yield* Effect.sleep("20 millis")
       }).pipe(Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.die("caller env was not dropped") }))
+
       const out = yield* (yield* ChildProcessSpawner.ChildProcessSpawner).string(
         ChildProcess.make("sh", ["-c", `printf %s "\${${key}-}"`]),
       )
+
       assert.strictEqual(out, "")
     }).pipe(Effect.provide(Platform.services)),
   )

@@ -46,6 +46,7 @@ export const make = Effect.gen(function* () {
   const logged = Reactor.logFailure
   const live = (session: SessionRow) => runtimes.route(runtimeOf(session))
   const dropQueue = inbox.dropQueue
+
   const getRow = (id: string) =>
     db.session
       .getSession(id)
@@ -57,12 +58,16 @@ export const make = Effect.gen(function* () {
 
   const undoCutOffStart = Effect.fn("Archive.undoCutOffStart")(function* (h: Runtime, session: SessionRow) {
     const what = `${session.id} never finished starting (vibestd stopped while it started)`
+
     if (yield* db.session.hadTerminal(session.id)) return yield* notice(session, `${what}.`)
     const ended = yield* getRow(session.id)
+
     const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(session.id)) ?? ""))(
       removal.release({ h, session: ended, terminal: undefined, keepWorktree: false, reasons: [] }),
     )
+
     let kept = out.worktree === "kept" ? out.reasons.join("; ") : undefined
+
     if (
       kept !== undefined &&
       (yield* fs.readDirectory(out.path).pipe(Effect.orElseSucceed(() => ["?"]))).length === 0
@@ -70,6 +75,7 @@ export const make = Effect.gen(function* () {
       yield* fs.remove(out.path, { recursive: true }).pipe(Effect.ignore)
       kept = undefined
     }
+
     yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
   })
 
@@ -96,8 +102,10 @@ export const make = Effect.gen(function* () {
       const reasons: Array<string> = []
       const working = busyOf(seen)
       const execution = yield* db.session.openExecution(id)
+
       if (working || execution !== undefined) {
         if (options.unlessPending) return undefined
+
         if (working) {
           const stopped = yield* interruptAgent(h, session, terminal)
           reasons.push(
@@ -106,9 +114,11 @@ export const make = Effect.gen(function* () {
               : `${id} did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
           )
         }
+
         if (execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
         session = yield* getRow(id)
       }
+
       if (!archived(session)) {
         if (options.unlessPending) {
           if (!(yield* db.session.archiveIfNoPending(id))) return undefined
@@ -116,11 +126,14 @@ export const make = Effect.gen(function* () {
           yield* db.session.archive(id)
           yield* dropQueue(session, `${id} was archived before it was delivered`)
         }
+
         session = yield* getRow(id)
       }
+
       yield* fs
         .remove(layout.sessionFolder(session.projectId, id), { recursive: true, force: true })
         .pipe(Effect.ignore)
+
       const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(id)) ?? ""))(
         removal.release({
           h,
@@ -130,7 +143,9 @@ export const make = Effect.gen(function* () {
           reasons,
         }),
       )
+
       yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
+
       return out
     })
 
@@ -138,8 +153,10 @@ export const make = Effect.gen(function* () {
     function* (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) {
       yield* getRow(id)
       const { already } = yield* sessionLive.stop(id)
+
       if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
       const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(release(id))))!
+
       return out
     },
     Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
@@ -149,6 +166,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (!(yield* sessionLive.archivesOnIdle(id))) return
       const owner = yield* db.session.getSession(id)
+
       if (owner === undefined || archived(owner)) return
       yield* locked(
         id,
@@ -156,28 +174,38 @@ export const make = Effect.gen(function* () {
       )(
         Effect.gen(function* () {
           const r = yield* sessionLive.track(id)
+
           if (yield* Ref.getAndSet(r.stopping, true)) return
           yield* Effect.gen(function* () {
             const session = yield* getRow(id)
+
             if (archived(session)) return
+
             const tell = (message: string) =>
               Ref.getAndSet(r.archiveTold, true).pipe(
                 Effect.flatMap((told) => (told ? Effect.void : notice(session, message))),
               )
+
             const skip = (why: string) => tell(`${id} not archived (vibest run --archive-on-idle): ${why}`)
+
             if (executionStateOf(session) !== "completed") return yield* Ref.set(r.archiveTold, false)
             const h = yield* live(session)
             const terminal = terminalOf(session)
             const seen = yield* agentState(h, terminal)
+
             if (seen !== "absent") {
               const settled = yield* settleAfterInterrupt(h, session, terminal)
+
               if (!settled)
                 return yield* skip(`it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`)
             }
+
             const out = yield* removeLocked(id, { unlessPending: true })
+
             if (!out) return
             const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
             const again = out.processes === "exited" ? "" : ` Run vibest archive ${id} again to check.`
+
             if (kept || again)
               yield* notice(
                 session,
@@ -212,12 +240,16 @@ export const make = Effect.gen(function* () {
     locked(id)(
       Effect.gen(function* () {
         const session = yield* getRow(id)
+
         if (!archived(session) || exitedAt(session) !== null) return
         const h = yield* live(session)
+
         const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(id)) ?? ""))(
           removal.release({ h, session, terminal: terminalOf(session), keepWorktree: true, reasons: [] }),
         )
+
         yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
+
         if (out.processes !== "exited")
           yield* notice(
             session,
@@ -269,6 +301,7 @@ export const archiveOnIdle = Effect.gen(function* () {
   const archive = yield* Service
   const db = yield* Db.Service
   const live = yield* SessionLive.Service
+
   return {
     optedIn: live.archivesOnIdle,
     consider: archive.archiveSoon,

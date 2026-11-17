@@ -22,19 +22,25 @@ export const fromPromise =
     Effect.gen(function* () {
       const scope = yield* Effect.context<Scope.Scope>()
       const run = Effect.runPromiseWith(scope)
+
       const register = (registering: Effect.Effect<EffectRegistration, never, Scope.Scope>) =>
         run(registering).then((registration): Registration => ({ dispose: () => run(registration.dispose) }))
+
       const iterators = new Set<AsyncIterator<unknown>>()
       yield* Effect.addFinalizer(() =>
         Effect.promise(() => Promise.all(Array.from(iterators, (iterator) => iterator.return?.()))),
       )
+
       const iterable = <A>(stream: Stream.Stream<A>): AsyncIterable<A> => ({
         [Symbol.asyncIterator]: () => {
           const source = Stream.toAsyncIterableWith(stream, scope)[Symbol.asyncIterator]()
+
           const close = () => {
             iterators.delete(iterator)
+
             return source.return?.() ?? Promise.resolve({ done: true as const, value: undefined })
           }
+
           const iterator: AsyncIterator<A> = {
             next: () =>
               source.next().then(
@@ -43,15 +49,19 @@ export const fromPromise =
               ),
             return: close,
           }
+
           iterators.add(iterator)
+
           return iterator
         },
       })
+
       const definitions = <Editor>(
         domain: EffectContext["runtime"] | EffectContext["harness"],
       ): Definitions<Editor> => ({
         transform: (callback) => register(domain.transform(callback as never)),
       })
+
       const context: Context = {
         options: host.options,
         agent: {
@@ -67,6 +77,7 @@ export const fromPromise =
         subscription: { report: (input) => run(host.subscription.report(input)) },
         event: { subscribe: (input) => iterable(host.event.subscribe(input)) },
       }
+
       yield* Effect.acquireRelease(
         settle(() => plugin.setup(context)),
         (cleanup: Cleanup | void) => (cleanup === undefined ? Effect.void : settle(cleanup)),

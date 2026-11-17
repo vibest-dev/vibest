@@ -19,6 +19,7 @@ export const install = (host: ShutdownHost, releases: Releases, stopRequested: D
   Effect.gen(function* () {
     const fork = Effect.runForkWith(yield* Effect.context<never>())
     let timer: Fiber.Fiber<void> | undefined
+
     const arm = (cause: string) => {
       timer = fork(
         Effect.gen(function* () {
@@ -37,6 +38,7 @@ export const install = (host: ShutdownHost, releases: Releases, stopRequested: D
         }),
       )
     }
+
     yield* host.onSignals((signal) => {
       if (timer === undefined) return arm(signal)
       fork(

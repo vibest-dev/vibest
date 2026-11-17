@@ -16,7 +16,9 @@ type Plugin = {
 const built = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-claude-plugin-"))
 const pkg = path.join(import.meta.dirname, "..")
 const r = childProcess.spawnSync("bun", ["scripts/build.ts", built], { cwd: pkg, encoding: "utf8" })
+
 if (r.status !== 0) throw new Error(`build failed: ${r.stderr}`)
+
 const hooks = JSON.parse(fs.readFileSync(path.join(built, "hooks/hooks.json"), "utf8")) as { modules: string[] }
 const plugin = (await import(path.join(built, "hooks", hooks.modules[0]!))) as Plugin
 
@@ -27,6 +29,7 @@ const settle = async () => {
 }
 
 type Request = { url: string; socketPath: string; headers: Record<string, string>; body: unknown }
+
 type Answer = { status: number; body?: unknown } | Error
 
 const SESSION = {
@@ -36,26 +39,32 @@ const SESSION = {
   VIBEST_HOME: "/vh",
   VIBEST_RUNTIME: '{"runtime":"herdr"}',
 }
+
 const WORKER = { ...SESSION, VIBEST_SESSION_ID: "w1" }
 
 const host = (env: Record<string, string> = SESSION) => {
   const hooks: Record<string, Function> = {}
   const catches: Record<string, Function> = {}
+
   const on = (event: string, a: unknown, b?: unknown) => {
     hooks[event] = (b ?? a) as Function
+
     return { catch: (handler: Function) => void (catches[event] = handler) }
   }
+
   const requests: Request[] = []
   const submitted: string[] = []
   const statuses: Array<string | undefined> = []
   const every: Array<{ ms: number; fn: () => void }> = []
   const after: Array<{ ms: number; fn: () => void; cancelled: boolean }> = []
+
   const state = {
     conversation: "c1",
     redraws: 0,
     answer: (_r: Request): Answer => ({ status: 204 }),
     submit: async (_text: string): Promise<{ text: string; drop?: undefined } | { drop: string }> => ({ text: "x" }),
   }
+
   const $ = {
     env: { get: async (name: string) => env[name] },
     session: { id: async () => state.conversation, cwd: async () => "/work" },
@@ -65,7 +74,9 @@ const host = (env: Record<string, string> = SESSION) => {
         const request = { url, socketPath: init.socketPath, headers: init.headers, body: JSON.parse(init.body) }
         requests.push(request)
         const a = state.answer(request)
+
         if (a instanceof Error) throw a
+
         return {
           status: a.status,
           ok: a.status < 300,
@@ -77,6 +88,7 @@ const host = (env: Record<string, string> = SESSION) => {
     prompt: {
       submit: (input: { text: string }) => {
         submitted.push(input.text)
+
         return state.submit(input.text)
       },
     },
@@ -85,17 +97,21 @@ const host = (env: Record<string, string> = SESSION) => {
     clock: {
       every: (ms: number, fn: () => void) => {
         every.push({ ms, fn })
+
         return { cancel: () => undefined }
       },
       after: (ms: number, fn: () => void) => {
         const t = { ms, fn, cancelled: false }
         after.push(t)
+
         return { cancel: () => void (t.cancelled = true) }
       },
     },
   }
+
   plugin.register(on)
   const pass = async (e: object) => e
+
   return {
     hooks,
     catches,
@@ -116,6 +132,7 @@ const host = (env: Record<string, string> = SESSION) => {
     draw: async () => {
       const r = await hooks["ui.render"]!($, { component: "AbovePrompt" }, async () => "drawn")
       await settle()
+
       return r
     },
     prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
@@ -126,6 +143,7 @@ const host = (env: Record<string, string> = SESSION) => {
         t.cancelled = true
         t.fn()
       }
+
       await settle()
     },
   }
@@ -135,6 +153,7 @@ const batch = (execution: number, line: string, text: string) => ({
   status: 200,
   body: { execution, ids: [execution], line, text },
 })
+
 const ownSubmit = { kind: "plugin", name: "vibest" }
 
 describe("Claude plugin requests", () => {
@@ -186,11 +205,13 @@ describe("Claude plugin requests", () => {
 describe("Claude plugin inbox", () => {
   it("takes only while idle; each draw submits one batch's line; its own submit reports the accepted execution and gets the full text as context, unless the line already ends with it", async () => {
     const h = host()
+
     const takes = [
       batch(1, 'General Agent "A" completed (w1)', "full A"),
       batch(2, "Notice: x", "full B"),
       batch(3, "Notice: w1 exited.", "w1 exited."),
     ]
+
     h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
     await h.start()
     await h.tick()
@@ -252,6 +273,7 @@ describe("Claude plugin inbox", () => {
     let down = true
     h.state.answer = () => (down ? new Error("ENOENT") : { status: 204 })
     await h.start()
+
     for (let i = 1; i < plugin.POLL_FAILURES_SHOWN; i++) await h.tick()
     assert.lengthOf(h.statuses, 1)
     assert.match(h.statuses[0]!, /vibestd does not answer/)
@@ -276,6 +298,7 @@ describe("Claude plugin protocol mismatch", () => {
     let refused = true
     h.state.answer = () => (refused ? { status: 409, body: mismatch } : { status: 204 })
     await h.start()
+
     for (let i = 0; i < plugin.POLL_FAILURES_SHOWN + 1; i++) await h.tick()
     assert.isTrue(h.statuses.every((t) => t === `VIBEST: ${mismatch.error}`))
     refused = false
@@ -309,6 +332,7 @@ describe("Claude plugin guard", () => {
     h.state.answer = () => new Error("ECONNREFUSED")
     const answer = h.preTool({ tool: "Read" })
     await settle()
+
     for (const ms of plugin.GUARD_BACKOFF_MS) await h.fire(ms)
     assert.deepStrictEqual(await answer, { deny: plugin.UNREACHABLE })
     assert.lengthOf(h.requests, 4)

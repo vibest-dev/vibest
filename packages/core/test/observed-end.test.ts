@@ -14,6 +14,7 @@ import { idleSession, spawnWorking, sqlNotices, test } from "./lib/sessions-help
 const observedEnd = (harness: string, payload: object) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses.Service).get(harness)
+
     return executionEndFrom(adapter, payload as Record<string, unknown>, yield* Clock.currentTimeMillis)
   })
 
@@ -112,11 +113,13 @@ describe("observed execution end", () => {
       const handed = yield* db.session.openExecution(id)
       yield* writeEnd(id, "pi", { text: "done fast" })
       yield* held.release()
+
       const [row] = yield* until(
         sql<{ status: string; execution: number | null }>`SELECT status, execution_id AS execution FROM inbox
           WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )
+
       assert.isDefined(handed)
       assert.strictEqual(row!.execution, handed)
     }),

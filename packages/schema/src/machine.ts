@@ -9,6 +9,7 @@ export class UnknownMachine extends Schema.TaggedError<UnknownMachine>()("Unknow
   override get message() {
     const known =
       this.machines.length === 0 ? "none is added (vibest machine add)" : `machines: ${this.machines.join(", ")}`
+
     return `unknown machine ${JSON.stringify(this.machine)}; ${known}`
   }
 }
@@ -33,6 +34,7 @@ export class AlreadyAdded extends Schema.TaggedError<AlreadyAdded>()("AlreadyAdd
 }
 
 export const MachineState = Schema.Literals(["connecting", "connected", "unreachable", "different"])
+
 export type MachineState = typeof MachineState.Type
 
 export const MachineNote = Schema.Struct({
@@ -40,6 +42,7 @@ export const MachineNote = Schema.Struct({
   message: Schema.String,
   fix: Schema.optional(Schema.String),
 })
+
 export type MachineNote = typeof MachineNote.Type
 
 export const RuntimeThere = Schema.Struct({
@@ -48,6 +51,7 @@ export const RuntimeThere = Schema.Struct({
   reason: Schema.optional(Schema.String),
   link: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
+
 export type RuntimeThere = typeof RuntimeThere.Type
 
 export const RuntimeView = Schema.Struct({
@@ -60,6 +64,7 @@ export const RuntimeView = Schema.Struct({
     note: Schema.optional(Schema.String),
   }),
 })
+
 export type RuntimeView = typeof RuntimeView.Type
 
 export const MachineInfo = Schema.Struct({
@@ -76,9 +81,11 @@ export const MachineInfo = Schema.Struct({
   runtimesAt: Schema.optional(Schema.Number),
   notes: Schema.optional(Schema.Array(Schema.Struct({ ...MachineNote.fields, at: Schema.Number }))),
 })
+
 export type MachineInfo = typeof MachineInfo.Type
 
 export const ListedMachine = MachineInfo.mapFields(Struct.pick(["name", "state", "since", "reason"]))
+
 export type ListedMachine = typeof ListedMachine.Type
 
 export class NoProject extends Schema.TaggedError<NoProject>()("NoProject", { message: Schema.String }) {}
@@ -103,4 +110,5 @@ export const OutboxItem = Schema.Struct({
   content: Schema.String,
   cut: Schema.optional(Schema.Boolean),
 })
+
 export type OutboxItem = typeof OutboxItem.Type

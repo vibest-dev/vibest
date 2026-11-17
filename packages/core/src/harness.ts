@@ -42,13 +42,16 @@ export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
   const pinned = Context.make(ChildProcessSpawner.ChildProcessSpawner, spawner).pipe(
     Context.add(FileSystem.FileSystem, fs),
     Context.add(Path.Path, path),
   )
+
   const harnesses = yield* Harnesses.Service
   const self = yield* VibestCommand
   const pkg = self.length === 1 && path.isAbsolute(self[0]!) ? path.dirname(path.dirname(self[0]!)) : undefined
+
   const beside =
     pkg === undefined
       ? undefined
@@ -60,12 +63,15 @@ export const make = Effect.gen(function* () {
           ],
           (dir) => fs.exists(dir).pipe(Effect.orElseSucceed(() => false)),
         ).pipe(Effect.map((found) => Option.getOrElse(found, () => path.join(pkg, "harnesses"))))
+
   const plugins = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))) || beside
   const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
+
   const cached = yield* Cache.makeWith(
     (key: string) => {
       const [id, providerName, entries] = JSON.parse(key) as [string, string, ReadonlyArray<readonly [string, string]>]
       const definition = harnesses.find(id)
+
       return definition === undefined
         ? Effect.fail(unprovided(id, harnesses.all))
         : listModels(definition, providerName === "" ? null : providerName, Object.fromEntries(entries)).pipe(
@@ -77,10 +83,12 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? MODELS_TTL : Duration.zero),
     },
   )
+
   return Service.of({
     available: Effect.fn("Harness.available")((id) =>
       Effect.suspend(() => {
         const definition = harnesses.find(id)
+
         return definition === undefined
           ? Effect.succeed(false)
           : Effect.findFirst(searchPath, (dir) =>
@@ -91,16 +99,21 @@ export const make = Effect.gen(function* () {
     plugin: Effect.fn("Harness.plugin")(function* (id) {
       const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
       const definition = harnesses.find(id)
+
       if (definition === undefined) return yield* unprovided(id, harnesses.all)
       const integration = definition.integration ?? id
+
       if (path.isAbsolute(integration)) return integration
+
       if (!plugins)
         return yield* unavailable(
           "VIBEST_HARNESSES is not set, and vibest runs from source; set it to a built harnesses/ directory",
         )
       const dir = path.join(plugins, integration)
+
       if (!(yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))))
         return yield* unavailable(`vibest's ${id} plugin is missing: ${dir}`)
+
       return dir
     }),
     models: Effect.fn("Harness.models")((id, provider, env) => Cache.get(cached, modelCacheKey(id, provider, env))),
@@ -124,21 +137,28 @@ export const preflight = Effect.fn("Harness.preflight")(function* (
   const harness = yield* Service
   const harnesses = yield* Harnesses.Service
   const adapter = harnesses.find(id)
+
   if (adapter === undefined) return yield* unprovided(id, harnesses.all)
   const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
   const providerError = adapter.checkProvider?.(provider)
+
   if (providerError) return yield* unavailable(providerError)
+
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   yield* harness.plugin(id)
+
   const models = yield* harness
     .models(id, provider, env)
     .pipe(Effect.mapError((e) => unavailable(`${id} model discovery failed: ${e.message}`)))
+
   if (model !== null && !models.some((m) => m.model === model)) {
     const choices = models.map((m) => (m.provider ? `${m.provider}/${m.model}` : m.model)).join(", ")
+
     return yield* unavailable(
       `${id} does not list model "${model}"${provider ? ` for provider "${provider}"` : ""}; choose one of: ${choices}`,
     )
   }
+
   return models
 })
 

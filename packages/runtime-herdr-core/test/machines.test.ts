@@ -22,31 +22,40 @@ const row = (name: string, id: string, extra: Partial<Row> = {}): Row => ({
 
 const fake = (rows: Array<Row>, options: { offline?: boolean; addFails?: string; rmFails?: string } = {}) => {
   const calls: Array<[string, unknown]> = []
+
   const hc: Pick<HcShape, "call"> = {
     call: ((method: string, params: Record<string, unknown>) =>
       Effect.suspend((): Effect.Effect<unknown, HcError | HcTransportError> => {
         calls.push([method, params])
+
         if (options.offline) return Effect.fail(new HcTransportError({ method, message: "connect ENOENT" }))
+
         switch (method) {
           case "machine.list":
             return Effect.succeed({ machines: [...rows] })
           case "machine.add": {
             if (options.addFails)
               return Effect.fail(new HcError({ method, kind: options.addFails, message: options.addFails }))
+
             if (rows.some((r) => r.name === params.name))
               return Effect.fail(new HcError({ method, kind: "name_taken", message: "name taken" }))
             const added = row(params.name as string, "core-new", { session: params.session as string })
             rows.push(added)
+
             return Effect.succeed(added)
           }
+
           case "machine.rm": {
             if (options.rmFails)
               return Effect.fail(new HcError({ method, kind: options.rmFails, message: options.rmFails }))
             const at = rows.findIndex((r) => r.name === params.machine)
+
             if (at < 0) return Effect.fail(new HcError({ method, kind: "machine_unknown", message: "unknown" }))
             rows.splice(at, 1)
+
             return Effect.succeed({ removed: [params.machine] })
           }
+
           case "terminal.list":
             return Effect.succeed({
               machines: [],
@@ -59,9 +68,11 @@ const fake = (rows: Array<Row>, options: { offline?: boolean; addFails?: string;
               ],
             })
         }
+
         return Effect.die(new Error(`unexpected ${method}`))
       })) as HcShape["call"],
   }
+
   return { hc, calls, rows, added: () => calls.filter(([m]) => m === "machine.add").length }
 }
 
@@ -69,6 +80,7 @@ type Noted = MachineEvent & { readonly notes: Array<MachineNote> }
 
 const noting = (hook: typeof Mirror.connect) => (hc: Parameters<typeof Mirror.connect>[0], event: Noted) =>
   hook(hc, event).pipe(Effect.map((notes) => void event.notes.push(...notes)))
+
 const connect = noting(Mirror.connect)
 const remove = noting(Mirror.remove)
 
@@ -189,12 +201,14 @@ describe("hc mirrors vibest's machines", () => {
           ["s2", { id: "mb/t8@/a.sock" }],
         ],
       )
+
       const down = yield* locate(
         fake([row("mb", "core-new", { state: "unreachable", why: "ssh refused" })]).hc,
         "/a.sock",
         peer,
         asked(["s1"]),
       )
+
       assert.isFalse(down.missing)
       assert.strictEqual(down.note, "hc here reaches mb as mb: unreachable (ssh refused)")
       const offline = yield* locate(fake([], { offline: true }).hc, "/a.sock", peer, asked(["s1"]))
@@ -236,9 +250,11 @@ describe("hc mirrors vibest's machines", () => {
     Effect.gen(function* () {
       const f = fake([])
       const resets = yield* Queue.unbounded<void>()
+
       const hooks = yield* machineHooks(
         Plugin.define({ id: "hc-test", effect: (ctx) => mirror(ctx.machine, f.hc, Stream.fromQueue(resets)) }),
       )
+
       const { notes: _, ...b } = event(linked)
       const { notes: __, ...c } = event({ core: "core-c", session: "main" }, { name: "mc", target: "c-host" })
       yield* hooks.fire("connect", b)

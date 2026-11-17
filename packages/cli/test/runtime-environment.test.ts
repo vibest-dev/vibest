@@ -15,9 +15,11 @@ describe("handler environment", () => {
       // @ts-expect-error Missing is not in the allowed environment
       () => needsMissing,
     )
+
     const loader: Runtime.Handlers<typeof Commands.commands.status> = () =>
       // @ts-expect-error Missing is not in the allowed environment
       Promise.resolve({ default: () => needsMissing })
+
     assert.isFunction(handler)
     assert.isFunction(loader)
   })

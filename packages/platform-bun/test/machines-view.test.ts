@@ -54,6 +54,7 @@ const viewPlugin = (s: Side) =>
             locate: (machine, sessions) =>
               Effect.sync(() => {
                 const name = s.mirror.get(machine.link?.core ?? "")
+
                 return name === undefined
                   ? { missing: true, terminals: new Map() }
                   : {
@@ -71,11 +72,15 @@ const viewPlugin = (s: Side) =>
           (event) =>
             Effect.suspend(() => {
               s.connects.push(event)
+
               if (s.hang) return Effect.never
               const core = coreOf(event)
+
               if (s.refuse) return Effect.succeed([{ message: "cannot add", fix: "add by hand" }])
+
               if (core === undefined || s.mirror.has(core)) return Effect.void
               s.mirror.set(core, event.name)
+
               return Effect.succeed([{ message: `added ${event.name}` }])
             }),
           { runtime: "view" },
@@ -111,17 +116,22 @@ const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late
     const B = side("b")
     const spawned: Array<SpawnInput> = []
     const a = yield* repoStack(net, { plugins: [...(options.late ? [] : [viewPlugin(A)]), ...extra] })
+
     const b = yield* repoStack(net, {
       plugins: [viewPlugin(B)],
       sessions: fakeSpawns(spawned, (input, id) => (input.runtime === undefined ? "" : `t-${id}`)),
     })
+
     net.route("b-host", b.layout.socket)
     const added = yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
     yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
     const { asEntry: here } = yield* entryOn(a)
+
     const spawn = (runtime = "view") =>
       here(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {}, runtime }))
+
     const listed = (id: string) => Effect.map(here(a.raw.List({})), (r) => r.sessions.find((row) => row.id === id)!)
+
     return { net, A, B, a, b, added, here, spawn, listed, spawned }
   })
 

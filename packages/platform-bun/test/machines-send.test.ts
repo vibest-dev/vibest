@@ -34,6 +34,7 @@ describe("a Send retried with the same request across machines", () => {
           parentSessionId: middle,
         },
       )
+
       const asB =
         (sessionId: string) =>
         <A, E>(effect: Effect.Effect<A, E>) =>
@@ -41,11 +42,13 @@ describe("a Send retried with the same request across machines", () => {
             effect,
             sessionHeaders({ sessionId, projectId: b.project, repositoryRoot: b.directory }),
           )
+
       const sendTwice = (from: string, to: string, request: string) =>
         Effect.gen(function* () {
           for (let attempt = 0; attempt < 2; attempt++)
             yield* asB(from)(b.raw.Send({ id: to, message: request, request }))
         })
+
       const arrived = (count: number) =>
         Effect.gen(function* () {
           yield* until(a.run(inboxCount(entryId)), (n) => n === count)
@@ -94,14 +97,19 @@ describe("a Send retried with the same request across machines", () => {
       const peer = randomId()
       const ids = Array.from({ length: 2500 }, () => randomId())
       yield* b.as(peer, "p1")
+
       for (const id of ids) yield* b.db.remote.sendToPeer(randomId(), peer, randomId(), "x", id)
       const peers = yield* b.run(Peer.Service)
       const reads: Array<ReadonlyArray<unknown>> = []
+
       const countReads: Statement.Transformer = (statement) => {
         const [text, params] = statement.compile()
+
         if (text.includes("FROM outbox o")) reads.push(params)
+
         return Effect.succeed(statement)
       }
+
       const sent = yield* peers
         .outbox(peer)
         .pipe(
@@ -109,6 +117,7 @@ describe("a Send retried with the same request across machines", () => {
           Stream.runCollect,
           Effect.provideService(Statement.CurrentTransformer, countReads),
         )
+
       assert.deepStrictEqual(
         sent.map((row) => row.id),
         ids,

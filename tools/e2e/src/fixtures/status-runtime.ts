@@ -7,16 +7,21 @@ import { Effect, Stream } from "effect"
 
 const execFile = util.promisify(childProcess.execFile)
 const root = process.env.VIBEST_HOME && path.dirname(process.env.VIBEST_HOME)
+
 if (!root?.startsWith("/tmp/vbe-") || process.env.HC_SOCKET !== root + "/hc.sock")
   throw new Error("status fixture requires its isolated E2E core")
+
 const prefix = root.split("/").at(-1)!
 const id = (terminal: Runtime.Terminal) => terminal.id.slice(prefix.length + 1)
+
 const hc = (...argv: Array<string>) =>
   Effect.tryPromise({
     try: async () => (await execFile("hc", argv, { env: process.env, timeout: 30_000 })).stdout,
     catch: (e) => new Runtime.RuntimeError({ code: "failed", message: String(e) }),
   })
+
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
+
 const runtime: Runtime.RuntimeDefinition = {
   id: "status-fixture",
   status: () => Effect.succeed({ status: "online" }),
@@ -55,6 +60,7 @@ const runtime: Runtime.RuntimeDefinition = {
   close: (terminal) => hc("kill", id(terminal)).pipe(Effect.asVoid),
   events: Stream.never,
 }
+
 export default Plugin.define({
   id: "status-fixture",
   effect: (ctx) =>

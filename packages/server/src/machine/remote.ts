@@ -25,6 +25,7 @@ const Address = Data.taggedEnum<Address>()
 
 export const address = (input: string): Address => {
   const at = input.indexOf("/")
+
   return at <= 0
     ? Address.Local({ id: input })
     : Address.Remote({ machine: input.slice(0, at), id: input.slice(at + 1) })
@@ -68,6 +69,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const shown = rows.filter((row) => row.address.id !== "")
       const kinds = [...new Set(shown.map((row) => row.runtime))]
+
       const views = new Map(
         yield* Effect.forEach(
           kinds,
@@ -82,9 +84,11 @@ const make = Effect.gen(function* () {
           { concurrency: "unbounded" },
         ),
       )
+
       return rows.map((row): R => {
         const found = row.address.id === "" ? undefined : views.get(row.runtime)
         const terminal = found?.terminals.get(row.id)
+
         return {
           ...row,
           id: addressed(name, row.id),
@@ -126,6 +130,7 @@ const make = Effect.gen(function* () {
 
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
       if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }
+
       const each = yield* Effect.forEach(
         yield* machines.states,
         ({ info, link }): Effect.Effect<Away> =>
@@ -150,6 +155,7 @@ const make = Effect.gen(function* () {
                 ),
         { concurrency: "unbounded" },
       )
+
       return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
     }),
 
@@ -161,11 +167,13 @@ const make = Effect.gen(function* () {
 
     peek: Effect.fn("Remote.peek")(function* (at: At, project: string, by: string, p: PayloadOf<"Peek">) {
       const { text } = yield* relay(at, project, by, (c, { id }, o) => c.Peek({ ...p, id }, o))
+
       const row = yield* relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
         Effect.flatMap((row) => view(at.machine, [row])),
         Effect.map((rows) => rows[0]),
         Effect.orElseSucceed(() => undefined),
       )
+
       return {
         text,
         ...(row === undefined || row.address.id === "" ? {} : { terminal: row.address.id }),
@@ -181,26 +189,33 @@ const make = Effect.gen(function* () {
       const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
         ([, flag]) => flag,
       )
+
       if (refused.length > 0)
         return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })
+
       if (input.files !== undefined && input.files.length > 0) {
         const link = yield* machines.link(machine)
+
         if (link.capabilities.peerSpawnFiles !== true)
           return yield* new MachineFailed({
             message: `${machine} runs a vibest that does not take --file; run vibest update there`,
           })
       }
+
       const repositories = yield* db.project.projectRemote(from.project)
       const repository = repositories[0]
+
       if (repositories.length !== 1 || repository === undefined)
         return yield* new MachineFailed({
           message: "only a project of one repository runs agents on another machine",
         })
       const remote = repository.remote
+
       if (remote === null)
         return yield* new MachineFailed({
           message: `${repository.path} has no remote; another machine finds its checkout by the remote URL`,
         })
+
       const commit = yield* git
         .head(repository.path)
         .pipe(
@@ -208,13 +223,16 @@ const make = Effect.gen(function* () {
             (e) => new MachineFailed({ message: `cannot read HEAD of ${repository.path}: ${e.message}` }),
           ),
         )
+
       const identity = yield* repositoryIdentity(remote)
       const runtime = input.runtime ?? callerKind(yield* runtimes.callers, input.callerEnv)
       const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
+
       const ready =
         viewer?.locate === undefined || runtime === undefined
           ? undefined
           : yield* machines.ensure(machine, runtime, new Map(), true)
+
       const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
         client["Peer.Spawn"](
           {
@@ -234,6 +252,7 @@ const make = Effect.gen(function* () {
           { headers },
         ),
       )
+
       return {
         id: addressed(machine, spawned.session),
         harness: spawned.harness,

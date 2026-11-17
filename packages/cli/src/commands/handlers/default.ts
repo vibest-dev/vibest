@@ -21,25 +21,31 @@ export const soleEntry = <A, E, R>(
 ) =>
   Effect.gen(function* () {
     const running = yield* client["Project.RunningEntry"]({ terminal })
+
     if (running) {
       const where = `the entry session (${running.harness}) runs in ${running.place}`
       const question = `The entry session (${running.harness}) runs in ${running.place}. Move it here and continue? [y/N]: `
+
       if (!((yield* interactive) && (yield* askYesNo(question))))
         return yield* new LaunchFailed({
           message: `not starting: ${where}, and a project has one entry session. Exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
         })
       const stopped = yield* client["Project.StopEntry"]({ runtime: running.runtime, address: running.address })
+
       if (stopped.result === "moved")
         return yield* new LaunchFailed({ message: "not starting: the entry session moved meanwhile; run vibest again" })
+
       if (stopped.result === "unsupported")
         return yield* new LaunchFailed({
           message: `not starting: ${where} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
         })
+
       if (stopped.result === "running")
         return yield* new LaunchFailed({
           message: `not starting: ${where} and did not exit; nothing changed. Exit it there first`,
         })
     }
+
     return yield* start
   })
 
@@ -52,6 +58,7 @@ export default Runtime.handler(Commands, (o) =>
     const provider = Option.getOrUndefined(o.provider)
     const model = Option.getOrUndefined(o.model)
     const runtimeKind = Option.getOrUndefined(o.runtime)
+
     const again = [
       ...(yield* VibestCommand),
       ...(harness ? ["--harness", harness] : []),
@@ -60,16 +67,19 @@ export default Runtime.handler(Commands, (o) =>
       ...(runtimeKind ? ["--runtime", runtimeKind] : []),
       ...(o.fresh ? ["--new"] : []),
     ]
+
     const claim = (yield* caller).claim
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem
     yield* withVibest(claim, (client) => client["Project.Open"]({}))
+
     const placed = yield* withVibest(claim, (client) =>
       client["Project.EntryPlace"]({
         callerEnv: callerEnvOf(),
         ...(runtimeKind === undefined ? {} : { runtime: runtimeKind }),
       }),
     )
+
     const foreignSession = Option.match(o.session, {
       onNone: () => undefined,
       onSome: (name) =>
@@ -77,6 +87,7 @@ export default Runtime.handler(Commands, (o) =>
           message: `--session ${name} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
         }),
     })
+
     if (placed.place.in === "launch") {
       const opened = yield* withVibest(claim, (client) =>
         client.Launch({
@@ -88,20 +99,26 @@ export default Runtime.handler(Commands, (o) =>
           ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
         }),
       )
+
       if (opened.routing !== undefined) yield* Console.error(`entry session: ${opened.routing}`)
       yield* Console.log(`the entry session is starting in ${opened.place}`)
+
       if (o.headless || !opened.attach) return
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const [file, ...args] = opened.attach
       yield* spawner.exitCode(
         ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }),
       )
+
       return
     }
+
     if (foreignSession !== undefined) return yield* foreignSession
+
     if ((yield* fs.realPath(path.resolve("."))) !== placed.directory)
       yield* Effect.sync(() => process.chdir(placed.directory))
     const terminal = placed.place.terminal
+
     const chosen = yield* withVibest(claim, (client) =>
       client["Project.StartEntry"]({
         harness,
@@ -111,7 +128,9 @@ export default Runtime.handler(Commands, (o) =>
         runtime: placed.place.runtime,
       }),
     )
+
     if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`entry session: ${describeSpawn(chosen)}`)
+
     const started = yield* withVibest(claim, (client) =>
       soleEntry(
         client,
@@ -129,6 +148,7 @@ export default Runtime.handler(Commands, (o) =>
         }),
       ),
     )
+
     return yield* Effect.sync(() => exec(started.command.file, started.command.args, started.command.env))
   }),
 )

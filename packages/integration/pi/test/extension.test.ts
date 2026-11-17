@@ -37,15 +37,19 @@ import { Pi } from "../src/pi.ts"
 import presentation from "../src/presentation.ts"
 
 const valuesStoredByRefSet = vi.hoisted(() => [] as Array<unknown>)
+
 vi.mock("effect", async (importOriginal) => {
   const effect = await importOriginal<typeof import("effect")>()
+
   const set = effect.Function.dual(2, <A>(self: Ref.Ref<A>, value: A) =>
     effect.Effect.tap(effect.Ref.set(self, value), () =>
       effect.Effect.sync(() => void valuesStoredByRefSet.push(value)),
     ),
   )
+
   return { ...effect, Ref: { ...effect.Ref, set } }
 })
+
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   UserMessageComponent: class {
     render() {
@@ -74,6 +78,7 @@ const session = (env: Record<string, string>, withPresentation = false) =>
     const fs = yield* FileSystem.FileSystem
     const statuses: Array<string> = []
     const unused = Effect.die("unexpected tty operation")
+
     const file: FileSystem.File = {
       [FileSystem.FileTypeId]: FileSystem.FileTypeId,
       stat: unused,
@@ -86,9 +91,11 @@ const session = (env: Record<string, string>, withPresentation = false) =>
       write: (bytes: Uint8Array) =>
         Effect.sync(() => {
           statuses.push(new TextDecoder().decode(bytes))
+
           return bytes.length
         }),
     }
+
     const noTty = Layer.succeed(
       FileSystem.FileSystem,
       FileSystem.makeNoop({
@@ -96,14 +103,17 @@ const session = (env: Record<string, string>, withPresentation = false) =>
         open: (path, options) => (path === "/dev/tty" ? Effect.succeed(file) : fs.open(path, options)),
       }),
     )
+
     const handlers = new Map<string, Array<(e: unknown, ctx: unknown) => unknown>>()
     const messages: Array<{ message: unknown; options: unknown }> = []
     const renderers: Array<unknown> = []
+
     const fake: Pick<ExtensionAPI, "sendMessage" | "registerToolRenderer"> & {
       on: (event: string, handler: (e: unknown, ctx: unknown) => unknown) => () => void
     } = {
       on: (event, handler) => {
         handlers.set(event, [...(handlers.get(event) ?? []), handler])
+
         return () =>
           handlers.set(
             event,
@@ -113,27 +123,36 @@ const session = (env: Record<string, string>, withPresentation = false) =>
       sendMessage: (message, options) => void messages.push({ message, options }),
       registerToolRenderer: (resolver) => void renderers.push(resolver),
     }
+
     const api = fake as unknown as ExtensionAPI
+
     const emit = (event: string, e: unknown = {}, ctx: unknown = {}) =>
       Effect.promise(async () => {
         const results = []
         const full = { sessionManager: { getSessionId: () => "pi-session" }, ...(ctx as object) }
+
         for (const h of handlers.get(event) ?? []) results.push(await h(e, full))
+
         return results
       })
+
     const config = ConfigProvider.layer(
       ConfigProvider.fromUnknown({ HOME: layout.home, VIBEST_HOME: layout.home, ...env }),
     )
+
     yield* Effect.promise(() =>
       Pi.runMain(api, extension.pipe(Layer.provide(Layer.merge(services, noTty)), Layer.provide(config))),
     )
+
     if (withPresentation) presentation(api)
     yield* Effect.addFinalizer(() => emit("session_shutdown"))
+
     return { handlers, messages, renderers, statuses, emit }
   })
 
 const lease = () =>
   Object.getOwnPropertyDescriptor(UserMessageComponent.prototype, "vibestCompactUserMessagesLease")?.value
+
 const tuiStart = {
   mode: "tui",
   hasUI: true,
@@ -166,6 +185,7 @@ const executionEnd = (mode: string, sessionId: string, notes: Array<string> = []
 
 const cli = Effect.gen(function* () {
   const root = yield* makeRepository
+
   return authed(yield* connect((yield* Layout).socket), cliHeaders(root))
 })
 
@@ -199,6 +219,7 @@ describe("pi-vibest", () => {
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("pi")
         yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+
         const coord = yield* db.session.startEntry(
           yield* projectOf("r"),
           "pi",
@@ -209,14 +230,17 @@ describe("pi-vibest", () => {
           },
           { agent: "coordinator" },
         )
+
         yield* db.inbox.insertNoticeTo(coord.sessionId, "survives the gap")
         const notes: Array<string> = []
+
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
           VIBEST_PROJECT_ID: coord.projectId,
           VIBEST_COMMAND: '["/nonexistent-vibest-fixture"]',
         })
+
         yield* s.emit(
           "session_start",
           { reason: "startup" },
@@ -252,12 +276,14 @@ describe("pi-vibest", () => {
         const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const project = yield* projectOf("r")
         yield* db.session.insertSession({ id, ...idleRow("pi") }, project)
+
         const s = yield* session({
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: id,
           VIBEST_PROJECT_ID: project,
           VIBEST_COMMAND: '["vibest"]',
         })
+
         yield* s.emit("session_start", { reason: "startup" }, tuiStart)
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.isUndefined(yield* db.session.readyAt(id))
@@ -279,6 +305,7 @@ describe("pi-vibest", () => {
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("claude")
         yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+
         const coord = yield* db.session.startEntry(
           yield* projectOf("r"),
           "pi",
@@ -289,19 +316,23 @@ describe("pi-vibest", () => {
           },
           { agent: "coordinator" },
         )
+
         const vibestd = Server.layer.pipe(
           Layer.provide(Platform.socketServer(layout.socket)),
           Layer.provide(Project.layer),
         )
+
         const first = yield* Scope.make()
         yield* Layer.buildWithScope(vibestd, first)
         const notes: Array<string> = []
+
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
           VIBEST_PROJECT_ID: coord.projectId,
           VIBEST_COMMAND: '["vibest"]',
         })
+
         yield* s.emit(
           "session_start",
           { reason: "startup" },
@@ -337,6 +368,7 @@ describe("pi-vibest", () => {
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
       const paint = Object.getOwnPropertyDescriptor(TuiAltScreen.prototype, "doRender")?.value
+
       for (const env of [
         {
           VIBEST_SESSION_ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -377,6 +409,7 @@ describe("pi-vibest", () => {
     "Plain Pi, without VIBEST_SESSION_ID: no TUI handlers, no renderer, no lease; only session_shutdown",
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
+
       for (const env of [{}, { VIBEST_AGENT: "general" }]) {
         const s = yield* session(env)
         assert.deepStrictEqual([...s.handlers.keys()], ["session_shutdown"])
@@ -411,6 +444,7 @@ describe("pi-vibest", () => {
       const row = idleRow("pi")
       yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
       yield* db.session.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
+
       const coord = yield* db.session.startEntry(
         yield* projectOf("r"),
         "pi",
@@ -421,6 +455,7 @@ describe("pi-vibest", () => {
         },
         { agent: "coordinator" },
       )
+
       yield* db.inbox.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
 
       const s = yield* session({
@@ -429,6 +464,7 @@ describe("pi-vibest", () => {
         VIBEST_PROJECT_ID: coord.projectId,
         VIBEST_COMMAND: '["/usr/bin/bun","/src/main.ts"]',
       })
+
       assert.deepStrictEqual(
         yield* s.emit("tool_call", { toolName: "bash", input: { command: "git diff | head" } }, { cwd: "/" }),
         [undefined],
@@ -491,6 +527,7 @@ describe("pi-vibest", () => {
       const sql = yield* SqlClient.SqlClient
       const row = idleRow("pi")
       yield* db.session.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
+
       const coord = yield* db.session.startEntry(
         yield* projectOf("r"),
         "pi",
@@ -501,6 +538,7 @@ describe("pi-vibest", () => {
         },
         { agent: "coordinator" },
       )
+
       const messages = () =>
         sql<{
           input: string
@@ -508,22 +546,26 @@ describe("pi-vibest", () => {
         }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = 'abcd1234-abcd-4abc-8abc-abcd1234abcd' ORDER BY id`.pipe(
           Effect.orDie,
         )
+
       const s = yield* session({
         VIBEST_AGENT: "general",
         VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
         VIBEST_COMMAND: '["vibest"]',
       })
+
       yield* s.emit("input", { type: "input", text: "hello from the pane", source: "interactive" })
       assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
       yield* s.emit("input", { type: "input", text: "vibest handed this over", source: "extension" })
       yield* s.emit("input", { type: "input", text: "again", source: "interactive" })
       assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
+
       const coordinator = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
         VIBEST_PROJECT_ID: coord.projectId,
         VIBEST_COMMAND: '["vibest"]',
       })
+
       yield* coordinator.emit("input", { type: "input", text: "the normal conversation", source: "interactive" })
       assert.deepStrictEqual(
         yield* sql<{
@@ -541,14 +583,17 @@ describe("pi-vibest", () => {
     Effect.gen(function* () {
       const db = yield* Db.Service
       const c = yield* cli
+
       const launched = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
         terminal: "test/p1",
       })
+
       assert.isNull(launched.harnessSessionId)
       const saved = savedSession(launched.sessionId)
+
       const env = {
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
@@ -556,6 +601,7 @@ describe("pi-vibest", () => {
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
       }
+
       const s = yield* session(env)
       yield* s.emit("agent_end", { messages: [] }, executionEnd("rpc", "child"))
       yield* s.emit("agent_end", { messages: [] }, executionEnd("print", "child"))
@@ -597,12 +643,14 @@ describe("pi-vibest", () => {
       yield* db.session.noteConversation(launched.sessionId, "kept")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
+
       const renewed = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "pi",
         fresh: true,
         terminal: "test/p1",
       })
+
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
       assert.isNull(renewed.harnessSessionId)
       assert.isNull(yield* saved)
@@ -615,37 +663,46 @@ describe("pi-vibest", () => {
       const layout = yield* Layout
       const path = yield* Path.Path
       const c = yield* cli
+
       const launched = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
         terminal: "test/p1",
       })
+
       const saved = savedSession(launched.sessionId)
       const home = yield* tempDirectory("pi-vibest-slow-")
+
       const first = {
         held: [] as Array<string | Buffer>,
         released: false,
         answered: false,
         upstream: undefined as net.Socket | undefined,
       }
+
       let connections = 0
+
       const proxy = net.createServer((socket) => {
         const isFirst = connections++ === 0
         const upstream = net.connect(layout.socket)
+
         if (isFirst) first.upstream = upstream
         upstream.on("data", (chunk) => {
           if (isFirst) first.answered = true
+
           if (!socket.destroyed) socket.write(chunk)
         })
         socket.on("error", () => {})
         socket.on("data", (chunk) => (isFirst && !first.released ? first.held.push(chunk) : upstream.write(chunk)))
       })
+
       yield* Effect.acquireRelease(
         Effect.callback<void>((resume) => void proxy.listen(path.join(home, "vibest.sock"), () => resume(Effect.void))),
         () => Effect.sync(() => proxy.close()),
       )
       const notes: Array<string> = []
+
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
@@ -654,6 +711,7 @@ describe("pi-vibest", () => {
         VIBEST_COMMAND: '["vibest"]',
         VIBEST_HOME: home,
       })
+
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s1", notes))
       yield* until(
         Effect.sync(() => first.held.length > 0),
@@ -667,6 +725,7 @@ describe("pi-vibest", () => {
       )
       assert.match(notes[0]!, /^vibest: the entry session's conversation may not have been saved/)
       first.released = true
+
       for (const chunk of first.held) first.upstream!.write(chunk)
       yield* until(
         Effect.sync(() => first.answered),
@@ -690,6 +749,7 @@ describe("pi-vibest", () => {
         () => Effect.sync(() => server.close()),
       )
       const gone = yield* tempDirectory("pi-vibest-gone-")
+
       for (const home of [hanging, gone]) {
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
@@ -698,7 +758,9 @@ describe("pi-vibest", () => {
           VIBEST_COMMAND: '["false"]',
           VIBEST_HOME: home,
         })
+
         const notes: Array<string> = []
+
         for (const execution of [1, 2]) {
           yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s1", notes))
           assert.strictEqual(notes.length, execution - 1, "the execution ended before its reply did")
@@ -707,6 +769,7 @@ describe("pi-vibest", () => {
             Boolean,
           )
         }
+
         assert.match(notes[0]!, /^vibest: the entry session's conversation may not have been saved/)
       }
     }),

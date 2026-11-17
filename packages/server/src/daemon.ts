@@ -24,7 +24,9 @@ export const DaemonInfo = Schema.Struct({
   instance: Schema.optional(Schema.String),
   command: Schema.optional(Schema.Array(Schema.String)),
 })
+
 export type DaemonInfo = typeof DaemonInfo.Type
+
 const DaemonInfoJson = Schema.fromJsonString(DaemonInfo)
 
 export const readDaemonInfo = (file: string) =>
@@ -60,9 +62,11 @@ export const checkImport = (host: Host) =>
 export class DaemonLockUnavailable extends Schema.TaggedError<DaemonLockUnavailable>()("DaemonLockUnavailable", {
   message: Schema.String,
 }) {}
+
 export class DaemonNotAnswering extends Schema.TaggedError<DaemonNotAnswering>()("DaemonNotAnswering", {
   message: Schema.String,
 }) {}
+
 export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("DaemonSocketInUse", {
   message: Schema.String,
 }) {}
@@ -75,9 +79,11 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     const fs = yield* FileSystem.FileSystem
     yield* fs.makeDirectory(layout.home, { recursive: true })
     const startTimeout = options.handoff ? HANDOFF_TIMEOUT : DAEMON_START_TIMEOUT
+
     type LockWait =
       | { readonly held: true; readonly write: (text: string) => Effect.Effect<void, LockFailed> }
       | { readonly held: false }
+
     const acquired = yield* host.lock(layout.daemonInfo).pipe(
       Effect.mapError(
         (e) =>
@@ -87,7 +93,9 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       ),
       Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector.Service> => {
         if (writer) return Effect.succeed({ held: true, write: writer })
+
         if (options.handoff) return Effect.succeed(undefined)
+
         return probe(layout.socket).pipe(Effect.map((up) => (up ? { held: false } : undefined)))
       }),
       Effect.repeat({
@@ -104,13 +112,16 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
           ),
       }),
     )
+
     if (acquired === undefined || !acquired.held)
       return yield* Effect.log(`vibestd is already running on ${layout.socket}`)
+
     const inUse = (yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })))
       ? "answers Ping (an vibestd that takes no start lock, from an older vibest)"
       : (yield* accepts(layout.socket))
         ? "accepts connections but does not answer Ping"
         : undefined
+
     if (inUse)
       return yield* new DaemonSocketInUse({
         message: `something on ${layout.socket} ${inUse}; it was left running. ${stopByHand(layout.socket, undefined)}`,
@@ -118,16 +129,20 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     yield* host.trimLog(layout.log)
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
+
     const facts = yield* Identity.HostFacts.pipe(
       Effect.provide(LayerNode.compile(Identity.hostFactsNode, { replacements })),
     )
+
     const app = yield* App.Service.pipe(Effect.provide(LayerNode.compile(App.node, { replacements })))
+
     const identity = {
       pid: facts.pid,
       instance: yield* newId(),
       command: yield* VibestCommand,
       startedAt: yield* Clock.currentTimeMillis,
     }
+
     const shutdown = yield* Deferred.make<void>()
     const releases = new LayerNode.Releases()
     yield* ShutdownDeadline.install(host, releases, shutdown)

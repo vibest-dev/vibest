@@ -33,6 +33,7 @@ const CurrentBatch = Context.Reference<Batch | undefined>("vibest/Registry/Curre
 
 export const group = (report: Group["report"]) => {
   const current: Group = { failed: false, registrations: new Set(), report }
+
   return <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, CurrentGroup, current)
 }
 
@@ -40,10 +41,12 @@ const disable = (current: Group, failure: Failure) => {
   if (current.failed) return
   current.failed = true
   const notifications = new Set<Effect.Effect<void>>()
+
   for (const registration of current.registrations) {
     registration.remove()
     notifications.add(registration.notify)
   }
+
   current.report(
     failure,
     Effect.forEach(notifications, (notify) => notify, { discard: true }),
@@ -54,12 +57,14 @@ const runBatch = <A, E, R>(effect: Effect.Effect<A, E, R>, shutdown: boolean) =>
   Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
       const current = yield* CurrentBatch
+
       if (current?.active && !shutdown) return yield* restore(effect)
       const batch: Batch = { active: true, shutdown, notifications: new Set() }
       const exit = yield* restore(effect.pipe(Effect.provideService(CurrentBatch, batch))).pipe(Effect.exit)
       batch.active = false
       const notified = yield* Effect.forEach(batch.notifications, (notify) => restore(notify).pipe(Effect.exit))
       yield* Exit.asVoidAll([exit, ...notified])
+
       return yield* exit
     }),
   )
@@ -102,11 +107,13 @@ export const make = <State, Editor>(options: Options<State, Editor>): Registry<S
 
   const get = () => {
     if (closed || !dirty) return state
+
     for (;;) {
       const started = version
       const next = options.initial()
       const editor = options.editor(next)
       building = true
+
       try {
         for (const transform of transforms) {
           try {
@@ -115,14 +122,17 @@ export const make = <State, Editor>(options: Options<State, Editor>): Registry<S
             if (!transform.group || cause instanceof RegistryMisuse) throw cause
             disable(transform.group, { state: options.name, cause })
           }
+
           if (version !== started) break
         }
       } finally {
         building = false
       }
+
       if (version !== started) continue
       state = next
       dirty = false
+
       return state
     }
   }
@@ -130,6 +140,7 @@ export const make = <State, Editor>(options: Options<State, Editor>): Registry<S
   const notify: Effect.Effect<void> = Effect.suspend(() => {
     if (closed) return Effect.void
     const value = get()
+
     return options.notify ? options.notify(value) : Effect.void
   })
 
@@ -138,14 +149,19 @@ export const make = <State, Editor>(options: Options<State, Editor>): Registry<S
       if (closed) return
       invalidate()
       const current = yield* CurrentBatch
+
       if (current?.active) {
         if (current.shutdown) {
           closed = true
+
           return
         }
+
         current.notifications.add(notify)
+
         return
       }
+
       yield* restore(notify)
     }),
   )
@@ -155,29 +171,37 @@ export const make = <State, Editor>(options: Options<State, Editor>): Registry<S
       refuseWhileBuilding("transform registered")
       const scope = yield* Scope.Scope
       const current = yield* CurrentGroup
+
       if (current?.failed) return { dispose: Effect.void } satisfies Registration
+
       return yield* Effect.uninterruptible(
         Effect.gen(function* () {
           const entry = { run, group: current }
+
           const registration: Grouped = {
             remove: () => {
               if (!transforms.delete(entry)) return false
               current?.registrations.delete(registration)
               invalidate()
+
               return true
             },
             notify: changed,
           }
+
           const dispose = Effect.uninterruptible(
             Effect.suspend(() => {
               refuseWhileBuilding("transform disposed")
+
               return registration.remove() ? changed : Effect.void
             }),
           )
+
           transforms.add(entry)
           current?.registrations.add(registration)
           yield* Scope.addFinalizer(scope, dispose)
           yield* changed
+
           return { dispose } satisfies Registration
         }),
       )
@@ -189,6 +213,7 @@ export const make = <State, Editor>(options: Options<State, Editor>): Registry<S
     reload: () =>
       Effect.suspend(() => {
         refuseWhileBuilding("reload")
+
         return changed
       }),
   }
@@ -206,11 +231,13 @@ export interface ListEditor<D extends Keyed> {
 export const listEditor = <D extends Keyed>(state: Array<D>): ListEditor<D> => ({
   add: (definition) => {
     const at = state.findIndex((existing) => existing.id === definition.id)
+
     if (at >= 0) state[at] = definition
     else state.push(definition)
   },
   update: (id, update) => {
     const at = state.findIndex((existing) => existing.id === id)
+
     if (at < 0) return
     const copy = { ...state[at]! }
     update(copy)

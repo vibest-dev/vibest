@@ -49,6 +49,7 @@ export const DaemonIdentity = Schema.Struct({
   command: Schema.optional(Schema.Array(Schema.String)),
   startedAt: Schema.optional(Schema.Number),
 })
+
 export type DaemonIdentity = typeof DaemonIdentity.Type
 
 export const RuntimeStatus = Schema.Struct({
@@ -56,6 +57,7 @@ export const RuntimeStatus = Schema.Struct({
   status: Schema.String,
   reason: Schema.optional(Schema.String),
 })
+
 export type RuntimeStatus = typeof RuntimeStatus.Type
 
 export const RuntimeDoctor = Schema.Struct({
@@ -78,6 +80,7 @@ export const UpdateStatus = Schema.Struct({
   latest: Schema.NullOr(Schema.String),
   checking: Schema.Boolean,
 })
+
 export type UpdateStatus = typeof UpdateStatus.Type
 
 export const NOT_CHECKED: UpdateStatus = { checked: null, latest: null, checking: false }
@@ -90,6 +93,7 @@ export const PingResult = Schema.Struct({
   ...DaemonIdentity.fields,
   capabilities: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 })
+
 export type Ping = typeof PingResult.Type
 
 export class ProtocolRejected extends Schema.TaggedError<ProtocolRejected>()("ProtocolRejected", {
@@ -141,6 +145,7 @@ export class DaemonStopping extends Schema.TaggedError<DaemonStopping>()("Daemon
 }
 
 export const Blocker = Schema.Struct({ id: Schema.String, reason: Schema.String })
+
 export type Blocker = typeof Blocker.Type
 
 export class DaemonBusy extends Schema.TaggedError<DaemonBusy>()("DaemonBusy", { blockers: Schema.Array(Blocker) }) {
@@ -182,6 +187,7 @@ const protocol = <
 >(
   rpc: Rpc.Rpc<Tag, Payload, Success, Error, Middleware, Requires>,
 ) => rpc.middleware(ProtocolGate)
+
 const admitted = <
   Tag extends string,
   Payload extends Schema.Top,
@@ -192,6 +198,7 @@ const admitted = <
 >(
   rpc: Rpc.Rpc<Tag, Payload, Success, Error, Middleware, Requires>,
 ) => rpc.middleware(Admission)
+
 const scoped = <
   Tag extends string,
   Payload extends Schema.Top,
@@ -242,6 +249,7 @@ export const SessionInfo = Schema.Struct({
   machine: Schema.optional(Schema.String),
   view: Schema.optional(Schema.String),
 })
+
 export type SessionInfo = typeof SessionInfo.Type
 
 const LINE_ERRORS = [UnknownMachine, MachineUnavailable, MachineIncompatible] as const
@@ -265,6 +273,7 @@ export const ProjectRow = Schema.Struct({
   entrySessionId: Schema.NullOr(Schema.String),
   activity: ProjectActivity,
 })
+
 export type ProjectRow = typeof ProjectRow.Type
 
 export const WatchSession = Schema.Struct({
@@ -272,6 +281,7 @@ export const WatchSession = Schema.Struct({
   parentId: Schema.NullOr(Schema.String),
   finished: Schema.NullOr(Schema.Number),
 })
+
 export type WatchSession = typeof WatchSession.Type
 
 export const WatchEvent = Schema.Union([
@@ -280,6 +290,7 @@ export const WatchEvent = Schema.Union([
   Schema.TaggedStruct("Session", { session: WatchSession }),
   Schema.TaggedStruct("SessionEnded", { id: Schema.String, projectId: Schema.String }),
 ])
+
 export type WatchEvent = typeof WatchEvent.Type
 
 export const EventsFact = Schema.Struct({

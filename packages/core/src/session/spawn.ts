@@ -65,14 +65,17 @@ const UNNAMED = new Set(["", ".", ".."])
 
 export const attachmentNames = (names: ReadonlyArray<string>) => {
   const taken = new Set<string>()
+
   return names.map((given) => {
     const name = UNNAMED.has(given) ? "file" : given
     const dot = name.lastIndexOf(".")
     const stem = dot > 0 ? name.slice(0, dot) : name
     const extension = dot > 0 ? name.slice(dot) : ""
     let unique = name
+
     for (let n = 2; taken.has(unique); n++) unique = `${stem}-${n}${extension}`
     taken.add(unique)
+
     return unique
   })
 }
@@ -129,12 +132,14 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
     const { abandonLaunch } = yield* Archive.Service
     const { rerun } = yield* Move.Service
     const logged = Reactor.logFailure
+
     const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
       effect.pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
         Effect.provideService(Git.Service, git),
       )
+
     const launchOwned = (
       h: Runtime,
       target: string | undefined,
@@ -159,6 +164,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
             : Effect.void,
         ),
       )
+
     const machinesListing = machines(
       runtimes,
       harnesses.all.map((adapter) => adapter.id),
@@ -171,15 +177,19 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
       Effect.gen(function* () {
         if (decision.runtime === undefined) {
           const machines = yield* machinesListing
+
           const list = machines[0]!.runtimes
             .map((runtime) => `${runtime.kind}: ${runtime.status}${runtime.reason ? ` (${runtime.reason})` : ""}`)
             .join("; ")
+
           return yield* new NoRuntime({
             message: `no terminal runtime was chosen for this start (${list || "none is loaded"})`,
           })
         }
+
         const rt = yield* runtimes.route(decision.runtime)
         yield* runtimes.online(rt)
+
         return rt
       })
 
@@ -187,21 +197,28 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
       Effect.gen(function* () {
         const refuse = (why: string) => new NoSuchSession({ id, message: `--share ${id}: ${why}` })
         const p = yield* db.session.getSession(id)
+
         if (!p) return yield* refuse(`no session ${id}`)
+
         if (p.projectId !== input.projectId) return yield* refuse("it belongs to another project")
+
         if (archived(p)) return yield* refuse("it was archived")
+
         if (runtimeOf(p) !== runtime || terminalOf(p).machine !== machineId)
           return yield* refuse(
             `ineligible: it runs in ${runtimeOf(p)} on ${terminalOf(p).machine}, not ${runtime} on ${machineId}`,
           )
         const worktree = yield* worktreeOf(p).pipe(Effect.mapError((e) => refuse(e.message)))
+
         if (!(yield* fs.exists(worktree).pipe(Effect.orDie)))
           return yield* refuse(`ineligible: its worktree ${worktree} is gone`)
+
         if (
           !(yield* listProjectRepositories(worktree).pipe(Effect.mapError((e) => refuse(e.message)))) &&
           !Option.contains(yield* mainCheckout(worktree).pipe(Effect.option), input.root)
         )
           return yield* refuse(`ineligible: its worktree is not in ${input.root}`)
+
         return worktree
       })
 
@@ -211,30 +228,39 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
           return yield* new NoCallingSession()
         const root = input.root
         const agent = input.agent
+
         if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
+
         const parent =
           input.parentSessionId === undefined ? undefined : yield* db.session.getSession(input.parentSessionId)
+
         const parentRuntime = parent === undefined ? undefined : runtimeOf(parent) || undefined
         const from = input.harness !== undefined ? undefined : parent
+
         const namedShare =
           input.runtime === undefined && input.share !== undefined
             ? yield* db.session.getSession(input.share)
             : undefined
+
         const followedShare =
           namedShare !== undefined && namedShare.projectId === input.projectId && !archived(namedShare)
             ? namedShare
             : undefined
+
         const id = yield* db.session.newSessionId
         const attachments = input.files ?? []
         const sessionFolder = layout.sessionFolder(input.projectId, id)
         const filesFolder = path.join(sessionFolder, "files")
+
         const files = attachmentNames(attachments.map((file) => path.basename(file.name))).map((name) =>
           path.join(filesFolder, name),
         )
+
         const dropAttachments =
           attachments.length === 0
             ? Effect.void
             : fs.remove(sessionFolder, { recursive: true, force: true }).pipe(Effect.ignore)
+
         const writeAttachments =
           attachments.length === 0
             ? Effect.void
@@ -250,10 +276,12 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                     }),
                 ),
               )
+
         const attachmentsOwned = yield* Ref.make(false)
         yield* Effect.acquireRelease(writeAttachments, () =>
           Ref.get(attachmentsOwned).pipe(Effect.flatMap((owned) => (owned ? Effect.void : dropAttachments))),
         )
+
         const decision = yield* plugins.start({
           project: root,
           agent,
@@ -273,20 +301,25 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
           parentRuntime,
           machines: yield* machinesListing,
         })
+
         const { provider, model } = decision
+
         const runnableHere = harnessCatalog.pipe(
           Effect.provideService(Harness.Service, harness),
           Effect.provideService(Harnesses.Service, harnesses),
           Effect.map((choices) => choices.filter((choice) => choice.problem === null).map((choice) => choice.harness)),
         )
+
         if (decision.harness === undefined) return yield* new NoHarnessChosen({ runnable: yield* runnableHere })
         const rt = yield* chosenRuntime(decision)
         const target = input.machine.id === decision.machine.id ? input.machine.target : undefined
         const runtimeKind = rt.id
+
         const inheritedFrom =
           from !== undefined && Object.keys(decision.decidedBy).length === 0 && decision.harness === harnessIdOf(from)
             ? from.id
             : undefined
+
         const routed = (e: HarnessUnavailable) =>
           Effect.gen(function* () {
             const origin =
@@ -295,12 +328,15 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                 : inheritedFrom === undefined
                   ? ""
                   : ` (inherited from ${inheritedFrom})`
+
             return yield* new HarnessUnavailable({
               harness: e.harness,
               message: `${e.message}${origin}${runnableNote(yield* runnableHere)}`,
             })
           })
+
         const harnessId = decision.harness
+
         if (harnesses.find(harnessId) === undefined) return yield* routed(unprovided(harnessId, harnesses.all))
         yield* preflight(harnessId, provider ?? null, model ?? null, input.env).pipe(
           Effect.provideService(Harness.Service, harness),
@@ -308,27 +344,33 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
           Effect.catchTag("HarnessUnavailable", routed),
         )
         const adapter = yield* harnesses.get(harnessId)
+
         const sender =
           parent !== undefined
             ? { id: parent.id, title: parent.name }
             : input.origin?.reportTo === undefined
               ? undefined
               : { id: input.origin.reportTo }
+
         const task = sender === undefined ? decision.prompt : sessionEnvelope(sender, decision.prompt)
         const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
         const now = yield* Clock.currentTimeMillis
         const held = yield* Deferred.make<void>()
+
         const reserveWorktree = (folders: boolean) =>
           Effect.gen(function* () {
             const refuse = (message: string) => new AllocationFailed({ message })
+
             const repository = folders
               ? path.basename(root)
               : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
+
             if (!safeRepositoryDirectory(repository))
               return yield* refuse(
                 `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or a session id)`,
               )
             const parentPath = path.join(layout.worktrees, repository)
+
             if (
               yield* allocationParentBlocked(parentPath).pipe(
                 Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`)),
@@ -338,10 +380,13 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                 `refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`,
               )
             yield* fs.makeDirectory(parentPath, { recursive: true }).pipe(Effect.mapError((e) => refuse(e.message)))
+
             for (let i = 0; i < ALLOCATION_NAME_ATTEMPTS; i++) {
               const candidate = Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
+
               if (!ALLOCATION_LEAF.test(candidate)) continue
               const where = layout.allocationWorktree(repository, candidate)
+
               const made = yield* fs.makeDirectory(where).pipe(
                 Effect.as(true),
                 Effect.catchTag("PlatformError", (e) =>
@@ -350,19 +395,24 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                     : Effect.fail(refuse(`${where}: ${e.message}`)),
                 ),
               )
+
               if (made) return where
             }
+
             return yield* refuse(
               `no unused 4-hex worktree name under ${repository} after ${ALLOCATION_NAME_ATTEMPTS} attempts`,
             )
           })
+
         const admit = (shared: string | undefined) =>
           Effect.scoped(
             Effect.gen(function* () {
               const handedOver = yield* Ref.make(false)
+
               const folders = yield* listProjectRepositories(root).pipe(
                 Effect.mapError((e) => new AllocationFailed({ message: `${root}: ${e.message}` })),
               )
+
               const cwd =
                 shared ??
                 (yield* Effect.acquireRelease(reserveWorktree(folders !== undefined), (reserved) =>
@@ -372,6 +422,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                     ),
                   ),
                 ))
+
               const draft: Omit<NewSession, "projectId"> = {
                 id,
                 agent,
@@ -391,6 +442,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                 createdAt: now,
                 lastActive: now,
               }
+
               return yield* Effect.uninterruptible(
                 Effect.gen(function* () {
                   const inserted = yield* db.session.insertSession(draft, input.projectId, {
@@ -402,12 +454,15 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                     origin: input.origin,
                     archiveOnIdle: input.archive === true,
                   })
+
                   if (inserted === false) return yield* new LimitReached({ limit: options.maxSessions! })
+
                   if (inserted === "parent-ended")
                     return yield* new NoSuchSession({
                       id: input.parentSessionId!,
                       message: `${input.parentSessionId} has ended and can no longer start sessions`,
                     })
+
                   if (inserted !== true) return { before: inserted }
                   yield* Ref.set(handedOver, true)
                   yield* Ref.set(attachmentsOwned, true)
@@ -429,22 +484,27 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                       .pipe(Effect.ensuring(leave), logged(`spawn ${id}`)),
                     scope,
                   )
+
                   return { before: undefined }
                 }),
               )
             }),
           )
+
         const admitted =
           input.share === undefined
             ? yield* admit(undefined)
             : yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(input.share)) ?? ""))(
                 Effect.gen(function* () {
                   const shared = yield* shareOf(input, input.share!, runtimeKind, decision.machine.id)
+
                   return yield* admit(shared)
                 }),
               )
+
         if (admitted.before !== undefined) {
           const { before } = admitted
+
           return {
             id: before.id,
             harness: before.harness as HarnessId,
@@ -455,7 +515,9 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
             trace: before.routing?.trace ?? [],
           }
         }
+
         yield* Deferred.await(held)
+
         return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
       },
       Effect.scoped,

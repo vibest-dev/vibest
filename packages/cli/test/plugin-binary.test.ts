@@ -41,27 +41,34 @@ const userEnv = (home: string) => {
     PATH: "/usr/bin:/bin",
     HC_SOCKET: path.join(home, "hc.sock"),
   }
+
   delete env.VIBEST_SESSION_ID
   delete env.VIBEST_AGENT
+
   return env
 }
 
 const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<PluginInfo>>) => Promise<void>) => {
   const socket = path.join(home, "vibest.sock")
   const log = path.join(home, "vibestd.log")
+
   const rpc = <A>(effect: Effect.Effect<A, unknown, Effect.Services<ReturnType<typeof probe>>>) =>
     Effect.runPromise(effect.pipe(Effect.provide(Platform.services)))
+
   const daemon = Bun.spawn([binary, "daemon", "--foreground"], {
     env: userEnv(home),
     stdout: "ignore",
     stderr: Bun.file(log),
   })
+
   note(daemon.pid, `${binary} daemon --foreground`)
+
   try {
     for (const deadline = Date.now() + 10_000; !(await rpc(probe(socket))); await Bun.sleep(100)) {
       if (daemon.exitCode !== null || Date.now() > deadline)
         assert.fail(`vibestd did not come up:\n${await fs.readFile(log, "utf8").catch(() => "")}`)
     }
+
     await f(() =>
       rpc(
         connect(socket).pipe(
@@ -73,7 +80,9 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
     )
   } finally {
     if (daemon.exitCode === null) daemon.kill()
+
     for (const deadline = Date.now() + 2_000; daemon.exitCode === null && Date.now() < deadline;) await Bun.sleep(50)
+
     if (daemon.exitCode === null) daemon.kill("SIGKILL")
     await daemon.exited
   }
@@ -89,16 +98,20 @@ it(
   { timeout: 60_000 },
   async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-p11-"))
+
     for (const [file, content] of Object.entries(plugins)) {
       await fs.mkdir(path.dirname(path.join(home, "plugins", file)), { recursive: true })
       await fs.writeFile(path.join(home, "plugins", file), content)
     }
+
     try {
       await withVibestd(home, async (list) => {
         const listed = await listUntil(list, (rows) => {
           const status = Object.fromEntries(rows.map((p) => [path.basename(p.id), p.status]))
+
           return status["shared"] === "active" && status["bundled"] === "active" && status["broken.ts"] === "failed"
         })
+
         const status = Object.fromEntries(listed.map((p) => [path.basename(p.id), [p.status, p.error]]))
         assert.deepStrictEqual(status["shared"], ["active", undefined])
         assert.deepStrictEqual(status["bundled"], ["active", undefined])
@@ -118,10 +131,13 @@ const listUntil = async (
   done: (listed: ReadonlyArray<PluginInfo>) => boolean,
 ) => {
   let listed: ReadonlyArray<PluginInfo> = []
+
   for (const deadline = Date.now() + fsEventsDeliveryUnderLoadMs; Date.now() < deadline; await Bun.sleep(100)) {
     listed = await list()
+
     if (done(listed)) return listed
   }
+
   return assert.fail(`gave up; last listing: ${JSON.stringify(listed)}`)
 }
 
@@ -134,8 +150,10 @@ it(
     const version = path.join(home, "shared", "version.ts")
     await fs.mkdir(path.join(home, "plugins"), { recursive: true })
     await fs.mkdir(path.dirname(version))
+
     const versionFileWithTopLevelAwait = (v: string) =>
       `await new Promise((r) => setTimeout(r, 10))\nexport const version = "${v}"\n`
+
     await fs.writeFile(version, versionFileWithTopLevelAwait("v1"))
     await fs.writeFile(
       path.join(home, "plugins", "live.ts"),
@@ -148,27 +166,33 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
 `,
     )
     const log = async () => (await fs.readFile(setups, "utf8")).trim().split("\n")
+
     try {
       await withVibestd(home, async (list) => {
         const first = byId(await listUntil(list, (l) => byId(l, "live")?.status === "active"), "live")!
         assert.deepStrictEqual(await log(), ["v1"])
 
         await fs.writeFile(version, versionFileWithTopLevelAwait("v2"))
+
         const second = byId(
           await listUntil(list, (l) => byId(l, "live") !== undefined && byId(l, "live")!.revision !== first.revision),
           "live",
         )!
+
         assert.strictEqual(second!.status, "active")
         assert.deepStrictEqual(await log(), ["v1", "v2"])
 
         await fs.writeFile(version, `export const version = await new Promise(() => {})\n`)
+
         const hung = byId(
           await listUntil(list, (l) => byId(l, "live")?.error?.includes("import timed out") === true),
           "live",
         )!
+
         assert.deepInclude(hung, { status: "active", revision: second!.revision })
 
         await fs.writeFile(version, versionFileWithTopLevelAwait("v3"))
+
         const fixed = byId(
           await listUntil(
             list,
@@ -179,6 +203,7 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
           ),
           "live",
         )!
+
         assert.strictEqual(fixed!.status, "active")
         assert.deepStrictEqual(await log(), ["v1", "v2", "v3"])
       })
@@ -221,6 +246,7 @@ export default Plugin.define({
 })
 `,
     )
+
     try {
       await withVibestd(home, async (list) => {
         await listUntil(list, (l) => l[0]?.status === "active")
@@ -231,6 +257,7 @@ export default Plugin.define({
         await listUntil(list, (l) => l[1]?.status === "active")
         await fs.writeFile(path.join(home, "trigger"), "")
         const lines = async () => (await fs.readFile(log, "utf8")).trim().split("\n")
+
         for (const deadline = Date.now() + 15_000; (await lines()).length < 2 && Date.now() < deadline;)
           await Bun.sleep(100)
         assert.deepStrictEqual(await lines(), ["evaluated", "same"])

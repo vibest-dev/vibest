@@ -92,17 +92,24 @@ export const nameProblem = (name: string) =>
 
 export const targetProblem = (target: string) => {
   const at = target.indexOf("@")
+
   if (target === "") return "the ssh target is empty"
+
   if (new TextEncoder().encode(target).length > 1024) return "the ssh target is longer than 1024 bytes"
+
   if (UNSAFE.test(target)) return "the ssh target has a space or a control character"
+
   if (target.startsWith("-")) return "the ssh target starts with -"
+
   if (at !== -1 && target.slice(0, at).includes(":"))
     return "the ssh target names a password; use a key (ssh-agent or ~/.ssh/config)"
+
   return undefined
 }
 
 export const sshArgv = (target: string) => {
   const port = /^(.+):(\d+)$/.exec(target)
+
   return [
     "ssh",
     "-o",
@@ -128,6 +135,7 @@ const differentMessage = (name: string, answered: string) =>
 const exitReason = (name: string, exit: PipeExit) => {
   if (exit.code === 127) return `vibest is not installed on ${name}`
   const last = exit.stderr.trim().split("\n").at(-1)?.trim()
+
   return last || `ssh exited ${exit.code ?? "on a signal"}`
 }
 
@@ -140,6 +148,7 @@ const LINE_TAGS: Record<LineError["_tag"], true> = {
   InvalidCaller: true,
   MachineDown: true,
 }
+
 const isLineError = (e: unknown): e is LineError =>
   Predicate.hasProperty(e, "_tag") && typeof e._tag === "string" && Object.hasOwn(LINE_TAGS, e._tag)
 
@@ -189,16 +198,21 @@ const make = Effect.gen(function* () {
         { name: row.name, target: row.target, vibestd: row.vibestdId, runtimes: there.get(row.name)?.runtimes ?? [] },
         runtime,
       )
+
       if (hook === "connect") {
         const at = yield* Clock.currentTimeMillis
         const kept = noted.get(row.name) ?? new Map()
+
         for (const plugin of fired.plugins) {
           const notes = fired.notes.filter((note) => note.plugin === plugin)
+
           if (notes.length === 0) kept.delete(plugin)
           else kept.set(plugin, { notes, at })
         }
+
         noted.set(row.name, kept)
       }
+
       return fired.notes
     })
 
@@ -217,10 +231,12 @@ const make = Effect.gen(function* () {
           const here = yield* runtimes.all
           const locate = here.find((r) => r.id === kind)?.locate
           const label = shownKind(here, kind)
+
           if (row === undefined || locate === undefined)
             return { terminals: NONE, note: cannotShow(name, label) } as View
           const seen = there.get(name)
           const reported = seen?.runtimes.find((r) => r.kind === kind)
+
           if (reported?.link === undefined)
             return {
               terminals: NONE,
@@ -231,6 +247,7 @@ const make = Effect.gen(function* () {
                     ? `${name} has no ${kind} runtime`
                     : `${kind} on ${name} is ${reported.status}${reported.reason ? ` (${reported.reason})` : ""}`,
             } as View
+
           const look = locate({ id: name, target: row.target, link: reported.link }, sessions).pipe(
             Effect.catchCause((cause) =>
               Effect.succeed({
@@ -240,10 +257,13 @@ const make = Effect.gen(function* () {
               }),
             ),
           )
+
           const first = yield* look
+
           if (!first.missing) return first as View
           const key = `${name}\0${kind}`
           const last = repairs.get(key)
+
           if (
             !always &&
             last !== undefined &&
@@ -252,12 +272,16 @@ const make = Effect.gen(function* () {
             return { terminals: NONE, note: last.note } as View
           const notes = yield* fire(row, "connect", kind)
           const again = yield* look
+
           if (!again.missing) {
             repairs.delete(key)
+
             return again as View
           }
+
           const note = again.note ?? (notes.map(noteText).join("; ") || `${name}'s agents are not in ${label} here`)
           repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
+
           return { terminals: NONE, note } as View
         }),
       ),
@@ -267,6 +291,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const before = entries.get(name)
       entries.set(name, { ...entry, since: yield* Clock.currentTimeMillis })
+
       if (before?.state !== entry.state || before.reason !== entry.reason)
         yield* Effect.logInfo(`machine ${name}: ${entry.state}${entry.reason ? ` (${entry.reason})` : ""}`)
     })
@@ -276,7 +301,9 @@ const make = Effect.gen(function* () {
       const pipe = yield* transport(sshArgv(target)).pipe(
         Effect.mapError((e) => new MachineDown({ message: `cannot run ssh: ${e.message}` })),
       )
+
       const ended = pipe.exited.pipe(Effect.map((exit) => exitReason(name, exit)))
+
       const down = (error: unknown) =>
         ended.pipe(
           Effect.timeoutOption(EXIT_WAIT),
@@ -286,7 +313,9 @@ const make = Effect.gen(function* () {
             ),
           ),
         )
+
       const unavailable = (message: string) => Effect.fail(new MachineUnavailable({ machine: name, message }))
+
       const line =
         (lost: (reason: string) => string) =>
         <A, E>(effect: Effect.Effect<A, E | LineError>) =>
@@ -308,25 +337,30 @@ const make = Effect.gen(function* () {
                 }),
               ),
           )
+
       const call = line(
         (reason) =>
           `lost the line to ${name} during the call (${reason}); it may have happened there; check, then retry`,
       )
+
       const opening = line((reason) => reason)
       const client = yield* connectPipe(pipe.socket)
       const failed = (e: { readonly message: string }) => new MachineDown({ message: e.message })
       const ping = yield* opening(client.Ping(undefined)).pipe(Effect.mapError(failed))
+
       if (ping.protocol !== PROTOCOL)
         return yield* new MachineDown({
           message: `${name} runs vibest ${ping.version} (protocol ${ping.protocol ?? "none"}); run vibest update there`,
           stop: "mismatch",
         })
+
       const hello = yield* opening(
         RpcClient.withHeaders(
           client["Peer.Hello"]({ id: self.id, name: self.name, callsMe: name }),
           peerHeaders(self.id),
         ),
       ).pipe(Effect.mapError(failed))
+
       return {
         hello,
         version: ping.version,
@@ -337,6 +371,7 @@ const make = Effect.gen(function* () {
   const receive = (name: string, link: Link, item: OutboxItem) =>
     Effect.gen(function* () {
       const address = `${name}/${shortId(item.session)}`
+
       const outcome = yield* db.remote.receivePeerItem({
         id: item.id,
         recipient: item.recipient,
@@ -344,6 +379,7 @@ const make = Effect.gen(function* () {
         sender: address,
         content: `${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`,
       })
+
       if (outcome === "unknown")
         yield* Effect.logWarning(
           `${name}: dropped a ${item.kind} for session ${item.recipient}, which this vibestd does not have`,
@@ -362,6 +398,7 @@ const make = Effect.gen(function* () {
       if (first !== undefined) yield* Effect.addFinalizer(() => Scope.close(first.scope, Exit.void))
       yield* set(row.name, { state: "connecting", reason: entries.get(row.name)?.reason })
       const opened = first?.opened ?? (yield* open(row.name, row.target))
+
       if (opened.hello.id !== row.vibestdId)
         return yield* new MachineDown({
           message: differentMessage(row.name, opened.hello.id),
@@ -376,8 +413,10 @@ const make = Effect.gen(function* () {
         version: opened.version,
         link: opened.link,
       })
+
       if (first === undefined) yield* Effect.forkScoped(lock.withLock(row.name)(fire(row, "connect")))
       const link = opened.link
+
       const outbox = link.client["Peer.Outbox"](undefined, { headers: peerHeaders(self.id) }).pipe(
         Stream.runForEach((item) => receive(row.name, link, item)),
         Effect.matchCause({
@@ -385,6 +424,7 @@ const make = Effect.gen(function* () {
           onFailure: () => `${row.name} stopped answering`,
         }),
       )
+
       const reason = yield* link.exited.pipe(
         Effect.map((exit) => exitReason(row.name, exit)),
         Effect.raceFirst(
@@ -400,6 +440,7 @@ const make = Effect.gen(function* () {
           ),
         ),
       )
+
       return yield* new MachineDown({ message: reason })
     }).pipe(Effect.scoped)
 
@@ -407,24 +448,31 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       let step = yield* Schedule.toStep(RETRY)
       let given = first
+
       while (true) {
         const row = given?.row ?? (yield* db.remote.machineNamed(name))
+
         if (row === undefined) return
         const down = yield* connection(row, given).pipe(Effect.flip)
         given = undefined
+
         if (down.stop !== undefined) {
           yield* set(name, {
             state: down.stop === "different" ? "different" : "unreachable",
             reason: down.message,
             stop: down.stop,
           })
+
           return
         }
+
         const was = entries.get(name)
         const now = yield* Clock.currentTimeMillis
+
         if (was?.state === "connected" && now - was.since >= Duration.toMillis(RETRY_RESET)) {
           step = yield* Schedule.toStep(RETRY)
         }
+
         yield* set(name, { state: "unreachable", reason: down.message })
         const [, delay] = yield* Effect.orDie(step(now, undefined))
         yield* Effect.sleep(delay)
@@ -468,6 +516,7 @@ const make = Effect.gen(function* () {
     rows.map((row) => {
       const entry = entries.get(row.name) ?? { state: "connecting" as const, since: row.connectedAt }
       const connected = entry.state === "connected"
+
       const info: MachineInfo = {
         name: row.name,
         target: row.target,
@@ -479,6 +528,7 @@ const make = Effect.gen(function* () {
         ...(connected && entry.vibestd !== undefined ? { vibestd: entry.vibestd } : {}),
         ...(connected && entry.version !== undefined ? { version: entry.version } : {}),
       }
+
       return { info, link: connected ? entry.link : undefined }
     }),
   )
@@ -486,9 +536,12 @@ const make = Effect.gen(function* () {
   return {
     add: Effect.fn("Machines.add")(function* (name: string, target: string) {
       const problem = nameProblem(name) ?? targetProblem(target)
+
       if (problem !== undefined) return yield* failed(problem)
+
       if ((yield* db.remote.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
       const pipe = yield* Scope.make()
+
       const opened = yield* open(name, target).pipe(
         Scope.provide(pipe),
         Effect.timeoutOrElse({
@@ -500,18 +553,25 @@ const make = Effect.gen(function* () {
         ),
         Effect.onError(() => Scope.close(pipe, Exit.void)),
       )
+
       const id = opened.hello.id
       const added = id === self.id ? undefined : yield* db.remote.addMachine({ name, target, vibestdId: id })
+
       if (added === undefined) {
         yield* Scope.close(pipe, Exit.void)
+
         if (id === self.id) return yield* failed(`${name} is this vibestd`)
         const same = yield* db.remote.machineWithVibestd(id)
+
         if (same !== undefined) return yield* new AlreadyAdded({ machine: same.name, id })
+
         return yield* failed(alreadyNamed(name))
       }
+
       yield* start(name, { row: added, opened, scope: pipe })
       yield* heard(name, opened.hello.runtimes)
       const notes = yield* lock.withLock(name)(fire(added, "connect"))
+
       return {
         name,
         id,
@@ -529,6 +589,7 @@ const make = Effect.gen(function* () {
         ({ info }) =>
           Effect.gen(function* () {
             const seen = there.get(info.name)
+
             const views = yield* Effect.forEach(
               seen?.runtimes ?? [],
               (r) =>
@@ -549,9 +610,11 @@ const make = Effect.gen(function* () {
                 ),
               { concurrency: "unbounded" },
             )
+
             const notes = [...(noted.get(info.name)?.values() ?? [])].flatMap((kept) =>
               kept.notes.map((note) => ({ ...note, at: kept.at })),
             )
+
             return {
               ...info,
               runtimes: views,
@@ -569,8 +632,10 @@ const make = Effect.gen(function* () {
       const row = yield* db.remote.machineNamed(name)
       const fiber = fibers.get(name)
       fibers.delete(name)
+
       if (fiber !== undefined) yield* Fiber.interrupt(fiber)
       entries.delete(name)
+
       if (row === undefined || !(yield* db.remote.removeMachine(name)))
         return yield* new UnknownMachine({
           machine: name,
@@ -579,7 +644,9 @@ const make = Effect.gen(function* () {
       const notes = yield* lock.withLock(name)(fire(row, "remove"))
       there.delete(name)
       noted.delete(name)
+
       for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
+
       return { notes }
     }),
 
@@ -590,7 +657,9 @@ const make = Effect.gen(function* () {
           machines: (yield* db.remote.machines).map((row) => row.name),
         })
       const entry = entries.get(name)
+
       if (entry?.state === "connected" && entry.link !== undefined) return entry.link
+
       return yield* unavailable(name, entry)
     }),
   }

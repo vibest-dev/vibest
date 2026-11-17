@@ -6,6 +6,7 @@ export const packagePath = (...segments: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     const here = path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))
+
     return path.join(here, "..", "..", ...segments)
   })
 
@@ -14,6 +15,7 @@ const decodeSchema = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Rec
 export const loadSchema = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const text = yield* fs.readFileString(yield* packagePath("schema", "herdr-api.schema.json"))
+
   return (yield* decodeSchema(text)) as JSONSchema
 })
 

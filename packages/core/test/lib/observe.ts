@@ -69,8 +69,10 @@ export const writeEnd = (id: string, harness: string, payload: object, offsetMs 
 export const eventsOf = (sessionId: string, type?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     const rows = yield* sql<{ seq: number; type: string; at: number; data: string }>`SELECT seq, type, at, data
       FROM event WHERE aggregate = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY seq`
+
     return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
   }).pipe(Effect.orDie)
 
@@ -79,16 +81,20 @@ export const replyText = (id: string) => replyOf(id).pipe(Effect.map((reply) => 
 export const replyOf = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     const [row] = yield* sql<{ reply: string | null }>`SELECT reply FROM execution
       WHERE session_id = ${id} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+
     return row?.reply ?? undefined
   })
 
 export const lastSentBy = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     const [row] = yield* sql<{ id: number; kind: string; status: string; content: string }>`SELECT id, kind, status,
         content FROM inbox WHERE sender_session_id = ${id} ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+
     return row
   })
 
@@ -108,5 +114,6 @@ export const processEnds = (sessionId: string) =>
 export const systemPromptFile = (id: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
+
     return path.join(yield* systemPromptRoot, id, "system-prompt.md")
   })

@@ -16,11 +16,13 @@ export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const project = yield* Project.Service
   const runtimes = yield* Runtimes.Service
+
   return {
     "Project.Open": () =>
       Effect.gen(function* () {
         const c = yield* cliOnly("Project.Open")
         const project = yield* resolveProject(db, yield* atProject(c.repositoryRoot))
+
         return { projectId: project.id, directory: project.directory }
       }),
 
@@ -28,6 +30,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const c = yield* cliOnly("Project.Move")
         const moved = yield* moveProjectHere(db, yield* atProject(c.repositoryRoot), from)
+
         return {
           projectId: moved.id,
           directory: moved.directory,
@@ -45,14 +48,18 @@ export const make = Effect.gen(function* () {
         const env = filterCallerEnv(specs, callerEnv)
         const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
         const place = entryPlace({ runtime, hits })
+
         if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
+
         if (place.in === "terminal") {
           const spec = specs.find((item) => item.id === place.runtime)
+
           if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
             return yield* new LaunchFailed({
               message: spec.missing ?? `this ${spec.name ?? place.runtime} place could not be named`,
             })
         }
+
         return { directory: project.directory, place }
       }),
 
@@ -60,6 +67,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const c = yield* cliOnly("Project.Create")
         const created = yield* createProject(directory, from, c.repositoryRoot)
+
         return {
           directory: created.directory,
           folders: created.folders.map((folder) => ({

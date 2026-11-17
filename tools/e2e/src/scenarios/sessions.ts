@@ -14,6 +14,7 @@ type ListedGit = {
   why: string
   unknown?: string
 }
+
 type Listed = {
   id: string
   title: string
@@ -28,6 +29,7 @@ type Listed = {
   git: ListedGit | null
   latest: { status: string; summary: string } | null
 }
+
 type Removed = {
   processes: string
   pane: string
@@ -36,6 +38,7 @@ type Removed = {
   branch: string | null
   reasons: Array<string>
 }
+
 type Project = Awaited<ReturnType<typeof piProject>>
 
 const ls = async (w: World, p: Project, all = false) =>
@@ -67,6 +70,7 @@ const exists = (file: string) =>
 const git = async (w: World, cwd: string, ...args: Array<string>) => {
   const r = await w.run(cwd, ["git", ...args])
   expect(r.code === 0, `git ${args.join(" ")} in ${cwd}: ${r.stderr}`)
+
   return r.stdout.trim()
 }
 
@@ -82,13 +86,16 @@ const spawningModel = (child: string, flags: string) => {
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
       const vibest = /run `([^`]+) send [0-9a-f-]{36} -- '<message>'`/.exec(system)?.[1]
       const last = messages.at(-1)
+
       const answer =
         vibest !== undefined && last?.role === "user" && text(last).includes("spawn-child")
           ? toolCall("call-run", "bash", { command: `${vibest} run pi ${flags} -- '${ask(child)}'` })
           : reply(text(last).includes(`done-${child}`) ? `done-${child}\nstatus: completed` : "ok")
+
       return new Response(answer, { headers: sseHeaders })
     },
   })
+
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
@@ -102,15 +109,18 @@ const fileReadingModel = () => {
       const last = messages.at(-1)
       const attached = /Attached files: ([^\s\\"]+)/.exec(text(last))?.[1]
       const word = /s57-word-(\w+)/.exec(text(last))?.[1]
+
       const answer =
         last?.role === "user" && attached !== undefined
           ? toolCall("call-read", "bash", { command: `cat ${attached}` })
           : last?.role === "tool" && word !== undefined
             ? reply(`done-s57 ${word}\nstatus: completed`)
             : reply("ok")
+
       return new Response(answer, { headers: sseHeaders })
     },
   })
+
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
@@ -134,15 +144,19 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const p = await piProject(w, "s1")
       const second = heldModel()
+
       try {
         p.model.release()
         second.release()
         const session = `${w.herdrSession}-s1`
+
         const subDir = await piShadow(path.join(w.root, "pi-s1-sub"), w.profile, {
           fake: { baseUrl: p.model.url },
           second: { baseUrl: second.url, models: ["m2"] },
         })
+
         const env = `PI_CODING_AGENT_DIR=${subDir}`
+
         const run = async (task: string, ...flags: Array<string>) =>
           (
             JSON.parse(
@@ -153,6 +167,7 @@ const checks: ReadonlyArray<Check> = [
               }),
             ) as { id: string }
           ).id
+
         const a = await run("s1", "--title", "s1 title", "--provider", "second", "--model", "m2")
         await answered(w, p, a, "s1")
         expect(second.asked("s1") > 0 && p.model.asked("s1") === 0, "the execution did not run on provider second")
@@ -178,10 +193,12 @@ const checks: ReadonlyArray<Check> = [
         )
         const branch = await w.run(worktree, ["git", "symbolic-ref", "-q", "HEAD"])
         expect(branch.code !== 0, `the worktree is on ${branch.stdout.trim()}, not detached`)
+
         for (const file of ["vibest.db", "vibest.db-wal"]) {
           const bytes = await fs.readFile(path.join(w.vibestHome, file), "latin1").catch(() => "")
           expect(!bytes.includes(subDir), `${file} stores the --env value`)
         }
+
         const b = await run("s1share", "--share", a.slice(0, 8))
         await answered(w, p, b, "s1share")
         const sharer = (await ls(w, p)).find((e) => e.id === b)
@@ -203,6 +220,7 @@ const checks: ReadonlyArray<Check> = [
       "vibest result has no reply before a subagent's first execution ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the entry session and the subagent with its latest reply; a worktree removed from outside leaves every session listed, that row's git unknown and the other complete; after archive only vibest ls --all lists it, exited",
     run: async (w) => {
       const p = await piProject(w, "s5")
+
       try {
         const a = await p.runSub("s5")
         await until("the subagent's execution at the model", () => p.model.held() > 0, 60_000)
@@ -211,6 +229,7 @@ const checks: ReadonlyArray<Check> = [
         p.model.release()
         await answered(w, p, a, "s5")
         const after = await resultOf(w, p, a)
+
         const projected = row<{ reply: string | null; reported: string | null }>(
           w,
           `SELECT t.reply, e.data ->> '$.reply' AS reported FROM execution t
@@ -218,6 +237,7 @@ const checks: ReadonlyArray<Check> = [
             WHERE t.session_id = ? AND t.outcome = 'completed'`,
           a,
         )
+
         expect(
           projected?.reply?.includes("done-s5") === true &&
             projected.reply === projected.reported &&
@@ -225,10 +245,12 @@ const checks: ReadonlyArray<Check> = [
             after.reply.status === "completed",
           `execution.reply: ${JSON.stringify(projected)}, vibest result: ${JSON.stringify(after.reply)}`,
         )
+
         const status = await w.json<{ daemon: { status: string; pid: number | null } }>(["status"], {
           cwd: p.repo,
           env: p.env,
         })
+
         expect(
           status.daemon.status === "running" && status.daemon.pid === (await w.daemonPid()),
           `status: ${JSON.stringify(status)}`,
@@ -279,6 +301,7 @@ const checks: ReadonlyArray<Check> = [
       "a just-finished --archive-on-idle session loses its worktree, with no notice and nothing it sent still waiting; vibest run --archive-on-completion is a usage error; vibest archive of a clean subagent closes its pane, its harness process exits and removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one; archiving a --share session while the first one lives finishes it with the shared worktree kept, and the reconcile after vibestd restarts posts no notice for it",
     run: async (w) => {
       const p = await piProject(w, "s6")
+
       try {
         p.model.release()
         const auto = await p.runSub("auto", "--archive-on-idle")
@@ -287,6 +310,7 @@ const checks: ReadonlyArray<Check> = [
           "the session's worktree path",
           async () => {
             autoTree = (await ls(w, p, true)).find((e) => e.id === auto)?.worktree ?? ""
+
             return autoTree !== ""
           },
           30_000,
@@ -299,12 +323,15 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(p.notices(auto, "working directory") === 0, "its own exiting processes kept the worktree")
         expect(p.notices(auto, "") === 0, "a notice for a clean archive")
+
         const waiting = row<{ n: number }>(
           w,
           "SELECT count(*) AS n FROM inbox WHERE (sender_session_id = ?1 OR session_id = ?1) AND status IN ('pending', 'delivering')",
           auto,
         )
+
         expect(waiting?.n === 0, `rows still waiting for the archived session: ${waiting?.n}`)
+
         const ended = (type: string) =>
           row<{ n: number }>(
             w,
@@ -312,18 +339,22 @@ const checks: ReadonlyArray<Check> = [
             auto,
             type,
           )?.n
+
         expect(
           ended("session.ended") === 1 && ended("process.ended") === 1,
           `archived events: session ${ended("session.ended")}, process ${ended("process.ended")}`,
         )
         const old = await w.vibest(["run", "pi", "--archive-on-completion", "--", "x"], { cwd: p.repo, env: p.env })
         expect(old.code !== 0, "--archive-on-completion was accepted")
+
         const ready = async (task: string) => {
           const id = await p.runSub(task)
           await answered(w, p, id, task)
           await until(`${task} idle`, () => p.idle(id), 30_000)
+
           return { id, worktree: (await ls(w, p)).find((e) => e.id === id)!.worktree }
         }
+
         const clean = await ready("clean")
         const pid = p.pid(clean.id)
         expect(pid !== null && alive(pid), `no live harness pid for ${clean.id}`)
@@ -411,6 +442,7 @@ const checks: ReadonlyArray<Check> = [
       "with VIBEST_MAX_SESSIONS=2 in vibestd, the entry session is not counted: two subagents start, the third vibest run fails LimitReached naming the limit, and starts once one is archived",
     run: async (w) => {
       const p = await piProject(w, "s9")
+
       try {
         p.model.release()
         Object.assign(p.env, { VIBEST_MAX_SESSIONS: "2" })
@@ -418,6 +450,7 @@ const checks: ReadonlyArray<Check> = [
         await p.startDaemon()
         const first = await p.runSub("one")
         await p.runSub("two")
+
         const third = await w.viaEntry(
           [
             "run",
@@ -431,6 +464,7 @@ const checks: ReadonlyArray<Check> = [
           ],
           { cwd: p.repo, env: p.env, timeoutMs: 90_000 },
         )
+
         const said = `${third.stdout}${third.stderr}`
         expect(
           third.code !== 0 && said.includes("LimitReached") && said.includes("VIBEST_MAX_SESSIONS=2"),
@@ -438,11 +472,13 @@ const checks: ReadonlyArray<Check> = [
         )
         await archive(w, p, first)
         expectFacts(w, first, ["session.created", "session.ended", "process.ended"])
+
         const archived = row<{ ended: number | null; reason: string | null }>(
           w,
           "SELECT s.ended_at AS ended, p.end_reason AS reason FROM session s JOIN process p ON p.session_id = s.id WHERE s.id = ?",
           first,
         )
+
         expect(
           archived?.ended != null && archived.reason === "archived",
           `the archived session: ${JSON.stringify(archived)}`,
@@ -463,6 +499,7 @@ const checks: ReadonlyArray<Check> = [
       const p = await piProject(w, "s41")
       const subDir = path.join(w.root, "pi-s41-sub")
       const spawning = spawningModel("s41c", `--env PI_CODING_AGENT_DIR=${subDir}`)
+
       try {
         p.model.release()
         await piShadow(subDir, w.profile, { fake: { baseUrl: spawning.url } })
@@ -478,6 +515,7 @@ const checks: ReadonlyArray<Check> = [
           (await git(w, p.repo, "worktree", "list", "--porcelain")) === before && (await ls(w, p)).length === listed,
           "the refused run left a worktree or a session",
         )
+
         const a = (
           JSON.parse(
             await w.okViaEntry(
@@ -495,6 +533,7 @@ const checks: ReadonlyArray<Check> = [
             ),
           ) as { id: string }
         ).id
+
         const entry = await w.entryOf(p.repo)
         await until(
           "the session the first session started",
@@ -519,6 +558,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const p = await piProject(w, "s57")
       const model = fileReadingModel()
+
       try {
         p.model.release()
         const subDir = await piShadow(path.join(w.root, "pi-s57-sub"), w.profile, { fake: { baseUrl: model.url } })
@@ -533,6 +573,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const notes = path.join(w.root, "s57-notes.md")
         await fs.writeFile(notes, "the answer is s57-word-hazel\n")
+
         const id = (
           JSON.parse(
             await w.okViaEntry(
@@ -552,11 +593,13 @@ const checks: ReadonlyArray<Check> = [
             ),
           ) as { id: string }
         ).id
+
         const seen = (await fs.readFile(seenFile, "utf8"))
           .split("\n")
           .filter(Boolean)
           .map((line) => JSON.parse(line) as { prompt: string; files: Array<string>; contents: Array<string> })
           .find((event) => event.files.length > 0)
+
         const copy = seen?.files[0] ?? ""
         const folder = path.dirname(path.dirname(copy))
         expect(

@@ -19,6 +19,7 @@ export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text:
 export const ownerOf = (real: string) => {
   if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const
   const npm = /^(.+)\/lib\/node_modules\/@vibest\//.exec(real)
+
   return npm ? ({ kind: "npm", prefix: npm[1]! } as const) : undefined
 }
 
@@ -50,6 +51,7 @@ export const stageCommand = (
   platform = `${process.platform}-${process.arch}`,
 ) => {
   const owner = ownerOf(real)
+
   return owner?.kind === "bun"
     ? ["bun", "add", "--cwd", dir, `@vibest/cli@${version}`, `@vibest/cli-${platform}@${version}`]
     : [owner?.kind === "npm" ? `${owner.prefix}/bin/npm` : "npm", "install", "--prefix", dir, `@vibest/cli@${version}`]
@@ -71,12 +73,16 @@ export const extraVibests = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const dirs = (Option.getOrUndefined(yield* Config.option(Config.String("PATH"))) ?? "").split(":").filter(Boolean)
   const found: Array<{ readonly link: string; readonly real: string }> = []
+
   for (const dir of dirs) {
     const link = `${dir}/vibest`
     const real = yield* fs.realPath(link).pipe(Effect.option)
+
     if (Option.isSome(real) && !found.some((f) => f.real === real.value)) found.push({ link, real: real.value })
   }
+
   if (found.length < 2) return []
+
   return yield* Effect.forEach(
     found,
     (v, i) =>
@@ -96,8 +102,10 @@ export const extraVibests = Effect.gen(function* () {
 export const noticeFrom = <E, R>(ping: Effect.Effect<Option.Option<Ping>, E, R>) =>
   Effect.gen(function* () {
     if (Option.isSome(yield* Config.option(Config.String("VIBEST_SESSION_ID")))) return
+
     if (Option.isSome(yield* Config.option(Config.String("VIBEST_NO_UPDATE_CHECK")))) return
     const latest = Option.getOrUndefined(yield* ping)?.update?.latest
+
     if (latest && compareVersions(VERSION, latest) < 0)
       yield* Console.error(`vibest ${latest} is available (this is ${VERSION}); update with: vibest update`)
   }).pipe(Effect.ignore)
@@ -107,6 +115,7 @@ export const updateNotice = noticeFrom(Effect.flatMap(Layout, (layout) => readPi
 export const runInherit = (argv: ReadonlyArray<string>, env: Record<string, string> = {}) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
     const code = yield* spawner
       .exitCode(
         ChildProcess.make(argv[0]!, argv.slice(1), {
@@ -118,6 +127,7 @@ export const runInherit = (argv: ReadonlyArray<string>, env: Record<string, stri
         }),
       )
       .pipe(Effect.mapError((e) => new UpdateError({ message: `${argv.join(" ")}: ${e.message}` })))
+
     if (code !== 0) return yield* new UpdateError({ message: `${argv.join(" ")} exited with ${code}` })
   })
 
@@ -168,20 +178,25 @@ export const handoffDaemon = (
   Effect.gen(function* () {
     const layout = yield* Layout
     const reported = yield* versionOf(target.command)
+
     if (reported !== target.version)
       return `\`${target.command.join(" ")} --version\` reports ${reported}, not ${target.version}; the old vibestd still runs. Next: vibest update`
+
     const reply = yield* RpcClient.withHeaders(
       connect(layout.socket).pipe(
         Effect.flatMap((c) => c["Daemon.Handoff"]({ instance: old.instance!, command: target.command })),
       ),
       { ...cliHeaders((yield* Path.Path).resolve(".")), [PROTOCOL_HEADER]: String(old.protocol) },
     ).pipe(Effect.scoped, Effect.exit)
+
     if (Exit.isFailure(reply)) {
       const e = Option.getOrUndefined(Cause.findErrorOption(reply.cause)) as { readonly message?: string } | undefined
       const still = Option.getOrUndefined(yield* readPing(layout.socket))
+
       if (still?.instance === old.instance)
         return `the handoff did not happen (${e?.message ?? "no reply"}); the old vibestd ${old.version} still runs. Next: vibest update`
     }
+
     const now = yield* readPing(layout.socket).pipe(
       Effect.repeat({
         until: (p) => Option.isSome(p) && p.value.instance !== old.instance && p.value.version === target.version,
@@ -190,13 +205,18 @@ export const handoffDaemon = (
       Effect.timeoutOption(HANDOFF_WATCH),
       Effect.map(Option.flatten),
     )
+
     if (Option.isSome(now)) {
       yield* Console.log(`vibestd ${now.value.version} (pid ${now.value.pid}) took over; agents kept running.`)
+
       return undefined
     }
+
     const after = Option.getOrUndefined(yield* readPing(layout.socket))
+
     if (after === undefined)
       return `no vibestd answers on ${layout.socket}. Next: vibest daemon (see ${layout.home}/vibestd.log)`
+
     return `vibestd ${after.version} (instance ${after.instance ?? "unknown"}) answers, not the new ${target.version}. Next: vibest update`
   })
 
@@ -208,9 +228,12 @@ export const restartAgents = (
 ) =>
   Effect.gen(function* () {
     const cwd = (yield* Path.Path).resolve(".")
+
     const ask = <A, E>(f: (client: VibestClient) => Effect.Effect<A, E>) =>
       withVibest(Claim.cli({ repositoryRoot: cwd }), f, { start: false })
+
     const outdated = yield* ask((client) => client["Agents.Outdated"]())
+
     if (outdated.length === 0) return yield* Console.log("No agent runs an old integration.")
     const working = outdated.filter((a) => a.working).map((a) => shortId(a.id))
     const ids = outdated.map((a) => shortId(a.id)).join(", ")
@@ -220,13 +243,17 @@ export const restartAgents = (
     const refused = "their calls to vibestd will be refused with a message that names vibest update"
     const lead = command === "vibest update" ? `vibest ${version} installed.` : `vibestd ${version} runs now.`
     const list = `${outdated.length} agent${outdated.length === 1 ? "" : "s"} still run${outdated.length === 1 ? "s" : ""} the old integration (${ids}${busy})`
+
     for (const a of blocked) yield* Console.log(`${shortId(a.id)} cannot be restarted in place: ${a.blocked}.`)
+
     if (restartable.length === 0) return
+
     if (!yes) {
       if (!(yield* interactive))
         return yield* Console.log(
           `${lead} ${list}. Not restarted without a terminal (${command === "vibest update" ? "vibest update --yes" : "vibest daemon restart in a terminal"} restarts them); ${refused} until then.`,
         )
+
       if (
         !(yield* askYesNo(
           `${lead} ${list}. Restart ${restartable.length === 1 ? "it" : `these ${restartable.length} agents`} in place and continue ${restartable.length === 1 ? "its conversation" : "their conversations"}? [Y/n]: `,
@@ -236,6 +263,7 @@ export const restartAgents = (
       )
         return yield* Console.log(`They keep the old integration; ${refused}.`)
     }
+
     yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after }))
     yield* Console.log(
       `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited; one that was working continues its execution (outcomes in ${(yield* Layout).home}/vibestd.log).`,

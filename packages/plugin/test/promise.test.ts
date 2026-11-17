@@ -7,13 +7,17 @@ test("an iterator the plugin closed is not returned again when the plugin unload
   vi.resetModules()
   vi.doMock("effect", async (importOriginal) => {
     const effect = await importOriginal<typeof import("effect")>()
+
     const toAsyncIterableWith = vi.fn((stream: never, context: never) => {
       const source = effect.Stream.toAsyncIterableWith(stream, context)[Symbol.asyncIterator]()
       const iterator = { next: () => source.next(), return: vi.fn(() => source.return!()) }
+
       return { [Symbol.asyncIterator]: () => iterator }
     })
+
     return { ...effect, Stream: { ...effect.Stream, toAsyncIterableWith } }
   })
+
   try {
     const mocked = await import("effect")
     const { fromPromise } = await import("../src/promise/adapter.ts")
@@ -28,11 +32,13 @@ test("an iterator the plugin closed is not returned again when the plugin unload
       })(host).pipe(Scope.provide(scope)),
     )
     await Effect.runPromise(Scope.close(scope, Exit.void))
+
     const iterators = vi
       .mocked(mocked.Stream.toAsyncIterableWith)
       .mock.results.map(
         (r) => (r.value as AsyncIterable<unknown>)[Symbol.asyncIterator]() as { return: ReturnType<typeof vi.fn> },
       )
+
     expect(iterators.map((i) => i.return.mock.calls.length)).toEqual([1, 1])
   } finally {
     vi.doUnmock("effect")

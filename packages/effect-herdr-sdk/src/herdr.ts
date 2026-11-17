@@ -11,6 +11,7 @@ import { defaultSocketPath, socketEndpoint, type SocketPathOptions } from "./soc
 export type ResultOf<M extends Method> = M extends keyof typeof METHOD_RESULT
   ? ResultByTag[(typeof METHOD_RESULT)[M]]
   : ResponseResult
+
 export type ParamsOf<M extends Method> = MethodParams[M]
 
 export class HerdrError extends Schema.TaggedError<HerdrError>()("HerdrError", {
@@ -74,6 +75,7 @@ const Response = Schema.Struct({
   result: Schema.optional(Schema.Unknown),
   error: Schema.optional(Schema.Struct({ code: Schema.String, message: Schema.String })),
 })
+
 const Push = Schema.Struct({ event: Schema.String, data: Schema.Unknown })
 const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Union([Response, Push])))
 const Request = Schema.Struct({ id: Schema.String, method: Schema.String, params: Schema.Unknown })
@@ -86,6 +88,7 @@ const requestId = (prefix: string) =>
 function makeClient(socketPath: string, connect: SocketConnector["Service"]): HerdrShape {
   const transport = (method: string) => (e: { readonly message: string }) =>
     new HerdrTransportError({ method, message: e.message })
+
   const serverError = (method: string, error: { code: string; message: string }) =>
     new HerdrError({ method, code: error.code, message: error.message })
 
@@ -96,6 +99,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
       const writer = yield* socket.writer
       yield* writer.write(`${yield* encodeRequest(request).pipe(Effect.orDie)}\n`)
       const text = pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))
+
       return Stream.fromPull(Effect.succeed(text)).pipe(
         Stream.splitLines,
         Stream.filter((l) => l.length > 0),
@@ -108,22 +112,28 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
     Effect.gen(function* () {
       const id = yield* requestId("vibest")
       const lines = yield* open(method, { id, method, params })
+
       const found = yield* lines.pipe(
         Stream.filter(isResponse),
         Stream.filter((m) => m.id === id || m.id === ""),
         Stream.runHead,
       )
+
       if (Option.isNone(found))
         return yield* new HerdrTransportError({ method, message: "connection closed before a response" })
+
       if (found.value.error) return yield* serverError(method, found.value.error)
+
       return found.value.result as ResultOf<M>
     }).pipe(Effect.scoped)
 
   const subscribe = (subscriptions: ReadonlyArray<Subscription>): Stream.Stream<PushFrame, HerdrFailure> => {
     const method = "events.subscribe"
+
     return Effect.gen(function* () {
       const id = yield* requestId("sub")
       const lines = yield* open(method, { id, method, params: { subscriptions } })
+
       return lines.pipe(
         Stream.flatMap((m): Stream.Stream<PushFrame, HerdrFailure> =>
           isResponse(m)

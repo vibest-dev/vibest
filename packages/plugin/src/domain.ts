@@ -25,6 +25,7 @@ export const exhaustedText = (limits: ReadonlyArray<LimitWindow & { readonly win
     .filter((limit) => countsAsLimited(limit, now))
     .map((limit) => {
       const reset = limit.resetTime == null ? "no reset time" : `resets ${new Date(limit.resetTime).toISOString()}`
+
       return `${limit.window} limit exhausted, ${reset}`
     })
     .join("; ")
@@ -42,6 +43,7 @@ export const stillLimited = (
     attempt.provider === undefined
       ? undefined
       : rows.find((r) => r.harness === attempt.harness && r.provider === attempt.provider)
+
   return !(row !== undefined && row.updatedAt > attempt.at && !isLimited(row))
 }
 

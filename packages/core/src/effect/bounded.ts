@@ -11,7 +11,10 @@ export const timeoutWithoutWaiting = Effect.fn("Bounded.timeoutWithoutWaiting")(
     Effect.suspend(() => effect),
     scope,
   )
+
   const exit = yield* Fiber.await(fiber).pipe(Effect.timeoutOption(timeout))
+
   if (Option.isNone(exit)) yield* Effect.forkDetach(Fiber.interrupt(fiber))
+
   return exit
 })

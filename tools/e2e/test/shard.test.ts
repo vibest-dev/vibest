@@ -4,6 +4,7 @@ import path from "node:path"
 import { shardOf } from "../src/runner/shard.ts"
 
 const main = path.join(import.meta.dirname, "../src/main.ts")
+
 const gateIds = (
   JSON.parse(Bun.spawnSync(["bun", main, "--list"]).stdout.toString()) as Array<{ id: string; tier: string }>
 )

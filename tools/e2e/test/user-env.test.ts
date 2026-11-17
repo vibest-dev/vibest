@@ -25,6 +25,7 @@ const fakeHome = async () => {
       "",
     ].join("\n"),
   )
+
   return { home, history, before: await fs.readFile(history, "utf8") }
 }
 
@@ -35,6 +36,7 @@ const typeIntoShell = async (env: Record<string, string>) => {
     stdout: "ignore",
     stderr: "ignore",
   })
+
   await p.exited
 }
 
@@ -53,14 +55,17 @@ test.if(zsh !== null)("commands typed into a world's pane shells stay out of the
   expect(await fs.readFile(history, "utf8")).toContain("typed-into-pane")
   await fs.writeFile(history, before)
   const w = await World.create(capture(home, zsh!), "first-run")
+
   try {
     const { ZDOTDIR, HISTFILE } = w.env()
+
     const out = Bun.spawn([zsh!, "-i"], {
       env: { HOME: home, PATH: "/usr/bin:/bin", ZDOTDIR: ZDOTDIR!, HISTFILE: HISTFILE! },
       stdin: new TextEncoder().encode('echo "rc:$FROM_RC"\n'),
       stdout: "pipe",
       stderr: "ignore",
     })
+
     expect(await new Response(out.stdout).text()).toContain("rc:yes")
     expect(await fs.readFile(history, "utf8")).toBe(before)
     expect(await fs.readFile(path.join(ZDOTDIR!, ".zsh_history"), "utf8")).toContain('echo "rc:$FROM_RC"')

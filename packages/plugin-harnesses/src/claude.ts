@@ -10,6 +10,7 @@ const CLAUDE_MENUS = [
 
 export const claudeMenuKey = (screen: string, answered: ReadonlyArray<string>) => {
   const m = CLAUDE_MENUS.find((m) => !answered.includes(m.menu) && m.pattern.test(screen))
+
   return m && { menu: m.menu, key: m.accept.test(screen) ? ("enter" as const) : ("down" as const) }
 }
 
@@ -18,7 +19,9 @@ const claudeStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.
   (answered) => (pane) =>
     Effect.gen(function* () {
       const next = claudeMenuKey(yield* pane.screen, yield* Ref.get(answered))
+
       if (!next) return
+
       if (next.key === "enter") yield* Ref.update(answered, (a) => [...a, next.menu])
       yield* pane.sendKeys([next.key])
     }),
@@ -28,6 +31,7 @@ const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`
 
 const executionComplete = (event: Readonly<Record<string, unknown>>) => {
   if (event.reason === "answer") return event
+
   if (event.reason === "aborted")
     return {
       ...event,
@@ -35,11 +39,14 @@ const executionComplete = (event: Readonly<Record<string, unknown>>) => {
       error: "interrupted",
       error_details: "the execution was stopped in its terminal (Esc) before it ended",
     }
+
   if (event.reason === "refusal") {
     const r = (event.refusal ?? {}) as { readonly category?: unknown; readonly explanation?: unknown }
     const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
+
     return { ...event, error: "refusal", error_details: why || "the model refused to answer" }
   }
+
   return { ...event, error: "error", error_details: "the execution ended on an API error" }
 }
 
@@ -63,6 +70,7 @@ const claudeInit = findMessage(
     }),
   }),
 )
+
 const claudeApplied = findMessage(
   Schema.Struct({
     type: Schema.Literal("control_response"),
@@ -78,9 +86,11 @@ const ANTHROPIC_RECOMMENDED_ENTRY = "default"
 export const claudeModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   const init = claudeInit(lines)
   const settings = claudeApplied(lines)
+
   if (!init || !settings) return undefined
   const models = init.response.response.models
   const applied = settings.response.response?.applied?.model ?? undefined
+
   return withConfigured(
     models
       .filter((m) => m.value !== ANTHROPIC_RECOMMENDED_ENTRY)
@@ -137,11 +147,14 @@ export const claude: Harness.HarnessDefinition = {
   },
   userPrompt: (event) => {
     if (event.hook_event_name !== "PromptSubmit") return undefined
+
     if (event.origin === "vibest")
       return typeof event.execution === "number"
         ? { execution: event.execution, ...(event.refused === true ? { refused: true as const } : {}) }
         : undefined
+
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
+
     return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },
   executionEnd: (event) =>

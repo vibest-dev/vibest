@@ -10,11 +10,14 @@ export const jsonLines = (...messages: ReadonlyArray<unknown>) => messages.map((
 
 export const findMessage = <A>(schema: Schema.Codec<A, unknown>) => {
   const decode = Schema.decodeUnknownOption(Schema.fromJsonString(schema))
+
   return (lines: ReadonlyArray<string>): A | undefined => {
     for (const line of lines) {
       const r = decode(line)
+
       if (Option.isSome(r)) return r.value
     }
+
     return undefined
   }
 }

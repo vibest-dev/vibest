@@ -22,7 +22,9 @@ export const entryIdle = Effect.fn("Inbox.entryIdle")(function* (
   terminal: RuntimeAddress,
 ): Effect.fn.Return<Presence, RuntimeError> {
   const seen = yield* agentState(h, terminal)
+
   if (seen === "unknown" || seen === "absent") return (yield* alive(h, terminal)) ? "busy" : "gone"
+
   return seen === "idle" ? "idle" : "busy"
 })
 
@@ -31,8 +33,10 @@ export const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.messa
 export const LINE_MAX = 120
 
 const codePoints = (s: string) => [...s].length
+
 const clip = (s: string, max: number) => {
   const cps = [...s]
+
   return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
 }
 
@@ -41,15 +45,20 @@ export const line = (
   who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
 ) => {
   const last = batch.at(-1)
+
   if (!last) return ""
   const more = batch.length > 1 ? ` · +${batch.length - 1} more` : ""
+
   const fit = (prefix: string, middle: string, suffix: string) =>
     `${prefix}${clip(middle, LINE_MAX - codePoints(prefix) - codePoints(suffix))}${suffix}`
+
   if (last.kind === "notice") return fit("Notice: ", unwrapped(last.message).trim().split("\n")[0] ?? "", more)
   const sender = last.sender ?? ""
   const session = who(sender)
+
   const type =
     session === undefined ? "Agent" : `${session.agent.charAt(0).toUpperCase()}${session.agent.slice(1)} Agent`
+
   return fit(`${type} "`, session?.title ?? "", `" sent a message (${shortId(sender)})${more}`)
 }
 
@@ -85,10 +94,12 @@ export const layer = Layer.effect(
     const handedOver = new Set<string>()
     const handedKey = (sessionId: string | undefined, execution: number) => `${sessionId}:${execution}`
     const waiting = new Map<string, Set<Queue.Queue<null>>>()
+
     const wake = (id: string | undefined) =>
       Effect.sync(() => {
         for (const signal of (id === undefined ? undefined : waiting.get(id)) ?? []) Queue.offerUnsafe(signal, null)
       })
+
     yield* reactor.on([ExecutionEnded], (event) =>
       Effect.sync(() => handedOver.delete(handedKey(event.sessionId, event.data.execution))).pipe(
         Effect.andThen(wake(event.sessionId)),
@@ -113,10 +124,12 @@ export const layer = Layer.effect(
               Effect.sync(() => {
                 const open = waiting.get(sessionId)
                 open?.delete(signal)
+
                 if (open?.size === 0) waiting.delete(sessionId)
               }),
           )
           Queue.offerUnsafe(signal, null)
+
           return Stream.fromQueue(signal)
         }),
       )
@@ -124,13 +137,17 @@ export const layer = Layer.effect(
     const take = Effect.fn("Inbox.take")(function* (sessionId: string, process: number | undefined) {
       if ((yield* drain.phase) !== "open") return undefined
       const session = yield* db.session.getSession(sessionId)
+
       if (session === undefined || !pulls(harnessIdOf(session))) return undefined
       const taken = yield* drain.work(`take inbox of ${sessionId}`, db.inbox.takeInbox(sessionId, process))
+
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
       const last = taken.rows.at(-1)!
+
       const sender =
         last.kind === "notice" || last.sender === null ? undefined : yield* db.session.getSession(last.sender)
+
       return {
         execution: taken.execution,
         ids: taken.rows.map((r) => r.id),
@@ -152,6 +169,7 @@ export const layer = Layer.effect(
               [...Map.groupBy(rows, (r) => (r.kind === "send" ? (r.sender ?? null) : null))],
               ([sender, group]) => {
                 const message = `A message to ${session.id} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
+
                 return sender === null
                   ? db.inbox.insertInbox({ sessionId: session.id, message })
                   : db.inbox.insertNoticeTo(sender, message)

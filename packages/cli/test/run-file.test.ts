@@ -54,6 +54,7 @@ describe("vibest run --file", () => {
         yield* fs.writeFileString(task, "first\n")
         yield* fs.writeFileString(other, "second\n")
         yield* fs.writeFile(binary, new Uint8Array([0x68, 0x00, 0xff]))
+
         const entry = yield* db.session.startEntry(
           yield* projectOf(repo),
           "pi",
@@ -61,7 +62,9 @@ describe("vibest run --file", () => {
           { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
           { agent: "coordinator" },
         )
+
         const env = agentEnv(layout.home, entry.sessionId, String(entry.projectId))
+
         const spawned = yield* runVibest(repo, env, [
           "run",
           "--runtime",
@@ -75,6 +78,7 @@ describe("vibest run --file", () => {
           "--",
           "do the task",
         ])
+
         assert.strictEqual(spawned.code, 0, spawned.stderr)
         const { id } = JSON.parse(spawned.stdout) as { id: string }
         const folder = path.join(layout.sessionFolder(String(entry.projectId), id), "files")
@@ -97,12 +101,14 @@ describe("vibest run --file", () => {
         const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-run-file-" })
         const home = path.join(dir, "home")
         yield* fs.makeDirectory(home)
+
         const env = {
           HOME: home,
           VIBEST_HOME: home,
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
         }
+
         const run = (args: ReadonlyArray<string>) => runVibest(dir, env, ["run", ...args, "--", "task"])
         const missing = yield* run(["--file", path.join(dir, "missing.md")])
         assert.strictEqual(missing.code, 1)

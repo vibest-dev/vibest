@@ -19,17 +19,20 @@ export const requested = <A, E, R>(
     const socket = (yield* Layout).socket
     const request = crypto.randomUUID()
     let known = false
+
     const call = (firstError?: ClientError.RpcClientError) =>
       withVibest(
         c.claim,
         (client, ping) => {
           known = ping.capabilities?.requests === true
+
           return firstError !== undefined && !known
             ? Effect.fail(firstError)
             : f(client, known ? request : undefined, ping)
         },
         { start: !c.agent },
       )
+
     return yield* call().pipe(
       Effect.catch((error) =>
         known && error instanceof ClientError.RpcClientError

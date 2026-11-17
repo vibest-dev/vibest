@@ -25,23 +25,30 @@ const listen = (sock: string, lines: string[], answer: (n: number) => true | "dr
     socket.on("data", (chunk) => {
       buf += chunk.toString()
       const nl = buf.indexOf("\n")
+
       if (nl < 0) return
       const line = buf.slice(0, nl)
       lines.push(line)
       const how = answer(lines.length)
+
       if (how === "drop") return socket.destroy()
+
       if (how === "hang") return
       let request: { id?: unknown; method?: unknown }
+
       try {
         request = JSON.parse(line) as { id?: unknown; method?: unknown }
       } catch {
         socket.end()
+
         return
       }
+
       const result = request.method === "Session.Ready" ? {} : null
       socket.end(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\n")
     })
   })
+
   return Effect.acquireRelease(
     Effect.promise(
       () =>
@@ -66,6 +73,7 @@ const rpc = (lines: readonly string[]) =>
       spanId?: unknown
       sampled?: unknown
     }
+
     return message.method && !message.method.startsWith("@effect/") ? [message] : []
   })
 
@@ -75,6 +83,7 @@ const event = {
   reason: "answer",
   last_assistant_message: "done",
 }
+
 const promptEvent = { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" }
 
 const promptAt = (home: string, env: Record<string, string>, raw: string) =>
@@ -119,9 +128,11 @@ layer(Platform.services)("claude integration stop", (it) => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const home = yield* tempDirectory("s-")
+
       const stopping = yield* Effect.forkChild(
         stopAt(home, { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event)).pipe(Effect.exit),
       )
+
       yield* untilVirtual(
         Effect.sync(() => stopping.pollUnsafe()),
         (exit) => exit !== undefined,
@@ -184,10 +195,12 @@ layer(Platform.services)("claude integration stop", (it) => {
         const home = yield* tempDirectory("s-")
         const lines: string[] = []
         yield* listen(path.join(home, "vibest.sock"), lines)
+
         for (const env of [{}, { VIBEST_AGENT: "general" }]) yield* stopAt(home, env, JSON.stringify(event))
         assert.deepStrictEqual(lines, [])
         const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
         const raws = ["not json", JSON.stringify({ ...event, hook_event_name: "Stop" })]
+
         for (const raw of raws) yield* stopAt(home, worker, raw)
         assert.deepStrictEqual(
           rpc(lines).map((r) => (r.params as { event: string }).event),
@@ -220,11 +233,13 @@ layer(Platform.services)("claude integration stop", (it) => {
         const lines: Array<string> = []
         yield* listen(path.join(home, "vibest.sock"), lines)
         const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1", VIBEST_PROCESS: "7" }
+
         const invoke = (report: typeof integrationStop, event: unknown, env: Record<string, string> = worker) =>
           report("cursor", JSON.stringify(event)).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(home)),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
           )
+
         yield* invoke(integrationReady, { hook_event_name: "sessionStart" })
         const prompt = { hook_event_name: "beforeSubmitPrompt", prompt: "go", conversation_id: "conv-1" }
         yield* invoke(integrationPrompt, prompt)
@@ -235,6 +250,7 @@ layer(Platform.services)("claude integration stop", (it) => {
           ["Session.Ready", "Prompt", "ExecutionEnd"],
         )
         assert.deepStrictEqual(rpc(lines)[0]?.params, { id: "w1" })
+
         for (const request of rpc(lines))
           assert.deepInclude(Object.fromEntries(request.headers as Array<[string, string]>), { "vibest-process": "7" })
         assert.deepStrictEqual(rpc(lines)[1]?.params, {

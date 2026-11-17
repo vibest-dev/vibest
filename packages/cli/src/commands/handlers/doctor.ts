@@ -18,16 +18,20 @@ export default Runtime.handler(Commands.commands.doctor, () =>
     let width = 0
 
     const installs = yield* extraVibests
+
     if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
 
     const daemon: Array<Finding> = []
     let ping = Option.getOrUndefined(yield* readPing(layout.socket))
+
     if (ping === undefined) {
       const started = yield* startDaemon.pipe(
         Effect.as(true),
         Effect.catch((e) => Effect.succeed(e.message)),
       )
+
       ping = Option.getOrUndefined(yield* readPing(layout.socket))
+
       if (ping === undefined)
         daemon.push({
           mark: "problem",
@@ -36,7 +40,9 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         })
       else daemon.push({ mark: "note", text: "was not running; started it" })
     }
+
     const talks = ping !== undefined && ping.protocol === PROTOCOL
+
     if (ping !== undefined && !talks)
       daemon.push({
         mark: "problem",
@@ -45,13 +51,16 @@ export default Runtime.handler(Commands.commands.doctor, () =>
       })
     else if (ping !== undefined) {
       daemon.push({ mark: "ok", text: `running ${ping.version}${ping.pid ? ` (pid ${ping.pid})` : ""}` })
+
       if (ping.version !== VERSION)
         daemon.push({ mark: "note", text: `this vibest is ${VERSION}; to run it instead: vibest daemon restart` })
     }
+
     sections.push({ title: "vibestd (the background service)", findings: daemon })
 
     const harnessNote = (why: string): Finding => ({ mark: "note", text: `not checked: vibestd ${why}` })
     let usable: Array<string> = []
+
     if (!talks) {
       sections.push({
         title: "Coding agents (the harnesses vibest starts)",
@@ -62,7 +71,9 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         connect(layout.socket).pipe(Effect.flatMap((c) => c["Harnesses.List"]({}))),
         protocolHeaders(),
       ).pipe(Effect.scoped, Effect.option)
+
       if (Option.isSome(listed)) width = Math.max(0, ...listed.value.map((row) => row.harness.length))
+
       const harnesses: Array<Finding> = Option.isNone(listed)
         ? [harnessNote("did not answer")]
         : listed.value.map((row) =>
@@ -73,6 +84,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
                   text: `${row.harness.padEnd(width)}  ${row.models.length} models, default ${row.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
                 },
           )
+
       if (Option.isSome(listed)) usable = listed.value.filter((row) => row.problem === null).map((row) => row.harness)
       sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
     }
@@ -83,7 +95,9 @@ export default Runtime.handler(Commands.commands.doctor, () =>
           Effect.scoped,
           Effect.option,
         )
+
       const runtimes = yield* ask((c) => c["Runtimes.Doctor"]({ harnesses: usable }))
+
       if (Option.isNone(runtimes) || runtimes.value.length === 0)
         sections.push({
           title: "Runtimes (where agents run)",
@@ -97,18 +111,22 @@ export default Runtime.handler(Commands.commands.doctor, () =>
             },
           ],
         })
+
       for (const r of Option.getOrElse(runtimes, () => [])) {
         const findings: Array<Finding> =
           r.status === "online" ? [] : [{ mark: "problem", text: `${r.status}: ${r.reason ?? "unknown"}` }]
+
         for (const c of r.checks)
           findings.push({
             mark: c.ok ? "ok" : "problem",
             text: c.subject ? `${c.subject.padEnd(width)}  ${c.text}` : c.text,
             ...(c.fix ? { fix: c.fix } : {}),
           })
+
         if (findings.length === 0) findings.push({ mark: "ok", text: "online" })
         sections.push({ title: `Runtime: ${r.name} (where agents run)`, findings })
       }
+
       const loaded = yield* ask((c) => c.Plugins())
       sections.push({
         title: "Plugins",
@@ -139,13 +157,17 @@ export default Runtime.handler(Commands.commands.doctor, () =>
     }
 
     const lines = [`vibest ${VERSION}`]
+
     for (const section of sections) {
       lines.push("", section.title)
+
       for (const f of section.findings) {
         lines.push(`  ${MARKS[f.mark]} ${f.text}`)
+
         if (f.fix) lines.push(`      fix: ${f.fix}`)
       }
     }
+
     const problems = sections.flatMap((x) => x.findings).filter((f) => f.mark === "problem").length
     lines.push(
       "",

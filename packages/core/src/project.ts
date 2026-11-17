@@ -47,14 +47,17 @@ export const layer = Layer.effect(
     const search = Effect.fn("Project.search")(function* (scope: ProjectScope, input: typeof ProjectSearchInput.Type) {
       const q = input.query.toLowerCase()
       const hits: string[] = []
+
       for (const kind of input.kind ? [input.kind] : KINDS) {
         const names = yield* fs
           .readDirectory(dir(scope, kind), { recursive: true })
           .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+
         for (const name of names.filter((n) => EXTENSIONS.some((e) => n.endsWith(e))).sort()) {
           const content = yield* fs
             .readFileString(path.join(dir(scope, kind), name))
             .pipe(Effect.orElseSucceed(() => ""))
+
           const rel = name.split(path.sep).join("/")
           content.split("\n").forEach((l, i) => {
             if (hits.length < SEARCH_HITS && l.toLowerCase().includes(q))
@@ -62,6 +65,7 @@ export const layer = Layer.effect(
           })
         }
       }
+
       return hits
     })
 

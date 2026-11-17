@@ -14,17 +14,22 @@ type Scripted = (method: string, params: Record<string, unknown>) => Effect.Effe
 const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = Stream.empty) =>
   Effect.gen(function* () {
     const calls: Array<{ readonly method: string; readonly params: Record<string, unknown> }> = []
+
     const resendingCall = ((method: string, params: Record<string, unknown>) =>
       Effect.suspend(() => {
         calls.push({ method, params })
+
         return answer(method, params)
       })) as HerdrShape["call"]
+
     const client: HerdrShape = {
       socketPath: "/nowhere",
       subscribe: () => pushed,
       call: resendingCall,
     }
+
     const resolved: Array<unknown> = []
+
     const pool = HerdrPool.of({
       resolve: (location) => Effect.sync(() => (resolved.push(location), "s")),
       client: () => Effect.succeed(client),
@@ -32,12 +37,14 @@ const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = St
       restarts: Stream.empty,
       sessions: Effect.succeed(["s"]),
     })
+
     const runtime = yield* fromPool({
       pool,
       spawner: yield* ChildProcessSpawner.ChildProcessSpawner,
       fs: undefined,
       scope: yield* Effect.scope,
     })
+
     return { runtime, calls, resolved }
   })
 
@@ -46,24 +53,31 @@ const herdrError = (method: string, code: string) => Effect.fail(new HerdrError(
 const scriptedSend = (agentNotReadyRefusals: number) =>
   Effect.gen(function* () {
     let refused = 0
+
     const { runtime, calls } = yield* scriptedRuntime((method) => {
       if (method === "agent.get")
         return Effect.succeed({
           agent: { name: "s-abcd1234abcd4abc8abcabcd1234ab", pane_id: "w1:p2", agent: "claude" },
         })
+
       if (method === "agent.prompt" && refused < agentNotReadyRefusals) {
         refused++
+
         return herdrError(method, "agent_not_ready")
       }
+
       return Effect.succeed({})
     })
+
     const sending = yield* Effect.forkChild(
       runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234abcd4abc8abcabcd1234ab"), {
         text: "line one\nline two",
       }),
     )
+
     yield* TestClock.adjust("40 seconds")
     yield* Fiber.join(sending)
+
     return calls.map((c) => c.method).filter((m) => m !== "agent.get")
   }).pipe(Effect.provide(Platform.services))
 
@@ -78,17 +92,23 @@ describe("send to an agent herdr started", () => {
     Effect.gen(function* () {
       let ready = false
       let gets = 0
+
       const { runtime, calls } = yield* scriptedRuntime((method) => {
         if (method === "agent.get") {
           if (++gets > 2) ready = true
+
           return Effect.succeed({ agent: { name: "s-abcd1234abcd4abc8abcabcd1234ab", pane_id: "w1:p2", agent: "pi" } })
         }
+
         if (method === "agent.prompt" && !ready) return herdrError(method, "agent_not_ready")
+
         return Effect.succeed({})
       })
+
       const sending = yield* Effect.forkChild(
         runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234abcd4abc8abcabcd1234ab"), { text: "task" }),
       )
+
       yield* TestClock.adjust("40 seconds")
       yield* Fiber.join(sending)
       const methods = calls.map((c) => c.method)
@@ -111,17 +131,21 @@ describe("pane events", () => {
   it.effect("a pane.agent_status_changed subscription frame (its data has no type) is a state event", () =>
     Effect.gen(function* () {
       const go = yield* Deferred.make<void>()
+
       const frame = {
         event: "pane.agent_status_changed",
         data: { pane_id: "w1:p2", workspace_id: "w1", agent: "pi", agent_status: "done" },
       } as PushFrame
+
       const { runtime } = yield* scriptedRuntime(
         () => Effect.succeed({}),
         Stream.fromEffect(Deferred.await(go)).pipe(Stream.as(frame)),
       )
+
       const first = yield* runtime.events!.pipe(Stream.take(2), Stream.runCollect, Effect.forkChild)
       const installPaneSubscription = runtime.state!(TerminalRuntime.terminalOf("s", "w1:p2")).pipe(Effect.ignore)
       yield* installPaneSubscription
+
       for (let i = 0; i < 10; i++) yield* Effect.yieldNow
       yield* Deferred.succeed(go, undefined)
       assert.deepStrictEqual(yield* Fiber.join(first), [
@@ -159,8 +183,10 @@ describe("terminal ids", () => {
 describe("herdr event stream", () => {
   it.effect("a failed herdr event stream is logged with its cause and emits reset", () => {
     const logs: Array<unknown> = []
+
     return Effect.gen(function* () {
       const open = yield* Deferred.make<void>()
+
       const pool = HerdrPool.of({
         resolve: () => Effect.succeed("s"),
         client: () => Effect.die("unused"),
@@ -170,12 +196,14 @@ describe("herdr event stream", () => {
         restarts: Stream.empty,
         sessions: Effect.succeed([]),
       })
+
       const runtime = yield* fromPool({
         pool,
         spawner: yield* ChildProcessSpawner.ChildProcessSpawner,
         fs: undefined,
         scope: yield* Effect.scope,
       })
+
       const seen = yield* Queue.unbounded<TerminalRuntime.RuntimeEvent>()
       yield* runtime.events.pipe(
         Stream.runForEach((event) => Queue.offer(seen, event)),

@@ -9,12 +9,16 @@ import { parseJson, record } from "./subscriptions/index.ts"
 
 export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   const start = lines.findIndex((line) => line.startsWith("{"))
+
   const models = record(
     record(record(parseJson(start < 0 ? undefined : lines.slice(start).join("\n")))?.command)?.data,
   )?.models
+
   if (!Array.isArray(models)) return undefined
+
   return models.flatMap((model) => {
     const m = record(model)
+
     return typeof m?.id === "string"
       ? [{ model: m.id, ...(typeof m.label === "string" ? { name: m.label } : {}), default: false }]
       : []
@@ -27,6 +31,7 @@ export const agyConversation = (event: Readonly<Record<string, unknown>>): strin
 export const agyExecutionEnd = (event: Readonly<Record<string, unknown>>) => {
   if (event.hookEventName !== "Stop" || event.continuationActive === true) return undefined
   const error = typeof event.error === "string" ? event.error : ""
+
   return { end: { text: "", conversation_id: agyConversation(event), ...(error !== "" ? { error } : {}) } }
 }
 
@@ -42,29 +47,37 @@ const GUARDED_TOOLS: Readonly<Record<string, string>> = {
   grep_search: "Grep",
   find_by_name: "Find",
 }
+
 const PATH_ARGS = ["Path", "AbsolutePath", "TargetFile", "File", "DirectoryPath", "SearchPath", "SearchDirectory"]
 
 const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
 
 export const agyGuardCall = (event: Readonly<Record<string, unknown>>) => {
   const call = event.toolCall
+
   if (typeof call !== "object" || call === null) return undefined
   const { name, args } = call as { name?: unknown; args?: unknown }
   const input = (typeof args === "object" && args !== null ? args : {}) as Readonly<Record<string, unknown>>
   const at = { cwd: event.cwd }
+
   if (name === "run_command") {
     const cwd = text(input.Cwd)
+
     return { ...at, tool_name: "Bash", tool_input: { command: input.CommandLine, ...(cwd ? { cwd } : {}) } }
   }
+
   const tool = typeof name === "string" ? GUARDED_TOOLS[name] : undefined
+
   if (tool === undefined) return undefined
   const path = PATH_ARGS.map((key) => text(input[key])).find((value) => value !== undefined)
+
   return { ...at, tool_name: tool, tool_input: path === undefined ? {} : { path } }
 }
 
 const agyStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.succeed((pane) =>
   Effect.gen(function* () {
     const screen = yield* pane.screen
+
     if (screen.includes("Do you trust the contents of this project?") && screen.includes("> Yes, I trust this folder"))
       yield* pane.sendKeys(["enter"])
   }),

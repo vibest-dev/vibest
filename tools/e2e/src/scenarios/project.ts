@@ -28,12 +28,17 @@ const filesExecution =
   (who: string, dir: string, done: number, last: string | undefined, creator?: string): Step => {
     if (last !== undefined) (results[who] ??= []).push(last)
     const file = path.join(dir, "artifacts", `${who}.md`)
+
     if (done === 0) return { tool: names.write, input: { [names.path]: file, content: `${who}-wrote\n` } }
+
     if (done === 1) return { tool: names.read, input: { [names.path]: file } }
+
     if (done === 2)
       return { tool: names.write, input: { [names.path]: path.join(other, "artifacts", `${who}.md`), content: "x\n" } }
+
     if (creator !== undefined)
       return { tool: names.bash, input: { command: `${binary} send ${creator} -- 'done-${who}'` } }
+
     return `done-${who}`
   }
 
@@ -44,6 +49,7 @@ const checks: ReadonlyArray<Check> = [
     title: "project search finds text in docs, memories and artifacts files, as kind/path:line: text",
     run: async (w) => {
       const info = await w.json<Info>(["project", "info"])
+
       for (const kind of ["docs", "memories", "artifacts"] as const) {
         await fs.mkdir(path.join(info[kind], "e2e"), { recursive: true })
         await fs.writeFile(path.join(info[kind], "e2e", `${kind}.md`), `# ${kind}\nneedle-${kind}\n`)
@@ -65,21 +71,26 @@ const checks: ReadonlyArray<Check> = [
       await fs.mkdir(path.join(other, "artifacts"), { recursive: true })
       const results: Record<string, Array<string>> = {}
       const dirs: Record<string, string> = {}
+
       const pi = fakeOpenAI(
         filesExecution(results, other, { write: "write", read: "read", path: "path", bash: "bash" }),
         dirs,
       )
+
       const claudeExecution = filesExecution(results, other, {
         write: "Write",
         read: "Read",
         path: "file_path",
         bash: "Bash",
       })
+
       const claude = fakeAnthropic((r) => {
         const dir = subagentFolder(r.system)
+
         if (r.tools.length === 0 || dir === undefined || r.results.length > 3) return "ok"
         dirs.claude = dir
         const last = r.results.at(-1)
+
         return claudeExecution(
           "claude",
           dir,
@@ -88,7 +99,9 @@ const checks: ReadonlyArray<Check> = [
           creatorIn(r.system),
         )
       })
+
       const session = `${w.herdrSession}-files`
+
       try {
         const repo = await newRepository(w, "files")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-files", pi.url)}`
@@ -100,6 +113,7 @@ const checks: ReadonlyArray<Check> = [
           env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
+
         const run = async (args: ReadonlyArray<string>) =>
           (
             JSON.parse(
@@ -109,31 +123,38 @@ const checks: ReadonlyArray<Check> = [
               }),
             ) as { id: string }
           ).id
+
         const subs = {
           pi: await run(["pi", "--env", env]),
           claude: await run(["claude", ...envArgs(await claudeEnv(w, "files", claude.url))]),
         }
+
         const answered = (who: string) => (results[who]?.length ?? 0) >= 3
+
         for (const who of ["pi", "claude", "main"])
           await until(`the ${who} agent's execution on the folder`, () => answered(who), 180_000).catch(
             async (e: Error) => {
               const peek =
                 who === "main" ? undefined : await w.vibest(["peek", subs[who as "pi" | "claude"]], { cwd: repo })
+
               throw new Error(
                 `${e.message}; tool results ${JSON.stringify(results)}; folders ${JSON.stringify(dirs)}${peek ? `; its screen:\n${peek.stdout}` : ""}`,
               )
             },
           )
+
         const entryId = (
           await w
             .json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"], { cwd: repo })
             .then((l) => l.sessions)
         ).find((e) => e.agent === "coordinator")?.id
+
         const own = path.join(
           w.vibestHome,
           "projects",
           row<{ p: string }>(w, "SELECT project_id AS p FROM session WHERE id = ?", entryId ?? "")?.p ?? "",
         )
+
         for (const who of ["pi", "claude", "main"]) {
           expect(dirs[who] === own, `${who}'s system prompt names ${dirs[who]}, not ${own}`)
           const [, read, refused] = results[who]!
@@ -162,11 +183,14 @@ const checks: ReadonlyArray<Check> = [
       "a moved checkout: vibest project move <old directory> keeps the project id, its repository path, memories and sessions at the new place, and repairs the worktree vibest run made; an unknown old directory is refused",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+
       const sh = async (cwd: string, ...argv: Array<string>) => {
         const r = await w.run(cwd, argv)
         expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
+
         return r.stdout.trim()
       }
+
       const before = path.join(w.root, "p7", "repo")
       await fs.mkdir(before, { recursive: true })
       await sh(before, "git", "init", "-q", "-b", "main")
@@ -182,16 +206,19 @@ const checks: ReadonlyArray<Check> = [
       model.release()
       const session = `${w.herdrSession}-p7`
       let vibestOwnWorktree = ""
+
       try {
         await w.daemon()
         await w.entry({ cwd: old, session })
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-p7", model.url)}`
+
         const { id } = JSON.parse(
           await w.okViaEntry(["run", "pi", "--session", session, "--env", pi, "--", ask("p7")], {
             cwd: old,
             timeoutMs: 90_000,
           }),
         ) as { id: string }
+
         await until("the subagent's answer", async () => (await replyOf(w, id, old)).includes("done-p7"), 90_000)
         vibestOwnWorktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)?.d ?? ""
         expect(vibestOwnWorktree.startsWith(w.vibestHome), `vibest run made no worktree: ${vibestOwnWorktree}`)
@@ -252,8 +279,10 @@ const checks: ReadonlyArray<Check> = [
         { mode: 0o755 },
       )
       const env = { PATH: `${shim}:${w.env().PATH}` }
+
       const listed = (JSON.parse(await w.ok(["ls"], { cwd: outside, env })) as { sessions: Array<{ agent: string }> })
         .sessions
+
       expect(
         listed.some((row) => row.agent === "coordinator"),
         `ls outside a project: ${JSON.stringify(listed)}`,
@@ -278,8 +307,10 @@ const checks: ReadonlyArray<Check> = [
       const focused = await w.ok(["herdr", "open-entry"], { env: { HERDR_PLUGIN_CONTEXT_JSON: context } })
       expect(focused.startsWith("focused "), `open-entry: ${focused}`)
       const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
+
       const panes = async () =>
         ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes.map((p) => p.pane_id)
+
       let entryPane = ""
       await until(
         "the entry session's pane",
@@ -288,12 +319,16 @@ const checks: ReadonlyArray<Check> = [
             const info = (await herdr(socket, "pane.process_info", { pane_id: id })) as {
               process_info?: { foreground_processes?: Array<{ name?: string; argv0?: string | null }> }
             }
+
             const fg = info.process_info?.foreground_processes ?? []
+
             if (fg.some((proc) => (proc.argv0 ?? proc.name ?? "").includes("pi"))) {
               entryPane = id
+
               return true
             }
           }
+
           return false
         },
         30_000,
@@ -301,9 +336,11 @@ const checks: ReadonlyArray<Check> = [
       const before = new Set(await panes())
       await herdr(socket, "pane.close", { pane_id: entryPane })
       await until("the entry session pane closed", async () => !(await panes()).includes(entryPane), 15_000)
+
       const opened = await w.ok(["herdr", "open-entry"], {
         env: { HERDR_PLUGIN_CONTEXT_JSON: context, HERDR_SOCKET_PATH: socket },
       })
+
       expect(opened.startsWith("opened "), `open-entry after quit: ${opened}`)
       const after = await panes()
       expect(
@@ -320,9 +357,11 @@ const checks: ReadonlyArray<Check> = [
       const root = path.join(w.root, "p9")
       const cwd = path.join(root, "work")
       await fs.mkdir(cwd, { recursive: true })
+
       for (const name of ["a", "b"]) {
         const dir = path.join(root, name)
         await fs.mkdir(dir)
+
         for (const argv of [
           ["git", "init", "-q", "-b", "main"],
           ["git", "add", "f"],
@@ -333,16 +372,20 @@ const checks: ReadonlyArray<Check> = [
           expect(ran.code === 0, `${name} ${argv.join(" ")}: ${ran.stderr}`)
         }
       }
+
       const created = await w.json<{ directory: string; folders: Array<{ name: string }> }>(
         ["project", "create", "combo", "--from", "../a", "--from", "../b"],
         { cwd },
       )
+
       expect((await fs.realpath(created.directory)) === (await fs.realpath(path.join(cwd, "combo"))), created.directory)
       expect(created.folders.map((folder) => folder.name).join(",") === "a,b", JSON.stringify(created.folders))
+
       const agent = await w.vibest(["project", "create", "agent", "--from", "../a"], {
         cwd,
         env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
       })
+
       expect(agent.code !== 0 && agent.stderr.includes("Forbidden"), agent.stderr)
       expect(
         !(await fs.stat(path.join(cwd, "agent")).then(

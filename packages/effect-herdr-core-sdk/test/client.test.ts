@@ -48,10 +48,13 @@ const fakeCore = (core: Core) => (socket: Socket.Socket) =>
   Effect.gen(function* () {
     const pull = yield* Socket.readerString(socket)
     const writer = yield* socket.writer
+
     const line = yield* Stream.fromPull(
       Effect.succeed(pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))),
     ).pipe(Stream.splitLines, Stream.runHead)
+
     const request = yield* decodeRequest(Option.getOrElse(line, () => ""))
+
     for (const reply of recorded(core, request.params?.generation)[request.method] ?? [])
       yield* writer.write(`${reply.replace("ID", String(request.id))}\n`)
     yield* writer.write(new Socket.CloseEvent())
@@ -65,6 +68,7 @@ const fakeServer = (core: Core = CURRENT) =>
     const socketPath = path.join(dir, "hc.sock")
     const server = yield* BunSocketServer.make({ path: socketPath })
     yield* Effect.forkScoped(server.run(fakeCore(core)))
+
     return { hc: yield* Hc.make(socketPath), dir }
   })
 
@@ -111,6 +115,7 @@ layer(Layer.mergeAll(BunServices.layer, HcBun.layer))("Hc client", (it) => {
         (yield* fakeServer({ ...CURRENT, methods: ["hello", ...USED_METHODS.filter((m) => m !== "terminal.label")] }))
           .hc.hello,
       )
+
       assert.instanceOf(e, HcMethodsMissing)
       assert.deepStrictEqual(e.missing, ["terminal.label"])
       assert.include(e.message, "update herdr-core")

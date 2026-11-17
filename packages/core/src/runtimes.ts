@@ -12,11 +12,17 @@ import * as Registry from "./plugin/registry.ts"
 export * as Runtimes from "./runtimes.ts"
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
+
 export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
+
 export type Terminal = RuntimeAddress
+
 export type AgentState = VibestPlugin.Runtime.AgentState
+
 export type RuntimeError = VibestPlugin.Runtime.RuntimeError
+
 export const RuntimeError = VibestPlugin.Runtime.RuntimeError
+
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 
 export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
@@ -45,6 +51,7 @@ const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
 
 const sameMembers = (a: Runtime, b: Runtime) => {
   const keys = Object.keys(a) as Array<keyof Runtime>
+
   return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
 }
 
@@ -56,6 +63,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus.Service | HostEnv | S
   const followers = yield* FiberMap.make<string>()
   const defined = new Map<string, Runtime>()
   const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
+
   const follow = (runtime: Runtime) =>
     runtime.events.pipe(
       Stream.tap((event) => bus.observe(live(runtime.id, event))),
@@ -72,29 +80,38 @@ export const make: Effect.Effect<RuntimesShape, never, Bus.Service | HostEnv | S
       Stream.runDrain,
       Effect.orDie,
     )
+
   const reconcile = (list: ReadonlyArray<Runtime>) =>
     Effect.gen(function* () {
       for (const [id, runtime] of defined) {
         const next = list.find((candidate) => candidate.id === id)
+
         if (next !== undefined && sameMembers(next, runtime)) continue
         defined.delete(id)
         yield* FiberMap.remove(followers, id)
       }
+
       const fresh: Array<string> = []
+
       for (const runtime of list) {
         if (defined.has(runtime.id)) {
           defined.set(runtime.id, runtime)
           continue
         }
+
         fresh.push(runtime.id)
         defined.set(runtime.id, runtime)
         yield* FiberMap.run(followers, runtime.id, follow(runtime))
       }
+
       env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
+
       if (fresh.length > 0) yield* PubSub.publish(added, fresh)
     })
+
   const registry = Registry.definitions<Runtime>("runtime", reconcile)
   const all = Effect.sync(() => registry.get())
+
   return {
     transform: registry.transform,
     all,
@@ -103,6 +120,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus.Service | HostEnv | S
       Effect.suspend(() => {
         const loaded = registry.get()
         const found = loaded.find((runtime) => runtime.id === id)
+
         return found === undefined ? Effect.fail(notLoaded(id, loaded)) : Effect.succeed(found)
       }),
     ),

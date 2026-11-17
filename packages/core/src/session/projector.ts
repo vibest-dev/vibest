@@ -27,6 +27,7 @@ export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const sql = yield* SqlClient.SqlClient
+
     const active =
       <D extends Definition>(projector: Projector<D>): Projector<D> =>
       (fact) =>
@@ -38,6 +39,7 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(SessionCreated, (fact) => {
       const { data } = fact
       const origin = data.origin
+
       return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_peer,
           origin_project, origin_session, created_at, active_at)
         VALUES (${sessionIdOf(fact)}, ${data.project}, ${data.parent ?? null}, ${data.agent}, ${data.name},
@@ -63,6 +65,7 @@ export const layer = Layer.effectDiscard(
       ProcessStarted,
       active((fact) => {
         const { data } = fact
+
         return Effect.andThen(
           sql`INSERT INTO process (id, session_id, harness, provider, model, routing, conversation, runtime, terminal,
               pid, started_at, placed_at)
@@ -86,6 +89,7 @@ export const layer = Layer.effectDiscard(
       ProcessReady,
       active((fact) => {
         const { integration } = fact.data
+
         return sql`UPDATE process SET ready_at = ${fact.at}, pid = coalesce(${fact.data.pid ?? null}, pid),
             integration_version = ${integration === undefined ? sql`integration_version` : integration.version},
             integration_protocol = ${integration === undefined ? sql`integration_protocol` : integration.protocol}
@@ -115,6 +119,7 @@ export const layer = Layer.effectDiscard(
           const session = sessionIdOf(fact)
           yield* sql`UPDATE process SET ended_at = ${fact.at}, end_reason = ${reason}
             WHERE session_id = ${session} AND id = ${process} AND ended_at IS NULL`
+
           if (reason !== "launch_failed") return
           yield* sql`UPDATE session SET process_id = coalesce((SELECT max(id) FROM process WHERE session_id = ${session}
               AND NOT (terminal IS NULL AND end_reason = 'launch_failed')), process_id)
@@ -163,6 +168,7 @@ export const layer = Layer.effectDiscard(
       InboxQueued,
       active((fact) => {
         const { data } = fact
+
         return sql`INSERT INTO inbox (session_id, id, sender_session_id, kind, content, request, peer_item, status)
           VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${data.sender ?? null}, ${data.kind}, ${data.content},
             ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`

@@ -1,11 +1,19 @@
 export * from "./herdr.js"
+
 export { SocketConnector } from "./socket-connector.js"
+
 export { configDir, defaultSocketPath, socketEndpoint, type SocketPathOptions } from "./socket-path.js"
+
 export * as params from "./generated/params.js"
+
 export * as results from "./generated/results.js"
+
 export * as events from "./generated/events.js"
+
 export type { Method, MethodParams, Subscription } from "./generated/params.js"
+
 export type { ResponseResult, ResultByTag, ResultTag } from "./generated/results.js"
+
 export type {
   AgentStatus,
   EventFrame,
@@ -14,4 +22,5 @@ export type {
   SubscriptionEventFrame,
   SubscriptionEventKind,
 } from "./generated/events.js"
+
 export { PROTOCOL, SCHEMA_VERSION } from "./generated/index.js"

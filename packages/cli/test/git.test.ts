@@ -29,6 +29,7 @@ const ownGitHome = Layer.effect(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const home = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-git-home-" }))
     const env = { HOME: home, XDG_CONFIG_HOME: home, GIT_CONFIG_NOSYSTEM: "1" }
+
     return ChildProcessSpawner.make((command) =>
       spawner.spawn(
         ChildProcess.isStandardCommand(command)
@@ -48,9 +49,11 @@ const live = Git.layer.pipe(Layer.provideMerge(ownGitHome), Layer.provideMerge(P
 const sh = (cwd: string, ...args: string[]) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
     const handle = yield* spawner.spawn(
       ChildProcess.make("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd }),
     )
+
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         Stream.mkString(Stream.decodeText(handle.stdout)),
@@ -59,7 +62,9 @@ const sh = (cwd: string, ...args: string[]) =>
       ],
       { concurrency: "unbounded" },
     )
+
     if (exitCode !== 0) return yield* Effect.die(new Error(`git ${args.join(" ")}: ${stderr.trim()}`))
+
     return stdout.trim()
   }).pipe(Effect.scoped, Effect.orDie)
 
@@ -73,6 +78,7 @@ const repositoryWithOneCommitOnMain = (parent: string, name: string) =>
     yield* fs.writeFileString(path.join(root, "README.md"), `${name}\n`)
     yield* sh(root, "add", ".")
     yield* sh(root, "commit", "-q", "-m", "init")
+
     return root
   }).pipe(Effect.orDie)
 
@@ -81,6 +87,7 @@ const makeRepository = Effect.gen(function* () {
   const path = yield* Path.Path
   const root = yield* repositoryWithOneCommitOnMain(yield* tempDirectory("vibest-repo-"), "repo")
   yield* fs.writeFileString(path.join(root, "CLAUDE.md"), "local rules\n")
+
   return root
 })
 
@@ -92,14 +99,17 @@ const test = <E>(
   timeout?: number,
 ) => {
   const run = () => program.pipe(Effect.provide(live))
+
   return timeout === undefined ? it.effect(name, run) : it.effect(name, run, timeout)
 }
 
 const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const exit = yield* Effect.exit(effect)
+
     if (Exit.isSuccess(exit)) return assert.fail("expected a failure")
     const error = Cause.findErrorOption(exit.cause)
+
     return Option.isSome(error) ? error.value.message : assert.fail(`not a failure: ${exit.cause}`)
   })
 
@@ -269,11 +279,13 @@ describe("git, the live layer: project copies", () => {
       const path = yield* Path.Path
       const sources = yield* scopedRealPathTempDirectory("vibest-sources-")
       const app = yield* repositoryWithOneCommitOnMain(sources, "app")
+
       const smudgeFilter = {
         "filter.slow.clean": "cat",
         "filter.slow.smudge": "sleep 30",
         "filter.slow.required": "true",
       }
+
       yield* Effect.acquireRelease(
         Effect.sync(() => {
           process.env.GIT_CONFIG_COUNT = String(Object.keys(smudgeFilter).length)
@@ -294,12 +306,14 @@ describe("git, the live layer: project copies", () => {
       yield* fs.writeFileString(path.join(app, ".gitattributes"), "README.md filter=slow\n")
       yield* sh(app, "add", ".gitattributes")
       yield* sh(app, "commit", "-q", "-m", "slow")
+
       const waitFor = (file: string) =>
         Effect.gen(function* () {
           for (let i = 0; i < 250; i++) {
             if (yield* fs.exists(file)) return
             yield* TestClock.withLive(Effect.sleep("20 millis"))
           }
+
           return yield* Effect.die(new Error(`timed out waiting for ${file}`))
         })
 
@@ -348,12 +362,14 @@ describe("git, the live layer: project copies", () => {
       const workspace = path.join(parent, "ws")
       const made = yield* createIsolatedWorktrees(folders, workspace)
       assert.deepStrictEqual(made, [path.join(workspace, "app"), path.join(workspace, "sdk")])
+
       for (const folder of folders) {
         const wt = path.join(workspace, folder.name)
         assert.strictEqual(yield* sh(wt, "branch", "--show-current"), "")
         assert.strictEqual(yield* sh(folder.path, "branch", "--list", "vibest/*"), "")
         assert.strictEqual(yield* sh(wt, "rev-parse", "HEAD"), yield* sh(folder.path, "rev-parse", "HEAD"))
       }
+
       const fromWorkspace = yield* projectRoot(workspace)
       assert.strictEqual(fromWorkspace.root, root)
     }),
@@ -395,16 +411,20 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
     Effect.gen(function* () {
       const wt = (yield* Path.Path).join(yield* tempDirectory("vibest-wt-"), "w")
       yield* sh(repo, "worktree", "add", "-q", "--detach", wt)
+
       return wt
     })
+
   const policy = (repo: string, ignore: string, include?: string) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       yield* fs.writeFileString(`${repo}/.gitignore`, ignore)
       yield* sh(repo, "add", ".gitignore")
       yield* sh(repo, "commit", "-q", "-m", "ignore")
+
       if (include !== undefined) yield* fs.writeFileString(`${repo}/.worktreeinclude`, include)
     })
+
   const write = (file: string, content: string) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -424,14 +444,18 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         yield* Effect.gen(function* () {
           const db = yield* Db.Service
           const layout = yield* Layout
+
           const resolve = (directory: string) =>
             Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located))
+
           const move = (directory: string, from: string) =>
             Effect.flatMap(locateProject(directory), (located) => moveProjectHere(db, located, from))
+
           const refusal = (directory: string, from: string) =>
             Effect.map(Effect.flip(move(directory, from)), (e) =>
               Predicate.isTagged(e, "MoveRefused") ? e.message : e._tag,
             )
+
           const repo = path.join(dir, "a", "repo")
           yield* fs.makeDirectory(repo, { recursive: true })
           yield* sh(repo, "init", "-q", "-b", "main")
@@ -521,9 +545,11 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         yield* fs.makeDirectory(path.dirname(moved))
         yield* fs.rename(path.join(physical, "parent", "repo"), moved)
         yield* fs.rename(path.join(physical, "parent"), path.join(physical, "moved-parent"))
+
         const done = yield* Effect.flatMap(locateProject(moved), (located) =>
           moveProjectHere(db, located, path.join(alias, "parent", "repo")),
         )
+
         assert.strictEqual(done.id, first.id)
         assert.strictEqual(done.from, repo)
       }).pipe(
@@ -543,10 +569,13 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         yield* Effect.gen(function* () {
           const db = yield* Db.Service
           const layout = yield* Layout
+
           const resolve = (directory: string) =>
             Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located))
+
           const move = (directory: string, from: string, through = db) =>
             Effect.flatMap(locateProject(directory), (located) => moveProjectHere(through, located, from))
+
           const repo = path.join(dir, "a", "repo")
           yield* fs.makeDirectory(repo, { recursive: true })
           yield* sh(repo, "init", "-q", "-b", "main")
@@ -650,6 +679,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           "# local config\n.claude/\n.env.local\nCLAUDE.md\ncache/\n!cache/b\nlogs/*\n!logs/keep.log\ntracked.txt\nodd*\n",
         )
         yield* write(`${repo}/tracked.txt`, "edited in the main checkout\n")
+
         for (const f of [
           ".claude/settings.local.json",
           ".claude/notes.md",
@@ -677,9 +707,12 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           "odd\nname",
           "odd name ",
         ]
+
         const wt = yield* addWorktree(repo)
         assert.sameMembers(yield* copyIncluded(repo, wt), selected)
+
         for (const f of selected) assert.strictEqual(yield* fs.readFileString(`${wt}/${f}`), `${f}\n`)
+
         for (const f of [
           "CLAUDE.md",
           ".claude/notes.md",
@@ -698,6 +731,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         yield* fs.remove(`${repo}/.worktreeinclude`)
         const without = yield* addWorktree(repo)
         assert.deepStrictEqual(yield* copyIncluded(repo, without), [])
+
         for (const f of [".claude", ".env.local", "cache"]) assert.isFalse(yield* fs.exists(`${without}/${f}`), f)
       }),
   )
@@ -716,6 +750,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         `${repo}/.git/info/exclude`,
         (yield* fs.readFileString(`${repo}/.git/info/exclude`)) + "shared.dat\n",
       )
+
       for (const f of files) yield* write(`${repo}/${f}`, `${f}\n`)
       const wt = yield* addWorktree(repo)
       assert.sameMembers(yield* copyIncluded(repo, wt), ["committed.env", "shared.dat"])

@@ -36,22 +36,27 @@ export class FakeProcesses extends Context.Service<
       const signaled = yield* Ref.make<ReadonlyArray<number>>([])
       const denied = yield* Ref.make(false)
       const ignored = yield* Ref.make(false)
+
       const signalGate = yield* Ref.make(
         Option.none<{ readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }>(),
       )
+
       const cwdGate = yield* Ref.make(
         Option.none<{ readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }>(),
       )
+
       const holdNext = (gate: typeof cwdGate) =>
         Effect.gen(function* () {
           const reached = yield* Deferred.make<void>()
           const release = yield* Deferred.make<void>()
           yield* Ref.set(gate, Option.some({ reached, release }))
+
           return {
             reached: Deferred.await(reached),
             release: () => Deferred.succeed(release, undefined).pipe(Effect.asVoid),
           }
         })
+
       return FakeProcesses.of({
         set: (pid, liveness) => Ref.update(states, HashMap.set(pid, liveness)),
         setCwdUsers: (u) => Ref.set(users, u),
@@ -83,19 +88,25 @@ export class FakeProcesses extends Context.Service<
                     }>(),
                   ] as const,
               )
+
               if (Option.isSome(gate)) {
                 yield* Deferred.succeed(gate.value.reached, undefined)
                 yield* Deferred.await(gate.value.release)
+
                 for (let i = 0; i < 8; i++) yield* Effect.yieldNow
               }
+
               if (yield* Ref.get(denied)) return "denied" as const
               yield* Ref.update(signaled, (s) => [...s, pid])
+
               if (!(yield* Ref.get(ignored))) yield* Ref.update(states, HashMap.set(pid, "exited" as Liveness))
+
               return "sent" as const
             }),
           cwdUsers: () =>
             Effect.gen(function* () {
               yield* Ref.update(listings, (n) => n + 1)
+
               const gate = yield* Ref.modify(
                 cwdGate,
                 (g) =>
@@ -107,11 +118,14 @@ export class FakeProcesses extends Context.Service<
                     }>(),
                   ] as const,
               )
+
               if (Option.isSome(gate)) {
                 yield* Deferred.succeed(gate.value.reached, undefined)
                 yield* Deferred.await(gate.value.release)
               }
+
               yield* Effect.sleep(yield* Ref.get(cwdDelay))
+
               return yield* Ref.get(users)
             }),
           tree: (root) => Ref.get(trees).pipe(Effect.map((m) => Option.getOrElse(HashMap.get(m, root), () => [root]))),

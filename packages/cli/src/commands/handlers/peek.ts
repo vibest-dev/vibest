@@ -9,6 +9,7 @@ export default Runtime.handler(Commands.commands.peek, (o) =>
     Effect.flatMap((r) =>
       Effect.gen(function* () {
         if (r.terminal !== undefined) yield* Console.error(`terminal here: ${r.terminal.split("@")[0]}`)
+
         if (r.view !== undefined) yield* Console.error(`not shown here: ${r.view}`)
         yield* Console.log(r.text)
       }),

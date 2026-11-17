@@ -18,11 +18,14 @@ export class SqlClientLayer extends Context.Service<
   SqlClientLayer,
   Layer.Layer<SqlClient.SqlClient, DatabaseOpenFailed | SchemaMismatch | SqlError.SqlError>
 >()("vibest/SqlClientLayer") {}
+
 export const sqlClientLayer = LayerNode.unbound(SqlClientLayer)
+
 export const sqlClient = LayerNode.make({
   service: SqlClient.SqlClient,
   layer: Layer.unwrap(Effect.map(SqlClientLayer, (layer) => layer)),
   deps: [sqlClientLayer],
 })
+
 export const layout = LayerNode.unbound(Layout)
 export const httpClient = LayerNode.make({ service: HttpClient.HttpClient, layer: FetchHttpClient.layer, deps: [] })

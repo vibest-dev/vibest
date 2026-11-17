@@ -26,8 +26,10 @@ export const archiveOnIdlePlugin = Effect.map(ArchiveOnIdle, (deps) =>
         const facts = ctx.event.subscribe({
           types: ["execution.ended", "inbox.moved", "session.ended"],
         })
+
         yield* Stream.runForEach(facts, (event) => {
           const id = event.sessionId
+
           const act =
             id === undefined
               ? Effect.void
@@ -46,6 +48,7 @@ export const archiveOnIdlePlugin = Effect.map(ArchiveOnIdle, (deps) =>
                           Effect.flatMap((creator) => (creator === undefined ? Effect.void : opted(deps, [creator]))),
                         )
                     : Effect.void
+
           return act.pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning(`archive-on-idle ${event.type}`, cause),

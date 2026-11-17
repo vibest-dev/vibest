@@ -72,7 +72,9 @@ export class SocketServerLayer extends Context.Service<
   SocketServerLayer,
   Layer.Layer<SocketServer.SocketServer, SocketServer.SocketServerError>
 >()("vibest/SocketServerLayer") {}
+
 export const socketServerLayer = LayerNode.unbound(SocketServerLayer)
+
 export const socketServer = LayerNode.make({
   service: SocketServer.SocketServer,
   layer: Layer.unwrap(Effect.map(SocketServerLayer, (layer) => layer)),

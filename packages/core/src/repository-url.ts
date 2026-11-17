@@ -14,16 +14,21 @@ const parsed = (host: string, rest: string, ssh: boolean): ParsedRemote | undefi
     .replace(/^~?\/+/, "")
     .replace(/\/+$/, "")
     .replace(/\.git$/i, "")
+
   return path === "" ? undefined : { host, path, ssh }
 }
 
 export const parseRemote = (url: string): ParsedRemote | undefined => {
   const u = url.trim()
+
   if (u.includes("://")) {
     const m = /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/]*@)?([^/:@]+)(?::\d*)?\/(.+)$/i.exec(u)
+
     return m === null || /^file$/i.test(m[1]!) ? undefined : parsed(m[2]!, m[3]!, /ssh/i.test(m[1]!))
   }
+
   const m = /^(?:[^@/:]+@)?([^/:@[\]]{2,}):(.+)$/.exec(u)
+
   return m === null ? undefined : parsed(m[1]!, m[2]!, true)
 }
 
@@ -38,25 +43,31 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const known = new Map<string, string>()
+
     const ask = (alias: string) =>
       capture("ssh", ["-G", "--", alias], { timeout: Duration.seconds(5) }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.map((run) => {
           if (run === undefined || run.exitCode !== 0) return alias
+
           const name = run.stdout
             .split("\n")
             .find((line) => line.startsWith("hostname "))
             ?.slice("hostname ".length)
             .trim()
+
           if (!name) return alias
           known.set(alias, name)
+
           return name
         }),
         Effect.orElseSucceed(() => alias),
       )
+
     return {
       hostName: Effect.fn("RepositoryUrl.hostName")((alias) => {
         const hit = known.get(alias)
+
         return hit === undefined ? ask(alias) : Effect.succeed(hit)
       }),
     }
@@ -71,7 +82,9 @@ export const node = LayerNode.make({
 
 export const repositoryIdentity = Effect.fn("RepositoryUrl.repositoryIdentity")(function* (url: string) {
   const remote = parseRemote(url)
+
   if (remote === undefined) return undefined
   const host = remote.ssh ? yield* (yield* Service).hostName(remote.host) : remote.host
+
   return `${host.toLowerCase()}/${remote.path}`
 })

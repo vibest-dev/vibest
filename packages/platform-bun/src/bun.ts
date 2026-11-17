@@ -61,6 +61,7 @@ const user = Layer.succeed(UserPlatform, {
   uid: process.getuid?.(),
   lstat: async (file) => {
     const st = await fsPromises.lstat(file)
+
     return { symlink: st.isSymbolicLink(), directory: st.isDirectory(), uid: st.uid, mode: st.mode }
   },
 })
@@ -84,6 +85,7 @@ const privateDatabase = (filename: string) =>
     try: async () => {
       await (await fsPromises.open(filename, "a", PRIVATE_FILE)).close()
       await fsPromises.chmod(filename, PRIVATE_FILE)
+
       for (const suffix of ["-wal", "-shm"]) {
         try {
           await fsPromises.chmod(filename + suffix, PRIVATE_FILE)
@@ -120,8 +122,10 @@ export const sqlite = (filename: string) =>
       if (filename !== ":memory:") {
         const existed = yield* Effect.promise(() => Bun.file(filename).exists())
         yield* privateDatabase(filename)
+
         if (existed) yield* inspectFile(filename)
       }
+
       return sqliteLayer(filename, false)
     }),
   )
@@ -135,6 +139,7 @@ const readOnly = (filename: string) =>
 export const checkDatabase: Host["checkDatabase"] = (filename) =>
   Effect.gen(function* () {
     if (!(yield* Effect.promise(() => Bun.file(filename).exists()))) return
+
     if ((yield* inspectFile(filename)) !== "ready") return
     yield* checkReplay(yield* readOnly(filename)).pipe(
       Effect.provide(Projectors.replay.pipe(Layer.provideMerge(sqliteLayer(":memory:", false)))),
@@ -162,6 +167,7 @@ const providedPackages: ReadonlySet<string> = new Set(Object.keys(provided).map(
 export const makePluginLoader = (): PluginLoader["Service"] => {
   const { keyLocalImports, load } = pluginLoads()
   let mapped = false
+
   return {
     prepare: Effect.sync(() => {
       if (mapped) return
@@ -173,6 +179,7 @@ export const makePluginLoader = (): PluginLoader["Service"] => {
             exports: exports as Record<string, unknown>,
             loader: "object" as const,
           })
+
           for (const [name, value] of Object.entries(provided)) build.module(name, object(value))
           keyLocalImports(build)
         },
@@ -194,6 +201,7 @@ const darwinLibc =
         },
       }).symbols
     : undefined
+
 const CTL_KERN = 1
 const KERN_PROC = 14
 const KERN_PROC_PID = 1
@@ -205,6 +213,7 @@ const darwinZombie = (sysctl: NonNullable<typeof darwinLibc>["sysctl"], pid: num
   const info = new Uint8Array(KINFO_PROC_BYTES)
   const size = new BigUint64Array([BigInt(KINFO_PROC_BYTES)])
   const query = new Int32Array([CTL_KERN, KERN_PROC, KERN_PROC_PID, pid])
+
   return (
     sysctl(query, query.length, info, size, null, 0) === 0 &&
     size[0] === BigInt(KINFO_PROC_BYTES) &&
@@ -215,6 +224,7 @@ const darwinZombie = (sysctl: NonNullable<typeof darwinLibc>["sysctl"], pid: num
 const linuxZombie = (pid: number) => {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8")
+
     return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z")
   } catch {
     return false
@@ -225,6 +235,7 @@ const isZombie = (pid: number) => (darwinLibc ? darwinZombie(darwinLibc.sysctl, 
 
 export const liveness = (pid: number): Liveness => {
   const seen = livenessOf(() => process.kill(pid, 0))
+
   return seen === "alive" && isZombie(pid) ? "exited" : seen
 }
 
@@ -244,12 +255,14 @@ const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", 
   dup2: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 })
+
 const LOCK_EX_NB = 2 | 4
 
 export const captureDaemonLog = (file: string) =>
   Effect.sync(() => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const fd = fs.openSync(file, "a")
+
     try {
       if (libc.symbols.dup2(fd, 1) === -1 || libc.symbols.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
     } finally {
@@ -274,8 +287,10 @@ export const lock: Host["lock"] = (file) =>
     Effect.try({
       try: () => {
         const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600)
+
         if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) return fd
         fs.closeSync(fd)
+
         return undefined
       },
       catch: lockFailed(file),
@@ -283,6 +298,7 @@ export const lock: Host["lock"] = (file) =>
     (fd) =>
       Effect.sync(() => {
         if (fd === undefined) return
+
         try {
           fs.ftruncateSync(fd, 0)
         } finally {
@@ -334,6 +350,7 @@ const transport: Machines.MachineTransport["Service"] = (argv) =>
     Effect.flatMap((proc) => {
       const stderr = new Response(proc.stderr).text().catch(() => "")
       const exited = Effect.promise(async () => ({ code: (await proc.exited) ?? undefined, stderr: await stderr }))
+
       const writable = new WritableStream<Uint8Array>({
         write: (chunk) =>
           Promise.resolve()
@@ -346,6 +363,7 @@ const transport: Machines.MachineTransport["Service"] = (argv) =>
           await proc.stdin.end()
         },
       })
+
       return Effect.map(stdioSocket({ readable: proc.stdout, writable }), (socket) => ({ socket, exited }))
     }),
   )
@@ -437,7 +455,9 @@ const onSignals: Host["onSignals"] = (onSignal) =>
       const interactive = process.stdin.isTTY || process.stdout.isTTY
       process.on("SIGTERM", onSignal)
       process.on("SIGINT", onSignal)
+
       if (interactive) process.on("SIGHUP", hangup)
+
       return () => {
         process.off("SIGTERM", onSignal)
         process.off("SIGINT", onSignal)

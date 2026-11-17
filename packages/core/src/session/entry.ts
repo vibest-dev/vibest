@@ -40,11 +40,13 @@ export class EntryRunning extends Schema.TaggedError<EntryRunning>()("EntryRunni
 
 const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
   const name = runtime.name ?? runtime.id
+
   return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
 }
 
 export const sameEntry = (current: SessionRow | undefined, runtime: string, address: string) => {
   const place = current === undefined ? undefined : placedTerminal(current)
+
   return place !== undefined && place.runtime === runtime && encodeAddress(place.address) === address
 }
 
@@ -82,6 +84,7 @@ const make = Effect.gen(function* () {
     )
 
   const harnessIds = () => harnesses.all.map((definition) => definition.id)
+
   const firstInputOf = (harness: HarnessId) =>
     harnesses.find(harness)?.systemPromptInPrompt === true ? ENTRY_FIRST_INPUT : undefined
 
@@ -122,13 +125,17 @@ const make = Effect.gen(function* () {
   const running = Effect.fn("EntrySession.running")(function* (projectId: string, terminal: string) {
     const entry = yield* db.session.entryOf(projectId)
     const place = entry === undefined ? undefined : placedTerminal(entry)
+
     if (entry === undefined || place === undefined || place.address.id === terminal) return null
     const found = runtimes.find(place.runtime)
+
     if (!(yield* restarting.has(entry.id))) {
       if (found === undefined) return null
       const presence = yield* entryIdle(found, place.address).pipe(Effect.option)
+
       if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
     }
+
     return {
       harness: harnessIdOf(entry),
       place: placeOf(found ?? { id: place.runtime }, place.address),
@@ -158,6 +165,7 @@ const make = Effect.gen(function* () {
     const fresh = argv.includes("--new")
     const agent = agentOf(current, fresh, input.agent)
     yield* known(agent)
+
     const decision = yield* decide({
       root,
       agent,
@@ -168,13 +176,17 @@ const make = Effect.gen(function* () {
       machine: at.id,
       runtime: input.runtime,
     })
+
     if (decision.runtime === undefined) {
       const loaded = (yield* runtimes.all).map((h) => h.id)
+
       return yield* new NoRuntime({
         message: `no terminal runtime was chosen for the entry session${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}`,
       })
     }
+
     if (decision.harness === undefined) return yield* firstStart
+
     if (harnesses.find(decision.harness) === undefined)
       return yield* new LaunchFailed({
         message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}; ${addPluginHint}`,
@@ -183,10 +195,12 @@ const make = Effect.gen(function* () {
     const rt = yield* runtimes.route(decision.runtime)
     yield* runtimes.online(rt)
     const run = rt.run
+
     if (run === undefined)
       return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
     let opened: Terminal | undefined
     let claimedId: string | undefined
+
     const closeLaunched = Effect.suspend(() =>
       opened === undefined
         ? Effect.void
@@ -197,6 +211,7 @@ const make = Effect.gen(function* () {
               Effect.andThen(claimedId === undefined ? Effect.void : db.session.endProcess(claimedId, "launch_failed")),
             ),
     )
+
     return yield* Effect.gen(function* () {
       const command = yield* withHarness(
         Launch.entryCommand({
@@ -209,8 +224,10 @@ const make = Effect.gen(function* () {
             Effect.gen(function* () {
               yield* notRunning(id, "")
               const existing = yield* db.session.entryOf(id)
+
               const sessionId =
                 existing === undefined || fresh ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
+
               const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
                 root,
                 label: "vibest",
@@ -224,6 +241,7 @@ const make = Effect.gen(function* () {
                 ),
                 Effect.uninterruptible,
               )
+
               const claimed = yield* db.session
                 .startEntry(
                   id,
@@ -248,6 +266,7 @@ const make = Effect.gen(function* () {
                   ),
                   Effect.uninterruptible,
                 )
+
               return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
             }),
           ),
@@ -256,9 +275,11 @@ const make = Effect.gen(function* () {
         Effect.catchTag("HarnessUnavailable", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
         Effect.catchTag("SystemPromptDirUnsafe", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
       )
+
       if (opened === undefined) return yield* Effect.die("launch opened no terminal")
       const pane = opened
       yield* run(pane, command).pipe(Effect.mapError((error) => new LaunchFailed({ message: error.message })))
+
       const routing =
         Object.keys(decision.decidedBy).length === 0
           ? undefined
@@ -268,6 +289,7 @@ const make = Effect.gen(function* () {
               model: decision.model,
               decidedBy: decision.decidedBy,
             })
+
       return {
         runtime: rt.id,
         terminal: pane.id,
@@ -291,16 +313,20 @@ const make = Effect.gen(function* () {
     const agent = agentOf(current, false, input.agent)
     yield* known(agent)
     const decision = yield* decide({ ...input, agent, current, machine: "local" })
+
     if (decision.harness === undefined) return yield* firstStart
+
     if (harnesses.find(decision.harness) === undefined)
       return yield* new HarnessUnavailable({
         harness: decision.harness,
         message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}; ${addPluginHint} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
       })
+
     if (decision.runtime === undefined)
       return yield* new NoRuntime({ message: "no terminal runtime was chosen for the entry session" })
     const rt = yield* runtimes.route(decision.runtime)
     yield* runtimes.online(rt)
+
     return { ...decision, harness: decision.harness, runtime: rt.id }
   })
 
@@ -321,11 +347,14 @@ const make = Effect.gen(function* () {
     const agent = agentOf(yield* db.session.entryOf(projectId), input.fresh, input.agent)
     yield* known(agent)
     const kind = input.runtime ?? (yield* onlyRuntime)
+
     if (kind === undefined) return yield* new NoRuntime({ message: "the entry session's runtime is not named" })
+
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
         yield* notRunning(projectId, terminal)
         const address = { machine: "local", id: terminal }
+
         let claimed:
           | {
               readonly sessionId: string
@@ -335,6 +364,7 @@ const make = Effect.gen(function* () {
               readonly runtime: string
             }
           | undefined
+
         const command = yield* withHarness(
           Launch.entryCommand({
             harness: input.harness,
@@ -358,7 +388,9 @@ const make = Effect.gen(function* () {
                   firstInput: firstInputOf(input.harness),
                 },
               )
+
               claimed = { ...saved, runtime: runtimeEnv(kind, address) }
+
               return claimed
             }),
           }),
@@ -367,17 +399,22 @@ const make = Effect.gen(function* () {
             Effect.fail(new LaunchFailed({ message: error.message })),
           ),
         )
+
         if (claimed === undefined) return yield* Effect.die("entry command returned without a session")
         const rt = runtimes.find(kind)
+
         if (rt?.present !== undefined)
           yield* rt
             .present(address, { entrySession: claimed.sessionId, projectId })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
+
         const typed = yield* Launch.launchLine(command).pipe(
           Effect.mapError((e) => new LaunchFailed({ message: e.message })),
         )
+
         const at = typed[0] === "env" ? 1 + typed.slice(1).findIndex((part) => !/^[A-Z_]+=/.test(part)) : 0
         const [file, ...args] = typed.slice(at)
+
         return {
           sessionId: claimed.sessionId,
           harnessSessionId: claimed.harnessSessionId,
@@ -391,11 +428,14 @@ const make = Effect.gen(function* () {
 
   const focus = Effect.fn("EntrySession.focus")(function* (projectId: string) {
     const found = yield* running(projectId, "")
+
     if (found === null) return null
     const runtime = runtimes.find(found.runtime)
+
     if (runtime?.focus === undefined) return { place: found.place, focused: false }
     const address = yield* Schema.decodeUnknownEffect(AddressJson)(found.address).pipe(Effect.orDie)
     const focused = yield* runtime.focus(address).pipe(Effect.exit)
+
     return { place: found.place, focused: Exit.isSuccess(focused) }
   })
 
@@ -404,14 +444,17 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const entry = yield* db.session.entryOf(projectId)
         const place = entry === undefined ? undefined : placedTerminal(entry)
+
         if (entry === undefined || place === undefined || !sameEntry(entry, runtime, address))
           return { result: "moved" as const }
+
         if (yield* restarting.has(entry.id))
           return {
             result: "unsupported" as const,
             reason: "vibest update is restarting it there; run vibest again once it is ready",
           }
         const h = yield* runtimes.route(runtime)
+
         return yield* stopAgent(h, place.address, {
           pid: pidOf(entry),
           detach: db.session.detachEntry(projectId, runtime, place.address),

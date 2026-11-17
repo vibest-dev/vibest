@@ -17,6 +17,7 @@ import type { Handlers } from "./caller.ts"
 import { group } from "./group.ts"
 
 type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
+
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
 const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
@@ -31,10 +32,12 @@ const peerOf = (method: string) =>
 const peerScope = (method: string) =>
   Effect.flatMap(Caller, (c): Effect.Effect<PeerScope | undefined, Forbidden> => {
     if (!Predicate.isTagged(c, "Peer")) return Effect.succeed(undefined)
+
     if (c.projectId === undefined)
       return Effect.fail(
         new Forbidden({ method, message: `${method} needs the calling project (${PEER_PROJECT_HEADER})` }),
       )
+
     return Effect.succeed({
       peer: c.peerId,
       project: c.projectId,
@@ -49,7 +52,9 @@ const makeRouting = Effect.gen(function* () {
   const reach = (method: Routed | "List") =>
     Effect.gen(function* () {
       const scope = yield* peerScope(method)
+
       if (scope !== undefined) return { c: undefined, scope }
+
       return { c: yield* deps.agent(method), scope }
     })
 
@@ -63,6 +68,7 @@ const makeRouting = Effect.gen(function* () {
     forwarded: (at: At, project: string, by: string) => Effect.Effect<B, F>,
   ) => {
     const at = address(input)
+
     return Predicate.isTagged(at, "Local")
       ? local(at.id)
       : deps.agent(method).pipe(
@@ -123,9 +129,13 @@ const make = Effect.gen(function* () {
   const listScope = (all: boolean | undefined) =>
     Effect.gen(function* () {
       const { c, scope } = yield* reach("List")
+
       if (c === undefined) return ListScope.Peer(scope)
+
       if (Predicate.isTagged(c, "Session")) return ListScope.Project({ id: c.projectId })
+
       if (all === true) return ListScope.All()
+
       return yield* findAt(c.repositoryRoot).pipe(
         Effect.map((row): ListScope => (row === undefined ? ListScope.Nothing() : ListScope.Project({ id: row.id }))),
         Effect.catchTag("NotInRepository", () => Effect.succeed(ListScope.All())),
@@ -138,6 +148,7 @@ const make = Effect.gen(function* () {
         const scope = yield* listScope(all)
         const local = yield* listing.listed(scope, stopped === true)
         const away = yield* remote.list(scope, byOf(yield* Caller), stopped)
+
         return { sessions: [...local, ...away.sessions], machines: away.machines }
       }),
 
@@ -148,19 +159,24 @@ const make = Effect.gen(function* () {
             method: "Peer.Hello",
             message: "Peer.Hello names the vibestd that calls it",
           })
+
         if (id !== self.id) yield* db.remote.notePeer({ id, name })
+
         return { id: self.id, name: self.name, version, runtimes: yield* runtimesHere(runtimes) }
       }),
 
     "Peer.Spawn": (input: PayloadOf<"Peer.Spawn">) =>
       Effect.gen(function* () {
         const scope = yield* peerScope("Peer.Spawn")
+
         if (scope === undefined) return yield* notPeer("Peer.Spawn")
+
         if (scope.session === undefined)
           return yield* new Forbidden({
             method: "Peer.Spawn",
             message: "Peer.Spawn is started by a session; it is not run in the user's name",
           })
+
         return yield* peers.spawn(scope.peer, scope.project, scope.session, input)
       }),
 

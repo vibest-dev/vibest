@@ -23,6 +23,7 @@ const follow = (events: Stream.Stream<RuntimeApi.RuntimeEvent>) =>
     )
     yield* Effect.yieldNow
     yield* runtimes.transform((editor) => editor.add({ id: "fake", events } as unknown as Runtime))
+
     return seen
   })
 
@@ -31,11 +32,13 @@ describe("a runtime's events stream", () => {
     Effect.gen(function* () {
       const pubsub = yield* PubSub.unbounded<RuntimeApi.RuntimeEvent>()
       const acquired = yield* Ref.make(false)
+
       const events = Effect.sleep("5 seconds").pipe(
         Effect.andThen(Ref.set(acquired, true)),
         Effect.as(RuntimeApi.eventsFrom(pubsub)),
         Stream.unwrap,
       )
+
       const seen = yield* follow(events)
       yield* TestClock.adjust("4 seconds")
       assert.strictEqual((yield* Queue.clear(seen)).length, 0)
@@ -50,12 +53,15 @@ describe("a runtime's events stream", () => {
   it.effect("after output a failure waits the first delay again, and a failure without output waits longer", () =>
     Effect.gen(function* () {
       const attempts = yield* Ref.make(0)
+
       const events = Effect.gen(function* () {
         const attempt = yield* Ref.updateAndGet(attempts, (n) => n + 1)
+
         return attempt === 2
           ? Stream.die("closed")
           : Stream.succeed<RuntimeApi.RuntimeEvent>({ type: "reset" }).pipe(Stream.concat(Stream.die("closed")))
       }).pipe(Stream.unwrap)
+
       yield* follow(events)
       const count = Ref.get(attempts)
       yield* Effect.yieldNow

@@ -12,6 +12,7 @@ import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harness
 import { memoryBus } from "./platform/bun.ts"
 
 const events: Array<string> = []
+
 const builtin: Candidate = {
   source: "builtin:harness-x",
   revision: "1",
@@ -54,6 +55,7 @@ const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
     yield* TestClock.withLive(Effect.sleep("20 millis"))
     yield* TestClock.adjust("150 millis")
   }
+
   if (!done()) return yield* Effect.die(`gave up waiting for ${what}`)
 })
 
@@ -64,28 +66,35 @@ describe("plugins: builtins follow the latest config", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
+
         const dir = yield* fs.realPath(
           yield* fs.makeTempDirectoryScoped({ directory: import.meta.dirname, prefix: ".tmp-" }),
         )
+
         yield* fs.makeDirectory(path.join(dir, "plugins"))
         const config = path.join(dir, "vibest.json")
         let release!: () => void
         const gate = new Promise<void>((resolve) => (release = resolve))
         const entered = new Set<string>()
         const platform = Platform.makePluginLoader()
+
         const loader: PluginLoader["Service"] = {
           ...platform,
           prepare: Effect.void,
           load: async (entry, files) => {
             const name = /gate:(\w+)/.exec(await Bun.file(entry).text())?.[1]
+
             if (name !== undefined) {
               entered.add(name)
               await gate
             }
+
             return platform.load(entry, files)
           },
         }
+
         yield* fs.writeFileString(config, `{ "plugins": ["-harness-x"] }`)
+
         const plugins = yield* Plugins.layer.pipe(
           Layer.provide(Layer.succeed(PluginLoader, loader)),
           Layer.provide(Layer.succeed(Builtins, [builtin])),
@@ -99,6 +108,7 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.build,
           Effect.map(Context.get(Plugins.Service)),
         )
+
         assert.deepStrictEqual(events, [])
 
         yield* fs.writeFileString(config, `{ "plugins": [] }`)

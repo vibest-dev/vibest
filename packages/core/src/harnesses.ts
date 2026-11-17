@@ -15,8 +15,10 @@ export const unprovided = (id: string, loaded: ReadonlyArray<HarnessDefinition>)
 
 export const make: Effect.Effect<HarnessesShape> = Effect.sync(() => {
   const registry = Registry.definitions<HarnessDefinition>("harness")
+
   const find = (id: string | null | undefined) =>
     id ? registry.get().find((definition) => definition.id === id) : undefined
+
   return {
     get all() {
       return registry.get()
@@ -24,6 +26,7 @@ export const make: Effect.Effect<HarnessesShape> = Effect.sync(() => {
     get: Effect.fn("Harnesses.get")((id) =>
       Effect.suspend(() => {
         const found = find(id)
+
         return found === undefined ? Effect.fail(unprovided(id, registry.get())) : Effect.succeed(found)
       }),
     ),

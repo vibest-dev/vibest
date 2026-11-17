@@ -16,6 +16,7 @@ const piState = findMessage(
     ),
   }),
 )
+
 const piList = findMessage(
   Schema.Struct({
     id: Schema.Literal("vibest-models"),
@@ -37,8 +38,10 @@ const piList = findMessage(
 export const piModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   const state = piState(lines)
   const list = piList(lines)
+
   if (!state || !list) return undefined
   const current = state.data?.model ?? undefined
+
   return withConfigured(
     list.data.models.map((m) => ({
       provider: m.provider,
@@ -85,14 +88,18 @@ export const pi: Harness.HarnessDefinition = {
   userPrompt: (event) => {
     if (event.type === "accepted")
       return typeof event.execution === "number" ? { execution: event.execution } : undefined
+
     if (event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
+
     if (typeof event.text !== "string" || event.text.trim() === "") return undefined
+
     return { text: event.text }
   },
   executionEnd: (event) => {
     if (event.type !== "agent_settled") return undefined
     const aborted = event.aborted === true
     const error = typeof event.error === "string" ? event.error : ""
+
     return {
       end: {
         text: typeof event.text === "string" ? event.text : "",

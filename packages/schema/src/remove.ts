@@ -10,4 +10,5 @@ export const RemoveOutcome = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   reasons: Schema.Array(Schema.String),
 })
+
 export type RemoveOutcome = typeof RemoveOutcome.Type

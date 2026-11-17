@@ -5,6 +5,7 @@ export const SubscriptionAccount = Schema.Struct({
   plan: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
 })
+
 export type SubscriptionAccount = typeof SubscriptionAccount.Type
 
 export const SubscriptionLimit = Schema.Struct({
@@ -13,6 +14,7 @@ export const SubscriptionLimit = Schema.Struct({
   status: Schema.Literals(["available", "limited"]),
   resetTime: Schema.NullOr(Schema.Number),
 })
+
 export type SubscriptionLimit = typeof SubscriptionLimit.Type
 
 export const Subscription = Schema.Struct({
@@ -24,4 +26,5 @@ export const Subscription = Schema.Struct({
   updatedAt: Schema.Number,
   error: Schema.optional(Schema.String),
 })
+
 export type Subscription = typeof Subscription.Type

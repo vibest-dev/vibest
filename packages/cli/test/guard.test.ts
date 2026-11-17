@@ -48,9 +48,12 @@ import { Host as CliHost } from "../src/host.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const RUNTIME_PROGRAMS = new Set(["herdr"])
+
 const bareGuard = (agent: string, tool: string, input: Record<string, unknown>) =>
   guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, input, "/")
+
 const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAMS)
+
 const namedRuntimes = (ids: ReadonlyArray<string>) =>
   Layer.succeed(Runtimes.Service, {
     all: Effect.succeed(ids.map((id) => ({ id }) as Runtime)),
@@ -137,6 +140,7 @@ describe("Shell denials", () => {
       "cat <<EOF\nx\nEOF\nherdr pane list",
     ])
       assert.match(blocked(command) ?? "", /^Agents must not control a terminal runtime/, command)
+
     for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
       assert.isUndefined(blocked(command), command)
     assert.isUndefined(blocked("hc pane list"))
@@ -245,8 +249,10 @@ layer(
       yield* fs.makeDirectory(path.join(own, "artifacts"), { recursive: true })
       yield* fs.makeDirectory(other, { recursive: true })
       yield* fs.symlink(other, path.join(own, "artifacts", "out"))
+
       const asCoordinator = (tool: string, input: Record<string, unknown>, dir: string = own) =>
         guardOf(vibestHome, home, "coordinator", dir)(tool, input, home)
+
       for (const [tool, input] of [
         ["Write", { file_path: path.join(own, "artifacts", "plan.md"), content: "x" }],
         ["Edit", { file_path: path.join(own, "memories", "a.md"), old_string: "a", new_string: "b" }],
@@ -254,6 +260,7 @@ layer(
         ["edit", { path: ".vibest/projects/own/artifacts/x/../plan.md" }],
       ] as const)
         assert.isUndefined(yield* asCoordinator(tool, input), JSON.stringify(input))
+
       for (const [tool, input] of [
         ["Write", { file_path: "a" }],
         ["Write", { file_path: path.join(other, "a.md") }],
@@ -293,10 +300,13 @@ layer(
       yield* fs.symlink(stolen, path.join(work, "leak"))
       const asCoordinator = guardOf(vibestHome, home, "coordinator", own)
       const asSession = guardOf(vibestHome, home, "general", own)
+
       const edits =
         "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
+
       const offLimits =
         "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
+
       const unresolved = "The path is a symlink that refers to itself or whose target cannot be read; refused."
       assert.strictEqual(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "leak") }, home), edits)
       assert.isUndefined(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "alias") }, home))
@@ -325,11 +335,15 @@ layer(
       yield* fs.makeDirectory(work, { recursive: true })
       yield* fs.writeFileString(path.join(work, "file.txt"), "x")
       yield* fs.writeFileString(path.join(own, "artifacts", "file.txt"), "x")
+
       const asSession = (tool: string, input: Record<string, unknown>) =>
         guardOf(vibestHome, home, "general", own)(tool, input, work)
+
       assert.isUndefined(yield* asSession("Bash", { command: `cat ${path.join(work, "file.txt")}/x` }))
+
       const asCoordinator = (input: Record<string, unknown>) =>
         guardOf(vibestHome, home, "coordinator", own)("Write", input, work)
+
       assert.isUndefined(
         yield* asCoordinator({ file_path: path.join(own, "artifacts", "file.txt", "x"), content: "y" }),
       )
@@ -350,14 +364,18 @@ layer(
         yield* fs.symlink(projects, path.join(worktree, "link"))
         const own = path.join(projects, "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b")
         const other = path.join(projects, "7c1e9d20-3b4a-4c5d-9e6f-0a1b2c3d4e5f")
+
         for (const dir of [own, other])
           for (const kind of ["docs", "memories", "artifacts"])
             yield* fs.makeDirectory(path.join(dir, kind), { recursive: true })
         const missing = path.join(projects, "missing")
+
         const asSession = (tool: string, input: Record<string, unknown>, dir: string | null = own) =>
           guardOf(vibestHome, home, "general", dir ?? missing)(tool, input, worktree)
+
         const offLimits =
           "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
+
         const calls = (dir: string, file: string) =>
           [
             ["Read", { file_path: file }],
@@ -370,11 +388,14 @@ layer(
             ["Bash", { command: `cat ${file}` }],
             ["Bash", { command: `grep -r x ${dir}` }],
           ] as const
+
         for (const dir of [own, ...["docs", "memories", "artifacts"].map((kind) => path.join(own, kind))])
           for (const [tool, input] of calls(dir, path.join(dir, "notes.md")))
             assert.isUndefined(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
+
         for (const [tool, input] of calls(own, path.join(own, "preferences.md")))
           assert.isUndefined(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
+
         for (const [dir, file] of [
           [other, path.join(other, "preferences.md")],
           [path.join(other, "artifacts"), path.join(other, "artifacts", "a.md")],
@@ -384,17 +405,20 @@ layer(
         ] as const)
           for (const [tool, input] of calls(dir, file))
             assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
+
         for (const [tool, input] of [
           ["Grep", { pattern: "x", path: vibestHome }],
           ["Glob", { pattern: `${vibestHome}/**/preferences.md` }],
           ["Bash", { command: `grep -r x ${vibestHome}` }],
         ] as const)
           assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
+
         for (const [tool, input] of calls(own, path.join(own, "notes.md")))
           assert.strictEqual(yield* asSession(tool, input, null), offLimits, `no project folder: ${tool}`)
         assert.strictEqual(yield* asSession("Read", { file_path: "link/x.md" }, null), offLimits)
         assert.isUndefined(yield* asSession("Read", { file_path: path.join(worktree, "src/a.ts") }, null))
         assert.isUndefined(yield* asSession("Grep", { pattern: "x" }))
+
         for (const command of ["herdr pane list", "herdr --help", "cd /tmp && herdr"])
           assert.isString(yield* asSession("Bash", { command }), command)
         assert.isUndefined(yield* asSession("Read", { file_path: path.join(vibestHome, "vibest.json") }))
@@ -414,12 +438,15 @@ layer(
         yield* fs.makeDirectory(path.join(own, "artifacts"), { recursive: true })
         yield* fs.makeDirectory(path.join(other, "docs"), { recursive: true })
         yield* fs.symlink(other, path.join(home, "p"))
+
         const asSession = (tool: string, command: string, cwd: string) =>
           guardOf(vibestHome, home, "general", own)(tool, { command }, cwd)
+
         for (const tool of ["Bash", "Shell"]) {
           for (const cwd of [other, path.join(other, "docs"), path.join(home, "p"), path.join(vibestHome, "projects")])
             for (const command of ["cat preferences.md", "cat a.md", "ls"])
               assert.isString(yield* asSession(tool, command, cwd), `${tool} ${cwd}: ${command}`)
+
           for (const cwd of [
             own,
             path.join(own, "artifacts"),
@@ -451,9 +478,12 @@ layer(
         yield* fs.symlink(peer, path.join(work, "peer"))
         yield* fs.symlink(path.join(other, "docs", "sub"), path.join(work, "deep"))
         yield* fs.symlink(path.join(project, "docs", "sub"), path.join(work, "mine"))
+
         const asSession = (tool: string, input: Record<string, unknown>) =>
           guardOf(vibestHome, home, "general", project)(tool, input, home)
+
         const tilde = "~/.vibest/projects/own/artifacts/w1"
+
         for (const [tool, input] of [
           ["Write", { file_path: `${work}/notes.md` }],
           ["read", { path: `${tilde}/notes.md` }],
@@ -477,6 +507,7 @@ layer(
           ["Read", { file_path: "src/a.ts" }],
         ] as const)
           assert.isUndefined(yield* asSession(tool, input), JSON.stringify(input))
+
         for (const [tool, input] of [
           ["Read", { file_path: `${work}/../../../other/memories/a.md` }],
           ["Read", { file_path: path.join(other, "docs", "a.md") }],
@@ -514,6 +545,7 @@ layer(
     () =>
       Effect.gen(function* () {
         const as = (agent: string, tool: string, command: string) => bareGuard(agent, tool, { command })
+
         for (const agent of ["coordinator", "general"]) {
           for (const tool of ["Bash", "Shell"]) {
             for (const command of [
@@ -524,6 +556,7 @@ layer(
               "git log $REV",
             ])
               assert.isUndefined(yield* as(agent, tool, command), `${agent} ${tool}: ${command}`)
+
             for (const command of [
               "env -u VIBEST_SESSION_ID vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
               "VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
@@ -535,6 +568,7 @@ layer(
             ])
               assert.isString(yield* as(agent, tool, command), `${agent} ${tool}: ${command}`)
           }
+
           assert.isString(yield* bareGuard(agent, "Bash", {}))
         }
       }),
@@ -543,6 +577,7 @@ layer(
   it.effect("the coordinator does not start harness CLIs or run gh's credential and config commands", () =>
     Effect.gen(function* () {
       const as = (agent: string, command: string) => bareGuard(agent, "Bash", { command })
+
       for (const command of [
         "claude -p x",
         "pi -p x",
@@ -558,6 +593,7 @@ layer(
         assert.isString(yield* as("coordinator", command), command)
         assert.isUndefined(yield* as("general", command), command)
       }
+
       assert.isUndefined(yield* as("coordinator", "gh pr view 12"))
     }),
   )
@@ -565,6 +601,7 @@ layer(
   it.effect("a general agent does not run a terminal runtime at all, not even to ask for help", () =>
     Effect.gen(function* () {
       const as = (agent: string, command: string) => bareGuard(agent, "Bash", { command })
+
       for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
         assert.strictEqual(
           yield* as("general", command),
@@ -583,8 +620,10 @@ layer(
       const vibestHome = path.join(home, ".vibest")
       const project = path.join(vibestHome, "projects", "own")
       yield* fs.makeDirectory(project, { recursive: true })
+
       const as = (tool: string, input: Record<string, unknown>) =>
         guardOf(vibestHome, home, "coordinator", project)(tool, input, project)
+
       for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit"]) {
         assert.isString(yield* as(tool, { file_path: path.join(home, "a") }), tool)
         assert.isString(yield* as(tool, {}), tool)
@@ -593,6 +632,7 @@ layer(
           tool,
         )
       }
+
       for (const tool of ["TodoWrite", "WebFetch", "Task", "mcp__x__y"]) assert.isUndefined(yield* as(tool, {}), tool)
     }),
   )
@@ -646,13 +686,16 @@ describe("wizard entry", () => {
     () =>
       Effect.gen(function* () {
         const touched = { spawn: false, exec: false, host: false, socket: false }
+
         const enter: Terminal.UserInput = {
           input: Option.none(),
           key: { name: "enter", ctrl: false, meta: false, shift: false },
         }
+
         const keys = yield* Queue.unbounded<Terminal.UserInput>()
         const [pickDaemon, pickRestart, acceptRunDefaultYes] = [enter, enter, enter]
         yield* Queue.offerAll(keys, [pickDaemon, pickRestart, acceptRunDefaultYes])
+
         const terminal = Terminal.make({
           columns: Effect.succeed(80),
           rows: Effect.succeed(24),
@@ -660,13 +703,16 @@ describe("wizard entry", () => {
           readLine: Effect.die("readline"),
           display: () => Effect.void,
         })
+
         const host = new Proxy({} as Host, {
           get: (target, prop, receiver) => {
             if (prop in target) return Reflect.get(target, prop, receiver)
             touched.host = true
+
             return () => Effect.die("host")
           },
         })
+
         const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
           version: "0.0.0-test",
           extra: { after: "daemon", commands: [] },
@@ -683,15 +729,18 @@ describe("wizard entry", () => {
             ChildProcessSpawner.ChildProcessSpawner,
             ChildProcessSpawner.make(() => {
               touched.spawn = true
+
               return Effect.die("spawned")
             }),
           ),
           Effect.provideService(SocketConnector, () => {
             touched.socket = true
+
             return Effect.die("socket")
           }),
           Effect.provideService(VibestSocketConnector.Service, () => {
             touched.socket = true
+
             return Effect.die("socket")
           }),
           Effect.provideService(
@@ -716,6 +765,7 @@ describe("wizard entry", () => {
           ),
           Effect.exit,
         )
+
         const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
         assert.strictEqual(
           error instanceof Forbidden,
@@ -742,13 +792,16 @@ describe("vibest --session inside herdr", () => {
         const repo = yield* makeRepository.pipe(Effect.provide(FakeGit.layer), Effect.provide(Platform.services))
         const back = process.cwd()
         process.chdir(repo)
+
         const host = new Proxy({} as Host, {
           get: (target, prop, receiver) => {
             if (prop in target) return Reflect.get(target, prop, receiver)
             touched.host = true
+
             return () => Effect.die("host")
           },
         })
+
         const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
           version: "0.0.0-test",
           extra: { after: "daemon", commands: [] },
@@ -763,10 +816,12 @@ describe("vibest --session inside herdr", () => {
           }),
           Effect.provideService(SocketConnector, () => {
             touched.socket = true
+
             return Effect.die("herdr socket")
           }),
           Effect.provideService(VibestSocketConnector.Service, () => {
             touched.socket = true
+
             return Effect.die("socket")
           }),
           Effect.provide(Platform.services),
@@ -785,6 +840,7 @@ describe("vibest --session inside herdr", () => {
           Effect.exit,
           Effect.ensuring(Effect.sync(() => process.chdir(back))),
         )
+
         assert.strictEqual(Exit.isFailure(exit), true, "vibest started the entry session")
         assert.strictEqual(touched.exec, false)
         assert.strictEqual(touched.host, false)
@@ -802,10 +858,12 @@ describe("vibest --session inside herdr", () => {
       process.chdir(sub)
       const secret = "probe-value-9f3c"
       const herdr: Array<string> = []
+
       const host = new Proxy({} as Host, {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
+
       const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
         version: "0.0.0-test",
         extra: { after: "daemon", commands: [] },
@@ -814,6 +872,7 @@ describe("vibest --session inside herdr", () => {
         Effect.provideService(CliHost, { daemon: host, replacements: [], exec: () => {} }),
         Effect.provideService(SocketConnector, () => {
           herdr.push("connect")
+
           return Effect.die("herdr")
         }),
         Effect.provideService(VibestSocketConnector.Service, () => Effect.die("socket")),
@@ -825,6 +884,7 @@ describe("vibest --session inside herdr", () => {
         Effect.exit,
         Effect.ensuring(Effect.sync(() => process.chdir(back))),
       )
+
       assert.deepStrictEqual(herdr, [])
       const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
       assert.notInclude(message, secret)
@@ -836,6 +896,7 @@ describe("vibest --session inside herdr", () => {
 describe("vibest integration guard through vibestd", () => {
   const cursorAnswer = (reason: string | undefined) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" }
+
   const served = Server.layer.pipe(
     Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
@@ -847,6 +908,7 @@ describe("vibest integration guard through vibestd", () => {
       }),
     ),
   )
+
   it.effect(
     "--harness cursor prints Cursor's deny shape for a refused call and its allow shape otherwise",
     () =>
@@ -855,6 +917,7 @@ describe("vibest integration guard through vibestd", () => {
         const repo = yield* makeRepository
         const { id } = yield* spawnWorking(repo)
         const identity = (yield* (yield* Db.Service).session.sessionIdentity(id))!
+
         const guard = (command: string) =>
           runVibest(
             repo,
@@ -867,10 +930,13 @@ describe("vibest integration guard through vibestd", () => {
             ["integration", "guard", "--harness", "cursor"],
             JSON.stringify({ tool_name: "Shell", tool_input: { command }, cwd: repo }),
           )
+
         const refused = yield* guard("herdr pane list")
         assert.strictEqual(refused.code, 0, refused.stderr)
+
         const reason =
           "Agents must not control a terminal runtime's agents, panes, tabs, workspaces or worktrees; vibest manages them."
+
         assert.deepStrictEqual(JSON.parse(refused.stdout), {
           permission: "deny",
           user_message: reason,

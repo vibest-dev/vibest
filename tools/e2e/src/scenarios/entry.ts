@@ -7,7 +7,9 @@ import { replyOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } 
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Proc = { name: string; argv0?: string | null; argv?: Array<string> | null }
+
 type Pane = { pane_id: string; agent?: string | null }
+
 type EntryRow = { id: string; directory: string; conversation: string | null; runtime: string | null }
 
 const needs = (...bins: Array<string>) => {
@@ -21,9 +23,11 @@ const panes = async (socket: string) =>
 
 const runsPi = async (socket: string, pane: Pane) => {
   if (pane.agent === "pi") return true
+
   const info = (await herdr(socket, "pane.process_info", { pane_id: pane.pane_id }).catch(() => ({}))) as {
     process_info?: { foreground_processes?: Array<Proc> }
   }
+
   return (info.process_info?.foreground_processes ?? []).some((p) =>
     [p.name, p.argv0, ...(p.argv ?? []).slice(0, 2)].some((n) => n != null && path.basename(n) === "pi"),
   )
@@ -31,6 +35,7 @@ const runsPi = async (socket: string, pane: Pane) => {
 
 const piPane = async (socket: string) => {
   for (const p of await panes(socket)) if (await runsPi(socket, p)) return p.pane_id
+
   return undefined
 }
 
@@ -70,11 +75,13 @@ const piReady = async (socket: string, what: string) => {
     `${what}: pi running`,
     async () => {
       pane = await piPane(socket)
+
       return pane !== undefined
     },
     60_000,
   )
   await until(`${what}: pi idle`, async () => ["idle", "done"].includes(await status(socket, pane!)), 60_000)
+
   return { pane: pane! }
 }
 
@@ -83,10 +90,12 @@ const readyConversation = async (w: World, what: string) => {
     `${what}: the process ready with its conversation`,
     () => {
       const p = latestProcess(w)
+
       return p?.ready != null && p.conversation !== null
     },
     30_000,
   )
+
   return latestProcess(w)!.conversation
 }
 
@@ -112,25 +121,30 @@ const exitEntry = async (w: World, socket: string, pane: string, id: string) => 
 
 const toolsModel = (readme: string) => {
   let calls = 0
+
   const steps = [
     { name: "bash", input: { command: "echo grp-alpha" } },
     { name: "bash", input: { command: "echo grp-beta" } },
     { name: "read", input: { path: readme } },
   ]
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const entryAnswer = entryRun(messages)
+
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const user = messages.findLastIndex((m) => m.role === "user")
       const done = messages.slice(user + 1).filter((m) => m.role === "tool").length
       const step = text(messages[user]).includes("group-tools") ? steps[done] : undefined
       const body = step === undefined ? reply("tools-done") : toolCall(`call${++calls}`, step.name, step.input)
+
       return new Response(body, { headers: sseHeaders })
     },
   })
+
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
@@ -143,6 +157,7 @@ const checks: ReadonlyArray<Check> = [
       needs("pi", "herdr")
       const model = heldModel()
       model.release()
+
       try {
         const env = { PI_CODING_AGENT_DIR: await piDir(w, "pi-launch", model.url) }
         await w.daemon({ env })
@@ -181,15 +196,19 @@ const checks: ReadonlyArray<Check> = [
       model.release()
       const session = w.herdrSession
       const socket = socketOf(w, session)
+
       try {
         const env = { PI_CODING_AGENT_DIR: await piDir(w, "pi-resume", model.url) }
         await w.daemon({ env })
+
         const start = async (extra: ReadonlyArray<string>, what: string) => {
           const before = processStarts(w)
           await w.startEntry({ harness: "pi", session, env, extra, timeoutMs: 60_000 })
           await until(`${what}: a new process`, () => processStarts(w) > before, 60_000)
+
           return piReady(socket, what)
         }
+
         const first = await start([], "the first entry session")
         const prompt = ask("first")
         await execution(w, socket, first.pane, prompt, "done-first")
@@ -199,16 +218,20 @@ const checks: ReadonlyArray<Check> = [
           () => Bun.spawnSync(["find", `${env.PI_CODING_AGENT_DIR}/sessions`, "-name", "*.jsonl"]).stdout.length > 0,
           30_000,
         )
+
         const resultOf = await w.json<{ reply?: { text: string | null } | null }>(["result", one.id], {
           cwd: w.repository,
         })
+
         expect(
           resultOf.reply?.text?.includes("done-first") === true,
           `result of the entry session: ${JSON.stringify(resultOf)}`,
         )
+
         const listing = await w.json<{ sessions: Array<{ id: string; executionState: string }> }>(["ls"], {
           cwd: w.repository,
         })
+
         expect(
           listing.sessions.find((e) => e.id === one.id)?.executionState === "completed",
           `vibest ls: ${JSON.stringify(listing.sessions.map((e) => [e.id, e.executionState]))}`,
@@ -232,6 +255,7 @@ const checks: ReadonlyArray<Check> = [
         const started = await readyConversation(w, "the --new entry session")
         expect(started !== one.conversation, `--new resumed conversation ${started}`)
         const shown = await screen(socket, fresh.pane)
+
         if (shown.includes("done-first")) fail(`--new shows the old conversation:\n${shown}`)
       } finally {
         model.stop()
@@ -248,6 +272,7 @@ const checks: ReadonlyArray<Check> = [
       const model = toolsModel(path.join(w.repository, "README.md"))
       const session = `${w.herdrSession}-tools`
       const socket = socketOf(w, session)
+
       try {
         const env = { PI_CODING_AGENT_DIR: await piDir(w, "pi-tools", model.url) }
         await w.daemon({ env })
@@ -272,11 +297,14 @@ const checks: ReadonlyArray<Check> = [
       "several repositories: each is its own Project (also from a subdirectory or a linked worktree); a nested repository and another clone of the same origin are other Projects; Pi runs in two repositories at once get worktrees of their own repository and their own answers",
     run: async (w) => {
       needs("pi", "herdr", "git")
+
       const git = async (cwd: string, ...args: Array<string>) => {
         const r = await w.run(cwd, ["git", ...args])
         expect(r.code === 0, `git ${args.join(" ")}: ${r.stderr}`)
+
         return r.stdout.trim()
       }
+
       const info = (cwd: string) => w.json<{ directory: string }>(["project", "info"], { cwd }).then((i) => i.directory)
       const shop = w.repository
       await fs.writeFile(path.join(shop, ".gitignore"), "vendor/\n")
@@ -307,11 +335,13 @@ const checks: ReadonlyArray<Check> = [
 
       const model = heldModel()
       model.release()
+
       try {
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-repos", model.url)}`
         await w.daemon()
         await w.entry({ cwd: shop })
         await w.entry({ cwd: admin })
+
         const run = async (cwd: string, task: string) =>
           (
             JSON.parse(
@@ -320,7 +350,9 @@ const checks: ReadonlyArray<Check> = [
               id: string
             }
           ).id
+
         const [inShop, inAdmin] = await Promise.all([run(shop, "shop"), run(admin, "admin")])
+
         for (const [id, cwd, task, repo] of [
           [inShop!, shop, "shop", shop],
           [inAdmin!, admin, "admin", admin],
@@ -330,6 +362,7 @@ const checks: ReadonlyArray<Check> = [
           expect(dir !== repo, `${task}'s run works in the checkout itself`)
           const common = await git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
           expect(common === (await fs.realpath(path.join(repo, ".git"))), `${task}'s worktree belongs to ${common}`)
+
           if (task === "shop")
             expect(
               !(await Bun.file(path.join(dir, "vendor", "sdk", ".git")).exists()),
@@ -352,6 +385,7 @@ const checks: ReadonlyArray<Check> = [
       needs("pi", "herdr", "git")
       const model = heldModel()
       model.release()
+
       try {
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-agents", model.url)}`
         await w.daemon()

@@ -22,6 +22,7 @@ export { launchLine, type Launch }
 
 export const definitionIn = (agents: AgentsShape, id: string) => {
   const found = agents.find(id)
+
   return found === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.succeed(found)
 }
 
@@ -60,16 +61,21 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   const vibest = yield* VibestCommand
   const unavailable = (message: string) => new HarnessUnavailable({ harness: input.harness, message })
   const providerError = adapter.checkProvider?.(input.provider)
+
   if (providerError) return yield* unavailable(providerError)
+
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   const pluginDir = yield* harness.plugin(input.harness)
   yield* unsafeOnly(systemPromptRoot)
+
   const env: Record<string, string> = {
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
     VIBEST_COMMAND: encodeCommand(vibest),
   }
+
   const saved = yield* input.session
+
   const promptText = systemPrompt({
     system: definition.system,
     id: saved.sessionId,
@@ -78,10 +84,12 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     vibest,
     ...(yield* projectText(layout.project(saved.projectId))),
   })
+
   const promptPath = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, promptText))
   yield* (yield* FileSystem.FileSystem)
     .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
     .pipe(Effect.ignore)
+
   const commandEnv: Record<string, string> = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
@@ -90,7 +98,9 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     ...(saved.process !== undefined ? { VIBEST_PROCESS: String(saved.process) } : {}),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
+
   const message = input.message ?? (saved.firstInput === undefined ? undefined : withTask(promptText, saved.firstInput))
+
   return {
     harness: input.harness,
     argv: PluginHarness.harnessArgv(
@@ -117,6 +127,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
 
 export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
   const value = argv[argv.indexOf(name) + 1]
+
   return argv.includes(name) && value !== undefined && !value.startsWith("-") ? value : undefined
 }
 
@@ -144,5 +155,6 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
       ...(target !== undefined ? { target } : {}),
     })
     .pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message })))
+
   return addressOf(terminal)
 })

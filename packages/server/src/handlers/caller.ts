@@ -8,7 +8,9 @@ import { Context, Effect, Layer, Predicate } from "effect"
 import type { RpcGroup } from "effect/rpc"
 
 type Access = typeof ACCESS
+
 type Allowed<K extends keyof Access> = Access[K] extends readonly unknown[] ? Access[K][number] : Access[K]
+
 export type MethodOf<A> = {
   [K in keyof Access]: [Extract<Allowed<K>, A>] extends [never] ? never : K
 }[keyof Access]
@@ -24,7 +26,9 @@ export const make = Effect.gen(function* () {
   const agent = (method: MethodOf<"agent" | "owner">) =>
     Effect.gen(function* () {
       const c = yield* Caller
+
       if (Predicate.isTagged(c, "Cli") || Predicate.isTagged(c, "Session")) return c
+
       return yield* new Forbidden({
         method,
         message: `only the user or a session calls ${method}`,
@@ -38,6 +42,7 @@ export const make = Effect.gen(function* () {
         (error) => Effect.die(error),
       ),
     )
+
   const resolveAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => resolveProject(db, at)))
   const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.project.projectAt(at.root)))
 
@@ -45,15 +50,19 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (Predicate.isTagged(c, "Cli")) return yield* resolveAt(c.repositoryRoot)
       const directory = yield* db.project.projectDirectory(c.projectId)
+
       if (directory !== undefined) return { id: c.projectId, directory }
+
       if (c.repositoryRoot === undefined) return yield* new NotInRepository({ path: `project ${c.projectId}` })
       const here = yield* resolveAt(c.repositoryRoot)
+
       if (here.id !== c.projectId)
         return yield* new Forbidden({
           method,
           message:
             "a session only works in its own project: cd into the directory where vibest was started and run it again",
         })
+
       return here
     })
 
@@ -66,6 +75,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const specs = yield* runtimes.callers
       const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
+
       return { id: "local", ...(target !== undefined ? { target } : {}) }
     })
 
@@ -79,7 +89,9 @@ export const make = Effect.gen(function* () {
   const self = (method: MethodOf<"self">, id: string) =>
     Effect.gen(function* () {
       const c = yield* Caller
+
       if (Predicate.isTagged(c, "Session") && c.sessionId === id) return undefined
+
       return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
     })
 

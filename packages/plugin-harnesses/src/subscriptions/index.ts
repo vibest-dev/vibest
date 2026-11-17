@@ -11,6 +11,7 @@ export const CLI_TIMEOUT = "10 seconds"
 
 export const parseJson = (text: string | undefined): unknown => {
   if (text === undefined || text.trim() === "") return undefined
+
   try {
     return JSON.parse(text)
   } catch {
@@ -32,5 +33,7 @@ export const runCli = (spawner: Spawner, command: string, args: ReadonlyArray<st
   )
 
 export { claudeAccount } from "./claude.ts"
+
 export { cursorAccount } from "./cursor.ts"
+
 export { piAccount } from "./pi.ts"

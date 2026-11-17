@@ -23,10 +23,13 @@ const hcOnPath = childProcess.spawnSync("hc", ["--version"], { stdio: "ignore" }
 
 const SOCKET_PATH_LIMIT_SAFE_ROOT = "/tmp/vbhc-"
 const root = hcOnPath ? fs.mkdtempSync(SOCKET_PATH_LIMIT_SAFE_ROOT) : ""
+
 const coreEnv = (): Record<string, string> => {
   const env: Record<string, string> = {}
+
   for (const [key, value] of Object.entries(process.env))
     if (value !== undefined && !key.startsWith("HC_") && !key.startsWith("VIBEST_")) env[key] = value
+
   return {
     ...env,
     HC_SESSION: "t",
@@ -36,16 +39,21 @@ const coreEnv = (): Record<string, string> => {
     ZDOTDIR: path.join(root, "z"),
   }
 }
+
 const socketPath = path.join(root, "r", "herdr-core", "t.sock")
+
 const hcCli = (...args: Array<string>) =>
   childProcess.spawnSync("hc", args, { env: coreEnv(), encoding: "utf8", timeout: 20_000 })
 
 const until = <A, E>(read: Effect.Effect<A, E>, ok: (a: A) => boolean, what: string) =>
   Effect.gen(function* () {
     const deadline = Date.now() + 30_000
+
     for (;;) {
       const value = yield* read
+
       if (ok(value)) return value
+
       if (Date.now() > deadline)
         return yield* Effect.fail(new Error(`${what} within 30 s; last ${JSON.stringify(value)}`))
       yield* Effect.sleep("200 millis")
@@ -59,12 +67,14 @@ const withRuntime = <A, E, R>(
     const connector = yield* SocketConnector
     const connect = (at: string) => Hc.make(at).pipe(Effect.provideService(SocketConnector, connector))
     const hc = yield* connect(socketPath)
+
     const runtime = yield* make({
       connect,
       socket: socketPath,
       scope: yield* Effect.scope,
       typedLaunch: "2 seconds",
     })
+
     return yield* body(runtime, hc)
   }).pipe(
     Effect.scoped,
@@ -77,8 +87,10 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
   beforeAll(() => {
     for (const dir of ["r", "s", "c", "z"]) fs.mkdirSync(path.join(root, dir), { recursive: true })
     const started = hcCli("server", "start")
+
     if (started.status !== 0) throw new Error(`hc server start: ${started.stderr}${started.stdout}`)
     const core = (JSON.parse(started.stdout) as { pid?: number }).pid
+
     if (core !== undefined) note(core, commandOf(core).trim(), "", root)
   })
   afterAll(() => {
@@ -100,6 +112,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           const cwd = fs.realpathSync(root)
           const input = { project: "/work/My Project", cwd, launch: { argv: [], env: {} }, label: "main" }
           const opened = []
+
           for (const request of [
             input,
             input,
@@ -117,6 +130,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           const listed = hcCli("ls", "--json")
           assert.strictEqual(listed.status, 0, listed.stderr)
           const records = JSON.parse(listed.stdout).terminals as Array<{ address: string; name: string }>
+
           for (const [i, terminal] of opened.entries()) {
             const { address, socket } = parseTerminalId(terminal.id, socketPath)
             assert.strictEqual(socket, socketPath)
@@ -138,6 +152,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
         Effect.gen(function* () {
           const cwd = fs.realpathSync(root)
           const main = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "main" })
+
           const child = yield* runtime.open({
             project: cwd,
             cwd,
@@ -145,14 +160,17 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             label: "child",
             near: main,
           })
+
           yield* until(runtime.process(child), (p) => p.running, "cat did not start")
           const text = `vbt <b>"quoted" $HOME 'single' \\back`
           yield* runtime.send(child, { text })
+
           const screen = yield* until(
             runtime.read(child, 20),
             (s) => s.split(text).length >= 3,
             "cat did not echo the text",
           )
+
           assert.notInclude(screen, "<hc")
           const record = yield* hc.call("terminal.get", { terminal: parseTerminalId(child.id, socketPath).address })
           assert.isNotNull(record.parent ?? null)
@@ -172,14 +190,17 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
         Effect.gen(function* () {
           const cwd = fs.realpathSync(root)
           const marker = `keep${Math.random().toString(16).slice(2, 8)}`
+
           const terminal = yield* runtime.open({
             project: cwd,
             cwd,
             launch: { argv: [], env: { VBT_KEEP: marker } },
             label: "keep",
           })
+
           const pid = (yield* hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }))
             .pid
+
           yield* runtime.send(terminal, { text: "kill -9 $$" })
           yield* until(
             hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }),
@@ -214,8 +235,10 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           yield* Effect.sleep("300 millis")
           const main = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "main" })
           yield* runtime.present!(main, { [PRESENT_ENTRY_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
+
           const labels = (yield* hc.call("terminal.get", { terminal: parseTerminalId(main.id, socketPath).address }))
             .labels
+
           assert.deepInclude(labels, {
             [LABEL.runtime]: KIND,
             [LABEL.project]: "project-1",

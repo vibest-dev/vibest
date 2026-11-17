@@ -3,11 +3,15 @@ import { Context, Effect, Layer } from "effect"
 import { LayerNode } from "./layer-node.ts"
 
 class A extends Context.Service<A, {}>()("test/LayerNodeA") {}
+
 class B extends Context.Service<B, {}>()("test/LayerNodeB") {}
+
 class C extends Context.Service<C, {}>()("test/LayerNodeC") {}
+
 class LayerError {
   readonly _tag = "LayerError"
 }
+
 class OtherError {
   readonly _tag = "OtherError"
 }
@@ -17,14 +21,17 @@ const contracts = (tag: LayerNode.Tag<"app"> | LayerNode.Tag<"other">, flag: boo
   const make = tags.make("app")
   const aLayer = Layer.succeed(A, A.of({}))
   const bLayer = Layer.effect(B, Effect.as(A, B.of({})))
+
   const cLayer = Layer.effect(
     C,
     Effect.gen(function* () {
       yield* A
       yield* B
+
       return C.of({})
     }),
   )
+
   const a = make({ service: A, layer: aLayer, deps: [] })
   const b = make({ service: B, layer: bLayer, deps: [a] })
   const c = make({ service: C, layer: cLayer, deps: [a, b] })

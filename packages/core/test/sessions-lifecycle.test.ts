@@ -35,9 +35,11 @@ describe.concurrent("Session", () => {
       yield* held.release("failed")
       yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 1)
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+
       const notice = yield* until(sqlNotices(id), (rows) =>
         rows.some((message) => message.includes("A message to") && message.includes("again")),
       )
+
       assert.include(notice.at(-1)!, "open: failed")
       yield* sessions.send(id, "once more")
       const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 2)
@@ -77,9 +79,11 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
+
       const counts = Effect.all([herdr.callsTo("open"), herdr.callsTo("send")]).pipe(
         Effect.map((calls) => calls.map((c) => c.length)),
       )
+
       const before = yield* counts
       const held = yield* herdr.hold("state", id)
       const removing = yield* Effect.forkChild(sessions.remove(id, { keepWorktree: true }))
@@ -141,6 +145,7 @@ describe.concurrent("Session", () => {
         yield* after.sessions.remove(after.id)
         yield* writeEnd(after.id, harness, aborted, 60_000)
         yield* TestClock.adjust("2 minutes")
+
         for (const { id, sessions, db } of [during, after]) {
           const row = (yield* db.session.getSession(id))!
           assert.isTrue(archived(row), id)

@@ -31,6 +31,7 @@ export const busy = (state: AgentState) => state === "working" || state === "blo
 
 export const busyOf = (seen: AgentSeen) => {
   const state = stateOf(seen)
+
   return state !== undefined && busy(state)
 }
 
@@ -53,14 +54,18 @@ export const make = Effect.gen(function* () {
         const reports = adapter.ready === "integration"
         const step = adapter.startup ? yield* adapter.startup : undefined
         const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
+
         const look = Effect.gen(function* () {
           const seen = yield* sessionState(h, terminal, reportedStatus(id))
           const ready = (yield* db.session.readyAt(id)) !== undefined || (!reports && seen === "idle")
+
           return { seen, ready }
         })
+
         return yield* look.pipe(
           Effect.flatMap((now) => {
             if (now.ready || step === undefined) return Effect.succeed(now)
+
             return step({
               screen,
               sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
@@ -91,13 +96,16 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* db.session.acceptExecution(session.id, execution)
       yield* db.session.setStatus(session.id, state)
+
       return true
     })
 
   const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
     Effect.gen(function* () {
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
+
       if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
+
       return yield* db.session.executionAccepted(session.id)
     })
 
@@ -134,9 +142,11 @@ export const make = Effect.gen(function* () {
     const settledNow = agentState(h, terminal).pipe(
       Effect.map((seen) => {
         const state = stateOf(seen)
+
         return state !== undefined && state !== "working" && state !== "blocked"
       }),
     )
+
     return awaitEvent(
       stop.pipe(
         Effect.andThen(settledNow),
@@ -163,6 +173,7 @@ export const make = Effect.gen(function* () {
     terminal: Terminal,
   ) => {
     const key = harnesses.find(harnessIdOf(session))?.interruptKey
+
     return settleAfterInterrupt(
       h,
       session,
@@ -182,21 +193,27 @@ export const make = Effect.gen(function* () {
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const state = yield* awaitReady(h, terminal, adapter, session.id)
     const open = yield* db.session.openExecution(session.id)
+
     if (open !== undefined && open !== kept) return undefined
+
     const begun =
       open === undefined
         ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(session.id, at))
         : { execution: open, opened: true }
+
     if (!begun.opened) return undefined
     const execution = begun.execution
+
     const standing = Effect.map(db.session.openExecution(session.id), (now) =>
       now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
     )
+
     yield* onHandover
     const r = yield* track(session.id)
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
     yield* db.session.setStatus(session.id, state)
+
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(
         adapter.clearKeys === undefined ? Effect.void : h.send(terminal, { keys: [...adapter.clearKeys] }),
@@ -204,39 +221,53 @@ export const make = Effect.gen(function* () {
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
+
     const missed = db.session.closeExecution(session.id, execution, "not_started")
     const subscription = yield* bus.subscribe()
+
     const delivered = yield* send.pipe(
       Effect.as(false),
       Effect.catchTag("RuntimeError", (error) =>
         Effect.gen(function* () {
           const after = yield* standing
+
           if (after === "closed") return true
+
           if (error.code === "unreachable" || after === "busy") return yield* Effect.fail(error)
           yield* missed
+
           return yield* error
         }),
       ),
     )
+
     if (delivered) return undefined
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
     const confirm = confirmed(h, session, terminal, execution, subscription)
+
     if (yield* confirm) return undefined
+
     if (yield* settledElsewhere) return undefined
     yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
+
     if (yield* confirm) return undefined
+
     if (yield* settledElsewhere) return undefined
     yield* send.pipe(Effect.ignore)
+
     if (yield* confirm) return undefined
+
     if (yield* settledElsewhere) return undefined
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed
+
     return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
   }, Effect.scoped)
 
   const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
     const { execution } = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(id, at))
     yield* onHandover
+
     return execution
   })
 
@@ -248,6 +279,7 @@ export const make = Effect.gen(function* () {
   ) {
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const step = adapter.startup ? yield* adapter.startup : undefined
+
     const answer =
       step === undefined
         ? Effect.void
@@ -255,20 +287,26 @@ export const make = Effect.gen(function* () {
             screen: h.read(terminal, 40).pipe(Effect.orElseSucceed(() => "")),
             sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
           })
+
     const taken = Effect.gen(function* () {
       if ((yield* db.session.openExecution(session.id)) !== execution) return true
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
+
       if (state === "working") return yield* pickedUp(session, execution, state)
+
       return yield* db.session.executionAccepted(session.id)
     })
+
     const took = yield* taken.pipe(
       Effect.tap((done) => (done ? Effect.void : answer)),
       Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
       Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
     )
+
     if (took) return undefined
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* db.session.closeExecution(session.id, execution, "not_started")
+
     return `task_not_started: ${session.id} did not start working on the message it was started with; ${peekHint(session.id)}`
   })
 

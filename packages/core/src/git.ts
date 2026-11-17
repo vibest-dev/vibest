@@ -95,7 +95,9 @@ export const layer = Layer.effect(
     return Service.of({
       mainCheckout: Effect.fn("Git.mainCheckout")(function* (dir) {
         const cwd = yield* gitDirectory(dir).pipe(Effect.catchTag("PlatformError", (e) => Effect.die(e)))
+
         if (cwd === undefined) return yield* new NotInRepository({ path: dir })
+
         const out = yield* git(
           dir,
           "rev-parse",
@@ -104,7 +106,9 @@ export const layer = Layer.effect(
           "--git-dir",
           "--git-common-dir",
         ).pipe(Effect.mapError(() => new NotInRepository({ path: dir })))
+
         const [top = "", gitDir, common = ""] = out.split("\n")
+
         return gitDir === common ? top : path.dirname(common)
       }),
       topLevel: Effect.fn("Git.topLevel")((dir) => git(dir, "rev-parse", "--show-toplevel")),
@@ -118,6 +122,7 @@ export const layer = Layer.effect(
         git(dir, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir").pipe(
           Effect.map((out) => {
             const [gitDir, common = ""] = out.split("\n")
+
             return gitDir !== "" && gitDir === common
           }),
           Effect.orElseSucceed(() => false),
@@ -135,6 +140,7 @@ export const layer = Layer.effect(
       copyRepository: Effect.fn("Git.copyRepository")(function* ({ source, dest, branch, origin }) {
         yield* git(source, "clone", "--quiet", "--no-hardlinks", "--branch", branch, "--", source, dest)
         yield* git(dest, "remote", "remove", "origin")
+
         if (origin === undefined) return
         yield* git(dest, "remote", "add", "origin", origin)
         yield* git(
@@ -148,10 +154,13 @@ export const layer = Layer.effect(
           "^refs/remotes/origin/HEAD",
         )
         const head = yield* tryGit(source, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+
         if (head?.startsWith("origin/"))
           yield* tryGit(dest, "remote", "set-head", "origin", head.slice("origin/".length))
+
         if ((yield* tryGit(source, "config", "--get", `branch.${branch}.remote`)) !== "origin") return
         const merge = yield* tryGit(source, "config", "--get", `branch.${branch}.merge`)
+
         if (!merge) return
         yield* git(dest, "config", `branch.${branch}.remote`, "origin")
         yield* git(dest, "config", `branch.${branch}.merge`, merge)
@@ -187,10 +196,13 @@ export const layer = Layer.effect(
       ),
       includedFiles: Effect.fn("Git.includedFiles")(function* (root) {
         const include = path.join(root, ".worktreeinclude")
+
         if (!(yield* fs.exists(include))) return []
+
         const named = nul(
           yield* gitRaw(root, ["ls-files", "-z", "--others", "--ignored", `--exclude-from=${include}`]),
         ).filter((f) => !f.endsWith("/"))
+
         return yield* ignored(root, named)
       }),
       ignored,
@@ -198,11 +210,14 @@ export const layer = Layer.effect(
         if ((yield* gitDirectory(worktree)) === undefined) return undefined
         const branch = (yield* tryGit(worktree, "branch", "--show-current")) ?? ""
         const dirty = !!(yield* tryGit(worktree, "status", "--porcelain", "--untracked-files=all"))
+
         const contained =
           !!branch || !!(yield* tryGit(worktree, "for-each-ref", "--contains", "HEAD", "refs/heads", "refs/remotes"))
+
         const upstream = branch ? yield* tryGit(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") : undefined
         const pushed = !!upstream && (yield* tryGit(worktree, "rev-list", "--count", "@{upstream}..HEAD")) === "0"
         const why = dirty ? "uncommitted changes" : !contained ? "commits not on any branch" : ""
+
         return { branch, pushed, saved: !why, why } satisfies GitState
       }),
     })

@@ -6,6 +6,7 @@ import { TestConsole } from "effect/testing"
 const capture = (env: Record<string, string>, program: Effect.Effect<void>) =>
   Effect.gen(function* () {
     yield* program
+
     return (yield* TestConsole.errorLines).map(String)
   }).pipe(
     Effect.provide(Logging.layer),
@@ -66,6 +67,7 @@ describe("Logging.layer", () => {
         {},
         Effect.logInfo("x").pipe(Effect.annotateLogs({ plugin: { id: "a b", note: 'say "hi"' } })),
       )
+
       assert.include(line!, 'plugin.id="a b"')
       assert.include(line!, 'plugin.note="say \\"hi\\""')
     }),
