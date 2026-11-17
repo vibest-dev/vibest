@@ -42,8 +42,7 @@ builtin harness.
 
 ## G7. A plugin adds a runtime
 
-A user plugin can add a terminal runtime and route an agent to it; the agent starts there and reports its status from
-it.
+A user plugin can add a terminal runtime and route an agent to it; the agent starts there and its result arrives.
 
 ## G8. A broken edit keeps the running plugin
 

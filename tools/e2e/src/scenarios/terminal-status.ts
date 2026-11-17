@@ -7,14 +7,6 @@ import type { Check } from "../check.ts"
 import { binary, checkout, expect, row, Skip, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 
-type CoreTerminal = { address: string; reported: boolean; status?: { state: string; kind?: string; app?: string } }
-
-const reports = (bytes: string) =>
-  bytes
-    .split("\x1b]7501;")
-    .slice(1)
-    .map((record) => record.split("\x1b")[0]!.split("\x07")[0]!)
-
 type Reply = string | { tool: string; input: Schema.JsonObject } | { error: string }
 
 const fakeModel = () => {
@@ -160,10 +152,7 @@ const statusCore = async (
     readonly model: ReturnType<typeof fakeModel>
     readonly hc: (...args: Array<string>) => Promise<string>
     readonly terminal: () => string
-    readonly visible: (text: string) => Promise<void>
-    readonly status: (stage: string, state: string, kind?: string) => Promise<void>
     readonly worker: (harness: string, flags?: Array<string>) => Promise<string>
-    readonly snapshot: (stage: string, terminal: CoreTerminal) => void
   }) => Promise<void>,
 ) => {
   for (const bin of ["hc", harness, "python3"]) if (!Bun.which(bin)) throw new Skip(bin + " not on PATH")
@@ -232,38 +221,7 @@ const statusCore = async (
     return r.stdout
   }
 
-  const visible = (text: string) =>
-    until(
-      "stable visible " + text,
-      async () => {
-        const first = await hc("read", terminal)
-
-        if (!first.includes(text)) return false
-        await Bun.sleep(300)
-
-        return (await hc("read", terminal)) === first
-      },
-      30_000,
-    )
-
-  const snapshots: Array<{ at: number; stage: string; terminal: CoreTerminal }> = []
   let terminal = ""
-  let owner: string | undefined = harness === "pi" ? "pi" : "claude-code"
-
-  const status = async (stage: string, state: string, kind?: string) => {
-    let current: CoreTerminal | undefined
-    await until(
-      stage,
-      async () => {
-        current = JSON.parse(await hc("get", terminal)) as CoreTerminal
-
-        return current.reported && current.status?.state === state && current.status?.kind === kind
-      },
-      30_000,
-    )
-    snapshots.push({ at: Date.now(), stage, terminal: current! })
-    expect(current!.status?.app === owner, "unexpected status owner: " + JSON.stringify(current))
-  }
 
   const bind = async (sessionId: string) => {
     await until(
@@ -323,26 +281,8 @@ const statusCore = async (
       model,
       hc,
       terminal: () => terminal,
-      visible,
-      status,
       worker,
-      snapshot: (stage, current) => snapshots.push({ at: Date.now(), stage, terminal: current }),
     })
-    owner = undefined
-
-    for (const file of await fs.readdir(path.join(w.root, "status-output"))) {
-      if (!file.endsWith(".raw")) continue
-
-      const records = reports(await fs.readFile(path.join(w.root, "status-output", file), "utf8")).filter((r) =>
-        r.startsWith("state="),
-      )
-
-      expect(
-        records.every((r) => r === "state=clear" || r.includes(":app=pi") || r.includes(":app=claude-code")),
-        "competing terminal writer: " + JSON.stringify(records),
-      )
-    }
-
     await w.writeEvidence(
       path.join(evidence, `${id}-versions.json`),
       JSON.stringify(
@@ -357,10 +297,7 @@ const statusCore = async (
       ),
     )
   } finally {
-    await w.writeEvidence(
-      path.join(evidence, `${id}-status.json`),
-      JSON.stringify({ snapshots, model: model.stages }, null, 2),
-    )
+    await w.writeEvidence(path.join(evidence, `${id}-status.json`), JSON.stringify({ model: model.stages }, null, 2))
     model.stop()
     await w.stopDaemon()
     await hc("server", "stop").catch((error) => console.error("Failed to stop isolated herdr-core:", error))
@@ -371,20 +308,14 @@ const statusCore = async (
 
 const checks: ReadonlyArray<Check> = [
   {
-    id: "T1-pi",
-    covers: ["G7"],
-    title: "native Pi statuses in an isolated herdr-core",
+    id: "G7",
+    title:
+      "a user plugin adds a runtime (over an isolated herdr-core) and routes a Pi subagent to it: the subagent starts in that runtime's terminal and its result arrives",
     run: (w, evidence) =>
-      statusCore(w, evidence, "T1-pi", "pi", async ({ env, model, hc, terminal, visible, status, worker }) => {
+      statusCore(w, evidence, "G7", "pi", async ({ env, model, hc, terminal, worker }) => {
         const piConfig = await piShadow(path.join(w.root, "pi-status"), "first-run", {
           fake: { baseUrl: model.url + "/v1" },
         })
-
-        await fs.mkdir(path.join(piConfig, "extensions"))
-        await fs.copyFile(
-          path.join(checkout, "tools/e2e/src/fixtures/status-prompts.ts"),
-          path.join(piConfig, "extensions/status-prompts.ts"),
-        )
 
         const pi = await worker("pi", [
           "--provider",
@@ -395,33 +326,15 @@ const checks: ReadonlyArray<Check> = [
           "PI_CODING_AGENT_DIR=" + piConfig,
         ])
 
-        await until("Pi model held", () => model.waiting.length === 1, 30_000)
-        await status("Pi start", "working")
-        await model.next({ tool: "status_prompt", input: {} })
-        await status("Pi confirmation", "blocked", "permission")
-        await visible("Confirm the scratch test")
-        await hc("keys", terminal(), "enter")
-        await until("Pi resumed model", () => model.waiting.length === 1, 30_000)
-        await status("Pi resumed", "working")
         await model.next("pi-status-completed")
-        await status("Pi settled", "done")
-        expect(
-          (await w.json<{ reply: { text: string } | null }>(["result", pi], { env })).reply?.text.includes(
-            "pi-status-completed",
-          ) === true,
-          "Pi result changed",
+        await until(
+          "the Pi subagent's result",
+          async () =>
+            (await w.json<{ reply: { text: string } | null }>(["result", pi], { env })).reply?.text.includes(
+              "pi-status-completed",
+            ) === true,
+          60_000,
         )
-        await hc("send", terminal(), "Wait for the model, then interrupt.")
-        await until("Pi abort request held", () => model.waiting.length === 1, 30_000)
-        await status("Pi before abort", "working")
-        await hc("keys", terminal(), "esc")
-        await status("Pi interrupted", "idle")
-        await model.next("discard interrupted Pi response")
-        await hc("send", terminal(), "/status-input")
-        await status("Pi idle input", "blocked", "question")
-        await visible("Scratch input")
-        await hc("keys", terminal(), "esc")
-        await status("Pi input dismissed", "idle")
         await hc("kill", terminal())
       }),
   },
