@@ -11,6 +11,7 @@ import { defaultSocketPath, socketEndpoint, type SocketPathOptions } from "./soc
 export type ResultOf<M extends Method> = M extends keyof typeof METHOD_RESULT
   ? ResultByTag[(typeof METHOD_RESULT)[M]]
   : ResponseResult
+
 export type ParamsOf<M extends Method> = MethodParams[M]
 
 export class HerdrError extends Schema.TaggedError<HerdrError>()("HerdrError", {
@@ -33,14 +34,14 @@ export class HerdrProtocolMismatch extends Schema.TaggedError<HerdrProtocolMisma
   serverVersion: Schema.String,
 }) {}
 
-export interface HerdrShape {
+export interface HerdrClient {
   readonly socketPath: string
   readonly call: <M extends Method>(method: M, params: ParamsOf<M>) => Effect.Effect<ResultOf<M>, HerdrFailure>
   readonly subscribe: (subscriptions: ReadonlyArray<Subscription>) => Stream.Stream<PushFrame, HerdrFailure>
 }
 
-export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sdk/Herdr") {
-  static readonly verifyProtocol = (herdr: HerdrShape): Effect.Effect<void, HerdrFailure | HerdrProtocolMismatch> =>
+export class Herdr extends Context.Service<Herdr, HerdrClient>()("effect-herdr-sdk/Herdr") {
+  static readonly verifyProtocol = (herdr: HerdrClient): Effect.Effect<void, HerdrFailure | HerdrProtocolMismatch> =>
     herdr.call("ping", {}).pipe(
       Effect.flatMap((pong) =>
         pong.protocol === PROTOCOL
@@ -56,7 +57,7 @@ export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sd
       ),
     )
 
-  static readonly make = (socketPath: string): Effect.Effect<HerdrShape, never, SocketConnector> =>
+  static readonly make = (socketPath: string): Effect.Effect<HerdrClient, never, SocketConnector> =>
     Effect.map(SocketConnector, (connect) => makeClient(socketPath, connect))
   static readonly layer = (
     options: { socketPath?: string } & SocketPathOptions = {},
@@ -74,6 +75,7 @@ const Response = Schema.Struct({
   result: Schema.optional(Schema.Unknown),
   error: Schema.optional(Schema.Struct({ code: Schema.String, message: Schema.String })),
 })
+
 const Push = Schema.Struct({ event: Schema.String, data: Schema.Unknown })
 const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Union([Response, Push])))
 const Request = Schema.Struct({ id: Schema.String, method: Schema.String, params: Schema.Unknown })
@@ -83,9 +85,10 @@ const isResponse = (m: typeof Response.Type | typeof Push.Type): m is typeof Res
 const requestId = (prefix: string) =>
   Random.nextIntBetween(0, 2 ** 31).pipe(Effect.map((n) => `${prefix}-${n.toString(36)}`))
 
-function makeClient(socketPath: string, connect: SocketConnector["Service"]): HerdrShape {
+function makeClient(socketPath: string, connect: SocketConnector["Service"]): HerdrClient {
   const transport = (method: string) => (e: { readonly message: string }) =>
     new HerdrTransportError({ method, message: e.message })
+
   const serverError = (method: string, error: { code: string; message: string }) =>
     new HerdrError({ method, code: error.code, message: error.message })
 
@@ -95,12 +98,8 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
       const pull = yield* Socket.readerString(socket)
       const writer = yield* socket.writer
       yield* writer.write(`${yield* encodeRequest(request).pipe(Effect.orDie)}\n`)
-      const text = pull.pipe(
-        Effect.catchIf(
-          (e) => e.reason._tag === "SocketCloseError",
-          () => Cause.done(),
-        ),
-      )
+      const text = pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))
+
       return Stream.fromPull(Effect.succeed(text)).pipe(
         Stream.splitLines,
         Stream.filter((l) => l.length > 0),
@@ -113,22 +112,28 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
     Effect.gen(function* () {
       const id = yield* requestId("vibest")
       const lines = yield* open(method, { id, method, params })
+
       const found = yield* lines.pipe(
         Stream.filter(isResponse),
         Stream.filter((m) => m.id === id || m.id === ""),
         Stream.runHead,
       )
+
       if (Option.isNone(found))
         return yield* new HerdrTransportError({ method, message: "connection closed before a response" })
+
       if (found.value.error) return yield* serverError(method, found.value.error)
+
       return found.value.result as ResultOf<M>
     }).pipe(Effect.scoped)
 
   const subscribe = (subscriptions: ReadonlyArray<Subscription>): Stream.Stream<PushFrame, HerdrFailure> => {
     const method = "events.subscribe"
+
     return Effect.gen(function* () {
       const id = yield* requestId("sub")
       const lines = yield* open(method, { id, method, params: { subscriptions } })
+
       return lines.pipe(
         Stream.flatMap((m): Stream.Stream<PushFrame, HerdrFailure> =>
           isResponse(m)

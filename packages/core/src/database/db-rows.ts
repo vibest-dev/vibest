@@ -27,10 +27,12 @@ const NewSessionFields = {
   createdAt: Schema.Number,
   lastActive: Schema.Number,
 }
+
 export const NewSession = Schema.Struct(NewSessionFields)
+
 export type NewSession = typeof NewSession.Type
 
-const IntegrationShape = Schema.Struct({ version: Schema.String, protocol: Schema.Number })
+const IntegrationVersion = Schema.Struct({ version: Schema.String, protocol: Schema.Number })
 
 export const SessionProcess = Schema.Struct({
   id: Schema.Number,
@@ -47,7 +49,7 @@ export const SessionProcess = Schema.Struct({
   readyAt: Schema.NullOr(Schema.Number),
   endedAt: Schema.NullOr(Schema.Number),
   endReason: Schema.NullOr(ProcessEndReason),
-  integration: Schema.NullOr(IntegrationShape),
+  integration: Schema.NullOr(IntegrationVersion),
 })
 
 export const OpenExecution = Schema.Struct({
@@ -82,6 +84,7 @@ export const SessionRow = Schema.Struct({
   openExecution: Schema.NullOr(OpenExecution),
   lastExecution: Schema.NullOr(LastExecution),
 })
+
 export type SessionRow = typeof SessionRow.Type
 
 export const archived = (row: Pick<SessionRow, "entry" | "endedAt">) => !row.entry && row.endedAt !== null
@@ -103,6 +106,7 @@ export const harnessIdOf = (row: Pick<SessionRow, "process">) => row.process?.ha
 
 export const placedTerminal = (row: Pick<SessionRow, "process">) => {
   const process = row.process
+
   return process === null || process.endedAt !== null || process.terminal === null || process.runtime === ""
     ? undefined
     : { runtime: process.runtime, address: { machine: "local", id: process.terminal } }
@@ -110,14 +114,15 @@ export const placedTerminal = (row: Pick<SessionRow, "process">) => {
 
 export const startOf = (row: Pick<SessionRow, "process">): ProcessStart => {
   const process = row.process
+
   return {
     harness: process?.harness ?? "",
-    ...(process?.provider ? { provider: process.provider } : {}),
-    ...(process?.model ? { model: process.model } : {}),
-    ...(process?.routing ? { routing: process.routing } : {}),
+    ...(process?.provider && { provider: process.provider }),
+    ...(process?.model && { model: process.model }),
+    ...(process?.routing && { routing: process.routing }),
     runtime: process?.runtime ?? "",
     terminal: "",
-    ...(process?.conversation ? { resume: process.conversation } : {}),
+    ...(process?.conversation && { resume: process.conversation }),
   }
 }
 
@@ -158,7 +163,7 @@ export type ProcessStart = {
   readonly harness: string
   readonly provider?: string
   readonly model?: string
-  readonly routing?: unknown
+  readonly routing?: Routing
   readonly runtime: string
   readonly terminal: string
   readonly resume?: string
@@ -169,11 +174,14 @@ export type Integration = { readonly version: string; readonly protocol: number 
 
 export const attemptsOf = (raw: string | null) => {
   const seen: Array<{ harness: string; provider?: string; outcome: "limited"; at: number }> = []
+
   for (const a of JSON.parse(raw ?? "[]") as ReadonlyArray<{ harness: string; provider: string | null; at: number }>) {
     const provider = a.provider ?? undefined
+
     if (seen.some((s) => s.harness === a.harness && s.provider === provider)) continue
-    seen.push({ harness: a.harness, ...(provider === undefined ? {} : { provider }), outcome: "limited", at: a.at })
+    seen.push({ harness: a.harness, ...(provider !== undefined && { provider }), outcome: "limited", at: a.at })
   }
+
   return seen
 }
 
@@ -198,6 +206,7 @@ export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
 
 export const toInbox = (row: InboxSql) => {
   const kind = row.kind as InboxKind
+
   return {
     id: row.id,
     sender: row.senderSessionId,
@@ -209,6 +218,7 @@ export const toInbox = (row: InboxSql) => {
 }
 
 export const MESSAGE_STATUSES: ReadonlySet<string> = new Set(MessageStatus.literals)
+
 export type MessageStatusName = typeof MessageStatus.Type
 
 export type SessionBrief = {

@@ -6,7 +6,9 @@ import { SocketConnector } from "./socket-connector.js"
 import { defaultSocketPath } from "./socket-path.js"
 
 export type Method = keyof typeof METHODS
+
 export type ParamsOf<M extends Method> = (typeof METHODS)[M]["params"]["Encoded"]
+
 export type ResultOf<M extends Method> = (typeof METHODS)[M]["result"]["Type"]
 
 export class HcError extends Schema.TaggedError<HcError>()("HcError", {
@@ -70,7 +72,9 @@ const semver = (v: string): ReadonlyArray<number> =>
 
 const olderThan = (a: string, b: string): boolean => {
   const [x, y] = [semver(a), semver(b)]
+
   for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+
   return false
 }
 
@@ -80,6 +84,7 @@ export const HcEvent = Schema.Struct({
   terminal: Schema.String,
   data: Schema.optional(Schema.Unknown),
 })
+
 export type HcEvent = typeof HcEvent.Type
 
 export type Notice =
@@ -87,15 +92,15 @@ export type Notice =
   | { readonly _tag: "Event"; readonly event: HcEvent }
   | { readonly _tag: "Notification"; readonly method: string; readonly params: unknown }
 
-export interface HcShape {
+export interface HcClient {
   readonly socketPath: string
   readonly call: <M extends Method>(method: M, params: ParamsOf<M>) => Effect.Effect<ResultOf<M>, HcFailure>
   readonly hello: Effect.Effect<ResultOf<"hello">, HcFailure | HcIncompatible>
   readonly subscribe: (params: ParamsOf<"events.subscribe">) => Stream.Stream<Notice, HcFailure>
 }
 
-export class Hc extends Context.Service<Hc, HcShape>()("effect-herdr-core-sdk/Hc") {
-  static readonly make = (socketPath: string): Effect.Effect<HcShape, never, SocketConnector> =>
+export class Hc extends Context.Service<Hc, HcClient>()("effect-herdr-core-sdk/Hc") {
+  static readonly make = (socketPath: string): Effect.Effect<HcClient, never, SocketConnector> =>
     Effect.map(SocketConnector, (connect) => makeClient(socketPath, connect))
   static readonly layer = (
     options: { readonly socketPath?: string } = {},
@@ -113,6 +118,7 @@ const ErrorBody = Schema.Struct({
   message: Schema.String,
   data: Schema.optional(Schema.Struct({ kind: Schema.optional(Schema.String), hint: Schema.optional(Schema.String) })),
 })
+
 const Message = Schema.Struct({
   id: Schema.optional(Schema.Union([Schema.Number, Schema.String, Schema.Null])),
   method: Schema.optional(Schema.String),
@@ -120,50 +126,51 @@ const Message = Schema.Struct({
   result: Schema.optional(Schema.Unknown),
   error: Schema.optional(ErrorBody),
 })
+
 type Message = typeof Message.Type
+
 const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Message))
 const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const decodeEvent = Schema.decodeUnknownEffect(HcEvent)
 
-function makeClient(socketPath: string, connect: SocketConnector["Service"]): HcShape {
+function makeClient(socketPath: string, connect: SocketConnector["Service"]): HcClient {
   let nextId = 0
+
   const transport = (method: string) => (e: { readonly message: string }) =>
     new HcTransportError({ method, message: e.message })
+
   const serverError = (method: string, error: typeof ErrorBody.Type) =>
     new HcError({
       method,
       kind: error.data?.kind ?? String(error.code),
       message: error.message,
-      ...(error.data?.hint !== undefined ? { hint: error.data.hint } : {}),
+      ...(error.data?.hint !== undefined && { hint: error.data.hint }),
     })
 
-  const open = (method: string, params: unknown) =>
+  const open = <M extends Method>(method: M, params: ParamsOf<M>) =>
     Effect.gen(function* () {
       const id = ++nextId
       const socket = yield* connect(socketPath)
       const pull = yield* Socket.readerString(socket)
       const writer = yield* socket.writer
       yield* writer.write(`${yield* encodeLine({ jsonrpc: "2.0", id, method, params }).pipe(Effect.orDie)}\n`)
-      const text = pull.pipe(
-        Effect.catchIf(
-          (e) => e.reason._tag === "SocketCloseError",
-          () => Cause.done(),
-        ),
-      )
+      const text = pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))
+
       const lines = Stream.fromPull(Effect.succeed(text)).pipe(
         Stream.splitLines,
         Stream.filter((l) => l.length > 0),
         Stream.mapEffect((line) => decodeLine(line)),
         Stream.mapError(transport(method)),
       )
+
       return { id, lines }
     }).pipe(Effect.mapError(transport(method)))
 
   const response = (method: string, id: number) => (m: Message) =>
     m.method === undefined && (m.id === id || m.id === null)
 
-  const decodeResult = <M extends Method>(method: M, raw: unknown) =>
-    Schema.decodeUnknownEffect(METHODS[method].result as Schema.Codec<ResultOf<M>>)(raw).pipe(
+  const decodeResult = <M extends Method>(method: M, message: Message) =>
+    Schema.decodeUnknownEffect(METHODS[method].result as Schema.Codec<ResultOf<M>>)(message.result).pipe(
       Effect.mapError((e) => new HcTransportError({ method, message: `the result does not match hc schema: ${e}` })),
     )
 
@@ -171,15 +178,19 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
     Effect.gen(function* () {
       const { id, lines } = yield* open(method, params)
       const found = yield* lines.pipe(Stream.filter(response(method, id)), Stream.runHead)
+
       if (Option.isNone(found))
         return yield* new HcTransportError({ method, message: "connection closed before a response" })
+
       if (found.value.error) return yield* serverError(method, found.value.error)
-      return yield* decodeResult(method, found.value.result)
+
+      return yield* decodeResult(method, found.value)
     }).pipe(Effect.scoped)
 
   const hello = call("hello", {}).pipe(
     Effect.flatMap((r): Effect.Effect<ResultOf<"hello">, HcIncompatible> => {
       const core = `herdr-core ${r.version}`
+
       if (r.generation > GENERATION)
         return Effect.fail(
           new HcGenerationMismatch({
@@ -188,6 +199,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
             message: `${core} speaks protocol generation ${r.generation}, vibest speaks ${GENERATION}: update vibest`,
           }),
         )
+
       if (r.generation < GENERATION)
         return Effect.fail(
           new HcGenerationMismatch({
@@ -196,6 +208,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
             message: `${core} speaks protocol generation ${r.generation}, vibest needs ${GENERATION}: update herdr-core`,
           }),
         )
+
       if (olderThan(r.version, MIN_VERSION))
         return Effect.fail(
           new HcCoreTooOld({
@@ -206,6 +219,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
           }),
         )
       const missing = USED_METHODS.filter((m) => !r.methods.includes(m))
+
       return missing.length === 0
         ? Effect.succeed(r)
         : Effect.fail(
@@ -220,19 +234,23 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
 
   const subscribe = (params: ParamsOf<"events.subscribe">): Stream.Stream<Notice, HcFailure> => {
     const method = "events.subscribe"
+
     return Effect.gen(function* () {
       const { id, lines } = yield* open(method, params)
+
       return lines.pipe(
         Stream.mapEffect((m): Effect.Effect<Notice, HcFailure> => {
           if (response(method, id)(m))
             return m.error
               ? Effect.fail(serverError(method, m.error))
-              : decodeResult(method, m.result).pipe(Effect.map((result) => ({ _tag: "Subscribed" as const, result })))
+              : decodeResult(method, m).pipe(Effect.map((result) => ({ _tag: "Subscribed" as const, result })))
+
           if (m.method === "event")
             return decodeEvent(m.params).pipe(
               Effect.map((event) => ({ _tag: "Event" as const, event })),
               Effect.mapError(transport(method)),
             )
+
           return Effect.succeed({ _tag: "Notification" as const, method: m.method ?? "", params: m.params })
         }),
       )
@@ -242,5 +260,5 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
   return { socketPath, call, hello, subscribe }
 }
 
-export const fromEnv = (): Effect.Effect<HcShape, Config.ConfigError, SocketConnector | Path.Path> =>
+export const fromEnv = (): Effect.Effect<HcClient, Config.ConfigError, SocketConnector | Path.Path> =>
   defaultSocketPath().pipe(Effect.flatMap(Hc.make))

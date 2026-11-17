@@ -22,6 +22,7 @@ const entryAsked = Effect.gen(function* () {
   const sessions = yield* Session.Service
   const db = yield* Db.Service
   const repo = yield* makeRepository
+
   const entry = yield* db.session.startEntry(
     yield* projectOf(repo),
     "pulling-pi",
@@ -32,10 +33,12 @@ const entryAsked = Effect.gen(function* () {
     },
     { agent: "coordinator" },
   )
+
   yield* herdr.seedAgent("test/coord")
   const { id } = yield* sessions.spawn(yield* spawnInput(repo))
   yield* until(db.session.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
   yield* db.inbox.insertSend(entry.sessionId, "a question", undefined, id)
+
   return { db, sessions, inbox: yield* Inbox.Service, entryId: entry.sessionId, sender: id }
 })
 
@@ -189,9 +192,11 @@ describe.concurrent("an idle session takes its next batch", () => {
       const herdr = yield* FakeRuntime
       yield* sessions.check(entryId)
       yield* TestClock.adjust("1 second")
+
       const typedToEntry = Effect.map(herdr.callsTo("send"), (calls) =>
         calls.filter((c) => c.terminal === "test/coord" && c.text?.includes("a question")),
       )
+
       assert.lengthOf(yield* typedToEntry, 0)
       assert.deepStrictEqual(yield* inboxStatuses(sender), ["pending"])
       assert.isDefined(yield* inbox.take(entryId, undefined))

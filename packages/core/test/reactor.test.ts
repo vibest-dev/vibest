@@ -14,7 +14,9 @@ describe("Reactor", () => {
       const seen: Array<number> = []
       yield* reactor.on([TerminalExited], () => {
         calls += 1
+
         if (calls === 1) throw new Error("built badly")
+
         return Effect.sync(() => void seen.push(calls))
       })
       yield* Effect.yieldNow

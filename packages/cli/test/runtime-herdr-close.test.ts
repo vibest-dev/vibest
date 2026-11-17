@@ -26,10 +26,12 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
       withSession(({ name, socketPath }) =>
         withRuntime((runtime) => {
           const env = ConfigProvider.layer(ConfigProvider.fromUnknown({ HERDR_SOCKET_PATH: socketPath }))
+
           const open = (cwd: string) =>
             runtime
               .open({ project: cwd, cwd, launch: { argv: ["/bin/sh"], env: {} }, label: "close test" })
               .pipe(Effect.provide(env))
+
           return Effect.gen(function* () {
             const log = yield* Ref.make<ReadonlyArray<TerminalRuntime.RuntimeEvent>>([])
             yield* (runtime.events ?? Stream.empty).pipe(
@@ -48,11 +50,13 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             git(repo, "worktree", "add", "-q", "--detach", path.join(dir, "linked"))
             const main = yield* open(repo)
             const mainPane = TerminalRuntime.parseTerminal(main)!.paneId
+
             const linked = yield* herdr.call("worktree.open", {
               cwd: repo,
               path: path.join(dir, "linked"),
               trust_repository: true,
             })
+
             const linkedPane = linked.root_pane.pane_id
             yield* runtime.close(main)
             assert.isTrue(Exit.isFailure(yield* Effect.exit(herdr.call("pane.get", { pane_id: mainPane }))))
@@ -63,8 +67,10 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             fs.mkdirSync(plain)
             const first = yield* open(plain)
             const second = yield* open(plain)
+
             const ws = (yield* herdr.call("pane.get", { pane_id: TerminalRuntime.parseTerminal(first)!.paneId })).pane
               .workspace_id
+
             yield* runtime.close(first)
             assert.strictEqual(
               (yield* herdr.call("pane.get", { pane_id: TerminalRuntime.parseTerminal(second)!.paneId })).pane

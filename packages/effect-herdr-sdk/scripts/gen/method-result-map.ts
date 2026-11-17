@@ -1,4 +1,4 @@
-export const METHOD_RESULT: Readonly<Record<string, string>> = {
+export const METHOD_RESULT = {
   ping: "pong",
   "session.snapshot": "session_snapshot",
   "workspace.create": "workspace_created",
@@ -25,4 +25,4 @@ export const METHOD_RESULT: Readonly<Record<string, string>> = {
   "pane.read": "pane_read",
   "pane.split": "pane_info",
   "events.subscribe": "subscription_started",
-}
+} satisfies Readonly<Record<string, string>>

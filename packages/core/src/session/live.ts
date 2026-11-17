@@ -55,6 +55,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const r = Option.getOrUndefined(HashMap.get(map, id)) ?? (yield* newTracked)
         const already = yield* Ref.getAndSet(r.stopping, true)
+
         return [{ r, already }, HashMap.set(map, id, r)] as const
       }),
     ),
@@ -64,11 +65,15 @@ export const make = Effect.gen(function* () {
     SynchronizedRef.updateEffect(tracked, (map) =>
       Effect.gen(function* () {
         const r = Option.getOrUndefined(HashMap.get(map, id))
+
         if (r === undefined) return map
+
         if ((yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting))) {
           yield* Ref.set(r.forgetOnRelease, true)
+
           return map
         }
+
         return HashMap.remove(map, id)
       }),
     ),
@@ -78,9 +83,11 @@ export const make = Effect.gen(function* () {
     SynchronizedRef.updateEffect(tracked, (map) =>
       Effect.gen(function* () {
         const r = Option.getOrUndefined(HashMap.get(map, id))
+
         if (r === undefined) return map
         yield* Ref.set(r.stopping, false)
         const done = ended || (yield* Ref.get(r.forgetOnRelease))
+
         return done && !(yield* Ref.get(r.prompting)) ? HashMap.remove(map, id) : map
       }),
     ),
@@ -147,9 +154,11 @@ export const make = Effect.gen(function* () {
     Effect.uninterruptibleMask((restore) =>
       Effect.suspend(() => {
         const owner = restartOwners.get(id)
+
         if (owner !== undefined) return restore(Deferred.await(owner))
         const done = Deferred.makeUnsafe<Restarted>()
         restartOwners.set(id, done)
+
         return restore(restart).pipe(
           Effect.onExit((exit) =>
             Effect.sync(() => {

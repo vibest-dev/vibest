@@ -35,12 +35,14 @@ export const TraceEntry = Schema.Struct({
   reason: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
 })
+
 export type TraceEntry = typeof TraceEntry.Type
 
 export const Routing = Schema.Struct({
   decidedBy: Schema.Record(Schema.String, Schema.String),
   trace: Schema.Array(TraceEntry),
 })
+
 export type Routing = typeof Routing.Type
 
 export const PluginInfo = Schema.Struct({
@@ -57,4 +59,5 @@ export const PluginInfo = Schema.Struct({
   refused: Schema.Number,
   lastError: Schema.optional(Schema.String),
 })
+
 export type PluginInfo = typeof PluginInfo.Type

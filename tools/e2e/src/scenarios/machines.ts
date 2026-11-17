@@ -8,8 +8,11 @@ import { alive, binary, expect, fail, harnesses, readDb, row, Skip, until, type 
 import { addCursorPlugin } from "../world/plugins.ts"
 
 type Machine = { name: string; id: string; state: string; reason?: string }
+
 type Listed = { id: string; machine?: string; runtime?: string; address?: { machine: string; id: string } }
+
 type HcMachine = { id: string; name: string; session?: string | null }
+
 type MachineView = {
   runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
 }
@@ -47,8 +50,10 @@ export const fakeSsh = (root: string, exports: string, empty: string) =>
 export const subModel = () => {
   const held = new Map<string, () => void>()
   const asked: Array<string> = []
+
   const reply = (content: string) =>
     `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\ndata: [DONE]\n\n`
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -59,20 +64,27 @@ export const subModel = () => {
       const headers = { "content-type": "text/event-stream" }
       const last = messages.at(-1)
       const attached = /Attached files: ([^\s\\"]+)/.exec(text(last))?.[1]
+
       if (last?.role === "user" && attached !== undefined)
         return new Response(toolCall("call-cat", "bash", { command: `cat ${attached}` }), { headers })
       const word = last?.role === "tool" ? /m1-word-(\w+)/.exec(text(last))?.[1] : undefined
+
       if (word !== undefined) return new Response(reply(`done-${task} ${word}`), { headers })
+
       if (task === undefined) return new Response(reply("ok"), { headers })
+
       if (messages.at(-1)?.role !== "tool") {
         asked.push(task)
+
         if (task.startsWith("held")) await new Promise<void>((resolve) => held.set(task, resolve))
       }
+
       return new Response(task.startsWith("quiet") ? reply(`done-${task}`) : sendOrReply(messages, `done-${task}`), {
         headers,
       })
     },
   })
+
   return {
     url: `http://127.0.0.1:${server.port}/v1`,
     asked: (task: string) => asked.includes(task),
@@ -88,13 +100,19 @@ export const stopVibestd = async (home: string) => {
   const text = await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "")
   const parsed = (text === "" ? {} : JSON.parse(text)) as { pid?: number; socket?: string; command?: Array<string> }
   const pid = parsed.pid
+
   if (pid === undefined || !alive(pid)) return
+
   if (parsed.socket !== path.join(home, "vibest.sock")) return
   const command = commandOf(pid)
+
   if (!command.includes("daemon --foreground")) return
+
   if (parsed.command?.some((part) => !command.includes(part))) return
   process.kill(pid, "SIGTERM")
+
   for (const deadline = Date.now() + 2_000; alive(pid) && Date.now() < deadline;) await Bun.sleep(50)
+
   if (alive(pid)) process.kill(pid, "SIGKILL")
   await until(`vibestd ${pid} gone`, () => !alive(pid), 5_000)
 }
@@ -103,6 +121,7 @@ const hcCore = async (w: World, tag: string, env: Record<string, string | undefi
   const hc = (...args: Array<string>) => w.run(w.root, ["hc", ...args], { env })
   const started = await hc("server", "start")
   expect(started.code === 0, `hc server start (${tag}): ${started.stderr}${started.stdout}`)
+
   return hc
 }
 
@@ -112,6 +131,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   const bin = path.join(w.root, "bin")
   const b = path.join(w.root, "b")
   const empty = path.join(w.root, "empty-zdotdir")
+
   for (const dir of [bin, b, empty, ...["home", "tmp", "r", "s", "c"].map((d) => path.join(b, d))])
     await fs.mkdir(dir, { recursive: true })
   const subs = subModel()
@@ -119,6 +139,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   const piA = await piDir(w, "pi-a", main.url)
   const piB = await piDir(w, "pi-b", subs.url)
   const loginPath = w.env().PATH!
+
   const bEnv = {
     VIBEST_HOME: path.join(b, "home"),
     PATH: loginPath,
@@ -131,14 +152,17 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     ZDOTDIR: empty,
     HC_SOCKET: options.bSession ? undefined : path.join(b, "hc.sock"),
   }
+
   const exports = [
     ...(options.bSession ? ["-u HC_SOCKET"] : []),
     ...Object.entries(bEnv).flatMap(([k, v]) => (v === undefined ? [] : [`${k}=${sh(v)}`])),
   ].join(" ")
+
   await fs.writeFile(path.join(bin, "ssh"), fakeSsh(w.root, exports, empty), { mode: 0o755 })
   const bRepo = path.join(b, "shop")
   const cloned = await w.run(w.root, ["git", "clone", "-q", w.origin, bRepo])
   expect(cloned.code === 0, `git clone: ${cloned.stderr}`)
+
   for (const [cwd, url] of [
     [bRepo, "https://example.com/o/shop"],
     [w.repository, "git@gh-shop:o/shop.git"],
@@ -146,15 +170,20 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     const set = await w.run(cwd, ["git", "remote", "set-url", "origin", url])
     expect(set.code === 0, `git remote set-url: ${set.stderr}`)
   }
+
   const hcB = await hcCore(w, "b", bEnv)
   const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [binary, ...args], { env: bEnv })
+
   const okB = async (args: ReadonlyArray<string>) => {
     const r = await onB(args)
     expect(r.code === 0, `B: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
+
     return r.stdout
   }
+
   if (options.bCursor) await addCursorPlugin({ vibestHome: bEnv.VIBEST_HOME }, harnesses)
   await okB(["project", "add"])
+
   const aEnv = {
     HC_SESSION: `${w.herdrSession}-a`,
     XDG_RUNTIME_DIR: path.join(w.root, "a-r"),
@@ -164,6 +193,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     PATH: `${bin}:${loginPath}`,
     ZDOTDIR: empty,
   }
+
   for (const dir of ["a-r", "a-s", "a-c"]) await fs.mkdir(path.join(w.root, dir), { recursive: true })
   const hcA = await hcCore(w, "a", aEnv)
   await w.stopDaemon()
@@ -180,21 +210,27 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     timeoutMs: 60_000,
   })
   const onA = (args: ReadonlyArray<string>) => w.run(w.repository, [binary, ...args], { env: aEnv })
+
   const okA = async (args: ReadonlyArray<string>) => {
     const r = await onA(args)
     expect(r.code === 0, `A: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
+
     return r.stdout
   }
+
   const bDb = <A>(sql: string, ...args: Array<string>) => {
     const db = readDb(path.join(bEnv.VIBEST_HOME, "vibest.db"))
+
     try {
       return db.query(sql).get(...args) as A | null
     } finally {
       db.close()
     }
   }
+
   const identity = async (home: string) =>
     JSON.parse(await fs.readFile(path.join(home, "identity.json"), "utf8")) as { id: string; name: string }
+
   const notices = (address: string, marker: string) =>
     row<{ n: number }>(
       w,
@@ -202,15 +238,19 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
       `%<agent-id>${address}</agent-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
+
   const run = async (marker: string, machine = "mb") => {
     const printed = (
       JSON.parse(
         await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], { env: aEnv, asIs: true }),
       ) as { id: string }
     ).id
+
     expect(printed.startsWith(`${machine}/`) && /^[0-9a-f-]{36}$/.test(printed.slice(machine.length + 1)), printed)
+
     return printed.slice(0, machine.length + 9)
   }
+
   const stop = async () => {
     subs.stop()
     main.stop()
@@ -218,8 +258,10 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     await hcB("server", "stop")
     await hcA("server", "stop")
   }
+
   const aSocket = w.hcSocket
   const log = path.join(w.root, "ssh.log")
+
   return { b, bEnv, aEnv, aSocket, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcA, hcB }
 }
 
@@ -232,6 +274,7 @@ const checks: ReadonlyArray<Check> = [
       "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's entry session and none on A, A's entry session gets one message from mb/<id> with what the session sent itself, B's outbox empties; send, result, peek and archive forward to B; run --machine --file copies the file into B's project folder, the session on B reads it there and archive removes it",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w)
         const added = await s.okA(["machine", "add", "mb", "b-host"])
@@ -245,6 +288,7 @@ const checks: ReadonlyArray<Check> = [
           "mb connected",
           async () => {
             m = (JSON.parse(await s!.okA(["machine", "ls"])) as Array<Machine>)[0]
+
             return m?.state === "connected"
           },
           30_000,
@@ -287,12 +331,14 @@ const checks: ReadonlyArray<Check> = [
           `A's ls: ${JSON.stringify(listed)}`,
         )
         await s.okA(["archive", address])
+
         const started = s.bDb<{ peer: string | null; facts: string }>(
           `SELECT origin_peer AS peer, (SELECT group_concat(type, ' ') FROM
             (SELECT type FROM event WHERE aggregate = session.id ORDER BY seq)) AS facts
           FROM session WHERE id LIKE ?`,
           `${id8}%`,
         )
+
         expect(
           started?.peer === a.id &&
             /session\.created .*process\.started .*execution\.started .*execution\.ended .*session\.ended/.test(
@@ -300,18 +346,22 @@ const checks: ReadonlyArray<Check> = [
             ),
           `B's session started for A: ${JSON.stringify(started)}`,
         )
+
         const outbox = () =>
           s!.bDb<{ queued: number; acked: number }>(
             `SELECT count(*) FILTER (WHERE type = 'outbox.queued') AS queued,
               count(*) FILTER (WHERE type = 'outbox.acked') AS acked FROM event`,
           )
+
         await until("B's outbox items all acked", () => {
           const o = outbox()
+
           return o !== null && o.queued >= 2 && o.queued === o.acked
         }).catch(() => fail(`B's outbox facts: ${JSON.stringify(outbox())}`))
 
         const notes = path.join(w.root, "m1-notes.md")
         await fs.writeFile(notes, "the answer is m1-word-hazel\n")
+
         const attachedTo = (
           JSON.parse(
             await w.okViaEntry(
@@ -329,13 +379,16 @@ const checks: ReadonlyArray<Check> = [
             ),
           ) as { id: string }
         ).id
+
         const remoteId = attachedTo.slice("mb/".length)
         const projects = path.join(s.bEnv.VIBEST_HOME, "projects")
+
         const sessionFolders = async () =>
           (
             await Promise.all(
               (await fs.readdir(projects).catch(() => [])).map(async (project) => {
                 const folder = path.join(projects, project, "sessions", remoteId)
+
                 return (await fs.stat(folder).then(
                   () => true,
                   () => false,
@@ -345,6 +398,7 @@ const checks: ReadonlyArray<Check> = [
               }),
             )
           ).flat()
+
         const [bFolder] = await sessionFolders()
         expect(
           bFolder !== undefined &&
@@ -373,6 +427,7 @@ const checks: ReadonlyArray<Check> = [
       "an execution that ends on B without a send queues nothing in B's outbox and gives A's entry session no notice; vibest result on A returns the execution's reply",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w)
         await s.okA(["machine", "add", "mb", "b-host"])
@@ -404,6 +459,7 @@ const checks: ReadonlyArray<Check> = [
       "recovery: a message sent while A's vibestd is stopped, and one sent while the ssh child is killed, each arrive once; A's ls shows mb not connected meanwhile",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w)
         await s.okA(["machine", "add", "mb", "b-host"])
@@ -444,6 +500,7 @@ const checks: ReadonlyArray<Check> = [
     title: "two A's on one B: B records two peers; the second A gets nothing from the first's task and cannot list it",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w)
         await s.okA(["machine", "add", "mb", "b-host"])
@@ -474,6 +531,7 @@ const checks: ReadonlyArray<Check> = [
       "forget: machine rm with a task held open; its message waits in B's outbox; machine add under another name delivers it once",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w)
         await s.okA(["machine", "add", "mb", "b-host"])
@@ -500,12 +558,15 @@ const checks: ReadonlyArray<Check> = [
       "clear failures: an unknown machine, vibest missing on the target, ssh exiting 255, the target being this vibestd, a different vibestd behind the target, a commit B does not have, and agents running vibest connect or machine add",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w)
+
         const failed = async (args: ReadonlyArray<string>, text: string) => {
           const r = args[0] === "run" ? await w.viaEntry(args, { env: s!.aEnv, asIs: true }) : await s!.onA(args)
           expect(r.code !== 0 && r.stderr.includes(text), `vibest ${args.join(" ")}: ${r.code} ${r.stderr}${r.stdout}`)
         }
+
         await failed(["run", "--machine", "nosuch", "pi", "--", "x"], `unknown machine "nosuch"`)
         await failed(["machine", "add", "m", "bare-host"], "vibest is not installed on m")
         await failed(["machine", "add", "m", "refused-host"], "Connection refused")
@@ -514,6 +575,7 @@ const checks: ReadonlyArray<Check> = [
 
         await s.okA(["machine", "add", "mb", "b-host"])
         await fs.writeFile(path.join(w.repository, "local.txt"), "only on A\n")
+
         for (const argv of [
           ["git", "add", "."],
           ["git", "commit", "-q", "-m", "local"],
@@ -522,6 +584,7 @@ const checks: ReadonlyArray<Check> = [
         await failed(["run", "--machine", "mb", "--runtime", "hc", "pi", "--", "x"], "push it and fetch it there")
 
         const agent = { VIBEST_SESSION_ID: crypto.randomUUID() }
+
         for (const args of [["connect"], ["machine", "add", "x", "b-host"]]) {
           const r = await w.run(w.repository, [binary, ...args], { env: { ...s.aEnv, ...agent } })
           expect(
@@ -551,9 +614,11 @@ const checks: ReadonlyArray<Check> = [
       "harness ls --machine: B has the Cursor plugin and A does not; A's harness ls has no cursor, --machine mb lists cursor with the same shape, A's entry session gets the same list, and after B stops the call fails saying mb is not connected",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w, { bCursor: true })
         await s.okA(["machine", "add", "mb", "b-host"])
+
         type Entry = {
           harness: string
           binary: string
@@ -561,6 +626,7 @@ const checks: ReadonlyArray<Check> = [
           defaultModel: string | null
           error: string | null
         }
+
         const names = (list: Array<Entry>) => list.map((e) => e.harness)
         const local = JSON.parse(await s.okA(["harness", "ls"])) as Array<Entry>
         expect(!names(local).includes("cursor"), `A lists cursor: ${names(local)}`)
@@ -570,9 +636,11 @@ const checks: ReadonlyArray<Check> = [
           cursor !== undefined && Object.keys(cursor).sort().join() === Object.keys(local[0]!).sort().join(),
           `B's list: ${JSON.stringify(remote)}`,
         )
+
         const fromAgent = JSON.parse(
           await w.okViaEntry(["harness", "ls", "--machine", "mb"], { env: s.aEnv, asIs: true }),
         ) as Array<Entry>
+
         expect(
           names(fromAgent).join() === names(remote).join(),
           `the entry session's list: ${JSON.stringify(fromAgent)}`,
@@ -603,18 +671,23 @@ const checks: ReadonlyArray<Check> = [
       "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed execution on B whose message arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
     run: async (w) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w, { bSession: true })
+
         const hcRows = async () => {
           const r = await s!.hcA("machine", "ls", "--json")
           expect(r.code === 0, `hc machine ls on A: ${r.stderr}`)
           const parsed = JSON.parse(r.stdout) as Array<HcMachine> | { machines: Array<HcMachine> }
+
           return Array.isArray(parsed) ? parsed : parsed.machines
         }
+
         const status = JSON.parse((await s.hcB("server", "status", "--json")).stdout) as {
           core?: { id?: string }
           id?: string
         }
+
         const core = status.core?.id ?? status.id ?? ""
         expect(core !== "", `B's hc core id: ${JSON.stringify(status)}`)
         const added = await s.okA(["machine", "add", "mb", "b-host"])
@@ -635,19 +708,24 @@ const checks: ReadonlyArray<Check> = [
 
         const address = await s.run("msix")
         const id8 = address.slice(3)
+
         const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
           r.id?.startsWith(id8),
         )
+
         expect(bRow?.runtime === "hc", `B's row: ${JSON.stringify(bRow)}`)
+
         const shown = async () =>
           (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
             r.id?.startsWith(address),
           )
+
         let first: Listed | undefined
         await until(
           "A's row has its terminal",
           async () => {
             first = await shown()
+
             return (first?.address?.id ?? "") !== ""
           },
           60_000,

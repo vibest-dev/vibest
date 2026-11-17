@@ -1,4 +1,4 @@
-import { type Claim, type VibestClient } from "@vibest/client/client"
+import { Claim, type VibestClient } from "@vibest/client/client"
 import { Forbidden } from "@vibest/protocol/rpc"
 import { Config, Console, Effect, Option, Path, Schema } from "effect"
 
@@ -8,12 +8,14 @@ export const caller = Effect.gen(function* () {
   const path = yield* Path.Path
   const repositoryRoot = path.resolve(".")
   const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID"))) || undefined
-  const claim: Claim = sessionId ? { _tag: "session", sessionId, repositoryRoot } : { _tag: "cli", repositoryRoot }
+  const claim: Claim = sessionId ? Claim.session({ sessionId, repositoryRoot }) : Claim.cli({ repositoryRoot })
+
   return { claim, agent: sessionId !== undefined, sessionId }
 })
 
 const userOnlyRefusal = (command: string, sessionId: string | undefined) => {
   const run = `vibest${command ? ` ${command}` : ""}`
+
   return [
     `an agent may not run ${run}; ask the user to.`,
     `This shell carries agent session ${sessionId}.`,
@@ -29,7 +31,7 @@ export const userOnly = (command: string) =>
   )
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-export const json = (value: unknown) => Console.log(encodeJson(value))
+export const json = <A>(value: A) => Console.log(encodeJson(value))
 
 export const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
   Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))

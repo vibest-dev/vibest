@@ -197,6 +197,9 @@ importers:
       '@vibest/tsconfig':
         specifier: workspace:*
         version: link:tools/tsconfig
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
       lint-staged:
         specifier: 17.6.0
         version: 17.6.0
@@ -366,6 +369,9 @@ importers:
       '@vibest/schema':
         specifier: workspace:*
         version: link:../../schema
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
 
   packages/integration/cursor: {}
 
@@ -568,7 +574,11 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
-  tools/e2e: {}
+  tools/e2e:
+    dependencies:
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
 
   tools/tsconfig: {}
 
@@ -577,6 +587,9 @@ importers:
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
 
 packages:
 

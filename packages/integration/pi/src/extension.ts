@@ -6,10 +6,24 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import { claimHeaders, type ClientServices, connect, hookCall, makeClient } from "@vibest/client/client"
+import { Claim, claimHeaders, type ClientServices, connect, hookCall, makeClient } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
+import {
+  Cause,
+  Config,
+  Deferred,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect"
 
 import { Pi } from "./pi.ts"
 import { VERSION } from "./version.ts"
@@ -20,45 +34,55 @@ export const skillsDir = path.join(path.dirname(url.fileURLToPath(import.meta.ur
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
+const decodeRefusal = Schema.decodeUnknownOption(Schema.String)
+
+const decodeVibestDetails = Schema.decodeUnknownOption(Schema.Struct({ execution: Schema.Number }))
+
 const guarded = (sessionId: string) =>
   Effect.gen(function* () {
     const pi = yield* Pi
     const layout = yield* Layout
     yield* pi.handle("tool_call", (e, ctx) =>
       Effect.gen(function* () {
-        const headers = yield* claimHeaders({ _tag: "session", sessionId, pluginVersion: VERSION })
+        const headers = yield* claimHeaders(Claim.session({ sessionId, pluginVersion: VERSION }))
         const input = encodeJson({ tool_name: e.toolName, tool_input: e.input, cwd: ctx.cwd })
+
         const exit = yield* hookCall(layout.socket, headers, (client) =>
           client["Integration.Guard"]({ harness: "pi", input }),
         )
+
         if (Exit.isFailure(exit))
           return {
             block: true,
             reason: `vibest could not check this tool call (${Cause.pretty(exit.cause)}); it is refused.`,
           }
-        const reason = exit.value.answer
-        return typeof reason === "string" && reason ? { block: true, reason } : undefined
+        const reason = decodeRefusal(exit.value.answer)
+
+        return Option.isSome(reason) && reason.value ? { block: true, reason: reason.value } : undefined
       }),
     )
   })
 
 type AgentMessage = AgentEndEvent["messages"][number]
+
 type AssistantMessage = Extract<AgentMessage, { readonly role: "assistant" }>
 
 const lastReply = (messages: ReadonlyArray<AgentMessage>) => {
   const message = messages.findLast((m): m is AssistantMessage => m.role === "assistant")
   const text = (message?.content ?? []).flatMap((c) => (c.type === "text" ? [c.text] : [])).join("")
+
   return { text, error: message?.stopReason === "error" ? message.errorMessage || "error" : "" }
 }
 
 const piHeaders = (sessionId: string, ctx: ExtensionContext, current?: string) =>
-  claimHeaders({
-    _tag: "session",
-    sessionId,
-    harnessSessionId: ctx.sessionManager.getSessionId(),
-    pluginVersion: VERSION,
-    ...(current === undefined ? {} : { process: current }),
-  })
+  claimHeaders(
+    Claim.session({
+      sessionId,
+      harnessSessionId: ctx.sessionManager.getSessionId(),
+      pluginVersion: VERSION,
+      ...(current !== undefined && { process: current }),
+    }),
+  )
 
 type Role = Layer.Layer<never, Config.ConfigError, Pi | ClientServices | FileSystem.FileSystem>
 
@@ -74,11 +98,13 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
       yield* pi.handle("message_start", (e, ctx) =>
         Effect.gen(function* () {
           const message = e.message
+
           if (message.role !== "custom" || message.customType !== "vibest") return
-          const details = message.details as { readonly execution?: unknown } | undefined
-          if (typeof details?.execution !== "number") return
+          const details = decodeVibestDetails(message.details)
+
+          if (Option.isNone(details)) return
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
-          const event = encodeJson({ type: "accepted", execution: details.execution })
+          const event = encodeJson({ type: "accepted", execution: details.value.execution })
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
         }),
       )
@@ -107,9 +133,11 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
   const layout = yield* Layout
   const scope = yield* Effect.scope
   const reported = yield* Ref.make("")
+
   const send = (ctx: ExtensionContext) =>
     Effect.gen(function* () {
       const harnessSessionId = ctx.sessionManager.getSessionId()
+
       if (ctx.mode !== "tui" || (yield* Ref.get(reported)) === harnessSessionId) return
       const headers = yield* piHeaders(sessionId, ctx)
       yield* connect(layout.socket).pipe(
@@ -135,6 +163,7 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
         Effect.forkIn(scope),
       )
     })
+
   yield* pi.handle("session_start", (event, ctx) =>
     event.reason === "new" || event.reason === "resume" || event.reason === "fork" ? send(ctx) : Effect.void,
   )
@@ -158,27 +187,34 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
       yield* pi.handle("session_start", (_e, ctx) =>
         ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
       )
+
       const identity = (ctx: ExtensionContext) =>
-        Effect.map(Ref.get(processId), (current) => ({
-          _tag: "session" as const,
-          sessionId,
-          harnessSessionId: ctx.sessionManager.getSessionId(),
-          pluginVersion: VERSION,
-          ...(current === undefined ? {} : { process: current }),
-        }))
+        Effect.map(Ref.get(processId), (current) =>
+          Claim.session({
+            sessionId,
+            harnessSessionId: ctx.sessionManager.getSessionId(),
+            pluginVersion: VERSION,
+            ...(current !== undefined && { process: current }),
+          }),
+        )
+
       const takeNext = (ctx: ExtensionContext) =>
         Effect.gen(function* () {
           if (!ctx.isIdle()) return
+
           const taken = yield* withVibest(yield* identity(ctx), (client) => client["Inbox.Take"](undefined), {
             start: false,
           })
+
           if (taken === null) return
           yield* pi.sendMessage(
             { customType: "vibest", content: taken.text, display: false, details: { execution: taken.execution } },
             { triggerTurn: true },
           )
         }).pipe(Effect.ignore)
+
       yield* pi.handle("agent_settled", (_e, ctx) => takeNext(ctx))
+
       const subscribe = (ctx: ExtensionContext) =>
         Effect.flatMap(identity(ctx), (who) =>
           withVibest(
@@ -192,11 +228,12 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
           ),
         ).pipe(
           Effect.retry({
-            while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
+            while: (e) => Predicate.isTagged(e, "RpcClientError") || Predicate.isTagged(e, "DaemonUnavailable"),
             schedule: Schedule.spaced("2 seconds"),
           }),
           Effect.repeat(Schedule.spaced("2 seconds")),
         )
+
       yield* Deferred.await(started).pipe(
         Effect.flatMap((ctx) =>
           subscribe(ctx).pipe(
@@ -223,12 +260,11 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
           : Ref.get(processId).pipe(
               Effect.flatMap((current) =>
                 withVibest(
-                  {
-                    _tag: "session",
+                  Claim.session({
                     sessionId,
                     pluginVersion: VERSION,
-                    ...(current === undefined ? {} : { process: current }),
-                  },
+                    ...(current !== undefined && { process: current }),
+                  }),
                   (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
                   { start: false },
                 ),
@@ -239,7 +275,9 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
               Effect.timeout("2 seconds"),
               Effect.retry({
                 while: (e) =>
-                  e._tag === "DaemonUnavailable" || e._tag === "RpcClientError" || e._tag === "TimeoutError",
+                  Predicate.isTagged(e, "DaemonUnavailable") ||
+                  Predicate.isTagged(e, "RpcClientError") ||
+                  Predicate.isTagged(e, "TimeoutError"),
                 schedule: Schedule.spaced("1 second"),
               }),
               Effect.ignore,
@@ -253,9 +291,11 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
 export const extension = Layer.unwrap(
   Effect.gen(function* () {
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
+
     if (!sessionId) return Layer.empty
     const processId = yield* Ref.make(Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROCESS"))))
     const guard: Role = Layer.merge(Layer.effectDiscard(guarded(sessionId)), ready(sessionId, processId))
+
     return terminal(sessionId).pipe(
       Layer.provideMerge(
         Layer.mergeAll(session(sessionId, processId), inbox(sessionId, processId)).pipe(Layer.provideMerge(guard)),

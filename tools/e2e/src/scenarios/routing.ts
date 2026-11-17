@@ -18,6 +18,7 @@ type Entry = {
   address: { id: string }
   routing?: { decidedBy: Record<string, string> }
 }
+
 type Listed = { harness: string; binary: string; available: boolean }
 
 const needs = (...bins: Array<string>) => {
@@ -43,6 +44,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
       ),
     30_000,
   )
+
   return file
 }
 
@@ -67,12 +69,14 @@ const withDefaultHarness = async (w: World) => {
 const fakePi = async (w: World, name: string) => {
   const model = heldModel()
   model.release()
+
   const dir = await piShadow(
     path.join(w.root, `pi-${name}`),
     w.profile,
     { first: { baseUrl: model.url, models: ["m", "m2"] }, second: { baseUrl: model.url, models: ["m", "m2"] } },
     { provider: "first", model: "m" },
   )
+
   return { model, dir }
 }
 
@@ -84,6 +88,7 @@ const entry = async (w: World, id: string) => (await sessions(w)).find((e) => e.
 const runId = async (w: World, args: ReadonlyArray<string>) => {
   const printed = JSON.parse(await w.okViaEntry(["run", ...args], { timeoutMs: 90_000 })) as { id: string }
   expect(Object.keys(printed).join() === "id", `vibest run prints only the id: ${JSON.stringify(printed)}`)
+
   return printed.id
 }
 
@@ -96,10 +101,12 @@ const entrySession = async (w: World) => {
     "the entry session in vibest ls",
     async () => {
       entry = (await sessions(w)).find((e) => e.agent === "coordinator")
+
       return entry !== undefined
     },
     60_000,
   )
+
   return entry!
 }
 
@@ -148,6 +155,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")
+
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
         await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
@@ -177,6 +185,7 @@ const checks: ReadonlyArray<Check> = [
       const { model, dir } = await fakePi(w, "wrap")
       const bin = path.join(w.root, "bin")
       const marker = path.join(w.root, "wrapper-ran")
+
       try {
         await fs.mkdir(bin)
         await fs.writeFile(path.join(bin, "pi-wrapped"), `#!/bin/sh\necho ran >> '${marker}'\nexec pi "$@"\n`, {
@@ -185,13 +194,16 @@ const checks: ReadonlyArray<Check> = [
         const daemonEnv = { PI_CODING_AGENT_DIR: dir, PATH: `${bin}:${w.env().PATH}` }
         await w.daemon({ env: daemonEnv })
         await w.entry({ processEnv: daemonEnv })
+
         const piBinary = async () =>
           (await w.json<Array<Listed>>(["harness", "list"], { timeoutMs: 60_000 })).find((h) => h.harness === "pi")
+
         const file = await writePlugin(
           w,
           "wrap-pi",
           `ctx.harness.transform((editor) => editor.update("pi", (d) => { d.binary = "pi-wrapped" }))`,
         )
+
         await until("harness list shows pi-wrapped", async () => (await piBinary())?.binary === "pi-wrapped", 30_000)
         expect((await piBinary())?.available === true, `pi-wrapped not startable: ${JSON.stringify(await piBinary())}`)
         const id = await runId(w, ["pi", "--", ask("wrapped")])
@@ -211,6 +223,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "inherit")
+
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
         await w.startEntry({
@@ -246,6 +259,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "reuse")
+
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
         await withoutDefaultHarness(w)
@@ -257,8 +271,10 @@ const checks: ReadonlyArray<Check> = [
         await withDefaultHarness(w)
         await w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
         const entryRow = await entrySession(w)
+
         const processes = () => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
           try {
             return db
               .query<{ harness: string; readyAt: number | null; endedAt: number | null }, [string]>(
@@ -269,9 +285,10 @@ const checks: ReadonlyArray<Check> = [
             db.close()
           }
         }
+
         await until("the entry session ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop() })
+        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop()! })
         await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)
@@ -293,6 +310,7 @@ const checks: ReadonlyArray<Check> = [
       const anthropic = fakeAnthropic(() => "ok")
       const { model, dir } = await fakePi(w, "dflt")
       const session = `${w.herdrSession}-dflt`
+
       const startedIn = async (name: string, env: Record<string, string>) => {
         const repo = await project(w, name)
         await w.startEntry({ session, cwd: repo, env, timeoutMs: 120_000 })
@@ -302,8 +320,10 @@ const checks: ReadonlyArray<Check> = [
           async () => (main = (await sessions(w, repo)).find((e) => e.agent === "coordinator")) !== undefined,
           60_000,
         )
+
         return main!
       }
+
       try {
         await w.daemon()
         const claude = await startedIn("dflt-claude", await claudeEnv(w, "dflt", anthropic.url, w.config.claude))
@@ -314,6 +334,7 @@ const checks: ReadonlyArray<Check> = [
           "router",
           `ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
         )
+
         const pi = await startedIn("dflt-pi", { PI_CODING_AGENT_DIR: dir })
         expect(pi.harness === "pi", `a plugin picking Pi: ${JSON.stringify(pi)}`)
         await fs.rm(router)
@@ -354,6 +375,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       needs("herdr")
       const slow = [1, 2, 3, 4, 5, 6, 7].map((n) => path.join(w.vibestHome, "slow", `slow-${n}`))
+
       for (const [n, folder] of slow.entries()) {
         await fs.mkdir(folder, { recursive: true })
         await fs.writeFile(
@@ -365,6 +387,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
 `,
         )
       }
+
       await configurePlugins(w, () => ["-*", "-harness-default", ...slow])
       await w.daemon()
       const pid = await w.daemonPid()
@@ -377,10 +400,12 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
           ["slow-5", "slow-6", "slow-7"].every((name) => out.includes(name)),
         `first start while plugins import: ${started.code} ${out}`,
       )
+
       const active = async () =>
         (await w.json<Array<{ id: string; status: string }>>(["plugins"], { timeoutMs: 60_000 })).filter(
           (p) => p.status === "active",
         )
+
       await until(
         "the slow plugins active",
         async () => (await active()).filter((p) => p.id.startsWith("slow-")).length === 7,
@@ -407,19 +432,26 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
       const first = path.join(w.root, "facts-first")
       const second = path.join(w.root, "facts-second")
       const file = path.join(w.vibestHome, "plugins", "observer.ts")
+
       const save = async (text: string) => {
         await fs.mkdir(path.dirname(file), { recursive: true })
         await fs.writeFile(`${file}.tmp`, text)
         await fs.rename(`${file}.tmp`, file)
       }
+
       const ordered = ["session.created", "process.started", "execution.started", "execution.ended"]
+
       const of = (lines: ReadonlyArray<string>, id: string) =>
-        lines.filter((line) => line.endsWith(` ${id}`)).map((line) => line.split(" ")[0]!)
+        lines.flatMap((line) => (line.endsWith(` ${id}`) ? [line.split(" ")[0]!] : []))
+
       const inOrder = (types: ReadonlyArray<string>) => {
         let at = 0
+
         for (const type of types) if (type === ordered[at]) at++
+
         return at === ordered.length
       }
+
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
         await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
@@ -437,9 +469,11 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
           seen.every((type) => ordered.includes(type)),
           `the observer got facts it did not ask for: ${JSON.stringify(seen)}`,
         )
+
         const revision = (await w.json<Array<{ id: string; revision: string }>>(["plugins"])).find(
           (p) => p.id === "observer",
         )!.revision
+
         await save(observer(second, "{}"))
         await until("the new revision active", async () =>
           (await w.json<Array<{ id: string; status: string; revision: string }>>(["plugins"])).some(
@@ -474,6 +508,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
       const facts = path.join(w.root, "promised-facts")
       const cleanup = path.join(w.root, "promised-cleanup")
       const file = path.join(w.vibestHome, "plugins", "promised.ts")
+
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
         await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
@@ -516,6 +551,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "gate")
       const ids = ["gate-a", "gate-b", "gate-router"]
+
       const install = async (id: string, effect: string) => {
         const file = path.join(w.vibestHome, "plugins", `${id}.ts`)
         await fs.mkdir(path.dirname(file), { recursive: true })
@@ -529,6 +565,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
         )
         await fs.rename(`${file}.tmp`, file)
       }
+
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
         await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
@@ -555,6 +592,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
             ),
           30_000,
         )
+
         const refused = await w.vibest(["run", "--", ask("gated")], {
           env: {
             VIBEST_SESSION_ID: session,
@@ -563,6 +601,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
           },
           timeoutMs: 30_000,
         })
+
         const out = refused.stderr + refused.stdout
         const named = ids.filter((id) => out.includes(id))
         expect(
@@ -577,6 +616,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
                 .filter((p) => p.status === "active")
                 .map((p) => p.id),
             )
+
             return ids.every((id) => active.has(id))
           },
           30_000,

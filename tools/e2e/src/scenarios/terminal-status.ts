@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { Predicate, type Schema } from "effect"
+
 import type { Check } from "../check.ts"
 import { binary, checkout, expect, row, Skip, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
@@ -13,27 +15,31 @@ const reports = (bytes: string) =>
     .slice(1)
     .map((record) => record.split("\x1b")[0]!.split("\x07")[0]!)
 
-type Reply = string | { tool: string; input: object } | { error: string }
+type Reply = string | { tool: string; input: Schema.JsonObject } | { error: string }
 
 const fakeModel = () => {
   const waiting: Array<(reply: Reply) => void> = []
   const stages: Array<{ at: number; event: string }> = []
   let sequence = 0
+
   const answer = (reply: Reply, openAI = false) => {
-    if (typeof reply !== "string" && "error" in reply)
+    if (!Predicate.isString(reply) && "error" in reply)
       return Response.json(
         { type: "error", error: { type: "authentication_error", message: reply.error } },
         { status: 401 },
       )
-    const text = typeof reply === "string"
+    const text = Predicate.isString(reply)
+
     const block = text
       ? { type: "text", text: "" }
       : { type: "tool_use", id: "toolu_status_" + ++sequence, name: reply.tool, input: {} }
+
     const delta = text
       ? { type: "text_delta", text: reply }
       : { type: "input_json_delta", partial_json: JSON.stringify(reply.input) }
+
     if (openAI) {
-      const chunk = (delta: object, finish: string | null = null) =>
+      const chunk = (delta: Schema.JsonObject, finish: string | null = null) =>
         "data: " +
         JSON.stringify({
           id: "status",
@@ -44,24 +50,26 @@ const fakeModel = () => {
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
         }) +
         "\n\n"
-      const delta =
-        typeof reply === "string"
-          ? { role: "assistant", content: reply }
-          : {
-              role: "assistant",
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_" + sequence,
-                  type: "function",
-                  function: { name: reply.tool, arguments: JSON.stringify(reply.input) },
-                },
-              ],
-            }
+
+      const delta = Predicate.isString(reply)
+        ? { role: "assistant", content: reply }
+        : {
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_" + sequence,
+                type: "function",
+                function: { name: reply.tool, arguments: JSON.stringify(reply.input) },
+              },
+            ],
+          }
+
       return new Response(chunk(delta) + chunk({}, text ? "stop" : "tool_calls") + "data: [DONE]\n\n", {
         headers: { "content-type": "text/event-stream" },
       })
     }
+
     const message = {
       id: "msg_status",
       type: "message",
@@ -71,6 +79,7 @@ const fakeModel = () => {
       stop_reason: null,
       usage: { input_tokens: 1, output_tokens: 1 },
     }
+
     const events = [
       ["message_start", { message }],
       ["content_block_start", { index: 0, content_block: block }],
@@ -82,6 +91,7 @@ const fakeModel = () => {
       ],
       ["message_stop", {}],
     ] as const
+
     return new Response(
       events
         .map(([event, data]) => "event: " + event + "\ndata: " + JSON.stringify({ type: event, ...data }) + "\n\n")
@@ -89,6 +99,7 @@ const fakeModel = () => {
       { headers: { "content-type": "text/event-stream" } },
     )
   }
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -96,13 +107,16 @@ const fakeModel = () => {
     fetch: async (req) => {
       const url = new URL(req.url)
       const openAI = url.pathname.endsWith("/chat/completions")
+
       if (!openAI && !url.pathname.endsWith("/messages")) return Response.json({ input_tokens: 1 })
+
       const body = (await req.json()) as {
         tools?: Array<{ name?: string; function?: { name?: string } }>
         stream?: boolean
         model?: string
         messages?: Array<unknown>
       }
+
       if (!body.stream)
         return Response.json({
           id: "msg_aux",
@@ -112,20 +126,24 @@ const fakeModel = () => {
           stop_reason: "end_turn",
           usage: { input_tokens: 1, output_tokens: 1 },
         })
+
       if (!body.tools?.some((tool) => ["Bash", "read"].includes(tool.name ?? tool.function?.name ?? "")))
         return answer("ok", openAI)
+
       if (JSON.stringify(body.messages?.at(-1)).includes("[SUGGESTION MODE:")) return answer("", openAI)
       stages.push({ at: Date.now(), event: "model waiting " + body.model })
+
       return answer(await new Promise<Reply>((resolve) => waiting.push(resolve)), openAI)
     },
   })
+
   return {
     url: "http://127.0.0.1:" + server.port,
     waiting,
     stages,
     next: async (reply: Reply) => {
       await until("next model request", () => waiting.length > 0, 30_000)
-      stages.push({ at: Date.now(), event: typeof reply === "string" ? reply : JSON.stringify(reply) })
+      stages.push({ at: Date.now(), event: Predicate.isString(reply) ? reply : JSON.stringify(reply) })
       waiting.shift()!(reply)
     },
     stop: () => server.stop(true),
@@ -151,6 +169,7 @@ const statusCore = async (
   for (const bin of ["hc", harness, "python3"]) if (!Bun.which(bin)) throw new Skip(bin + " not on PATH")
   const model = fakeModel()
   const home = path.join(w.root, "home")
+
   const env = {
     HOME: home,
     HC_SESSION: "status",
@@ -173,6 +192,7 @@ const statusCore = async (
     PATH: path.join(w.root, "bin") + ":" + w.env().PATH,
     PI_PACKAGE_DIR: await fs.realpath(path.join(w.home, ".pix/current")).catch(() => undefined),
   }
+
   for (const dir of [
     home,
     env.XDG_STATE_HOME,
@@ -184,6 +204,7 @@ const statusCore = async (
     path.join(w.root, "bin"),
   ])
     await fs.mkdir(dir, { recursive: true, mode: 0o700 })
+
   if (env.PI_PACKAGE_DIR) await fs.symlink(path.join(env.PI_PACKAGE_DIR, "pi"), path.join(w.root, "bin/pi"))
   await fs.writeFile(path.join(env.XDG_CONFIG_HOME, "herdr-core/config.toml"), "notes = false\n")
   await fs.writeFile(
@@ -203,31 +224,39 @@ const statusCore = async (
   )
   await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-pty.py"), path.join(w.root, "status-pty.py"))
   const plugin = path.join(w.vibestHome, "plugins/status-runtime.ts")
+
   const hc = async (...args: Array<string>) => {
     const r = await w.run(w.root, ["hc", ...args], { env })
     expect(r.code === 0, "isolated hc " + args.join(" ") + ": " + r.stderr)
+
     return r.stdout
   }
+
   const visible = (text: string) =>
     until(
       "stable visible " + text,
       async () => {
         const first = await hc("read", terminal)
+
         if (!first.includes(text)) return false
         await Bun.sleep(300)
+
         return (await hc("read", terminal)) === first
       },
       30_000,
     )
+
   const snapshots: Array<{ at: number; stage: string; terminal: CoreTerminal }> = []
   let terminal = ""
   let owner: string | undefined = harness === "pi" ? "pi" : "claude-code"
+
   const status = async (stage: string, state: string, kind?: string) => {
     let current: CoreTerminal | undefined
     await until(
       stage,
       async () => {
         current = JSON.parse(await hc("get", terminal)) as CoreTerminal
+
         return current.reported && current.status?.state === state && current.status?.kind === kind
       },
       30_000,
@@ -235,6 +264,7 @@ const statusCore = async (
     snapshots.push({ at: Date.now(), stage, terminal: current! })
     expect(current!.status?.app === owner, "unexpected status owner: " + JSON.stringify(current))
   }
+
   const bind = async (sessionId: string) => {
     await until(
       "harness terminal bound",
@@ -244,12 +274,15 @@ const statusCore = async (
           "SELECT terminal FROM process WHERE session_id = ? AND coalesce(terminal, '') != '' ORDER BY id DESC LIMIT 1",
           sessionId,
         )
+
         terminal = saved?.terminal.split("/").at(-1) ?? ""
+
         return terminal !== ""
       },
       60_000,
     )
   }
+
   const worker = async (harness: string, flags: Array<string> = []) => {
     const launched = JSON.parse(
       await w.okViaEntry(["run", harness, ...flags, "--", "Run the terminal status fixture."], {
@@ -257,10 +290,14 @@ const statusCore = async (
         timeoutMs: 90_000,
       }),
     ) as { id: string }
+
     await bind(launched.id)
+
     return launched.id
   }
+
   await w.stopDaemon()
+
   try {
     await hc("server", "start")
     await w.ok(["daemon"], { env })
@@ -292,16 +329,20 @@ const statusCore = async (
       snapshot: (stage, current) => snapshots.push({ at: Date.now(), stage, terminal: current }),
     })
     owner = undefined
+
     for (const file of await fs.readdir(path.join(w.root, "status-output"))) {
       if (!file.endsWith(".raw")) continue
+
       const records = reports(await fs.readFile(path.join(w.root, "status-output", file), "utf8")).filter((r) =>
         r.startsWith("state="),
       )
+
       expect(
         records.every((r) => r === "state=clear" || r.includes(":app=pi") || r.includes(":app=claude-code")),
         "competing terminal writer: " + JSON.stringify(records),
       )
     }
+
     await w.writeEvidence(
       path.join(evidence, `${id}-versions.json`),
       JSON.stringify(
@@ -350,12 +391,14 @@ const checks: ReadonlyArray<Check> = [
           })
           await status("permission dialog", "blocked", "permission")
           expect(!(await Bun.file(approved).exists()), "scratch action ran before permission")
+
           const completed = () =>
             row<{ n: number }>(
               w,
               "SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome IS NOT NULL",
               launched.id,
             )!.n
+
           expect(completed() === 0, "blocked published a completed result")
           await visible("Do you want to proceed?")
           await Bun.sleep(1000)
@@ -397,11 +440,13 @@ const checks: ReadonlyArray<Check> = [
               ) === true,
             30_000,
           )
+
           const conversation = row<{ conversation: string }>(
             w,
             "SELECT conversation FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             launched.id,
           )!.conversation
+
           await visible("native-status-completed")
           await hc("send", terminal(), "/clear")
           await until(
@@ -471,6 +516,7 @@ const checks: ReadonlyArray<Check> = [
             "native authentication outcome",
             async () => {
               auth = JSON.parse(await hc("get", terminal())) as CoreTerminal
+
               return (
                 auth.reported &&
                 (["blocked", "error"].includes(auth.status?.state ?? "") ||
@@ -483,7 +529,9 @@ const checks: ReadonlyArray<Check> = [
           await w.writeEvidence(path.join(evidence, "T1-claude-auth.txt"), await hc("read", terminal()))
           await hc("kill", terminal())
           await Bun.sleep(2000)
+
           for (const resolve of model.waiting.splice(0)) resolve("discard authentication retry")
+
           for (const [name, flag] of [
             ["title disabled", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1"],
             ["query unanswered", "VIBEST_STATUS_NO_QUERY=1"],
@@ -508,11 +556,13 @@ const checks: ReadonlyArray<Check> = [
         const piConfig = await piShadow(path.join(w.root, "pi-status"), "first-run", {
           fake: { baseUrl: model.url + "/v1" },
         })
+
         await fs.mkdir(path.join(piConfig, "extensions"))
         await fs.copyFile(
           path.join(checkout, "tools/e2e/src/fixtures/status-prompts.ts"),
           path.join(piConfig, "extensions/status-prompts.ts"),
         )
+
         const pi = await worker("pi", [
           "--provider",
           "fake",
@@ -521,6 +571,7 @@ const checks: ReadonlyArray<Check> = [
           "--env",
           "PI_CODING_AGENT_DIR=" + piConfig,
         ])
+
         await until("Pi model held", () => model.waiting.length === 1, 30_000)
         await status("Pi start", "working")
         await model.next({ tool: "status_prompt", input: {} })

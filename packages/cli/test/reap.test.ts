@@ -14,6 +14,7 @@ it("a process this run noted is still alive afterwards: the run reports it and i
   fs.writeFileSync(file, "")
   const owned = childProcess.spawn("sleep", ["30"], { stdio: "ignore" })
   const other = childProcess.spawn("sleep", ["30"], { stdio: "ignore" })
+
   try {
     note(owned.pid, "sleep 30")
     note(other.pid, "not-this-command")
@@ -31,6 +32,7 @@ it("a process this run noted is still alive afterwards: the run reports it and i
   } finally {
     for (const child of [owned, other]) if (child.exitCode === null) child.kill("SIGKILL")
     fs.rmSync(file, { force: true })
+
     if (saved === undefined) delete process.env.VIBEST_REAP_FILE
     else process.env.VIBEST_REAP_FILE = saved
   }
@@ -75,6 +77,7 @@ it("a run killed hard leaves its processes behind; the next run stops each recor
   const liveRun = path.join(dir, `vibest-reap-${process.pid}`)
   const liveOwned = childProcess.spawn("sleep", [String(n + 5)], { stdio: "ignore" })
   const fixtureCleanup = path.join(dir, "fixture-cleanup")
+
   try {
     process.env.VIBEST_REAP_FILE = liveRun
     note(liveOwned.pid, `sleep ${n + 5}`)
@@ -88,11 +91,13 @@ it("a run killed hard leaves its processes behind; the next run stops each recor
     const fixture = [noted, leader, core, stranger, leaderNamed, leaderUnnamed, coreChild]
     assert.isTrue(fixture.every((pid) => pid !== undefined && alive(pid)))
     process.env.VIBEST_REAP_FILE = fixtureCleanup
+
     for (const pid of fixture) note(pid, commandOf(pid!).trim())
     process.env.VIBEST_REAP_FILE = liveRun
     run.kill("SIGKILL")
     process.kill(core!, "SIGKILL")
     await new Promise((resolve) => run.once("exit", resolve))
+
     while (alive(core!)) await new Promise((resolve) => setTimeout(resolve, 50))
     assert.isTrue(alive(coreChild!), "the core's child outlives the core")
 
@@ -109,6 +114,7 @@ it("a run killed hard leaves its processes behind; the next run stops each recor
     await endNoted(fixtureCleanup)
     liveOwned.kill("SIGKILL")
     fs.rmSync(dir, { recursive: true, force: true })
+
     if (saved === undefined) delete process.env.VIBEST_REAP_FILE
     else process.env.VIBEST_REAP_FILE = saved
   }

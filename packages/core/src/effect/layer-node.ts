@@ -8,28 +8,41 @@ const NodeTypeId = Symbol("LayerNode.Node")
 const ReplacementTypeId = Symbol("LayerNode.Replacement")
 
 export type Tag<Name extends string = string> = Name & Brand.Brand<"LayerNode.Tag">
+
 const makeTag = Brand.nominal<Tag>()
 
 export type Graph<A, E = never, T extends Tag | undefined = Tag | undefined> = GraphValue<A, E, T>
+
 export type Node<A, E = never, T extends Tag | undefined = undefined> = NodeValue<A, E, T>
+
 export type Provider<A, E = never, T extends Tag | undefined = undefined> = ProviderNode<A, E, T>
+
 export type Replacement = ReplacementValue
+
 export type Replacements = readonly Replacement[]
 
 type AnyGraph = Graph<never, unknown>
+
 type AnyNode = AnyGraph & { readonly [NodeTypeId]: unknown; readonly tag: Tag | undefined }
+
 type RuntimeLayer = Layer.Layer<never, unknown, unknown>
+
 type GraphList = readonly [] | readonly [AnyGraph, ...AnyGraph[]]
 
 export type Output<Item> = CommonOutput<Item, Item extends Graph<infer A, unknown> ? A : never>
+
 export type Error<Item> = Item extends Graph<never, infer E> ? E : never
+
 type GraphTag<Item> = [Item] extends [never] ? undefined : Item extends Graph<never, unknown, infer T> ? T : never
+
 type CommonOutput<Item, A> = A extends unknown ? ([Item] extends [Graph<A, unknown>] ? A : never) : never
+
 type LayerOutput<Item extends Layer.Any, A = Layer.Success<Item>> = A extends unknown
   ? [Item] extends [Layer.Layer<A, unknown, unknown>]
     ? A
     : never
   : never
+
 type ListOutput<Items extends readonly AnyGraph[], A = never> = [Items] extends [
   readonly [infer Head extends AnyGraph, ...infer Tail extends readonly AnyGraph[]],
 ]
@@ -81,9 +94,12 @@ class NodeValue<in out A, in out E, in out T extends Tag | undefined> extends Gr
   ): Replacement {
     if (replacement instanceof NodeValue) {
       if (replacement.tag !== this.tag) throw new Error(`Cannot replace ${this.name} across tags`)
+
       return new ReplacementValue(this, replacement)
     }
+
     if (!Layer.isLayer(replacement)) throw new Error("A replacement must be a node or an Effect Layer")
+
     return new ReplacementValue(this, makeProvider({ name: this.name, layer: replacement, deps: [] }, this.tag))
   }
 }
@@ -91,7 +107,9 @@ class NodeValue<in out A, in out E, in out T extends Tag | undefined> extends Gr
 class ProviderNode<in out A, in out E, in out T extends Tag | undefined> extends NodeValue<A, E, T> {
   mapLayer(this: Provider<A, E, T>, f: <R>(layer: Layer.Layer<A, E, R>) => Layer.Layer<A, E, R>): Provider<A, E, T> {
     const definition = this[GraphTypeId]
+
     if (definition.kind !== "layer") throw new Error(`Cannot map unbound layer node: ${this.name}`)
+
     return new ProviderNode(
       { ...definition, implementation: f(definition.implementation as Layer.Layer<A, E, unknown>) },
       this.tag,
@@ -135,19 +153,25 @@ type CheckDependencies<Implementation extends Layer.Any, Items extends GraphList
 type Identity =
   | { readonly service: Context.Service.Any; readonly name?: never }
   | { readonly name: string; readonly service?: never }
+
 type CheckLayer<Implementation> = [Implementation] extends [RuntimeLayer]
   ? unknown
   : { readonly "Layer contract must be preserved": Implementation }
+
 type TagInput<T> = { readonly tag: T } | ([T] extends [undefined] ? { readonly tag?: undefined } : never)
+
 type MakeInput<Implementation extends Layer.Any, Items extends GraphList, T extends Tag | undefined> = Identity &
   TagInput<T> & {
     readonly layer: Implementation & CheckLayer<NoInfer<Implementation>>
     readonly deps: Items & CheckDependencies<Implementation, NoInfer<Items>>
   }
+
 type DistributiveOmit<A, K extends PropertyKey> = A extends unknown ? Omit<A, K> : never
 
 export type TagConfig = Readonly<Record<string, readonly string[]>>
+
 type TagNames<Config extends TagConfig> = keyof Config & string
+
 type CheckTags<Items extends GraphList, Names extends string> = [
   Exclude<GraphTag<Items[number]>, Tag<Names> | undefined>,
 ] extends [never]
@@ -172,6 +196,7 @@ export function tags<const Config extends { readonly [Name in keyof Config]: rea
 ): Tags<Config> {
   const names = Object.keys(config) as TagNames<Config>[]
   const values = Object.fromEntries(names.map((name) => [name, makeTag(name)])) as Tags<Config>["values"]
+
   return {
     values,
     make:
@@ -199,6 +224,7 @@ function makeProvider<Implementation extends Layer.Any, Items extends readonly A
   tag: T,
 ): Provider<LayerOutput<Implementation>, Layer.Error<Implementation> | Error<Items[number]>, T> {
   if (!Layer.isLayer(input.layer)) throw new Error("A layer node requires an Effect Layer")
+
   return new ProviderNode(
     {
       kind: "layer",
@@ -210,8 +236,8 @@ function makeProvider<Implementation extends Layer.Any, Items extends readonly A
   )
 }
 
-export function unbound<R, Shape, const T extends Tag | undefined = undefined>(
-  service: Context.Key<R, Shape>,
+export function unbound<R, Impl, const T extends Tag | undefined = undefined>(
+  service: Context.Key<R, Impl>,
   tag?: T,
 ): Node<R, never, T> {
   return new NodeValue({ kind: "unbound", name: service.key }, tag as T)
@@ -235,6 +261,7 @@ export class Releases {
   [TrackTypeId](name: string) {
     const key = Symbol(name)
     this.#entries.set(key, { name, since: Date.now() })
+
     return () => void this.#entries.delete(key)
   }
 
@@ -254,16 +281,20 @@ type Resolved = {
 
 export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): Layer.Layer<A, E> {
   const shared = options.shared
+
   const replacements = new Map<AnyGraph, AnyNode>(
     options.replacements?.map((item) => {
       const replacement = item[ReplacementTypeId]
+
       return [replacement.source, replacement.target] as const
     }),
   )
+
   const cache = {
     shared: new Map<AnyGraph, readonly Resolved[]>(),
     local: new Map<AnyGraph, readonly Resolved[]>(),
   }
+
   const stack: AnyGraph[] = []
   const definitions = { shared: new Map<RuntimeLayer, Resolved>(), local: new Map<RuntimeLayer, Resolved>() }
 
@@ -272,28 +303,37 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
     const isShared = inherited || (shared !== undefined && graph instanceof NodeValue && graph.tag === shared)
     const resolved = isShared ? cache.shared : cache.local
     const cached = resolved.get(graph)
+
     if (cached) return cached
     const cycle = stack.indexOf(graph)
+
     if (cycle !== -1) {
       throw new Error(
         `Cycle detected in layer graph: ${[...stack.slice(cycle), graph].map((item) => item.name).join(" -> ")}`,
       )
     }
+
     stack.push(graph)
     const replacement = replacements.get(graph)
+
     const result = (() => {
       if (replacement && replacement !== graph) return resolve(replacement, isShared)
+
       if (definition.kind === "group")
         return definition.dependencies.flatMap((dependency) => resolve(dependency, isShared))
+
       if (definition.kind === "unbound") throw new Error(`Unbound layer node: ${definition.name}`)
+
       const node: Resolved = {
         name: definition.name,
         implementation: definition.implementation,
         dependencies: definition.dependencies.flatMap((dependency) => resolve(dependency, isShared)),
         shared: isShared,
       }
+
       const registry = node.shared ? definitions.shared : definitions.local
       const existing = registry.get(node.implementation)
+
       if (existing) {
         if (
           existing.dependencies.length !== node.dependencies.length ||
@@ -303,22 +343,30 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
             `Layer ${definition.name} is wired to different dependencies; use a distinct implementation Layer`,
           )
         }
+
         return [existing]
       }
+
       registry.set(node.implementation, node)
+
       return [node]
     })()
+
     stack.pop()
     resolved.set(graph, result)
+
     return result
   }
 
   const roots = resolve(root)
+
   return Layer.fromBuild((memoMap, scope) => {
     const releases = options.releases ?? new Releases()
+
     const trackRelease = <B, F, R>(name: string, nodeScope: Scope.Scope, build: () => Effect.Effect<B, F, R>) =>
       Effect.gen(function* () {
         let settle = () => {}
+
         yield* Scope.addFinalizer(
           nodeScope,
           Effect.sync(() => settle()),
@@ -330,24 +378,32 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
             settle = releases[TrackTypeId](name)
           }),
         )
+
         return result
       })
+
     const local = shared === undefined ? memoMap : Layer.makeMemoMapUnsafe()
     const ambient = Layer.succeed(Layer.CurrentMemoMap, memoMap)
     const layers = new Map<Resolved, RuntimeLayer>()
+
     const build = (node: Resolved): RuntimeLayer => {
       const cached = layers.get(node)
+
       if (cached) return cached
       const dependencies = node.dependencies.map(build)
       const implementation = Layer.suspend(() => node.implementation.pipe(Layer.provide([ambient, ...dependencies])))
+
       const layer = Layer.fromBuild((_, nodeScope) =>
         trackRelease(node.name, nodeScope, () =>
           buildContext(implementation, node.shared ? memoMap : local, nodeScope),
         ),
       )
+
       layers.set(node, layer)
+
       return layer
     }
+
     return buildContext(
       roots.map(build).reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty),
       memoMap,

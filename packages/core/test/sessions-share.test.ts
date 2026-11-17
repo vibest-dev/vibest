@@ -16,6 +16,7 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const db = yield* Db.Service
       const shared = yield* db.session.sessionDirectory(ownerId)
+
       return yield* Effect.filter(
         (yield* db.session.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),
         (s) => db.session.sessionDirectory(s.id).pipe(Effect.map((d) => d === shared)),
@@ -26,6 +27,7 @@ describe.concurrent("Session", () => {
     const reached = Deferred.makeUnsafe<void>()
     const go = Deferred.makeUnsafe<void>()
     const state = { armed: false }
+
     const options: TestOptions = {
       db: (db) => ({
         ...db,
@@ -41,6 +43,7 @@ describe.concurrent("Session", () => {
         },
       }),
     }
+
     return {
       options,
       arm: Effect.sync(() => {
@@ -70,12 +73,15 @@ describe.concurrent("Session", () => {
         const spawning = yield* Effect.forkChild(
           owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id }),
         )
+
         yield* parked.reached
         const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+
         const listed = yield* Effect.race(
           cwd.reached.pipe(Effect.as(true)),
           TestClock.withLive(Effect.sleep("2 seconds")).pipe(Effect.as(false)),
         )
+
         if (listed) {
           yield* parked.release
           yield* until(sharersOfDirectory(owner.id), (rows) => rows.length === 1)
@@ -89,6 +95,7 @@ describe.concurrent("Session", () => {
               String(exists),
           )
         }
+
         assert.deepStrictEqual(yield* sharersOfDirectory(owner.id), [])
         assert.isUndefined(archiving.pollUnsafe())
         yield* parked.release
@@ -118,6 +125,7 @@ describe.concurrent("Session", () => {
         const spawning = yield* Effect.forkChild(
           owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id }),
         )
+
         yield* split.reached
         const admitted = yield* Fiber.join(spawning)
         const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
@@ -160,17 +168,21 @@ describe.concurrent("Session", () => {
       yield* parkedBehindShare.arm
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
+
       const reset = Effect.all([cwd.release(), split.release(), parkedBehindShare.release], { discard: true }).pipe(
         Effect.ignore,
       )
+
       yield* Effect.gen(function* () {
         const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: mid.id }))
         yield* parkedBehindShare.reached
         const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+
         const listed = yield* Effect.race(
           cwd.reached.pipe(Effect.as(true)),
           TestClock.withLive(Effect.sleep("2 seconds")).pipe(Effect.as(false)),
         )
+
         if (listed) {
           yield* parkedBehindShare.release
           yield* until(sharersOfDirectory(owner.id), (rows) =>
@@ -182,6 +194,7 @@ describe.concurrent("Session", () => {
             "owner archive listed before share-of-share insert and removed the tree: worktree=" + archived.worktree,
           )
         }
+
         yield* parkedBehindShare.release
         yield* until(sharersOfDirectory(owner.id), (rows) => rows.some((s) => s.id !== mid.id))
         yield* cwd.release()
@@ -211,9 +224,11 @@ describe.concurrent("Session", () => {
       yield* held.reached
       yield* held.release("failed")
       yield* until(owner.db.session.getSession(id), (w) => !!w && exitedAt(w) !== null)
+
       const newCloses = (yield* herdr.callsTo("close"))
         .map((c) => c.terminal)
         .filter((pane) => !closesBefore.includes(pane))
+
       assert.deepStrictEqual(newCloses, [])
       assert.isTrue(HashMap.has(yield* herdr.panes, ownerPane))
       assert.isTrue(yield* fs.exists(worktree))

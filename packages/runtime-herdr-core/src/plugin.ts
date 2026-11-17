@@ -22,6 +22,7 @@ const set = (name: string) => Config.option(Config.String(name)).pipe(Config.map
 
 const hcSession = Effect.gen(function* () {
   if (Option.isSome(yield* set("HC_SOCKET"))) return ""
+
   return Option.getOrElse(yield* set("HC_SESSION"), () => DEFAULT_SESSION)
 })
 
@@ -34,6 +35,7 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const connect = (socketPath: string) => Hc.make(socketPath).pipe(Effect.provide(platform))
       const home = yield* connect(socket)
       const runtime = yield* make({ connect, socket, scope: yield* Effect.scope })
+
       const definition: VibestPlugin.Runtime.RuntimeDefinition = {
         ...runtime,
         id: KIND,
@@ -46,6 +48,7 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
           ),
         locate: (peer, sessions) => Machines.locate(home, socket, peer, sessions),
       }
+
       yield* context.runtime.transform((editor) => editor.add(definition))
       yield* Machines.mirror(
         context.machine,

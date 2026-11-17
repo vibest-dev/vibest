@@ -63,10 +63,12 @@ describe.concurrent("Session", () => {
       yield* stateHeld.release()
       yield* processHeld.reached
       yield* sessions.send(id, "queued")
+
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       assert.lengthOf(yield* db.inbox.pendingInbox(id), 1)
       yield* processHeld.release()
       yield* Fiber.join(checking)
+
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       yield* settled
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
@@ -86,6 +88,7 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const { parentSessionId: _, ...input } = yield* spawnInput(repo)
+
       const error = yield* Effect.flip(
         (yield* Session.Service).spawn({
           ...input,
@@ -93,6 +96,7 @@ describe.concurrent("Session", () => {
           origin: { peer: "a".repeat(32), project: "p", reportTo: "origin-session" },
         }),
       )
+
       assert.strictEqual(error._tag, "NoHarnessChosen")
       assert.include(error.message, "no harness to inherit")
       assert.include(error.message, "this machine can run: ")
@@ -104,9 +108,11 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const parent = yield* entryOfProject(repo)
+
       const error = yield* Effect.flip(
         (yield* Session.Service).spawn({ ...(yield* spawnInput(repo)), harness: undefined }),
       )
+
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, `(inherited from ${parent})`)
       assert.match(error.message, /this machine can run: .*claude/)
@@ -125,7 +131,7 @@ describe.concurrent("Session", () => {
       const listed = yield* broken.sessions.list()
       const failed = listed.find((row) => row.id === broken.id)
       const other = listed.find((row) => row.id === fine.id)
-      assert.strictEqual(failed?.git?.unknown, "Unknown: Git.state: worktree unreadable")
+      assert.strictEqual(failed?.git?.unknown, "Git.state: worktree unreadable")
       assert.strictEqual(other?.git?.saved, true)
       assert.strictEqual(other?.git?.unknown, undefined)
     }),

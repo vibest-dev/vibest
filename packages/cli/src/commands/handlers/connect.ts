@@ -12,6 +12,7 @@ export default Runtime.handler(Commands.commands.connect, () =>
     Effect.andThen(
       Effect.gen(function* () {
         const layout = yield* Layout
+
         if (!(yield* probe(layout.socket))) yield* startDaemon
         yield* pipeStdio(layout.socket)
       }),

@@ -7,6 +7,7 @@ import { trimLog } from "@vibest/platform-bun/log-file"
 
 const fileIn = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-log-"))
+
   return path.join(dir, "vibestd.log")
 }
 

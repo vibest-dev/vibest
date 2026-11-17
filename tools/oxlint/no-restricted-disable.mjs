@@ -15,13 +15,17 @@ const PROTECTED_RULES = new Set([
 
 const parseDisableDirective = (commentValue) => {
   const match = DISABLE_DIRECTIVE.exec(commentValue.trim())
+
   if (match?.groups === undefined) return null
   const rulePart = (match.groups.body ?? "").replace(/\s+--\s+[\s\S]*$/u, "").trim()
+
   if (rulePart === "") return { rules: null }
+
   const rules = rulePart
     .split(",")
     .map((part) => part.trim().split(/\s+/u)[0] ?? "")
     .filter((name) => name.length > 0)
+
   return { rules }
 }
 
@@ -31,7 +35,9 @@ export const noRestrictedDisable = {
       Program() {
         for (const comment of context.sourceCode.getAllComments()) {
           const parsed = parseDisableDirective(comment.value)
+
           if (parsed === null) continue
+
           if (parsed.rules === null) {
             context.report({
               node: comment,
@@ -40,6 +46,7 @@ export const noRestrictedDisable = {
             })
             continue
           }
+
           for (const rule of parsed.rules) {
             if (!PROTECTED_RULES.has(rule.split("/").pop())) continue
             context.report({

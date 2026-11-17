@@ -1,8 +1,8 @@
 import { until } from "../world.ts"
 
-export const answerFolderTrust = async (
+export const answerFolderTrust = async <A>(
   screen: () => Promise<string>,
-  press: (key: "enter" | "down") => Promise<unknown>,
+  press: (key: "enter" | "down") => Promise<A>,
   timeoutMs = 60_000,
 ) => {
   await until(
@@ -10,6 +10,7 @@ export const answerFolderTrust = async (
     async () => /trust this folder|❯\s*$/im.test(await screen()),
     timeoutMs,
   )
+
   for (let i = 0; i < 10 && /trust this folder/i.test(await screen()); i++) {
     await press(/^\s*❯.*Yes, I trust this folder/im.test(await screen()) ? "enter" : "down")
     await Bun.sleep(1_000)
@@ -18,9 +19,9 @@ export const answerFolderTrust = async (
 
 const squeeze = (s: string) => s.replace(/\s+/g, "")
 
-export const typeAndEnter = async (
+export const typeAndEnter = async <T, E>(
   screen: () => Promise<string>,
-  send: { readonly text: (text: string) => Promise<unknown>; readonly enter: () => Promise<unknown> },
+  send: { readonly text: (text: string) => Promise<T>; readonly enter: () => Promise<E> },
   text: string,
   timeoutMs = 30_000,
 ) => {
@@ -30,6 +31,7 @@ export const typeAndEnter = async (
     aBusyClaudeTakesTextAndAQuickEnterAsOnePasteAndSendsNothing,
     async () => {
       const s = await screen()
+
       return squeeze(s.slice(s.lastIndexOf("❯"))).includes(squeeze(text))
     },
     timeoutMs,

@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/plugin/effect"
+import type { Schema } from "effect"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
@@ -78,8 +79,8 @@ describe("HarnessAdapter", () => {
   })
 
   it("agy's tool calls reach the guard in the shape it reads; a tool it has no rule for is not asked", () => {
-    const call = (name: string, args: Record<string, unknown>) =>
-      agy.guardCall!({ cwd: "/w", toolCall: { name, args } })
+    const call = (name: string, args: Schema.JsonObject) => agy.guardCall!({ cwd: "/w", toolCall: { name, args } })
+
     assert.deepStrictEqual(call("run_command", { CommandLine: "ls", Cwd: "/w/sub" }), {
       cwd: "/w",
       tool_name: "Bash",
@@ -102,6 +103,7 @@ describe("HarnessAdapter", () => {
         data: { models: [{ id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)" }] },
       },
     })
+
     assert.deepStrictEqual(agyModels(["Fetching available models...", json]), [
       { model: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", default: false },
     ])
@@ -124,13 +126,16 @@ describe("HarnessAdapter", () => {
         },
       },
     }
+
     const claudeGroup = (left: number) => ({
       name: "Claude Models",
       buckets: [{ window: "5h", remaining_fraction: left }],
     })
+
     const withClaude = (left: number) => ({
       command: { data: { groups: [...usage.command.data.groups, claudeGroup(left)] } },
     })
+
     assert.deepStrictEqual(
       agyLimits(withClaude(0.5)).map((w) => w.status),
       ["available", "available", "available"],
@@ -156,6 +161,7 @@ describe("HarnessAdapter", () => {
       resume: true,
       sessionId: "--yolo",
     })
+
     assert.strictEqual(dashLeadingArgs[0], "--resume=--yolo")
     assert.notInclude(dashLeadingArgs, "--yolo")
   })
@@ -168,18 +174,21 @@ describe("HarnessAdapter", () => {
     const executionEnd = ADAPTERS.cursor.executionEnd!
     const reply = { hook_event_name: "afterAgentResponse", text: "done" }
     assert.deepStrictEqual(executionEnd(reply), { end: reply })
+
     for (const status of ["completed", "aborted", "error"])
       assert.isUndefined(executionEnd({ hook_event_name: "stop", status }))
   })
 
   it("claude reports every reason of the plugin's ExecutionComplete: answer as it is, aborted, refusal and error failed", () => {
     const executionEnd = ADAPTERS.claude.executionEnd!
+
     const answer = {
       hook_event_name: "ExecutionComplete",
       session_id: "c1",
       reason: "answer",
       last_assistant_message: "done",
     }
+
     assert.deepStrictEqual(executionEnd(answer), { end: answer })
     const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
     assert.deepStrictEqual(executionEnd(aborted), {
@@ -214,6 +223,7 @@ describe("HarnessAdapter", () => {
         error_details: "the model refused to answer",
       },
     })
+
     for (const name of ["Stop", "StopFailure", "SubagentStop"])
       assert.isUndefined(executionEnd({ ...answer, hook_event_name: name }), name)
   })
@@ -224,8 +234,10 @@ describe("HarnessAdapter", () => {
     assert.deepStrictEqual(userPrompt(typed), { text: "look here" })
     assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }), { text: "look here" })
     assert.isUndefined(userPrompt({ ...typed, text: "  " }))
-    for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified", undefined])
-      assert.isUndefined(userPrompt({ ...typed, origin }), String(origin))
+
+    for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified"])
+      assert.isUndefined(userPrompt({ ...typed, origin }), origin)
+    assert.isUndefined(userPrompt({ hook_event_name: typed.hook_event_name, text: typed.text }), "no origin")
     assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }))
   })
 
@@ -245,6 +257,7 @@ describe("HarnessAdapter", () => {
     assert.deepStrictEqual(userPrompt(event), { text: "look here" })
     assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }))
     assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }))
+
     for (const hook_event_name of ["afterAgentThought", "postToolUse"]) {
       assert.deepStrictEqual(userPrompt({ hook_event_name }), { text: "" })
     }
@@ -267,7 +280,8 @@ describe("harness output", () => {
   })
 
   it("model lists: each harness's own output, its run-without-model choice marked default", () => {
-    const j = (v: unknown) => JSON.stringify(v)
+    const j = (v: Schema.Json) => JSON.stringify(v)
+
     const claudeList = j({
       type: "control_response",
       response: {
@@ -287,11 +301,13 @@ describe("harness output", () => {
         },
       },
     })
+
     const claudeApplied = (model: string) =>
       j({
         type: "control_response",
         response: { subtype: "success", request_id: "vibest-settings", response: { applied: { model } } },
       })
+
     const hook = j({ type: "system", subtype: "hook_started" })
     assert.deepStrictEqual(claudeModels([hook, claudeList, claudeApplied("claude-sonnet-5-5")]), [
       { model: "opus", name: "Opus 5.5", description: "complex work", default: false },
@@ -315,6 +331,7 @@ describe("harness output", () => {
         ],
       },
     })
+
     const piState = j({
       id: "vibest-state",
       type: "response",
@@ -322,6 +339,7 @@ describe("harness output", () => {
       success: true,
       data: { model: { provider: "zai", id: "glm-5.3", name: "GLM 5.3" } },
     })
+
     assert.deepStrictEqual(piModels([j({ type: "extension_ui_request" }), piState, piList]), [
       {
         provider: "xai",
@@ -349,6 +367,7 @@ describe("harness output", () => {
       "",
       "Tip: use --model <id> (or /model <id> in interactive mode) to switch.",
     ]
+
     assert.deepStrictEqual(cursorModels(cursor), [
       { model: "auto", name: "Auto", default: false },
       { model: "composer-2.5", name: "Composer 2.5", default: true },

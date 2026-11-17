@@ -1,12 +1,21 @@
-import type { JSONSchema } from "./schema.js"
+import { Schema } from "effect"
+
+import { type Document, JSONSchema } from "./schema.js"
 import { emitDefs, tsType } from "./ts-type.js"
 
-export function emitParams(schema: JSONSchema, header: string): string {
-  const req = schema.schemas.request as JSONSchema
-  const methods: Array<{ method: string; params: string }> = req.oneOf.map((v: JSONSchema) => ({
-    method: v.properties.method.const as string,
-    params: tsType(v.properties.params),
-  }))
+const decodeRequest = Schema.decodeUnknownSync(
+  Schema.Struct({ properties: Schema.Struct({ method: Schema.Struct({ const: Schema.String }), params: JSONSchema }) }),
+)
+
+export function emitParams(schema: Document, header: string): string {
+  const req = schema.schemas.request
+
+  const methods = req.oneOf.map((v) => {
+    const { method, params } = decodeRequest(v).properties
+
+    return { method: method.const, params: tsType(params) }
+  })
+
   return `${header}
 ${emitDefs(req.$defs)}
 

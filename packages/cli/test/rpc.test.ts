@@ -1,10 +1,9 @@
 import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, incompatibleDaemon, protocolHeaders } from "@vibest/client/client"
+import { Claim, cliHeaders, incompatibleDaemon, protocolHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf } from "@vibest/core/database/db-rows"
-import { projectRoot } from "@vibest/core/project/create"
 import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
 import { PRESENT_TIMEOUT } from "@vibest/core/session/entry"
@@ -15,16 +14,14 @@ import {
   tempDirectory,
   until,
   writeEnd,
-  projectOf,
 } from "@vibest/platform-bun/test/lib/fakes"
 import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vibest/platform-bun/test/lib/rpc-helpers"
 import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { Plugin } from "@vibest/plugin/effect"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
 import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, FileSystem, Path, type Schema, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -69,9 +66,11 @@ describe("vibest.sock", () => {
         const c = asCli(raw, yield* makeRepository)
         const instance = (yield* raw.Ping()).instance!
         const cannotOpen = 'echo "vibest.db is not this vibest\'s schema" >&2; exit 1'
+
         const refused = yield* Effect.flip(
           c["Daemon.Handoff"]({ instance, command: ["sh", "-c", cannotOpen, "newer-vibest"] }),
         )
+
         assert.strictEqual(refused._tag, "LaunchFailed")
         assert.include(refused.message, "cannot take over this vibestd (vibest.db is not this vibest's schema)")
         assert.include(refused.message, "it keeps running")
@@ -91,6 +90,7 @@ describe("vibest.sock", () => {
       yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       assert.strictEqual((yield* Effect.flip(c.Get({ id: "nothing!" })))._tag, "NoSuchSession")
       assert.deepStrictEqual(yield* c.Send({ id: id.slice(0, 12), message: "more" }), { id })
+
       const sharer = yield* spawner.Spawn({
         agent: "general",
         callerEnv: {},
@@ -98,6 +98,7 @@ describe("vibest.sock", () => {
         prompt: "beside it",
         share: id.slice(0, 10),
       })
+
       assert.strictEqual(
         yield* db.session.sessionDirectory(sharer.id),
         yield* db.session.sessionDirectory(id),
@@ -124,6 +125,7 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
+
       const first = yield* spawner.Spawn({
         agent: "general",
         callerEnv: {},
@@ -131,6 +133,7 @@ describe("vibest.sock", () => {
         prompt: "do it",
         request: "spawn-1",
       })
+
       assert.deepStrictEqual(
         yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it", request: "spawn-1" }),
         first,
@@ -146,12 +149,15 @@ describe("vibest.sock", () => {
         "the repeat's reserved worktree directory went again",
       )
       yield* until(db.session.executionAccepted(first.id), (accepted) => accepted)
+
       const queued = (request: string) =>
         sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'inbox.queued'
           AND json_extract(data, '$.request') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
+
       const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE kind = 'send'`.pipe(
         Effect.map((rows) => rows[0]!.n),
       )
+
       assert.strictEqual(yield* queued("spawn-1"), 1)
       const sent = yield* c.Send({ id: first.id, message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" })
       yield* c.Remove({ id: first.id })
@@ -194,9 +200,11 @@ describe("vibest.sock", () => {
         sessions.check(id).pipe(Effect.andThen(db.session.getSession(id))),
         (w) => (w ? executionStateOf(w) : undefined) === "completed",
       )
+
       const [execution] = yield* sql<{
         reply: string | null
       }>`SELECT reply FROM execution WHERE session_id = ${id}`
+
       assert.strictEqual(execution?.reply, "cursor said this")
       const reply = (yield* c.Get({ id })).reply
       assert.deepInclude(reply, { status: "completed", text: "cursor said this", failure: null })
@@ -269,22 +277,26 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const held = yield* runtime.hold("present")
+
       const launch = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
       }).pipe(Effect.forkChild)
+
       yield* held.reached
       yield* TestClock.adjust(PRESENT_TIMEOUT)
       const saved = yield* Fiber.join(launch)
       assert.isString(saved.sessionId)
+
       const again = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
       }).pipe(Effect.forkChild)
+
       yield* TestClock.adjust(PRESENT_TIMEOUT)
       assert.strictEqual((yield* Fiber.join(again)).sessionId, saved.sessionId)
     }),
@@ -295,8 +307,10 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const db = yield* Db.Service
       const c = asCli(yield* client, yield* makeRepository)
+
       const enter = (harness: "pi" | "claude") =>
         c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal: "test/p1" })
+
       const first = yield* enter("pi")
       assert.strictEqual(first.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
       const second = yield* enter("claude")
@@ -317,12 +331,14 @@ describe("vibest.sock", () => {
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* (yield* FakeRuntime).seedAgent("test/p1")
+
       const launch = yield* c["Project.EntrySession"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
       })
+
       yield* raw["Session.Ready"](
         { id: launch.sessionId, conversation: { harness: "claude", id: "s1" } },
         {
@@ -375,8 +391,10 @@ describe("vibest.sock", () => {
       )
 
       const projectId = String((yield* db.session.sessionIdentity(id))!.projectId)
+
       const as = (harness: string, harnessSessionId: string) =>
         authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
+
       yield* as("pi", "pi-1").Send({ id: launch.sessionId, message: "one" })
       assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "pi-1")
       yield* as("claude", "other").Send({ id: launch.sessionId, message: "two" })
@@ -457,27 +475,33 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const db = yield* Db.Service
       const repo = yield* makeRepository
+
       const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
           const raw = yield* client
+
           const launched = yield* asCli(raw, root)["Project.EntrySession"]({
             agent: "coordinator",
             harness: "pi",
             fresh: false,
             terminal: `test/${paneId}`,
           })
+
           return yield* asSession(raw, launched.sessionId, root)
         })
+
       const a = yield* asEntry(repo, "p1")
       const b = yield* asEntry(yield* makeRepository, "p2")
       const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.session.executionAccepted(id), (accepted) => accepted)
+
       const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         b.Send({ id, message: "x" }),
         b.Interrupt({ id }),
         b.Peek({ id }),
         b.Remove({ id }),
       ]
+
       for (const call of others) {
         const exit = yield* Effect.exit(call)
         assert.strictEqual(failureTag(exit), "Forbidden")
@@ -486,6 +510,7 @@ describe("vibest.sock", () => {
           /belongs to another entry session's project|was not started by this session/,
         )
       }
+
       assert.deepInclude(yield* b.Get({ id }), { id, agent: "general" })
       assert.strictEqual((yield* b.List({})).sessions[0]?.agent, "coordinator")
       assert.deepStrictEqual(
@@ -522,21 +547,27 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const db = yield* Db.Service
       const repo = yield* makeRepository
+
       const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
           const raw = yield* client
+
           const launched = yield* asCli(raw, root)["Project.EntrySession"]({
             agent: "coordinator",
             harness: "pi",
             fresh: false,
             terminal: `test/${paneId}`,
           })
+
           return yield* asSession(raw, launched.sessionId, root)
         })
+
       const a = yield* asEntry(repo, "p1")
       const { id } = yield* a.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.session.executionAccepted(id), (accepted) => accepted)
+
       type Client = Effect.Success<typeof client>
+
       const protectedCalls = (
         c: Client,
       ): ReadonlyArray<readonly [string, Effect.Effect<unknown, { readonly _tag: string }>]> => [
@@ -584,10 +615,13 @@ describe("vibest.sock", () => {
         ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
         ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
       ]
+
       const bare = yield* client
+
       for (const [method, call] of protectedCalls(bare))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
       const w = yield* asSession(yield* client, id)
+
       for (const [method, call] of protectedCalls(w).filter(
         ([m]) =>
           !([] as ReadonlyArray<string>)
@@ -596,12 +630,14 @@ describe("vibest.sock", () => {
       ))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
       const entryBefore = yield* db.session.entryOf((yield* db.session.getSession(id))!.projectId)
+
       const entryCalls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         w["Project.StopEntry"]({ runtime: "herdr", address: "{}" }),
         w["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: "test/p1" }),
         w["Project.StartEntry"]({ agent: "coordinator", runtime: "herdr" }),
         w.Launch({ agent: "coordinator", callerEnv: {}, argv: [], focus: false }),
       ]
+
       for (const call of entryCalls) assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden")
       assert.deepStrictEqual(yield* db.session.entryOf((yield* db.session.getSession(id))!.projectId), entryBefore)
       const child = yield* w.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "from a session" })
@@ -637,6 +673,7 @@ describe("vibest.sock", () => {
         "ExecutionEnd",
         "Prompt",
       ]
+
       assert.sameMembers(covered, [...VibestRpcs.requests.keys()])
     }),
   )
@@ -653,12 +690,14 @@ describe("vibest.sock", () => {
       yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       const session = yield* asSession(raw, id)
       yield* (yield* FakeRuntime).seedAgent("test/p1")
+
       const entry = (yield* cli["Project.EntrySession"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
       })).sessionId
+
       yield* session.Send({ id: entry, message: "first" })
       assert.match((yield* db.inbox.latestInbox(entry, "send"))!.message, /first/)
       const listed = (yield* cli.List({})).sessions
@@ -666,6 +705,7 @@ describe("vibest.sock", () => {
         listed.map((w) => w.id),
         id,
       )
+
       const [sent, got, stranger] = yield* Effect.all(
         [
           session.Send({ id: entry, message: "second" }),
@@ -674,6 +714,7 @@ describe("vibest.sock", () => {
         ],
         { concurrency: "unbounded" },
       )
+
       assert.deepStrictEqual(sent, { id: entry })
       assert.strictEqual(got.id, id)
       assert.strictEqual(failureTag(stranger), "NoSuchSession")
@@ -685,10 +726,12 @@ describe("vibest.sock", () => {
     "a legacy Ping fails closed; a different package version does not",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const serve = (result: object) =>
+
+      const serve = (result: Schema.JsonObject) =>
         Effect.gen(function* () {
           const home = yield* tempDirectory("vibest-ping-")
           const layout = yield* Layout.make(home)
+
           const server = yield* Effect.acquireRelease(
             Effect.promise(
               () =>
@@ -698,25 +741,32 @@ describe("vibest.sock", () => {
                     sock.on("data", (chunk) => {
                       buf += chunk.toString()
                       const nl = buf.indexOf("\n")
+
                       if (nl < 0) return
                       const req = JSON.parse(buf.slice(0, nl)) as { id?: string; method?: string }
+
                       if (req.method === "Ping")
                         sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }) + "\n")
                     })
                   })
+
                   listening.listen(layout.socket, () => resolve(listening))
                 }),
             ),
             (listening) => Effect.sync(() => listening.close()),
           )
+
           return { layout, server }
         })
+
       const legacy = yield* serve({ version: "0.0.0", runtimes: [] })
+
       const refused = yield* Effect.exit(
-        withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), { start: false }).pipe(
+        withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.die("must not call"), { start: false }).pipe(
           Effect.provideService(Layout, legacy.layout),
         ),
       )
+
       assert.strictEqual(failureTag(refused), "IncompatibleDaemon")
       assert.match(String(Exit.isFailure(refused) && Cause.pretty(refused.cause)), new RegExp(`protocol ${PROTOCOL}`))
       assert.match(String(Exit.isFailure(refused) && Cause.pretty(refused.cause)), /vibest daemon/)
@@ -730,15 +780,17 @@ describe("vibest.sock", () => {
       assert.include(said, "kill -TERM <pid>")
       assert.include(said, "vibestd is older (0.0.0); run vibest update")
       const olderBuildWithoutRuntimes = yield* serve({ protocol: 2, version: VERSION, runtimeSessions: [] })
+
       const olderRefused = yield* Effect.exit(
-        withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), { start: false }).pipe(
+        withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.die("must not call"), { start: false }).pipe(
           Effect.provideService(Layout, olderBuildWithoutRuntimes.layout),
         ),
       )
+
       assert.strictEqual(failureTag(olderRefused), "IncompatibleDaemon")
       const newer = yield* serve({ protocol: PROTOCOL, version: "9.9.9", runtimes: [] })
       assert.strictEqual(
-        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("ok"), { start: false }).pipe(
+        yield* withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.succeed("ok"), { start: false }).pipe(
           Effect.provideService(Layout, newer.layout),
         ),
         "ok",
@@ -751,11 +803,13 @@ describe("vibest.sock", () => {
         ),
         undefined,
       )
+
       const olderClient = incompatibleDaemon(
         newer.layout.socket,
         { protocol: PROTOCOL + 1, version: "9.9.9", runtimes: [] },
         { version: VERSION, command: ["vibest"] },
       )?.message
+
       assert.include(
         olderClient,
         `older than vibestd 9.9.9 (pid unknown, command unknown) on ${newer.layout.socket}, which speaks protocol ${PROTOCOL + 1}. Run vibest update (again, if this was vibest update)`,
@@ -764,221 +818,39 @@ describe("vibest.sock", () => {
       assert.include(olderClient, "kill -TERM <pid>")
       const needs = { capability: "harnesses", method: "Harnesses.List" }
       const lacking = yield* serve({ protocol: PROTOCOL, version: "0.9.0", runtimes: [], capabilities: {} })
+
       const lackRefused = yield* Effect.exit(
-        withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), {
+        withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.die("must not call"), {
           start: false,
           needs,
         }).pipe(Effect.provideService(Layout, lacking.layout)),
       )
+
       assert.strictEqual(failureTag(lackRefused), "IncompatibleDaemon")
       const lackSaid = String(Exit.isFailure(lackRefused) && Cause.pretty(lackRefused.cause))
       assert.include(lackSaid, "vibestd is older (0.9.0); run vibest update")
       assert.include(lackSaid, "has no Harnesses.List")
       assert.include(lackSaid, "vibest daemon restart")
       assert.strictEqual(
-        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("no need"), {
+        yield* withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.succeed("no need"), {
           start: false,
         }).pipe(Effect.provideService(Layout, lacking.layout)),
         "no need",
       )
+
       const having = yield* serve({
         protocol: PROTOCOL,
         version: "0.9.0",
         runtimes: [],
         capabilities: { harnesses: true },
       })
+
       assert.strictEqual(
-        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("ok"), {
+        yield* withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.succeed("ok"), {
           start: false,
           needs,
         }).pipe(Effect.provideService(Layout, having.layout)),
         "ok",
-      )
-    }),
-  )
-
-  const seenDirectory = { project: "" }
-  test(
-    "Project.StartEntry schedules with the project directory, not its key; with no harness it fails until an entry session exists, then takes its harness",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const c = asCli(yield* client, repo)
-      const first = yield* Effect.flip(c["Project.StartEntry"]({ agent: "general", runtime: "herdr" }))
-      assert.strictEqual(first._tag, "LaunchFailed")
-      assert.match(first.message, /no harness to inherit/)
-      assert.strictEqual(
-        (yield* c["Project.StartEntry"]({ agent: "general", runtime: "herdr", harness: "pi" })).harness,
-        "pi",
-      )
-      assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
-      assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
-      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "claude", fresh: false, terminal: "test/p1" })
-      assert.strictEqual((yield* c["Project.StartEntry"]({ agent: "general", runtime: "herdr" })).harness, "claude")
-    }),
-    {
-      plugins: [
-        Plugin.define({
-          id: "see",
-          effect: (ctx) =>
-            ctx.agent.hook("start.before", (e) =>
-              Effect.sync(() => {
-                seenDirectory.project = e.project
-              }),
-            ),
-        }),
-      ],
-    },
-  )
-
-  test(
-    "List shows the entry session's live status from its pane, not a stored unknown",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const c = asCli(yield* client, repo)
-      const pane = "w1:coord"
-      yield* herdr.seedAgent(pane)
-      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: pane })
-      yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
-      yield* until(c.List({}), (list) => list.sessions[0]?.status === "working")
-      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "working" })
-      yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
-      yield* until(c.List({}), (list) => list.sessions[0]?.status === "idle")
-      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "idle" })
-    }),
-    { statusEvents: true },
-  )
-
-  test(
-    "Remove names the resolved session when the runtime is unreachable, not the prefix typed",
-    Effect.gen(function* () {
-      const db = yield* Db.Service
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const c = asCli(yield* client, repo)
-      const spawner = yield* asEntry(yield* client, repo)
-      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
-      yield* Ref.set(herdr.reachable, false)
-      const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
-      assert.strictEqual(failed._tag, "RuntimeUnreachable")
-      assert.strictEqual("session" in failed ? failed.session : failed._tag, id)
-    }),
-  )
-
-  test(
-    "archive refuses an entry session and names its project",
-    Effect.gen(function* () {
-      const db = yield* Db.Service
-      const path = yield* Path.Path
-      const repo = yield* makeRepository
-      const projectId = yield* projectOf(repo)
-      yield* db.session.startEntry(
-        projectId,
-        "pi",
-        false,
-        {
-          runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
-        },
-        { agent: "coordinator" },
-      )
-      const entry = (yield* db.session.entryOf(projectId))!
-      const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: entry.id }))
-      assert.strictEqual(failed._tag, "NoSuchSession")
-      assert.strictEqual(
-        "message" in failed ? failed.message : "",
-        `${entry.id} is the session you opened in a terminal (project ${path.basename(repo)}); stop it in that terminal.`,
-      )
-    }),
-  )
-
-  test(
-    "FocusEntry reports a runtime that cannot focus",
-    Effect.gen(function* () {
-      const db = yield* Db.Service
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const projectId = yield* projectOf(repo)
-      yield* db.session.startEntry(
-        projectId,
-        "pi",
-        false,
-        {
-          runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
-        },
-        { agent: "coordinator" },
-      )
-      yield* herdr.seedAgent("test/main")
-      const focused = yield* asCli(yield* client, repo)["Project.FocusEntry"]({})
-      assert.strictEqual(focused?.focused, false)
-      assert.strictEqual((yield* herdr.callsTo("focus")).length, 0)
-    }),
-    { noFocus: true },
-  )
-
-  test(
-    "--new with a missing harness does not archive the current entry session",
-    Effect.gen(function* () {
-      const db = yield* Db.Service
-      const repo = yield* makeRepository
-      const projectId = yield* projectOf(repo)
-      yield* db.session.startEntry(
-        projectId,
-        "pi",
-        false,
-        {
-          runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
-        },
-        { agent: "coordinator" },
-      )
-      const before = (yield* db.session.entryOf(projectId))!.id
-      const failed = yield* Effect.flip(
-        asCli(yield* client, repo).Launch({
-          agent: "coordinator",
-          callerEnv: {},
-          argv: ["/bin/vibest", "--harness", "cursor", "--new"],
-          focus: false,
-          runtime: "herdr",
-        }),
-      )
-      assert.ok(failed._tag === "LaunchFailed" || failed._tag === "AgentRefused", failed._tag)
-      assert.strictEqual((yield* db.session.entryOf(projectId))!.id, before)
-    }),
-    { missingBinary: ["cursor"] },
-  )
-
-  test(
-    "an entry launch whose typing fails leaves no open execution: the next start runs its first input",
-    Effect.gen(function* () {
-      const db = yield* Db.Service
-      const sql = yield* SqlClient.SqlClient
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const projectId = yield* projectOf(repo)
-      const launch = Effect.flatMap(client, (c) =>
-        asCli(c, repo).Launch({
-          agent: "coordinator",
-          callerEnv: {},
-          argv: ["/bin/vibest", "--harness", "cursor"],
-          focus: false,
-          runtime: "herdr",
-        }),
-      )
-      const held = yield* herdr.hold("run")
-      const failing = yield* Effect.forkChild(Effect.flip(launch))
-      yield* held.reached
-      yield* held.release("failed")
-      assert.strictEqual((yield* Fiber.join(failing))._tag, "LaunchFailed")
-      yield* launch
-      const id = (yield* db.session.entryOf(projectId))!.id
-      const executions = yield* sql<{ outcome: string | null }>`SELECT outcome FROM execution
-        WHERE session_id = ${id} ORDER BY id`
-      assert.deepStrictEqual(
-        executions.map((e) => e.outcome),
-        ["not_started", null],
       )
     }),
   )

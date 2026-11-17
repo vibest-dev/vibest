@@ -85,6 +85,7 @@ describe.concurrent("Session", () => {
             getSession: (id) => {
               if (!defect.armed) return db.session.getSession(id)
               defect.armed = false
+
               return Effect.die(new Error("move died"))
             },
           },
@@ -134,6 +135,7 @@ describe.concurrent("Session", () => {
             getSession: (id) => {
               if (!gate.armed) return db.session.getSession(id)
               gate.armed = false
+
               return Deferred.succeed(gate.reached, undefined).pipe(
                 Effect.andThen(Deferred.await(gate.go)),
                 Effect.andThen(Effect.die(new Error("move died"))),
@@ -245,10 +247,12 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* herdr.callsTo("open")).at(-1)!.cwd, yield* sessionWorktree(id))
       assert.lengthOf(yield* herdr.callsTo("close"), 1)
       assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
+
       const executions = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
         (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(EXECUTIONS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
+
       const moved2 = yield* executions()
       assert.deepStrictEqual(
         moved2.map((row) => [row.status, row.inbox === row.task]),
@@ -274,9 +278,11 @@ describe.concurrent("Session", () => {
         (yield* executions()).map((row) => row.status),
         ["failed", "completed"],
       )
+
       const [reply] = yield* sql<{
         reply: string | null
       }>`SELECT reply FROM execution WHERE session_id = ${id} AND outcome = 'completed'`.pipe(Effect.orDie)
+
       assert.include(reply!.reply, "moved")
       assert.notInclude(reply!.reply, "stale")
     }),
@@ -292,6 +298,7 @@ describe.concurrent("Session", () => {
       const missing = yield* spawnWorking(repo)
       const lost = yield* spawnWorking(repo)
       yield* (yield* Subscriptions.Service).report({ harness: "pi", limits: [limited] })
+
       const fail = (
         id: string,
         sessions: typeof aborted.sessions,
@@ -310,6 +317,7 @@ describe.concurrent("Session", () => {
           assert.include(result!.message, error)
           assert.notInclude(result!.message, "no harness left")
         })
+
       yield* fail(aborted.id, aborted.sessions, aborted.db, "aborted")
       yield* fail(missing.id, missing.sessions, missing.db, "model_not_found", "usage limit")
       yield* herdr.endExecution(lost.id)
@@ -522,9 +530,11 @@ describe.concurrent("Session", () => {
       assert.strictEqual(harnessOf((yield* herdr.callsTo("open"))[0]!.argv), "pi")
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "pi: rate_limit")
+
       const results = yield* sql<{
         n: number
       }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
+
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)
     }),
@@ -566,6 +576,7 @@ describe.concurrent("Session", () => {
           id: "once",
           effect: (ctx) => {
             let first = true
+
             return ctx.agent.hook("fail", (event) =>
               Effect.sync(() => {
                 if (first) event.move = { harness: "claude" }
@@ -613,9 +624,11 @@ describe.concurrent("Session", () => {
       const message = (yield* db.inbox.latestInbox(id, "notice"))!.message
       assert.include(message, "closing its terminal failed")
       assert.notInclude(message, "no harness left")
+
       const results = yield* sql<{
         n: number
       }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
+
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)
     }),
@@ -626,6 +639,7 @@ describe.concurrent("Session", () => {
           id: "close-fails",
           effect: (ctx) => {
             let first = true
+
             return ctx.agent.hook("fail", (event) =>
               Effect.sync(() => {
                 if (first) event.move = { harness: "claude" }

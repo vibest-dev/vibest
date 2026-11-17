@@ -9,6 +9,7 @@ import { type EventFrame, Herdr, HerdrProtocolMismatch, PROTOCOL, type results }
 const decodeRequest = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ id: Schema.String, method: Schema.String })),
 )
+
 const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 
 const closed = (pane_id: string): EventFrame => ({
@@ -20,18 +21,14 @@ const fakeHerdr = (protocol: number) => (socket: Socket.Socket) =>
   Effect.gen(function* () {
     const pull = yield* Socket.readerString(socket)
     const writer = yield* socket.writer
+
     const line = yield* Stream.fromPull(
-      Effect.succeed(
-        pull.pipe(
-          Effect.catchIf(
-            (e) => e.reason._tag === "SocketCloseError",
-            () => Cause.done(),
-          ),
-        ),
-      ),
+      Effect.succeed(pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))),
     ).pipe(Stream.splitLines, Stream.runHead)
+
     const request = yield* decodeRequest(Option.getOrElse(line, () => ""))
-    const send = (o: object) => encodeLine(o).pipe(Effect.flatMap((json) => writer.write(`${json}\n`)))
+    const send = (o: Schema.Json) => encodeLine(o).pipe(Effect.flatMap((json) => writer.write(`${json}\n`)))
+
     if (request.method === "ping")
       yield* send({ id: request.id, result: { type: "pong", protocol, version: "test" } satisfies results.Result_pong })
     else if (request.method === "agent.get")
@@ -41,6 +38,7 @@ const fakeHerdr = (protocol: number) => (socket: Socket.Socket) =>
       yield* send(closed("w1:p1"))
       yield* send(closed("w1:p2"))
     }
+
     yield* writer.write(new Socket.CloseEvent())
   }).pipe(Effect.scoped, Effect.orDie)
 
@@ -52,6 +50,7 @@ const fakeServer = (protocol: number = PROTOCOL) =>
     const socketPath = path.join(dir, "herdr.sock")
     const server = yield* BunSocketServer.make({ path: socketPath })
     yield* Effect.forkScoped(server.run(fakeHerdr(protocol)))
+
     return { herdr: yield* Herdr.make(socketPath), dir }
   })
 

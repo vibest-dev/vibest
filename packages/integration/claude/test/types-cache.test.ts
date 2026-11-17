@@ -7,23 +7,29 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { prepareClaudeTypes, sha256 } from "../scripts/prepare-claude-types.ts"
 
 const dirs: string[] = []
+
 const temp = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-types-"))
   dirs.push(dir)
+
   return dir
 }
+
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
 })
 
 const bytes = (text: string) => new TextEncoder().encode(text)
-const rejects = async (run: () => Promise<unknown>, pattern: RegExp) => {
+
+const rejects = async <A>(run: () => Promise<A>, pattern: RegExp) => {
   try {
     await run()
   } catch (error) {
     assert.match(error instanceof Error ? error.message : String(error), pattern)
+
     return
   }
+
   throw new Error(`expected rejection ${pattern}`)
 }
 

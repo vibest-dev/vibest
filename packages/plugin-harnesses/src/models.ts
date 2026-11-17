@@ -1,5 +1,5 @@
 import type { Harness } from "@vibest/plugin/effect"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 export const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
 
@@ -10,11 +10,14 @@ export const jsonLines = (...messages: ReadonlyArray<unknown>) => messages.map((
 
 export const findMessage = <A>(schema: Schema.Codec<A, unknown>) => {
   const decode = Schema.decodeUnknownOption(Schema.fromJsonString(schema))
+
   return (lines: ReadonlyArray<string>): A | undefined => {
     for (const line of lines) {
       const r = decode(line)
-      if (r._tag === "Some") return r.value
+
+      if (Option.isSome(r)) return r.value
     }
+
     return undefined
   }
 }

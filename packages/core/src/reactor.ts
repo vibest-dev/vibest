@@ -15,6 +15,7 @@ export const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const handlers = yield* FiberSet.make()
   const timers = yield* FiberMap.make<string>()
+
   return {
     on: <T extends BusEvent["type"]>(
       definitions: ReadonlyArray<{ readonly type: T }>,

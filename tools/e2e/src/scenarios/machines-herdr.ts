@@ -14,7 +14,9 @@ type Listed = {
   runtime?: string
   address?: { machine: string; id: string }
 }
+
 type Profile = { id: string; label: string; target: string; session: string; enabled?: boolean }
+
 type MachineView = {
   runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
 }
@@ -25,6 +27,7 @@ const setup = async (w: World, evidence: string) => {
   const b = path.join(w.root, "b")
   const a = path.join(w.root, "a")
   const empty = path.join(w.root, "empty-zdotdir")
+
   for (const dir of [bin, empty, ...["home", "tmp", "r", "s", "c"].flatMap((d) => [path.join(b, d), path.join(a, d)])])
     await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   const subs = subModel()
@@ -33,11 +36,13 @@ const setup = async (w: World, evidence: string) => {
   const piB = await piDir(w, "pi-b", subs.url)
   const loginPath = w.env().PATH!
   const sessions = { a: `${w.herdrSession}-a`, b: "default" }
+
   const xdg = (dir: string) => ({
     XDG_RUNTIME_DIR: path.join(dir, "r"),
     XDG_STATE_HOME: path.join(dir, "s"),
     XDG_CONFIG_HOME: path.join(dir, "c"),
   })
+
   const herdrEnv = {
     a: { ...xdg(a), PATH: `${bin}:${loginPath}`, PI_CODING_AGENT_DIR: piA, ZDOTDIR: empty },
     b: {
@@ -49,11 +54,14 @@ const setup = async (w: World, evidence: string) => {
       ZDOTDIR: empty,
     },
   }
+
   const servers: Array<ReturnType<typeof Bun.spawn>> = []
+
   const herdrOn =
     (side: "a" | "b") =>
     (...args: Array<string>) =>
       w.run(w.root, ["herdr", ...args], { env: herdrEnv[side] })
+
   const serve = async (side: "a" | "b") => {
     const server = Bun.spawn([Bun.which("herdr")!, "server", "--session", sessions[side]], {
       env: w.env(herdrEnv[side]),
@@ -61,6 +69,7 @@ const setup = async (w: World, evidence: string) => {
       stdout: "ignore",
       stderr: "ignore",
     })
+
     server.unref()
     servers.push(server)
     note(server.pid, `herdr server --session ${sessions[side]}`, w.root)
@@ -69,12 +78,15 @@ const setup = async (w: World, evidence: string) => {
       `herdr session ${sessions[side]}`,
       async () => {
         const listed = await herdrOn(side)("session", "list", "--json")
+
         const found = (
           JSON.parse(listed.stdout || "{}") as {
             sessions?: Array<{ name: string; socket_path: string; running: boolean }>
           }
         ).sessions?.find((s) => s.name === sessions[side] && s.running)
+
         socket = found?.socket_path ?? ""
+
         return (
           socket !== "" &&
           (await fs.stat(socket).then(
@@ -85,18 +97,23 @@ const setup = async (w: World, evidence: string) => {
       },
       20_000,
     )
+
     return socket
   }
+
   const socketA = await serve("a")
   const bEnv = { ...herdrEnv.b, HERDR_SOCKET_PATH: undefined }
+
   const exports = Object.entries(bEnv)
     .flatMap(([k, v]) => (v === undefined ? [] : [`${k}=${sh(v)}`]))
     .join(" ")
+
   const log = path.join(w.root, "ssh.log")
   await fs.writeFile(path.join(bin, "ssh"), fakeSsh(w.root, exports, empty), { mode: 0o755 })
   const bRepo = path.join(b, "shop")
   const cloned = await w.run(w.root, ["git", "clone", "-q", w.origin, bRepo])
   expect(cloned.code === 0, `git clone: ${cloned.stderr}`)
+
   for (const [cwd, url] of [
     [bRepo, "https://example.com/o/shop"],
     [w.repository, "git@gh-shop:o/shop.git"],
@@ -104,11 +121,14 @@ const setup = async (w: World, evidence: string) => {
     const set = await w.run(cwd, ["git", "remote", "set-url", "origin", url])
     expect(set.code === 0, `git remote set-url: ${set.stderr}`)
   }
+
   const okB = async (args: ReadonlyArray<string>) => {
     const r = await w.run(bRepo, [binary, ...args], { env: bEnv })
     expect(r.code === 0, `B: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
+
     return r.stdout
   }
+
   await okB(["project", "add"])
   const aEnv = herdrEnv.a
   await w.stopDaemon()
@@ -123,12 +143,16 @@ const setup = async (w: World, evidence: string) => {
     timeoutMs: 60_000,
   })
   const onA = (args: ReadonlyArray<string>) => w.run(w.repository, [binary, ...args], { env: aEnv })
+
   const okA = async (args: ReadonlyArray<string>) => {
     const r = await onA(args)
     expect(r.code === 0, `A: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
+
     return r.stdout
   }
+
   const herdrA = herdrOn("a")
+
   const profiles = async () => {
     const r = await herdrA("machine", "list", "--json")
     await fs.appendFile(
@@ -136,16 +160,20 @@ const setup = async (w: World, evidence: string) => {
       w.redact(`${r.code}\n${r.stdout}${r.stderr}\n`),
     )
     expect(r.code === 0, `herdr machine list on A: ${r.stderr}`)
+
     return JSON.parse(r.stdout) as Array<Profile>
   }
+
   const bDb = <A>(sql: string, ...args: Array<string>) => {
     const db = readDb(path.join(bEnv.VIBEST_HOME, "vibest.db"))
+
     try {
       return db.query(sql).get(...args) as A | null
     } finally {
       db.close()
     }
   }
+
   const notices = (address: string, marker: string) =>
     row<{ n: number }>(
       w,
@@ -153,30 +181,38 @@ const setup = async (w: World, evidence: string) => {
       `%<agent-id>${address}</agent-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
+
   const stop = async () => {
     subs.stop()
     main.stop()
     await stopVibestd(bEnv.VIBEST_HOME)
+
     for (const side of ["a", "b"] as const) {
       await herdrOn(side)("session", "stop", sessions[side])
       await herdrOn(side)("session", "delete", sessions[side])
     }
+
     for (const server of servers) if (server.exitCode === null) server.kill("SIGKILL")
   }
+
   const herdrB = herdrOn("b")
+
   const serverB = async (name: string) => {
     const r = await herdrB("--session", sessions.b, "status", "server", "--json")
     await fs.appendFile(
       path.join(evidence, `M7-b-server-${name}.json`),
       w.redact(`${r.code}\n${r.stdout}${r.stderr}\n`),
     )
+
     return JSON.parse(r.stdout) as { running: boolean; capabilities?: { detached_server_daemon: boolean } | null }
   }
+
   const stopB = async () => {
     const stopped = await herdrB("session", "stop", sessions.b)
     expect(stopped.code === 0, `herdr session stop on B: ${stopped.stdout}${stopped.stderr}`)
     await until("B's herdr session stopped", async () => !(await serverB("stopping")).running, 20_000)
   }
+
   return { sessions, bEnv, aEnv, onA, okA, okB, herdrA, serve, serverB, stopB, profiles, bDb, notices, log, subs, stop }
 }
 
@@ -189,6 +225,7 @@ const checks: ReadonlyArray<Check> = [
       "herdr terminals on another machine: an agent run --machine starts opens in herdr's default session on B; machine add saves that session as a herdr machine on A (isolated XDG state, through herdr's own command, which never installs: against a host without herdr it fails and saves nothing); a plain herdr server on B is refused with a restart note and nothing saved; a run --machine row's address names B's pane under that machine and herdr --machine reaches B's agent; a prompt typed there through herdr starts a typed execution on B whose result arrives once; a profile removed in herdr is added back by the next ls; after B's session stops, B's vibestd starts it again as its own session leader for the next run --machine and the same saved machine reaches the new agent; machine rm removes it",
     run: async (w, evidence) => {
       let s: Setup | undefined
+
       try {
         s = await setup(w, evidence)
         const label = `mb/${s.sessions.b}`
@@ -228,17 +265,23 @@ const checks: ReadonlyArray<Check> = [
             await w.okViaEntry(["run", "--machine", "mb", "pi", "--", ask("hseven")], { env: s.aEnv, asIs: true }),
           ) as { id: string }
         ).id
+
         const id = printed.slice(3)
+
         const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
           id.startsWith(r.id.slice(0, 8)),
         )
+
         expect(bRow?.runtime === "herdr", `B's row: ${JSON.stringify(bRow)}`)
         expect(bRow?.agent === "general", `B's row ran as ${bRow?.agent}, not the default general`)
+
         const unknown = await w.viaEntry(["run", "--machine", "mb", "--agent", "nosuch", "pi", "--", ask("hnone")], {
           env: s.aEnv,
           asIs: true,
         })
+
         expect(unknown.code !== 0 && unknown.stderr.includes("nosuch"), `unknown agent on B: ${unknown.stderr}`)
+
         const coordinator = (
           JSON.parse(
             await w.okViaEntry(["run", "--machine", "mb", "--agent", "coordinator", "pi", "--", ask("hcoord")], {
@@ -247,27 +290,32 @@ const checks: ReadonlyArray<Check> = [
             }),
           ) as { id: string }
         ).id
+
         const onB = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
         expect(
           onB.find((r) => coordinator.slice(3).startsWith(r.id.slice(0, 8)))?.agent === "coordinator",
           `B's rows: ${JSON.stringify(onB.map((r) => [r.id, r.agent]))}`,
         )
         expect(onB.length === 2, `the refused run left a session on B: ${onB.length}`)
+
         const name = herdrPane(
           s.bDb<{ terminal: string }>(
             "SELECT terminal FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             bRow!.id,
           )?.terminal,
         )!
+
         const shown = async () =>
           (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
             r.id.startsWith(printed.slice(0, 11)),
           )
+
         let first: Listed | undefined
         await until(
           "A's row has its terminal",
           async () => {
             first = await shown()
+
             return (first?.address?.id ?? "") !== ""
           },
           60_000,
@@ -304,17 +352,20 @@ const checks: ReadonlyArray<Check> = [
 
         const kept = (await s.profiles()).map((p) => p.id)
         await s.stopB()
+
         const again = (
           JSON.parse(
             await w.okViaEntry(["run", "--machine", "mb", "pi", "--", ask("hnine")], { env: s.aEnv, asIs: true }),
           ) as { id: string }
         ).id
+
         await until(
           "A's row of the agent after B's herdr session restarted has its terminal",
           async () => {
             const row = (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
               r.id.startsWith(again.slice(0, 11)),
             )
+
             return new RegExp(`^${s!.sessions.b}/w\\d+:p\\d+@${label}$`).test(row?.address?.id ?? "")
           },
           60_000,
@@ -327,9 +378,11 @@ const checks: ReadonlyArray<Check> = [
           JSON.stringify((await s.profiles()).map((p) => p.id)) === JSON.stringify(kept),
           "A's saved herdr machine changed when B's session restarted",
         )
+
         const bAgain = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
           again.slice(3).startsWith(r.id.slice(0, 8)),
         )
+
         const reached = await s.herdrA(
           "--machine",
           label,
@@ -342,6 +395,7 @@ const checks: ReadonlyArray<Check> = [
             )?.terminal,
           )!,
         )
+
         await w.writeEvidence(
           path.join(evidence, "M7-agent-get-restarted.txt"),
           `${reached.code}\n${reached.stdout}${reached.stderr}`,

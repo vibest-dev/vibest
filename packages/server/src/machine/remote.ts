@@ -11,7 +11,7 @@ import { peerHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { type ListedMachine, MachineFailed } from "@vibest/schema/machine"
-import { Context, Effect, Layer } from "effect"
+import { Context, Data, Effect, Layer, Predicate } from "effect"
 
 import { Machines } from "./machines.ts"
 
@@ -21,11 +21,14 @@ type Address =
   | { readonly _tag: "Local"; readonly id: string }
   | { readonly _tag: "Remote"; readonly machine: string; readonly id: string }
 
+const Address = Data.taggedEnum<Address>()
+
 export const address = (input: string): Address => {
   const at = input.indexOf("/")
+
   return at <= 0
-    ? { _tag: "Local", id: input }
-    : { _tag: "Remote", machine: input.slice(0, at), id: input.slice(at + 1) }
+    ? Address.Local({ id: input })
+    : Address.Remote({ machine: input.slice(0, at), id: input.slice(at + 1) })
 }
 
 export type At = Extract<Address, { readonly _tag: "Remote" }>
@@ -35,6 +38,8 @@ export type ListScope =
   | { readonly _tag: "Project"; readonly id: string }
   | { readonly _tag: "Nothing" }
   | ({ readonly _tag: "Peer" } & PeerScope)
+
+export const ListScope = Data.taggedEnum<ListScope>()
 
 type Forwarded<A, E> = (
   client: PipeClient,
@@ -64,6 +69,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const shown = rows.filter((row) => row.address.id !== "")
       const kinds = [...new Set(shown.map((row) => row.runtime))]
+
       const views = new Map(
         yield* Effect.forEach(
           kinds,
@@ -72,21 +78,23 @@ const make = Effect.gen(function* () {
               .ensure(
                 name,
                 kind,
-                new Map(shown.filter((row) => row.runtime === kind).map((row) => [row.id, row.address.id])),
+                new Map(shown.flatMap((row) => (row.runtime === kind ? [[row.id, row.address.id] as const] : []))),
               )
               .pipe(Effect.map((found) => [kind, found] as const)),
           { concurrency: "unbounded" },
         ),
       )
+
       return rows.map((row): R => {
         const found = row.address.id === "" ? undefined : views.get(row.runtime)
         const terminal = found?.terminals.get(row.id)
+
         return {
           ...row,
           id: addressed(name, row.id),
           machine: name,
           address: terminal === undefined ? { machine: name, id: "" } : { machine: "local", id: terminal.id },
-          ...(terminal === undefined && found?.note !== undefined ? { view: found.note } : {}),
+          ...(terminal === undefined && found?.note !== undefined && { view: found.note }),
         }
       })
     })
@@ -121,11 +129,12 @@ const make = Effect.gen(function* () {
     ),
 
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
-      if (scope._tag === "Peer") return { sessions: [], machines: [] }
+      if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }
+
       const each = yield* Effect.forEach(
         yield* machines.states,
         ({ info, link }): Effect.Effect<Away> =>
-          link === undefined || scope._tag !== "Project"
+          link === undefined || !Predicate.isTagged(scope, "Project")
             ? Effect.succeed({ machine: info, sessions: [] })
             : link
                 .call(
@@ -146,6 +155,7 @@ const make = Effect.gen(function* () {
                 ),
         { concurrency: "unbounded" },
       )
+
       return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
     }),
 
@@ -157,15 +167,17 @@ const make = Effect.gen(function* () {
 
     peek: Effect.fn("Remote.peek")(function* (at: At, project: string, by: string, p: PayloadOf<"Peek">) {
       const { text } = yield* relay(at, project, by, (c, { id }, o) => c.Peek({ ...p, id }, o))
+
       const row = yield* relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
         Effect.flatMap((row) => view(at.machine, [row])),
         Effect.map((rows) => rows[0]),
         Effect.orElseSucceed(() => undefined),
       )
+
       return {
         text,
-        ...(row === undefined || row.address.id === "" ? {} : { terminal: row.address.id }),
-        ...(row?.view === undefined ? {} : { view: row.view }),
+        ...(row !== undefined && row.address.id !== "" && { terminal: row.address.id }),
+        ...(row?.view !== undefined && { view: row.view }),
       }
     }),
 
@@ -174,29 +186,34 @@ const make = Effect.gen(function* () {
       input: PayloadOf<"Spawn">,
       from: { readonly project: string; readonly session: string },
     ) {
-      const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
-        ([, flag]) => flag,
-      )
+      const refused = REFUSED.flatMap(([key, flag]) => (input[key] !== undefined && input[key] !== false ? [flag] : []))
+
       if (refused.length > 0)
         return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })
+
       if (input.files !== undefined && input.files.length > 0) {
         const link = yield* machines.link(machine)
+
         if (link.capabilities.peerSpawnFiles !== true)
           return yield* new MachineFailed({
             message: `${machine} runs a vibest that does not take --file; run vibest update there`,
           })
       }
+
       const repositories = yield* db.project.projectRemote(from.project)
       const repository = repositories[0]
+
       if (repositories.length !== 1 || repository === undefined)
         return yield* new MachineFailed({
           message: "only a project of one repository runs agents on another machine",
         })
       const remote = repository.remote
+
       if (remote === null)
         return yield* new MachineFailed({
           message: `${repository.path} has no remote; another machine finds its checkout by the remote URL`,
         })
+
       const commit = yield* git
         .head(repository.path)
         .pipe(
@@ -204,40 +221,44 @@ const make = Effect.gen(function* () {
             (e) => new MachineFailed({ message: `cannot read HEAD of ${repository.path}: ${e.message}` }),
           ),
         )
+
       const identity = yield* repositoryIdentity(remote)
       const runtime = input.runtime ?? callerKind(yield* runtimes.callers, input.callerEnv)
       const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
+
       const ready =
         viewer?.locate === undefined || runtime === undefined
           ? undefined
           : yield* machines.ensure(machine, runtime, new Map(), true)
+
       const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
         client["Peer.Spawn"](
           {
             repository: remote,
-            ...(identity === undefined ? {} : { identity }),
+            ...(identity !== undefined && { identity }),
             commit,
             agent: input.agent,
             prompt: input.prompt,
-            ...(input.harness === undefined ? {} : { harness: input.harness }),
-            ...(input.provider === undefined ? {} : { provider: input.provider }),
-            ...(input.model === undefined ? {} : { model: input.model }),
-            ...(input.name === undefined ? {} : { title: input.name }),
-            ...(runtime === undefined ? {} : { runtime }),
+            ...(input.harness !== undefined && { harness: input.harness }),
+            ...(input.provider !== undefined && { provider: input.provider }),
+            ...(input.model !== undefined && { model: input.model }),
+            ...(input.name !== undefined && { title: input.name }),
+            ...(runtime !== undefined && { runtime }),
             request: input.request ?? randomId(),
-            ...(input.files === undefined ? {} : { files: input.files }),
+            ...(input.files !== undefined && { files: input.files }),
           },
           { headers },
         ),
       )
+
       return {
         id: addressed(machine, spawned.session),
         harness: spawned.harness,
-        ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
-        ...(spawned.model === undefined ? {} : { model: spawned.model }),
+        ...(spawned.provider !== undefined && { provider: spawned.provider }),
+        ...(spawned.model !== undefined && { model: spawned.model }),
         decidedBy: spawned.decidedBy,
         trace: spawned.trace,
-        ...(ready?.note === undefined ? {} : { notes: [{ message: ready.note }] }),
+        ...(ready?.note !== undefined && { notes: [{ message: ready.note }] }),
       }
     }),
   }

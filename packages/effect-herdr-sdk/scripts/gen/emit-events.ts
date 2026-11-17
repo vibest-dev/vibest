@@ -1,11 +1,12 @@
-import type { JSONSchema } from "./schema.js"
+import type { Document } from "./schema.js"
 import { emitDefs } from "./ts-type.js"
 
 const SHARED_EVENT_DEFS = new Set(["AgentStatus", "PaneScrollInfo"])
 
-export function emitEvents(schema: JSONSchema, header: string): string {
-  const ev = schema.schemas.event as JSONSchema
-  const sub = schema.schemas.subscription_event as JSONSchema
+export function emitEvents(schema: Document, header: string): string {
+  const ev = schema.schemas.event
+  const sub = schema.schemas.subscription_event
+
   return `${header}
 // ---- session events ----
 ${emitDefs(ev.$defs)}

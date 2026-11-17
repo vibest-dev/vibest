@@ -28,11 +28,13 @@ const withPulling = (options: TestOptions = {}): TestOptions => ({
   ...options,
   harnesses: [...HARNESSES, PULLING_PI, PULLING_CLAUDE],
 })
+
 const test: typeof plainTest = (name, program, options) => plainTest(name, program, withPulling(options))
 const slowTest: typeof plainSlowTest = (name, program, options) => plainSlowTest(name, program, withPulling(options))
 
 const makeArchiveGate = () => {
   let started: { readonly id: string; readonly done: Deferred.Deferred<void> } | undefined
+
   const options: TestOptions = {
     db: (db) => ({
       ...db,
@@ -42,21 +44,26 @@ const makeArchiveGate = () => {
           db.session.getSession(id).pipe(
             Effect.tap(() => {
               const gate = started?.id === id ? started : undefined
+
               if (!gate) return Effect.void
               started = undefined
+
               return Deferred.succeed(gate.done, undefined)
             }),
           ),
       },
     }),
   }
+
   const awaitStart = (id: string) =>
     Deferred.make<void>().pipe(
       Effect.map((done) => {
         started = { id, done }
+
         return Deferred.await(done)
       }),
     )
+
   return { options, awaitStart }
 }
 
@@ -70,6 +77,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
       const db = yield* Db.Service
+
       const entry = yield* db.session.startEntry(
         yield* projectOf(repo),
         entryHarness,
@@ -80,6 +88,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
         },
         { agent: "coordinator" },
       )
+
       yield* herdr.seedAgent("test/coord")
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), ...input, archive: true })
       yield* until(
@@ -88,6 +97,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       )
       yield* sessions.check(id)
       yield* settled
+
       return {
         id,
         sessions,
@@ -115,11 +125,13 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   const entryTakes = (w: { readonly entryId: string }) =>
     Effect.gen(function* () {
       const inbox = yield* Inbox.Service
+
       return yield* until(inbox.take(w.entryId, undefined), (taken) => taken !== undefined)
     })
 
   const archivedRow = (db: Db.Interface, id: string) =>
     db.session.getSession(id).pipe(Effect.map((w) => w !== undefined && archived(w)))
+
   const letForkedArchiveRun = TestClock.withLive(Effect.sleep("100 millis"))
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
 
@@ -137,12 +149,14 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* until(fs.exists(yield* sessionWorktree(w.id)), (e) => !e)
       yield* until(w.db.session.getSession(w.id), (r) => exitedAt(r!) !== null)
       yield* letForkedArchiveRun
+
       const rows = yield* sql<{
         kind: string
         status: string
       }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE m.sender_session_id = ${w.id} ORDER BY m.id`.pipe(
         Effect.orDie,
       )
+
       assert.deepStrictEqual(
         rows.map((r) => r.kind),
         ["send"],
@@ -323,6 +337,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* looked
       yield* w.db.session.setStatus(w.id, "idle")
       yield* w.db.session.endExecution(w.id, { outcome: "completed" }, undefined)
+
       return { release: check.release().pipe(Effect.andThen(Fiber.join(checking))) }
     })
 

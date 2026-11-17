@@ -4,8 +4,10 @@ export const alive = (pid: number) => {
   } catch {
     return false
   }
+
   const state = Bun.spawnSync(["ps", "-p", String(pid), "-o", "state="])
     .stdout.toString()
     .trim()
+
   return state !== "" && !state.startsWith("Z")
 }

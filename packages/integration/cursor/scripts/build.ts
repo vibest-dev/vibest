@@ -6,6 +6,7 @@ import { files } from "../src/plugin.ts"
 
 const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))
 const outdir = path.resolve(process.argv[2] ?? root)
+
 for (const [name, text] of Object.entries(files)) {
   fs.mkdirSync(path.dirname(path.join(outdir, name)), { recursive: true })
   fs.writeFileSync(path.join(outdir, name), text)

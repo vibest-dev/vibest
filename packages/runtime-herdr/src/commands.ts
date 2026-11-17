@@ -1,11 +1,11 @@
 import readline from "node:readline"
 
-import type { Claim, VibestClient, VibestClients } from "@vibest/client/client"
+import { Claim, type VibestClient, type VibestClients } from "@vibest/client/client"
 import { isLimited } from "@vibest/plugin/effect"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { VibestCommand } from "@vibest/schema/layout"
-import { Config, Console, Effect, Option, Schema } from "effect"
+import { Config, Console, Effect, Option, Predicate, Schema } from "effect"
 import { Command } from "effect/cli"
 
 import { agentName, KIND, parseTerminal } from "./terminal-runtime.ts"
@@ -58,20 +58,30 @@ export interface HerdrDaemon<E = never, R = never> {
   readonly usage: () => Step<ReadonlyArray<UsageWindow> | undefined, E, R>
 }
 
-const field = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
+const field = (value: Schema.Json | undefined) => (Predicate.isString(value) && value !== "" ? value : undefined)
+
+const decodeJson = Schema.decodeEffect(Schema.fromJsonString(Schema.Json))
+
+const decodeContext = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    workspace_id: Schema.optionalKey(Schema.Json),
+    workspace_cwd: Schema.optionalKey(Schema.Json),
+    focused_pane_id: Schema.optionalKey(Schema.Json),
+    focused_pane_cwd: Schema.optionalKey(Schema.Json),
+    focused_pane_agent: Schema.optionalKey(Schema.Json),
+  }),
+)
 
 export const parsePluginContext = (raw: string) =>
   Effect.gen(function* () {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      return yield* new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not JSON" })
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return yield* new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not an object" })
-    }
-    const record = parsed as Record<string, unknown>
+    const parsed = yield* decodeJson(raw).pipe(
+      Effect.mapError(() => new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not JSON" })),
+    )
+
+    const record = yield* decodeContext(parsed).pipe(
+      Effect.mapError(() => new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not an object" })),
+    )
+
     return {
       workspaceId: field(record.workspace_id),
       workspaceCwd: field(record.workspace_cwd),
@@ -85,16 +95,19 @@ export const projectDirectory = (context: PluginContext) => context.focusedPaneC
 
 const requireDirectory = (context: PluginContext) => {
   const directory = projectDirectory(context)
+
   if (directory === undefined) {
     return Effect.fail(
       new BadPluginContext({ message: "the herdr context has no focused pane or workspace directory" }),
     )
   }
+
   return Effect.succeed(directory)
 }
 
 export const formatRuns = (sessions: ReadonlyArray<LiveSession>) => {
   if (sessions.length === 0) return "no live sessions"
+
   return sessions
     .map((session) =>
       [shortId(session.id), session.agent, session.harness, session.status, session.paneId ?? "-"].join("  "),
@@ -104,10 +117,12 @@ export const formatRuns = (sessions: ReadonlyArray<LiveSession>) => {
 
 export const formatUsage = (usage: ReadonlyArray<UsageWindow> | undefined) => {
   if (usage === undefined || usage.length === 0) return "unknown"
+
   return usage
     .map((window) => {
       const status = isLimited({ limits: [window] }) ? "limited" : "available"
       const error = window.error ? `  ${window.error}` : ""
+
       return `${window.harness}  ${window.window}  ${window.percent}%  ${status}${error}`
     })
     .join("\n")
@@ -119,7 +134,9 @@ export const sessionToStop = (
   agent: string | undefined,
 ) => {
   const byPane = paneId === undefined ? undefined : sessions.find((session) => session.paneId === paneId)
+
   if (byPane) return byPane.id
+
   return agent === undefined ? undefined : sessions.find((session) => agentName(session.id) === agent)?.id
 }
 
@@ -134,11 +151,13 @@ export const ACTIONS = [
 export const paletteMenu = () => ACTIONS.map(([id, title], index) => `${index + 1}  ${id}  ${title}`).join("\n")
 
 export const VERBS = ["startup", "open-entry", "run", "stop", "runs", "subscriptions", "palette"] as const
+
 export type Verb = (typeof VERBS)[number]
 
 const actionAt = (choice: string) => {
   if (!/^[1-9][0-9]*$/.test(choice)) return undefined
   const index = Number(choice)
+
   return index <= ACTIONS.length ? ACTIONS[index - 1] : undefined
 }
 
@@ -156,24 +175,34 @@ export const perform = <E, R>(
           return `republished ${yield* daemon.republish(projectDirectory(context))}`
         case "open-entry": {
           const opened = yield* daemon.openEntry(yield* requireDirectory(context))
+
           return `${opened.action} ${opened.place}`
         }
+
         case "run": {
           yield* write("Prompt:")
           const prompt = (yield* readLine()).trim()
+
           if (prompt === "") return yield* new EmptyInput({ message: "the prompt is empty" })
+
           return `started ${shortId(yield* daemon.spawn(yield* requireDirectory(context), prompt))}`
         }
+
         case "stop": {
           const id = sessionToStop(yield* daemon.list(undefined), context.focusedPaneId, context.focusedPaneAgent)
+
           if (id === undefined) {
             const where =
               context.focusedPaneId === undefined ? "no focused pane" : `no session in ${context.focusedPaneId}`
+
             return yield* new NoFocusedSession({ message: where })
           }
+
           yield* daemon.interrupt(id)
+
           return `stopped ${shortId(id)}`
         }
+
         case "runs":
           return formatRuns(yield* daemon.list(yield* requireDirectory(context)))
         case "subscriptions":
@@ -182,15 +211,18 @@ export const perform = <E, R>(
           const menu = paletteMenu()
           yield* write(menu)
           const picked = actionAt((yield* readLine()).trim())
+
           if (picked === undefined) return `pick a number from 1 to ${ACTIONS.length}`
+
           return yield* go(picked[0])
         }
       }
     })
+
   return go(verb)
 }
 
-const claim = (directory: string): Claim => ({ _tag: "cli", repositoryRoot: directory })
+const claim = (directory: string): Claim => Claim.cli({ repositoryRoot: directory })
 
 const callerEnvOf = (): Record<string, string> =>
   Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
@@ -206,14 +238,17 @@ const toLive = (session: SessionInfo): LiveSession => ({
 const daemonOn = ({ withVibest }: VibestClients) => {
   const ask = <A, E, R>(directory: string, f: (client: VibestClient) => Effect.Effect<A, E, R>) =>
     withVibest(claim(directory), f)
+
   return {
     republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
     openEntry: (directory: string) =>
       Effect.gen(function* () {
         const focused = yield* ask(directory, (client) => client["Project.FocusEntry"]({}))
+
         if (focused)
           return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
         const self = yield* VibestCommand
+
         const opened = yield* ask(directory, (client) =>
           client.Launch({
             argv: [...self],
@@ -223,6 +258,7 @@ const daemonOn = ({ withVibest }: VibestClients) => {
             callerEnv: callerEnvOf(),
           }),
         )
+
         return { action: "opened" as const, place: opened.place }
       }),
     spawn: (directory: string, prompt: string) =>
@@ -247,7 +283,7 @@ const daemonOn = ({ withVibest }: VibestClients) => {
               percent: limit.percent,
               status: limit.status,
               resetTime: limit.resetTime,
-              ...(row.error ? { error: row.error } : {}),
+              ...(row.error && { error: row.error }),
             })),
           ),
         ),
@@ -256,17 +292,21 @@ const daemonOn = ({ withVibest }: VibestClients) => {
 }
 
 type LiveSteps = ReturnType<ReturnType<typeof daemonOn>[keyof ReturnType<typeof daemonOn>]>
+
 export type DaemonError = LiveSteps extends Effect.Effect<any, infer E, any> ? E : never
+
 export type DaemonServices = LiveSteps extends Effect.Effect<any, any, infer R> ? R : never
 
 export const liveDaemon = (clients: VibestClients): HerdrDaemon<DaemonError, DaemonServices> => daemonOn(clients)
 
 const stdinLines = () => {
   let reader: readline.Interface | undefined
+
   const readLine = () =>
     Effect.callback<string>((resume) => {
       reader ??= readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false })
       let settled = false
+
       const done = (line: string) => {
         if (settled) return
         settled = true
@@ -274,11 +314,13 @@ const stdinLines = () => {
         reader?.off("close", onClose)
         resume(Effect.succeed(line))
       }
+
       const onLine = (line: string) => done(line)
       const onClose = () => done("")
       reader.once("line", onLine)
       reader.once("close", onClose)
     })
+
   return { readLine, close: () => reader?.close() }
 }
 
@@ -307,6 +349,7 @@ export const herdrCommands = <E, R>(
             Effect.andThen(
               Effect.gen(function* () {
                 const raw = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PLUGIN_CONTEXT_JSON")))
+
                 if (raw === undefined)
                   return yield* new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not set" })
                 const context = yield* parsePluginContext(raw)
@@ -314,6 +357,7 @@ export const herdrCommands = <E, R>(
                 yield* Effect.ensuring(
                   Effect.gen(function* () {
                     const result = yield* perform(verb, context, liveDaemon(clients), io.readLine, Console.log)
+
                     if (result !== "") yield* Console.log(result)
                   }),
                   Effect.sync(() => io.close()),

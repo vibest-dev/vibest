@@ -19,6 +19,7 @@ const IOREG = `+-o J316sAP  <class IOPlatformExpertDevice, id 0x100000213, regis
 
 const fileIn = Effect.gen(function* () {
   const path = yield* Path.Path
+
   return path.join(yield* tempDirectory("vibest-identity-"), "identity.json")
 })
 
@@ -82,6 +83,7 @@ describe("identity.json", () => {
   it.effect("a file that does not parse, or has no valid id, is refused and left as it was", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
+
       for (const text of ["{not json", JSON.stringify({ id: "nope", name: "x", machine_id: null })]) {
         const file = yield* fileIn
         yield* fs.writeFileString(file, text)
@@ -98,11 +100,13 @@ describe("identity.json", () => {
       const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
       yield* fs.writeFileString(layout.identity, "garbage")
+
       const run = yield* runVibest(
         layout.home,
         { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" },
         ["daemon", "--foreground"],
       )
+
       assert.strictEqual(run.code, 1)
       assert.include(yield* fs.readFileString(layout.log), "is not a vibest identity file")
       assert.isFalse(yield* fs.exists(layout.database))

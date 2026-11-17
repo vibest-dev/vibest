@@ -16,9 +16,8 @@ export default Runtime.handler(Commands.commands.daemon.commands.restart, () =>
     Effect.flatMap((failed) =>
       failed === undefined ? Effect.void : Effect.fail(new UpdateError({ message: failed })),
     ),
-    Effect.catchIf(
-      (e) => e._tag === "ReplaceFailed" && e.outcome === "declined",
-      () => Console.log(`${LEFT.declined}.`),
+    Effect.catchTag("ReplaceFailed", (e) =>
+      e.outcome === "declined" ? Console.log(`${LEFT.declined}.`) : Effect.fail(e),
     ),
   ),
 )

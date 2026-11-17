@@ -1,13 +1,18 @@
-import { Config, Effect, Formatter, Layer, Logger, Option, Random, References } from "effect"
+import { Config, Effect, Formatter, Layer, Logger, Option, Predicate, Random, References } from "effect"
 
 const logfmt = (run: string) =>
   Logger.map(Logger.formatStructured, (output) => {
     const messages = Array.isArray(output.message) ? output.message : [output.message]
+
     return [
       ["timestamp", output.timestamp],
       ["level", output.level],
       ["run", run],
-      ...messages.flatMap((value) => (plain(value) ? flatten(value) : [["message", value] as const])),
+      ...messages.flatMap((value) => {
+        const record = plainRecord(value)
+
+        return record === undefined ? [["message", value] as const] : flatten(record)
+      }),
       ...(output.cause === undefined ? [] : [["cause", output.cause] as const]),
       ...flatten(output.spans),
       ...flatten(output.annotations),
@@ -16,29 +21,33 @@ const logfmt = (run: string) =>
       .join(" ")
   })
 
-function flatten(
-  input: Record<string, unknown>,
+const plainPrototypes: ReadonlySet<object | null> = new Set([Object.prototype, null])
+
+const plainRecord = <A>(value: A) =>
+  Predicate.isObject(value) && plainPrototypes.has(Object.getPrototypeOf(value)) ? value : undefined
+
+function flatten<V>(
+  input: { readonly [key: string]: V },
   prefix = "",
   seen = new WeakSet<object>(),
 ): Array<readonly [string, unknown]> {
   if (seen.has(input)) return [[prefix, "[Circular]"]]
   seen.add(input)
   const entries = Object.entries(input)
+
   if (entries.length === 0 && prefix) return [[prefix, input]]
+
   return entries.flatMap(([key, value]) => {
     const path = prefix ? `${prefix}.${key}` : key
-    return plain(value) ? flatten(value, path, seen) : [[path, value] as const]
+    const record = plainRecord(value)
+
+    return record === undefined ? [[path, value] as const] : flatten(record, path, seen)
   })
 }
 
-function plain(input: unknown): input is Record<string, unknown> {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return false
-  const prototype = Object.getPrototypeOf(input)
-  return prototype === Object.prototype || prototype === null
-}
+function format<A>(input: A) {
+  const value = Predicate.isString(input) ? input : Formatter.format(input)
 
-function format(input: unknown) {
-  const value = typeof input === "string" ? input : Formatter.format(input)
   return /^[^\s="\\]+$/.test(value) ? value : JSON.stringify(value)
 }
 
@@ -49,6 +58,7 @@ const minimumLogLevel = Layer.effect(
   Config.option(Config.String("VIBEST_LOG_LEVEL")).pipe(
     Effect.map((value) => {
       const name = Option.getOrElse(value, () => "").toUpperCase()
+
       return name in levels ? levels[name as keyof typeof levels] : levels.INFO
     }),
     Effect.orElseSucceed(() => levels.INFO),

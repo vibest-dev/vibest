@@ -12,6 +12,7 @@ describe("event catalog", () => {
           runtime: "herdr",
           routing: { decidedBy: {}, trace: [{ plugin: "p", hook: "h", outcome: "ok", ms, changes: [] }] },
         }).pipe(Effect.exit)
+
         assert.isTrue(Exit.isFailure(exit))
       }),
     )

@@ -1,5 +1,5 @@
 import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
@@ -10,7 +10,7 @@ type LimitWindow = {
 }
 
 const resetPassed = (resetTime: number | null | undefined, now: number) =>
-  typeof resetTime === "number" && resetTime <= now
+  Predicate.isNumber(resetTime) && resetTime <= now
 
 const bucketWindow = (window: string | undefined) => window === "monthly-auto" || window === "monthly-api"
 
@@ -22,11 +22,14 @@ export const isLimited = (row: { readonly limits: ReadonlyArray<LimitWindow> }, 
 
 export const exhaustedText = (limits: ReadonlyArray<LimitWindow & { readonly window: string }>, now = Date.now()) =>
   limits
+    .values()
     .filter((limit) => countsAsLimited(limit, now))
     .map((limit) => {
       const reset = limit.resetTime == null ? "no reset time" : `resets ${new Date(limit.resetTime).toISOString()}`
+
       return `${limit.window} limit exhausted, ${reset}`
     })
+    .toArray()
     .join("; ")
 
 export const stillLimited = (
@@ -42,6 +45,7 @@ export const stillLimited = (
     attempt.provider === undefined
       ? undefined
       : rows.find((r) => r.harness === attempt.harness && r.provider === attempt.provider)
+
   return !(row !== undefined && row.updatedAt > attempt.at && !isLimited(row))
 }
 
@@ -141,7 +145,7 @@ export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
 
 export interface GuardCall {
   readonly tool: string
-  readonly input: Readonly<Record<string, unknown>>
+  readonly input: Schema.JsonObject
   readonly cwd: string
   readonly programs: ReadonlyArray<ReadonlyArray<string>>
   readonly writes: ReadonlyArray<string> | undefined
@@ -173,4 +177,4 @@ export interface MachineHookOptions {
   readonly runtime?: string
 }
 
-export type PluginOptions = Readonly<Record<string, unknown>>
+export type PluginOptions = Schema.JsonObject

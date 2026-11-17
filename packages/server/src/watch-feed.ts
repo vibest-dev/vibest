@@ -34,6 +34,7 @@ export const layer = Layer.effect(
       Effect.sync(() => {
         const failed = Array.from(watchers)
         watchers.clear()
+
         for (const watcher of failed) Queue.failCauseUnsafe(watcher, Cause.fail(new WatchLagged({ message })))
       })
 

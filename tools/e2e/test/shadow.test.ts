@@ -3,18 +3,22 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import { claudeShadow, cursorShadow, userFilesRead, userPaths, userPrivateValues } from "../src/world/shadow.ts"
 
-const fakeHome = async (files: Record<string, unknown>) => {
+const fakeHome = async (files: Record<string, Schema.Json>) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-test-"))
+
   for (const [rel, value] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(home, rel)), { recursive: true })
     await fs.writeFile(path.join(home, rel), JSON.stringify(value))
   }
+
   return userPaths(home)
 }
 
-const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>
+const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8")) as Schema.JsonObject
 
 describe("shadows", () => {
   test("Claude settings env keeps no model, provider, base URL or key, so the fake base URL wins", async () => {
@@ -35,6 +39,7 @@ describe("shadows", () => {
         },
       },
     })
+
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-out-"))
     await claudeShadow(dir, "user", from)
     const settings = await read(path.join(dir, "settings.json"))
@@ -56,6 +61,7 @@ describe("shadows", () => {
       modelSelectionHistory: ["user-model-id"],
       authInfo: { email: "someone@example.com", userId: 1, authId: "auth0|abc" },
     }
+
     const from = await fakeHome({ ".cursor/cli-config.json": own })
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-out-"))
     await cursorShadow(dir, "user", from)
@@ -77,6 +83,7 @@ describe("shadows", () => {
         authInfo: { email: "someone@example.com", displayName: "Sam Person", userId: 98765432 },
       },
     })
+
     expect((await userPrivateValues(from)).sort()).toEqual(
       [
         "98765432",

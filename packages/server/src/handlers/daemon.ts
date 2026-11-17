@@ -11,7 +11,7 @@ import { Caller, CAPABILITIES, type DaemonIdentity, Forbidden, WrongInstance } f
 import { shellQuote } from "@vibest/schema/layout"
 import { LaunchFailed } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Context, Deferred, Effect } from "effect"
+import { Context, Deferred, Effect, Predicate } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { stopOnce as stopDaemon } from "../stop.ts"
@@ -44,6 +44,7 @@ export const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.inbox.deliveringInbox, shutdown })
+
   return {
     Ping: () =>
       machinesListing(runtimes, []).pipe(
@@ -52,7 +53,7 @@ export const make = Effect.gen(function* () {
             machine.runtimes.map((r) => ({
               kind: r.kind,
               status: r.status,
-              ...(r.reason !== undefined ? { reason: r.reason } : {}),
+              ...(r.reason !== undefined && { reason: r.reason }),
             })),
           ),
         ),
@@ -76,7 +77,7 @@ export const make = Effect.gen(function* () {
             Effect.map((report) => ({
               kind: runtime.id,
               status: status.status,
-              ...("reason" in status ? { reason: status.reason } : {}),
+              ...("reason" in status && { reason: status.reason }),
               name: report.name,
               checks: report.checks,
             })),
@@ -89,29 +90,36 @@ export const make = Effect.gen(function* () {
     "Daemon.Stop": ({ instance }) =>
       Effect.gen(function* () {
         const c = yield* Caller
-        if (c._tag !== "Cli")
+
+        if (!Predicate.isTagged(c, "Cli"))
           return yield* new Forbidden({
             method: "Daemon.Stop",
             message: "only the user stops vibestd (vibest daemon restart); an agent may not",
           })
+
         if (instance !== identity.instance)
           return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
+
         return yield* stopOnce(instance, "Daemon.Stop", Effect.void)
       }),
 
     "Daemon.Handoff": ({ instance, command }) =>
       Effect.gen(function* () {
         yield* cliOnly("Daemon.Handoff")
+
         if (instance !== identity.instance)
           return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
         const quoted = command.map(shellQuote).join(" ")
+
         const checked = yield* importCheck(command).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         )
+
         if (checked !== undefined)
           return yield* new LaunchFailed({
             message: `${quoted} cannot take over this vibestd (${checked}); it keeps running`,
           })
+
         return yield* stopOnce(
           instance,
           "Daemon.Handoff",

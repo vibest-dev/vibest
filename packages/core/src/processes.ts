@@ -1,5 +1,5 @@
 import { type Captured, capture } from "@vibest/plugin/effect"
-import { Context, Duration, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer, Match, Predicate } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -12,14 +12,20 @@ export type Liveness = "exited" | "alive" | "unknown"
 export const livenessOf = (probe: () => void): Liveness => {
   try {
     probe()
+
     return "alive"
   } catch (e) {
     const code = (e as { readonly code?: unknown } | null)?.code
-    return code === "ESRCH" ? "exited" : code === "EPERM" ? "alive" : "unknown"
+
+    return Match.value(code).pipe(
+      Match.when("ESRCH", (): Liveness => "exited"),
+      Match.when("EPERM", (): Liveness => "alive"),
+      Match.orElse((): Liveness => "unknown"),
+    )
   }
 }
 
-export const validPid = (pid: unknown): pid is number => typeof pid === "number" && Number.isInteger(pid) && pid > 0
+export const validPid = <A>(pid: A): pid is A & number => Predicate.isNumber(pid) && Number.isInteger(pid) && pid > 0
 
 export class ProcessPlatform extends Context.Service<
   ProcessPlatform,
@@ -57,13 +63,16 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const platform = yield* ProcessPlatform
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
     const lsof = (uid: number) =>
       runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       )
+
     const ps = runFor("ps", PS_ARGS, PS_TIMEOUT).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     )
+
     return Service.of({
       liveness: Effect.fn("Processes.liveness")((pid) =>
         Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
@@ -71,8 +80,10 @@ export const layer = Layer.effect(
       terminate: Effect.fn("Processes.terminate")((pid) =>
         Effect.sync(() => {
           if (!validPid(pid) || pid === platform.pid) return "denied" as const
+
           try {
             platform.terminate(pid)
+
             return "sent" as const
           } catch (e) {
             return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
@@ -116,38 +127,50 @@ const commandName = (command: string) => command.replace(/^-/, "").replace(/^.*\
 
 export const parseProcessTable = (stdout: string): ReadonlyArray<ProcessRow> => {
   const rows: Array<ProcessRow> = []
+
   for (const line of stdout.split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(\S.*)$/.exec(line)
+
     if (!match) continue
     const pid = Number(match[1])
     const ppid = Number(match[2])
     const command = match[3]
+
     if (!validPid(pid) || !Number.isInteger(ppid) || ppid < 0 || command === undefined) continue
     rows.push({ pid, ppid, command: command.trim() })
   }
+
   return rows
 }
 
 export const sessionTree = (root: number, rows: ReadonlyArray<ProcessRow>): ReadonlyArray<number> => {
   const byPid = new Map(rows.map((row) => [row.pid, row]))
   const children = new Map<number, Array<number>>()
+
   for (const row of rows) {
     const list = children.get(row.ppid)
+
     if (list) list.push(row.pid)
     else children.set(row.ppid, [row.pid])
   }
+
   const seen = new Set<number>()
   const out: Array<number> = []
+
   const walk = (pid: number) => {
     if (!validPid(pid) || seen.has(pid)) return
     seen.add(pid)
     out.push(pid)
+
     for (const child of children.get(pid) ?? []) walk(child)
   }
+
   walk(root)
   const shell = byPid.get(byPid.get(root)?.ppid ?? -1)
+
   if (shell !== undefined && shell.pid > 1 && SHELLS.has(commandName(shell.command)) && !seen.has(shell.pid))
     out.push(shell.pid)
+
   return out
 }
 
@@ -165,22 +188,28 @@ export const cwdHolders = (
   let file: "cwd" | undefined
   let canary = false
   let unnamed = false
+
   for (const set of run.stdout.split("\n")) {
     if (set === "") continue
     const fields = set.split("\0")
+
     if (fields.pop() !== "") return undefined
+
     for (const field of fields) {
       const value = field.slice(1)
+
       if (field[0] === "p") {
         if (file !== undefined || unnamed) return undefined
         unnamed = true
         pid = Number(value)
         parent = undefined
         command = undefined
+
         if (!validPid(pid) || String(pid) !== value) return undefined
       } else if (field[0] === "R") {
         if (!unnamed || file !== undefined || parent !== undefined) return undefined
         parent = Number(value)
+
         if (!Number.isInteger(parent) || parent < 0 || String(parent) !== value) return undefined
       } else if (field[0] === "c") {
         if (!unnamed || file !== undefined || command !== undefined) return undefined
@@ -190,20 +219,26 @@ export const cwdHolders = (
         file = "cwd"
       } else if (field[0] === "n") {
         if (pid === undefined || file === undefined) return undefined
+
         if (value.startsWith(`/proc/${pid}/cwd (readlink: `) && pid !== self)
           unreadable.push({ pid, parent, command: command ?? "" })
         else if (DIAGNOSTIC.test(value)) return undefined
         else {
           if (pid === self) canary = true
+
           if (dirs.some((dir) => mayBeIn(value, dir))) holders.add(pid)
         }
+
         file = undefined
         unnamed = false
       } else return undefined
     }
   }
+
   if (file !== undefined || unnamed || !canary) return undefined
+
   if (!unreadable.every((p) => isUserManager(p, unreadable))) return undefined
+
   return [...holders]
 }
 
@@ -223,10 +258,13 @@ const mayBeIn = (name: string, dir: string) => {
   const base = dir.replace(/\/+$/, "")
   const deleted = name.replace(/ \(deleted\)$/, "")
   const escape = deleted.search(/[\\^]/)
+
   if (escape >= 0) {
     const known = deleted.slice(0, escape)
     const target = `${base}/`
+
     return target.startsWith(known) || known.startsWith(target)
   }
+
   return deleted === base || deleted.startsWith(`${base}/`)
 }

@@ -14,7 +14,7 @@ import {
 } from "@vibest/platform-bun/test/lib/fakes"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { Effect, Layer, type Scope } from "effect"
+import { Effect, Layer, Predicate, type Schema, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
@@ -34,7 +34,7 @@ const served = Server.layer.pipe(
 
 const headers = (record: Record<string, string>) => Object.entries(record)
 
-const request = (id: number, method: string, params: unknown, sent: Record<string, string>) => ({
+const request = (id: number, method: string, params: Schema.Json, sent: Record<string, string>) => ({
   jsonrpc: "2.0",
   id,
   method,
@@ -45,28 +45,42 @@ const request = (id: number, method: string, params: unknown, sent: Record<strin
 const normalizer = (paths: Record<string, string>) => {
   const ids = new Map<string, string>()
   const known = Object.entries(paths).sort(([a], [b]) => b.length - a.length)
+
   const text = (value: string) => {
     let out = value
+
     for (const [from, to] of known) out = out.split(from).join(to)
     out = out.replace(UUID, (id) => {
       const mapped = ids.get(id) ?? `00000000-0000-4000-8000-${String(ids.size + 1).padStart(12, "0")}`
       ids.set(id, mapped)
+
       return mapped
     })
+
     return out
       .split(VERSION)
       .join("0.0.0-fixture")
       .replace(/"fiberId":\d+/g, '"fiberId":0')
   }
-  const walk = (value: unknown, key?: string): unknown => {
-    if (typeof value === "string") return text(value)
-    if (typeof value === "number" && key !== undefined && TIME_KEYS.has(key)) return FIXED_TIME
-    if (typeof value === "number" && key === "fiberId") return 0
+
+  const walk = (value: Schema.Json, key?: string): Schema.Json => {
+    if (Predicate.isString(value)) return text(value)
+
+    if (Predicate.isNumber(value)) {
+      if (key !== undefined && TIME_KEYS.has(key)) return FIXED_TIME
+
+      if (key === "fiberId") return 0
+
+      return value
+    }
+
+    if (value === null || Predicate.isBoolean(value)) return value
+
     if (Array.isArray(value)) return value.map((item) => walk(item))
-    if (value !== null && typeof value === "object")
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v, k)]))
-    return value
+
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v, k)]))
   }
+
   return walk
 }
 
@@ -75,11 +89,14 @@ const check = (name: string, lines: ReadonlyArray<Line>, paths: Record<string, s
     const walk = normalizer(paths)
     const body = lines.map((line) => JSON.stringify(walk(line))).join("\n") + "\n"
     const file = path.join(FIXTURES, `${name}.ndjson`)
+
     if (RECORD) {
       fs.mkdirSync(FIXTURES, { recursive: true })
       fs.writeFileSync(file, body)
+
       return
     }
+
     const committed = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""
     assert.strictEqual(
       body,

@@ -1,5 +1,5 @@
 import type { SubscriptionAccount, SubscriptionLimit } from "@vibest/schema/subscription"
-import type { Effect, Types } from "effect"
+import type { Effect, Schema, Types } from "effect"
 
 import type { Transform } from "./registration.ts"
 
@@ -42,7 +42,7 @@ export interface SubscriptionRead {
   readonly error?: string
 }
 
-type HarnessEvent = Readonly<Record<string, unknown>>
+type HarnessEvent = Schema.JsonObject
 
 export interface HarnessDefinition {
   readonly id: string
@@ -62,9 +62,9 @@ export interface HarnessDefinition {
   readonly models: ModelLister
   readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
   readonly subscription?: (home: string, binary: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
-  readonly guardAnswer?: (reason: string | undefined) => unknown
+  readonly guardAnswer?: (reason: string | undefined) => Schema.Json
   readonly guardCall?: (event: HarnessEvent) => HarnessEvent | undefined
-  readonly executionEnd?: (event: HarnessEvent) => { readonly end: Readonly<Record<string, unknown>> } | undefined
+  readonly executionEnd?: (event: HarnessEvent) => { readonly end: Schema.JsonObject } | undefined
   readonly userPrompt?: (
     event: HarnessEvent,
   ) => { readonly text: string } | { readonly execution: number; readonly refused?: true } | undefined

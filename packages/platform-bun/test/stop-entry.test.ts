@@ -58,9 +58,12 @@ const refuseRealKills = Effect.acquireRelease(
         signal === 15 ||
         signal === 9 ||
         signal === 1
+
       if (pid <= 0 || terminal) throw new Error(`refused to signal ${pid} with ${String(signal)}`)
+
       return real(pid, signal)
     }) as typeof process.kill
+
     return real
   }),
   (real) =>
@@ -82,6 +85,7 @@ const workingPiEntry = Effect.gen(function* () {
   yield* herdr.seedAgent(paneId)
   yield* herdr.updateAgent(paneId, (a) => ({ ...a, status: "working" }))
   yield* processes.set(HARNESS, "alive")
+
   const started = yield* c["Project.EntrySession"]({
     agent: "coordinator",
     harness: "pi",
@@ -90,6 +94,7 @@ const workingPiEntry = Effect.gen(function* () {
     runtime: TEST_HERDR,
     pid: HARNESS,
   })
+
   yield* db.session.noteConversation(started.sessionId, "conversation-1")
   const projectId = yield* projectOf(repo)
   const entry = (yield* db.session.entryOf(projectId))!
@@ -122,9 +127,12 @@ const workingPiEntry = Effect.gen(function* () {
     message: "waiting for the entry session",
   })
   const stop = c["Project.StopEntry"]({ runtime: origin.runtime, address })
+
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
     c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
+
   const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => unwrapped(r.message)))
+
   return { db, herdr, processes, c, paneId, origin, projectId, started, stop, startAt, pending }
 })
 
@@ -135,6 +143,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       Effect.gen(function* () {
         yield* refuseRealKills
         const asked: Array<number> = []
+
         const processes = yield* Effect.gen(function* () {
           return yield* Processes.Service
         }).pipe(
@@ -143,8 +152,11 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
               liveness: () => "exited",
               terminate: (pid) => {
                 asked.push(pid)
+
                 if (pid === 42) throw Object.assign(new Error("gone"), { code: "ESRCH" })
+
                 if (pid === 99) throw Object.assign(new Error("denied"), { code: "EPERM" })
+
                 if (pid === 100) throw new Error("boom")
               },
               pid: 1,
@@ -153,6 +165,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
           ),
           Effect.provide(Platform.services),
         )
+
         for (const pid of [0, -1, 1.5, 1]) assert.strictEqual(yield* processes.terminate(pid), "denied", `${pid}`)
         assert.strictEqual(yield* processes.terminate(42), "sent")
         assert.strictEqual(yield* processes.terminate(99), "denied")
@@ -292,10 +305,12 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen but a live (reused) PID; an exited PID moves without a signal",
     Effect.gen(function* () {
       const s = yield* workingPiEntry
+
       const restore = s.db.session.startEntry(s.projectId, "pi", false, s.origin, {
         agent: "coordinator",
         pid: HARNESS,
       })
+
       yield* s.db.session.startEntry(
         s.projectId,
         "pi",
@@ -334,7 +349,9 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const c = authed(yield* client, cliHeaders(repo))
+
       for (const pane of ["test/p1", "test/p2"]) yield* herdr.seedAgent(pane)
+
       const exits = yield* Effect.all(
         ["test/p1", "test/p2"].map((terminal) =>
           Effect.exit(
@@ -349,6 +366,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
         ),
         { concurrency: "unbounded" },
       )
+
       assert.deepStrictEqual(exits.map((e) => Exit.isSuccess(e)).toSorted(), [false, true])
     }),
   )

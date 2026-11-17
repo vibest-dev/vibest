@@ -3,7 +3,7 @@ import { exitedAt, executionStateOf, harnessIdOf } from "@vibest/core/database/d
 import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
-import { Clock, Effect, Fiber } from "effect"
+import { Clock, Effect, Fiber, type Schema } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { FakeRuntime } from "./lib/fake-runtime.ts"
@@ -11,10 +11,11 @@ import { replyOf, eventsOf, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
-const observedEnd = (harness: string, payload: object) =>
+const observedEnd = (harness: string, payload: Schema.JsonObject) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses.Service).get(harness)
-    return executionEndFrom(adapter, payload as Record<string, unknown>, yield* Clock.currentTimeMillis)
+
+    return executionEndFrom(adapter, payload, yield* Clock.currentTimeMillis)
   })
 
 const ends = (id: string) => eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.map((row) => row.data)))
@@ -112,11 +113,13 @@ describe("observed execution end", () => {
       const handed = yield* db.session.openExecution(id)
       yield* writeEnd(id, "pi", { text: "done fast" })
       yield* held.release()
+
       const [row] = yield* until(
         sql<{ status: string; execution: number | null }>`SELECT status, execution_id AS execution FROM inbox
           WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )
+
       assert.isDefined(handed)
       assert.strictEqual(row!.execution, handed)
     }),

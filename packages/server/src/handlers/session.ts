@@ -8,10 +8,11 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
 import { Caller, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
-import { Effect, Stream } from "effect"
+import { Effect, Predicate, Stream } from "effect"
 
 import { integrationOf, processOf, reader } from "../gates.ts"
 import * as Listing from "../listing.ts"
+import { ListScope } from "../machine/remote.ts"
 import { WatchFeed } from "../watch-feed.ts"
 import * as CallerChecks from "./caller.ts"
 import type { Handlers, MethodOf } from "./caller.ts"
@@ -38,6 +39,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (scope.session === undefined) return true
       const route = direct ? yield* db.session.creatorOf(id) : yield* db.session.nearestAlive(id)
+
       return route !== undefined && "peer" in route && route.peer === scope.peer && route.session === scope.session
     })
 
@@ -45,36 +47,50 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const { c, scope } = yield* reach(method)
       const id = yield* db.session.resolveSession(input, scope)
+
       if (c === undefined) {
         if (scope !== undefined && !(yield* startedByPeer(scope, id, false)))
           return yield* new Forbidden({
             method,
             message: `${id} was not started by the session that called; a session manages only the sessions it started`,
           })
+
         return id
       }
+
       const session = yield* db.session.getSession(id)
+
       if (!session || session.entry) {
         const identity = yield* db.session.sessionIdentity(id)
+
         if (identity?.entry) {
           const directory = yield* db.project.projectDirectory(identity.projectId)
+
           const name =
             directory !== undefined && directory !== ""
               ? directory.slice(directory.lastIndexOf("/") + 1)
               : identity.projectId
+
           return yield* new NoSuchSession({
             id,
             message: `${id} is the session you opened in a terminal (project ${name}); stop it in that terminal.`,
           })
         }
+
         return yield* new NoSuchSession({ id, message: `no session ${id}` })
       }
+
       const manager = yield* db.session.nearestAlive(id)
-      if (c._tag === "Session" && (manager === undefined || !("local" in manager) || manager.local !== c.sessionId))
+
+      if (
+        Predicate.isTagged(c, "Session") &&
+        (manager === undefined || !("local" in manager) || manager.local !== c.sessionId)
+      )
         return yield* new Forbidden({
           method,
           message: `${id} was not started by this session; a session manages only the sessions it started`,
         })
+
       return id
     })
 
@@ -82,9 +98,12 @@ export const make = Effect.gen(function* () {
     Spawn: (input) =>
       Effect.gen(function* () {
         const c = yield* Caller
-        if (c._tag !== "Session") return yield* new NoCallingSession()
+
+        if (!Predicate.isTagged(c, "Session")) return yield* new NoCallingSession()
         const project = yield* projectOf(c, "Spawn")
+
         if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
+
         return yield* sessions.spawn({
           machine: yield* machineFromCaller(input),
           root: project.directory,
@@ -111,7 +130,8 @@ export const make = Effect.gen(function* () {
       routed.Send(p, (input) =>
         Effect.gen(function* () {
           const caller = yield* Caller
-          if (caller._tag === "Session")
+
+          if (Predicate.isTagged(caller, "Session"))
             return yield* sessions
               .admit(caller, input, p.message, p.request)
               .pipe(
@@ -121,12 +141,19 @@ export const make = Effect.gen(function* () {
               )
           const { c, scope } = yield* reach("Send")
           const target = yield* db.session.resolveSession(input, scope)
+
           if (c === undefined && scope !== undefined && !(yield* startedByPeer(scope, target, true)))
             return yield* new Forbidden({
               method: "Send",
               message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
             })
-          yield* sessions.deliverTo(target, p.message, p.request, caller._tag === "Peer" ? caller.session : undefined)
+          yield* sessions.deliverTo(
+            target,
+            p.message,
+            p.request,
+            Predicate.isTagged(caller, "Peer") ? caller.session : undefined,
+          )
+
           return { id: target }
         }),
       ),
@@ -162,6 +189,7 @@ export const make = Effect.gen(function* () {
           const id = yield* db.session.resolveSession(input, (yield* reach("Get")).scope)
           const row = yield* sessions.get(id)
           const session = Listing.toInfo(row, (yield* db.session.sessionBriefs([id])).get(id))
+
           return {
             ...session,
             reply: (yield* db.session.latestReply(id)) ?? null,
@@ -181,11 +209,13 @@ export const make = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           yield* cliOnly("Events")
+
           if (after !== undefined && session === undefined)
             return yield* new Forbidden({
               method: "Events",
               message: "after resumes one session's facts; give the session too",
             })
+
           const id =
             session === undefined
               ? undefined
@@ -196,6 +226,7 @@ export const make = Effect.gen(function* () {
                       Effect.fail(new NoSuchSession({ id: session, message: e.message })),
                     ),
                   )
+
           return bus.log({ aggregate: id, after, follow: follow === true }).pipe(
             Stream.map(({ aggregate, seq, at, type, data }) => ({
               aggregate,
@@ -213,12 +244,13 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* cliOnly("Watch")
           const changes = yield* watchFeed.subscribe
-          const sessionRows = yield* watched(yield* listed({ _tag: "All" }, false))
-          const snapshot: WatchEvent = {
-            _tag: "Snapshot",
+          const sessionRows = yield* watched(yield* listed(ListScope.All(), false))
+
+          const snapshot: WatchEvent = Listing.WatchEvents.Snapshot({
             projects: yield* snapshotProjects(sessionRows),
             sessions: sessionRows,
-          }
+          })
+
           return Stream.concat(Stream.make(snapshot), changes)
         }),
       ),
@@ -227,18 +259,24 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* cliOnly("Session.Seen")
         const identity = yield* db.session.sessionIdentity(id)
+
         if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
         const at = yield* db.session.getSession(id)
+
         if (at === undefined || !runtimeOf(at) || terminalOf(at).id === "") return
         const address = terminalOf(at)
         const rt = runtimes.find(runtimeOf(at))
+
         if (rt === undefined || rt.seen === undefined || rt.see === undefined) return
         const see = rt.see
+
         const unreachable = (e: { readonly message: string }) =>
           new RuntimeUnreachable({ session: id, message: e.message })
+
         const seen = rt.seen
         yield* Effect.gen(function* () {
           const now = yield* seen(address).pipe(Effect.mapError(unreachable))
+
           if (raisesSeen(now, finished)) yield* see(address, finished).pipe(Effect.mapError(unreachable))
         }).pipe(seenLocked.withLock(`${runtimeOf(at)}\n${address.machine}\n${address.id}`))
       }),
@@ -247,13 +285,18 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* self("Session.Ready", id)
         const read = reader(headers)
+
         if (conversation !== undefined) {
           const row = yield* db.session.sessionIdentity(id)
+
           if (row?.entry === true && conversation.harness === row.harness)
             yield* integration.conversation(id, conversation.id, processOf(read))
+
           return {}
         }
+
         const current = yield* integration.ready(id, pid, integrationOf(read), processOf(read))
+
         return current === undefined ? {} : { process: current }
       }),
 

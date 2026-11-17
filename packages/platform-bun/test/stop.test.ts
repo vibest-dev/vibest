@@ -10,7 +10,7 @@ import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { DaemonHandlers } from "@vibest/server/handlers/daemon"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Schema, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
 
@@ -51,24 +51,30 @@ const cli = (repo: string) => Effect.map(client, (c) => authed(c, cliHeaders(rep
 
 const errorOf = <A, E>(exit: Exit.Exit<A, E>) =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+
 const tagOf = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
   errorOf(exit)?._tag ?? (Exit.isSuccess(exit) ? "success" : "defect")
 
 const stopFromCli = (repo: string) =>
   Effect.gen(function* () {
     const exit = yield* Effect.exit((yield* cli(repo))["Daemon.Stop"]({ instance: INSTANCE }))
+
     if (Exit.isSuccess(exit)) return "accepted" as const
     const e = errorOf(exit)
+
     return e?._tag === "DaemonBusy" ? e.blockers : (e?._tag ?? "defect")
   })
 
 const shutdownDone = Effect.flatMap(DaemonHandlers.Shutdown, Deferred.isDone)
 const draining = Effect.flatMap(Drain.Service, (d) => until(d.phase, (p) => p === "draining"))
+
 const stopOnceIdle = (repo: string) =>
   Effect.gen(function* () {
     yield* until((yield* Drain.Service).pending, (p) => p.length === 0)
+
     return yield* joinAdvancingClock(yield* Effect.forkScoped(stopFromCli(repo)))
   })
+
 const joinAdvancingClock = <A, E>(stopping: Fiber.Fiber<A, E>) =>
   untilVirtual(
     Effect.sync(() => stopping.pollUnsafe()),
@@ -81,16 +87,19 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     const herdr = yield* FakeRuntime
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
+
     const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Project.EntrySession"]({
       agent: "coordinator",
       harness,
       fresh: true,
       terminal: "wC:p1",
     })
+
     if (harness === "claude") yield* db.session.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
     yield* until(db.session.executionAccepted(worker), (accepted) => accepted)
+
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.session.projectOfSession(sessionId))! }
   })
 
@@ -216,21 +225,25 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const raw = yield* client
+
       const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
         agent: "general",
         callerEnv: {},
         harness: "pi",
         prompt: "work",
       })
+
       yield* until(herdr.callsTo("open"), (calls) => calls.some((c) => c.argv.at(-1)?.includes("work") === true))
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      const piExtensionHook = (call: "Prompt", event: object) =>
+
+      const piExtensionHook = (call: "Prompt", event: Schema.JsonObject) =>
         Effect.forkScoped(
           Effect.exit(
             raw[call]({ sessionId: id, harness: "pi", event: JSON.stringify(event) }, { headers: protocolHeaders() }),
           ),
         )
+
       const prompted = yield* piExtensionHook("Prompt", { type: "input", text: "work", source: "interactive" })
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
       assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
@@ -270,12 +283,14 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const db = yield* Db.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
+
       const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
         agent: "general",
         callerEnv: {},
         harness: "pi",
         prompt: "work",
       })
+
       yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)

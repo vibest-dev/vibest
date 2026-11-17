@@ -9,6 +9,7 @@ export const unseenDone = (status: AgentStatus, seen: Runtime.Seen | undefined):
 
 export const projectActivity = (statuses: Iterable<AgentStatus>): ProjectActivity => {
   const present = new Set<AgentStatus>(statuses)
+
   return NEEDS_ATTENTION_FIRST.find((activity) => present.has(activity)) ?? "idle"
 }
 

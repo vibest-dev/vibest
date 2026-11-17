@@ -6,5 +6,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsrs --noEmit --fast -p tsconfig.json"
+  },
+  "dependencies": {
+    "effect": "catalog:"
   }
 }

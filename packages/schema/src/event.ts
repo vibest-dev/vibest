@@ -28,10 +28,13 @@ export const ProjectCreated = fact("project.created", "project", {
   directory: optional(Text),
   repositories: Repositories,
 })
+
 export const ProjectMoved = fact("project.moved", "project", { from: Text, to: Text, repositories: Repositories })
+
 export const ProjectRepositoriesChanged = fact("project.repositories_changed", "project", {
   repositories: Repositories,
 })
+
 export const ProjectEntryChanged = fact("project.entry_changed", "project", { session: optional(Text) })
 
 export const SessionCreated = fact("session.created", "session", {
@@ -42,6 +45,7 @@ export const SessionCreated = fact("session.created", "session", {
   parent: optional(Text),
   origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
 })
+
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
 export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
 export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literals(["archived", "replaced"]) })
@@ -56,14 +60,18 @@ export const ProcessStarted = fact("process.started", "session", {
   terminal: optional(Text),
   pid: optional(Pid),
 })
+
 export const ProcessPlaced = fact("process.placed", "session", { process: Seq, terminal: Text, pid: optional(Pid) })
+
 export const ProcessReady = fact("process.ready", "session", {
   process: Seq,
   pid: optional(Pid),
   integration: optional(Schema.Struct({ version: Text, protocol: Schema.Int })),
 })
+
 export const ProcessPid = fact("process.pid", "session", { process: Seq, pid: Pid })
 export const ProcessConversation = fact("process.conversation", "session", { process: Seq, conversation: Text })
+
 export const ProcessEndReason = Schema.Literals([
   "exited",
   "limited",
@@ -73,15 +81,19 @@ export const ProcessEndReason = Schema.Literals([
   "launch_failed",
   "superseded",
 ])
+
 export type ProcessEndReason = typeof ProcessEndReason.Type
+
 export const ProcessEnded = fact("process.ended", "session", { process: Seq, reason: ProcessEndReason })
 
 export const ExecutionStarted = fact("execution.started", "session", {
   process: optional(Seq),
   typed: optional(Text),
 })
+
 export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
+
 export const ExecutionEnded = fact("execution.ended", "session", {
   execution: Seq,
   outcome: ExecutionOutcome,
@@ -91,7 +103,9 @@ export const ExecutionEnded = fact("execution.ended", "session", {
 })
 
 export const InboxKind = Schema.Literals(["task", "send", "notice"])
+
 export type InboxKind = typeof InboxKind.Type
+
 export const InboxQueued = fact("inbox.queued", "session", {
   kind: InboxKind,
   recipient: optional(Text),
@@ -101,6 +115,7 @@ export const InboxQueued = fact("inbox.queued", "session", {
   request: optional(Text),
   peerItem: optional(Text),
 })
+
 export const InboxMoved = fact("inbox.moved", "session", {
   inbox: Seq,
   to: Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"]),
@@ -121,6 +136,7 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
 })
+
 export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
 
 const definitions = [
@@ -203,10 +219,13 @@ export const encodeData = <D extends Defined>(
 
 export const decodeRow = (row: Row): Effect.Effect<Fact, UnknownFact> => {
   const where = `event ${row.aggregate} ${row.seq}`
+
   const refuse = (message: string) =>
     new UnknownFact({ aggregate: row.aggregate, seq: row.seq, type: row.type, message: `${where}: ${message}` })
+
   if (!Object.hasOwn(Catalog, row.type)) return Effect.fail(refuse(`${row.type} is not in the event catalog`))
   const definition: Defined = Catalog[row.type as FactType]
+
   return Effect.try({
     try: () => JSON.parse(row.data) as unknown,
     catch: (cause) => refuse(`${row.type} data is not JSON: ${String(cause)}`),
@@ -223,8 +242,8 @@ export const decodeRow = (row: Row): Effect.Effect<Fact, UnknownFact> => {
           seq: row.seq,
           at: row.at,
           type: definition.type,
-          ...(definition.aggregate === "project" ? { projectId: row.aggregate } : {}),
-          ...(definition.aggregate === "session" ? { sessionId: row.aggregate } : {}),
+          ...(definition.aggregate === "project" && { projectId: row.aggregate }),
+          ...(definition.aggregate === "session" && { sessionId: row.aggregate }),
           data,
         }) as Fact,
     ),

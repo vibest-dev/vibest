@@ -13,12 +13,15 @@ const binaryOf = () => process.env.VIBEST_E2E_AGY_BINARY ?? "agy"
 
 const signedIn = async (w: World) => {
   const binary = binaryOf()
+
   if (!Bun.which(binary, { PATH: w.env().PATH! })) throw new Skip(`${binary} not on PATH`)
   const models = await w.run(w.repository, [binary, "--output-format", "json", "models"], { timeoutMs: 120_000 })
+
   if (models.code !== 0)
     throw new Skip(
       `${binary} is not signed in (set AGYX_PROFILE to the agyx profile to use, and VIBEST_E2E_AGY_BINARY to a wrapper): ${models.stderr.trim()}`,
     )
+
   return binary
 }
 
@@ -31,15 +34,19 @@ export const agyWorld = async (w: World, runtime: Runtime, name: string, entry: 
   const session = `${w.herdrSession}-${name}`
   const herdrSocket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const core = runtime === "hc" ? await isolatedCore(w, w.config.pi, name) : undefined
+
   if (core) w.ownRuntimes.add("hc")
+
   const placement = core
     ? { runtime: "hc", extra: ["--runtime", "hc"], hc: { run: core.hc }, name: `${name}-entry` }
     : { session }
+
   if (entry === "pi") await w.entry({ cwd: repo, ...placement })
   else {
     await w.ok(["daemon"], { cwd: repo })
     await w.startEntry({ harness: "agy", cwd: repo, timeoutMs: 240_000, ...placement })
   }
+
   const terminalOf = (id: string) => {
     const at =
       (
@@ -47,61 +54,77 @@ export const agyWorld = async (w: World, runtime: Runtime, name: string, entry: 
           id?: string
         }
       ).id ?? ""
+
     return core ? at.slice(0, at.indexOf("@")) : (at.split("/")[1] ?? "")
   }
+
   const screen = async (id: string) => {
     if (core) return (await core.hc("read", terminalOf(id))).stdout
+
     const read = await herdr(herdrSocket, "pane.read", {
       pane_id: terminalOf(id),
       source: "visible",
       strip_ansi: true,
     }).catch((e: Error) => ({ read: { text: `(no screen: ${e.message})` } }))
+
     return String((read.read as { text?: string } | undefined)?.text ?? "")
   }
+
   const typeText = async (id: string, text: string) => {
     if (core) {
       const r = await core.hc("keys", terminalOf(id), ...[...text].map(hcKey))
       expect(r.code === 0, `hc keys: ${r.stderr}${r.stdout}`)
     } else await herdr(herdrSocket, "pane.send_text", { pane_id: terminalOf(id), text })
   }
+
   const pressKeys = async (id: string, keys: ReadonlyArray<string>) => {
     if (core) {
       const r = await core.hc("keys", terminalOf(id), ...keys)
       expect(r.code === 0, `hc keys: ${r.stderr}${r.stdout}`)
     } else await herdr(herdrSocket, "pane.send_keys", { pane_id: terminalOf(id), keys })
   }
+
   const argv = async (id: string) => {
     if (core) return (await core.hc("get", terminalOf(id), "--json")).stdout
     const info = await herdr(herdrSocket, "pane.process_info", { pane_id: terminalOf(id) })
+
     return JSON.stringify(info)
   }
+
   const listed = async (id: string) =>
     (
       await w.json<{ sessions: Array<{ id: string; status: string; executionState: string }> }>(["ls"], { cwd: repo })
     ).sessions.find((e) => e.id === id)
+
   const entryIdle = async () => {
     const id = (await w.entryOf(repo))!
     await until(
       "agy idle in the entry pane",
       async () => {
         if ((await screen(id)).includes("Yes, I trust this folder")) await pressKeys(id, ["enter"])
+
         return (await screen(id)).includes("for shortcuts")
       },
       180_000,
     )
+
     return id
   }
+
   const executions = (id: string) =>
     rows<{ id: number; outcome: string | null }>(
       w,
       "SELECT id, outcome FROM execution WHERE session_id = ? ORDER BY id",
       id,
     )
+
   const close = async () => {
     await w.stopDaemon()
+
     if (core) await core.stop()
     else await dropHerdrSession(w, session)
   }
+
   return { repo, core, session, terminalOf, screen, typeText, pressKeys, argv, listed, entryIdle, executions, close }
 }
 
@@ -140,14 +163,18 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       await addAgyPlugin(w, harnesses, binary)
       await w.ok(["daemon"])
+
       const list = await w.json<Array<{ harness: string; binary: string; available: boolean }>>(["harness", "list"], {
         timeoutMs: 120_000,
       })
+
       const found = list.find((h) => h.harness === "agy")
       expect(found?.available === true && found.binary === binary, `harness list: ${JSON.stringify(list)}`)
+
       const models = await w.json<{ models: Array<{ harness: string; model: string }> }>(["models"], {
         timeoutMs: 120_000,
       })
+
       expect(
         models.models.some((m) => m.harness === "agy" && m.model !== ""),
         `models: ${JSON.stringify(models).slice(0, 500)}`,
@@ -158,6 +185,7 @@ const checks: ReadonlyArray<Check> = [
           const rows = await w.json<Array<{ harness: string; limits: Array<{ window: string }>; error?: string }>>([
             "subscriptions",
           ])
+
           return rows.some((r) => r.harness === "agy" && r.limits.length > 0)
         },
         120_000,
@@ -204,6 +232,7 @@ const checks: ReadonlyArray<Check> = [
         const pane = (await w.json<{ sessions: Array<{ id: string; address?: { id: string } }> }>(["ls"])).sessions
           .find((s) => s.id === id)
           ?.address?.id.split("/")[1]
+
         await herdr(socket, "pane.close", { pane_id: pane ?? "" })
         await until(
           "the session exited",
@@ -235,10 +264,12 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       await addAgyPlugin(w, harnesses, binary)
       const a = await agyWorld(w, "hc", "agy-h11", "pi")
+
       try {
         const { id } = JSON.parse(
           await w.okViaEntry(["run", "agy", "--runtime", "hc", "--", PONG(1)], { cwd: a.repo, timeoutMs: 120_000 }),
         ) as { id: string }
+
         await untilShown(w, id, evidence, "the first execution completed", () => completed(w, id) === 1)
         expect((await a.argv(id)).includes("--prompt-interactive"), `argv: ${await a.argv(id)}`)
         await w.ok(["send", id, "--", PONG(2)], { cwd: a.repo })
@@ -277,20 +308,25 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       await addAgyPlugin(w, harnesses, binary)
       const a = await agyWorld(w, "herdr", "agy-entry", "agy")
+
       try {
         const entry = await a.entryIdle()
+
         const settled = () =>
           (row<{ n: number }>(
             w,
             "SELECT (SELECT count(*) FROM inbox WHERE session_id = ?1 AND status IN ('pending', 'delivering')) + (SELECT count(*) FROM execution WHERE session_id = ?1 AND outcome IS NULL) AS n",
             entry,
           )?.n ?? 1) === 0
+
         await until("the entry's own first task completed", settled, 300_000)
-        const answered = async (send: () => Promise<unknown>) => {
+
+        const answered = async <A>(send: () => Promise<A>) => {
           const done = completed(w, entry)
           await send()
           await until("the message's execution completed", () => completed(w, entry) > done && settled(), 300_000)
         }
+
         await answered(() => w.ok(["send", entry, "--", PONG(1)], { cwd: a.repo }))
 
         await a.typeText(entry, "a draft the user left H12-DRAFT")
@@ -300,12 +336,14 @@ const checks: ReadonlyArray<Check> = [
         const afterDraft = await a.screen(entry)
         expect(!afterDraft.includes("H12-DRAFT"), `the draft was not cleared:\n${afterDraft}`)
         expect(a.executions(entry).length === before + 1, `executions: ${JSON.stringify(a.executions(entry))}`)
+
         const handed = rows<{ content: string }>(
           w,
           "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
           entry,
           a.executions(entry).at(-1)!.id,
         )
+
         expect(handed.length === 1 && handed[0]!.content.includes("PONG-AGY-2"), `handed: ${JSON.stringify(handed)}`)
 
         await a.typeText(entry, "Run this shell command exactly: sleep 20. Then reply with exactly: H12-SLEPT")
@@ -346,11 +384,13 @@ const checks: ReadonlyArray<Check> = [
       const task = `Run exactly this shell command with your command tool: herdr --version > ${ran}. Whatever happens, then run exactly this shell command: echo done > ${marker}. Then reply with exactly: H14-DONE`
       await withSession(w, "agy", [], task, async ({ id }) => {
         await untilShown(w, id, evidence, "the execution completed", () => completed(w, id) === 1)
+
         const exists = (file: string) =>
           fs.stat(file).then(
             () => true,
             () => false,
           )
+
         expect(!(await exists(ran)), "the refused herdr command ran")
         expect(await exists(marker), "the session did not go on to write its marker")
       })
@@ -369,6 +409,7 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       await addAgyPlugin(w, harnesses, binary)
       const a = await agyWorld(w, "herdr", "agy-h13", "agy")
+
       try {
         const entry = await a.entryIdle()
         const argv = await a.argv(entry)

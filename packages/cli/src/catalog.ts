@@ -13,14 +13,17 @@ export const modelsOf = (harness: string | undefined, provider: Option.Option<st
   Effect.gen(function* () {
     const all = yield* catalog(Option.getOrUndefined(provider))
     const choices = harness === undefined ? all : all.filter((c) => c.harness === harness)
+
     if (harness !== undefined && choices.length === 0)
       return yield* new HarnessUnavailable({
         harness,
         message: `no plugin provides harness ${harness}; loaded: ${all.map((c) => c.harness).join(", ") || "none"}; ${addPluginHint}`,
       })
+
     const models = choices.flatMap((c) =>
       c.problem === null ? c.models.map((m) => ({ harness: c.harness, ...m })) : [],
     )
+
     const errors = choices.flatMap((c) =>
       c.problem !== null
         ? [`${c.harness}: ${c.problem}`]
@@ -28,5 +31,6 @@ export const modelsOf = (harness: string | undefined, provider: Option.Option<st
           ? [`${c.harness}: ${c.binary} lists no models for provider "${Option.getOrNull(provider)}"`]
           : [],
     )
+
     yield* json({ models, errors })
   })

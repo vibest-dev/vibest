@@ -262,11 +262,13 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const repo = yield* makeRepository
       const parent = path.join(layout.worktrees, yield* repositoryDirectoryName(repo))
       const reserved = () => fs.existsSync(parent) && fs.readdirSync(parent).length > 0
+
       const spawning = yield* Effect.forkChild(
         sessions
           .spawn(yield* spawnInput(repo))
           .pipe(Effect.provideService(Scheduler.Scheduler, interruptOnceReady(reserved))),
       )
+
       const exit = yield* Fiber.await(spawning)
       assert.isTrue(Exit.hasInterrupts(exit))
       assert.deepStrictEqual(yield* files.readDirectory(parent), [])
@@ -278,6 +280,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
   const heldAfterInsert = () => {
     const inserted = Deferred.makeUnsafe<void>()
     const go = Deferred.makeUnsafe<void>()
+
     return {
       options: (): TestOptions => ({
         db: (db) => ({

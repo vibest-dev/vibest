@@ -1,5 +1,6 @@
 import type { Taken } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
+import * as Predicate from "effect/Predicate"
 
 export const MISMATCH_ACTION = "vibest update"
 
@@ -42,29 +43,32 @@ export const PEER_PROJECT_HEADER = "vibest-peer-project"
 export const PEER_BY_HEADER = "vibest-peer-by"
 export const PEER_BY_USER = "user"
 
-export const peerHeaders = (peer: string, project?: string, by?: string): Record<string, string> => ({
+export const peerHeaders = (peer: string, project?: string, by?: string) => ({
   [PROTOCOL_HEADER]: String(PROTOCOL),
   [CALLER_HEADER]: "peer",
   [PEER_HEADER]: peer,
-  ...(project === undefined ? {} : { [PEER_PROJECT_HEADER]: project }),
-  ...(by === undefined ? {} : { [PEER_BY_HEADER]: by }),
+  ...(project !== undefined && { [PEER_PROJECT_HEADER]: project }),
+  ...(by !== undefined && { [PEER_BY_HEADER]: by }),
 })
 
 export const TAKE_ROUTE = "/inbox/take"
+
 export type HookKind = "execution-end" | "prompt" | "guard"
+
 export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
+
 export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
   const m = /^\/hooks\/([a-z]+)\/(execution-end|prompt|guard)$/.exec(path)
+
   return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
 }
 
 export const isTaken = (body: unknown): body is Taken =>
-  typeof body === "object" &&
-  body !== null &&
-  typeof (body as Taken).execution === "number" &&
+  Predicate.isObjectOrArray(body) &&
+  Predicate.isNumber((body as Taken).execution) &&
   Array.isArray((body as Taken).ids) &&
-  typeof (body as Taken).line === "string" &&
-  typeof (body as Taken).text === "string"
+  Predicate.isString((body as Taken).line) &&
+  Predicate.isString((body as Taken).text)
 
 export type SessionIdentity = {
   readonly sessionId: string
@@ -78,22 +82,21 @@ export type SessionIdentity = {
   readonly repositoryRoot?: string | undefined
 }
 
-export const sessionHeaders = (who: SessionIdentity): Record<string, string> => {
-  const headers: Record<string, string> = {
-    [PROTOCOL_HEADER]: String(PROTOCOL),
-    [CALLER_HEADER]: "session",
-    [SESSION_HEADER]: who.sessionId,
-  }
-  const put = (name: string, value: string | undefined) => {
-    if (value) headers[name] = value
-  }
-  put(PROJECT_HEADER, who.projectId)
-  put(HARNESS_SESSION_HEADER, who.harnessSessionId)
-  put(HARNESS_HEADER, who.harness)
-  put(CWD_HEADER, who.cwd === undefined ? undefined : encodeURIComponent(who.cwd))
-  put(RUNTIME_HEADER, who.runtime)
-  put(PLUGIN_VERSION_HEADER, who.pluginVersion)
-  put(PROCESS_HEADER, who.process)
-  if (who.repositoryRoot !== undefined) headers[REPOSITORY_HEADER] = who.repositoryRoot
-  return headers
-}
+const presentHeaders = (headers: ReadonlyArray<readonly [string, string | undefined]>) =>
+  Object.fromEntries(headers.flatMap(([name, value]) => (value ? [[name, value] as const] : [])))
+
+export const sessionHeaders = (who: SessionIdentity) => ({
+  [PROTOCOL_HEADER]: String(PROTOCOL),
+  [CALLER_HEADER]: "session",
+  [SESSION_HEADER]: who.sessionId,
+  ...presentHeaders([
+    [PROJECT_HEADER, who.projectId],
+    [HARNESS_SESSION_HEADER, who.harnessSessionId],
+    [HARNESS_HEADER, who.harness],
+    [CWD_HEADER, who.cwd === undefined ? undefined : encodeURIComponent(who.cwd)],
+    [RUNTIME_HEADER, who.runtime],
+    [PLUGIN_VERSION_HEADER, who.pluginVersion],
+    [PROCESS_HEADER, who.process],
+  ]),
+  ...(who.repositoryRoot !== undefined && { [REPOSITORY_HEADER]: who.repositoryRoot }),
+})

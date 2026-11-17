@@ -24,6 +24,7 @@ const GRACE_MS = 5_000
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
+
     return true
   } catch {
     return false
@@ -32,21 +33,27 @@ const alive = (pid: number) => {
 
 const ownerAlive = (text: string) => {
   const pid = Number(text.split(" ")[0])
+
   return Number.isInteger(pid) && pid > 0 && alive(pid)
 }
 
 const taken = async (dir: string) => {
   let live = 0
+
   for (const name of await fs.readdir(dir).catch(() => [] as Array<string>)) {
     if (name.startsWith(".")) continue
     const file = path.join(dir, name)
     const seen = await fs.stat(file).catch(() => undefined)
+
     if (seen === undefined) continue
+
     if (ownerAlive(await fs.readFile(file, "utf8").catch(() => "")) || Date.now() - seen.mtimeMs < GRACE_MS) {
       live++
       continue
     }
+
     const tomb = path.join(dir, `.stale-${process.pid}-${crypto.randomUUID()}`)
+
     if (
       !(await fs.rename(file, tomb).then(
         () => true,
@@ -54,15 +61,18 @@ const taken = async (dir: string) => {
       ))
     )
       continue
+
     if ((await fs.stat(tomb)).ino !== seen.ino) await fs.link(tomb, file).catch(() => undefined)
     await fs.rm(tomb, { force: true })
   }
+
   return live
 }
 
 const claim = async (dir: string, name: string, owner: string) => {
   const draft = path.join(dir, `.claim-${process.pid}-${crypto.randomUUID()}`)
   await fs.writeFile(draft, owner)
+
   try {
     return await fs.link(draft, path.join(dir, name)).then(
       () => true,
@@ -81,8 +91,10 @@ export const acquire = async (
   admitsMore = loadAdmitsMore,
 ): Promise<() => Promise<void>> => {
   await fs.mkdir(dir, { recursive: true })
+
   for (;;) {
     const busy = await taken(dir)
+
     if (!gated || busy === 0 || (busy < cap && admitsMore()))
       for (let k = 0; k <= busy; k++)
         if (await claim(dir, String(k), `${process.pid} ${id}`))
@@ -98,9 +110,11 @@ export const pool = async <T extends { readonly id: string }>(
 ) => {
   const cap = jobs ?? machineSlots
   const queue = [...items]
+
   const workers = Array.from({ length: Math.min(cap, queue.length) }, async () => {
     for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
       const release = await acquire(item.id, jobs === undefined)
+
       try {
         await run(item)
       } finally {
@@ -108,6 +122,7 @@ export const pool = async <T extends { readonly id: string }>(
       }
     }
   })
+
   await Promise.all(workers)
 }
 

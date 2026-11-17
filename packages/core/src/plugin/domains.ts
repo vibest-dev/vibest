@@ -11,12 +11,14 @@ import type { Subscription } from "@vibest/schema/subscription"
 import type { Effect, Stream } from "effect"
 
 export type RuntimeDefinition = PluginRuntime.RuntimeDefinition
+
 export type HarnessDefinition = PluginHarness.HarnessDefinition
+
 export type AgentDefinition = PluginAgentDefinition
 
 export type Caller = PluginRuntime.RuntimeCaller & { readonly id: string; readonly name?: string }
 
-export interface RuntimesShape extends PluginRuntime.RuntimeDomain {
+export interface RuntimesDomain extends PluginRuntime.RuntimeDomain {
   readonly all: Effect.Effect<ReadonlyArray<RuntimeDefinition>>
   readonly route: (id: string) => Effect.Effect<RuntimeDefinition, NoRuntime>
   readonly find: (id: string | null | undefined) => RuntimeDefinition | undefined
@@ -28,19 +30,19 @@ export interface RuntimesShape extends PluginRuntime.RuntimeDomain {
   readonly added: Stream.Stream<ReadonlyArray<string>>
 }
 
-export interface HarnessesShape extends PluginHarness.HarnessDomain {
+export interface HarnessesDomain extends PluginHarness.HarnessDomain {
   readonly all: ReadonlyArray<HarnessDefinition>
   readonly get: (id: string) => Effect.Effect<HarnessDefinition, HarnessUnavailable>
   readonly find: (id: string | null | undefined) => HarnessDefinition | undefined
 }
 
-export interface AgentsShape {
+export interface AgentsDomain {
   readonly all: ReadonlyArray<AgentDefinition>
   readonly find: (id: string | null | undefined) => AgentDefinition | undefined
   readonly transform: Transform<AgentEditor>
 }
 
-export interface SubscriptionsShape {
+export interface SubscriptionsDomain {
   readonly list: Effect.Effect<ReadonlyArray<Subscription>>
   readonly report: (input: SubscriptionReport) => Effect.Effect<void>
   readonly poll: Effect.Effect<void>

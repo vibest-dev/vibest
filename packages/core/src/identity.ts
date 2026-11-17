@@ -15,7 +15,9 @@ export const IdentityFile = Schema.Struct({
   name: Schema.String,
   machine_id: Schema.NullOr(Schema.String),
 })
+
 export type IdentityFile = typeof IdentityFile.Type
+
 const IdentityJson = Schema.fromJsonString(IdentityFile)
 
 export class HostFacts extends Context.Service<
@@ -40,7 +42,9 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const loaded = yield* loadIdentity((yield* Layout).identity, yield* HostFacts)
+
     if (loaded.warning !== undefined) yield* Effect.logWarning(loaded.warning)
+
     return { id: loaded.identity.id, name: loaded.identity.name }
   }),
 )
@@ -70,11 +74,14 @@ export const readHostId = Effect.fn("Identity.readHostId")(
   }) {
     if (source.ioreg !== undefined) return ioregUuid(yield* source.ioreg)
     const fs = yield* FileSystem.FileSystem
+
     for (const file of source.files) {
       const text = yield* fs.readFileString(file).pipe(Effect.option)
       const line = Option.getOrUndefined(text)?.split("\n")[0]?.trim()
+
       if (line) return line
     }
+
     return undefined
   },
   Effect.timeoutOrElse({ duration: HOST_ID_TIMEOUT, orElse: () => Effect.succeed(undefined) }),
@@ -99,24 +106,34 @@ export const loadIdentity = Effect.fn("Identity.loadIdentity")(function* (file: 
   const fs = yield* FileSystem.FileSystem
   const hostId = yield* host.id
   const fresh = (): IdentityFile => ({ id: randomId(), name: shortHostName(host.name), machine_id: hostId ?? null })
+
   if (!(yield* fs.exists(file))) {
     const made = fresh()
     yield* writeIdentity(file, host.pid, made)
+
     return { identity: made, warning: undefined }
   }
+
   const stored = yield* fs.readFileString(file).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(IdentityJson)),
     Effect.mapError(() => new IdentityUnreadable({ file })),
   )
+
   if (!ID.test(stored.id)) return yield* new IdentityUnreadable({ file })
+
   if (hostId === undefined) return { identity: stored, warning: "host id unreadable: identity kept" }
+
   if (stored.machine_id === hostId) return { identity: stored, warning: undefined }
+
   if (stored.machine_id === null) {
     const filled = { ...stored, machine_id: hostId }
     yield* writeIdentity(file, host.pid, filled)
+
     return { identity: filled, warning: undefined }
   }
+
   const renewed = fresh()
   yield* writeIdentity(file, host.pid, renewed)
+
   return { identity: renewed, warning: "this home came from another machine: a new identity" }
 })

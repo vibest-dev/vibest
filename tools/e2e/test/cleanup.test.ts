@@ -11,6 +11,7 @@ test("a kept world and its sessions are swept only once they are a day old", () 
   const now = 10 * DAY_MS
   const old = now - DAY_MS - 1
   const young = now - 1
+
   const targets = sweepTargets(
     [
       { name: "vbe-AbC123", mtimeMs: old },
@@ -29,6 +30,7 @@ test("a kept world and its sessions are swept only once they are a day old", () 
     ],
     now,
   )
+
   expect(targets.worlds).toEqual(["vbe-AbC123"])
   expect(targets.sessions).toEqual(["vbe-AbC123", "vbe-AbC123-inbox", "vbe-OldOr1"])
 })
@@ -40,6 +42,7 @@ test("a herdr socket nested in a world is found by name", async () => {
   const server = net.createServer()
   server.unref()
   const sock = path.join(dir, "herdr.sock")
+
   try {
     await new Promise<void>((resolve) => server.listen(sock, () => resolve()))
     expect(await pathsNamed(root, "herdr.sock")).toEqual([sock])
@@ -55,12 +58,15 @@ test("the sweep removes an old world with its herdr sessions, and leaves a live 
   await fs.mkdir(sessions)
   const now = Date.now()
   const oldAt = new Date(now - 2 * DAY_MS)
+
   const touch = async (dir: string, at: Date) => {
     await fs.mkdir(dir, { recursive: true })
     await fs.utimes(dir, at, at)
   }
+
   const server = net.createServer()
   server.unref()
+
   try {
     await touch(path.join(tmp, "vbe-AbC123"), oldAt)
     await touch(path.join(sessions, "vbe-AbC123"), oldAt)
@@ -93,11 +99,13 @@ test("the sweep removes an old world with its herdr sessions, and leaves a live 
         ran.push(args.join(" "))
       },
     })
+
     const exists = (file: string) =>
       fs.stat(file).then(
         () => true,
         () => false,
       )
+
     expect(await exists(path.join(tmp, "vbe-AbC123"))).toBe(false)
     expect(await exists(path.join(sessions, "vbe-AbC123"))).toBe(false)
     expect(await exists(path.join(sessions, "vbe-AbC123-inbox"))).toBe(false)

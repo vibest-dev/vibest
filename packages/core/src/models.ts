@@ -14,9 +14,11 @@ export const Model = Schema.Struct({
   description: Schema.String,
   default: Schema.Boolean,
 })
+
 export type Model = typeof Model.Type
 
 export type RawModel = PluginHarness.RawModel
+
 export type ModelLister = PluginHarness.ModelLister
 
 export const normalizeModels = (
@@ -25,6 +27,7 @@ export const normalizeModels = (
   raw: ReadonlyArray<RawModel>,
 ): ReadonlyArray<Model> =>
   raw
+    .values()
     .map((r) => ({
       harness,
       provider: r.provider ?? provider,
@@ -34,6 +37,7 @@ export const normalizeModels = (
       default: r.default,
     }))
     .filter((m) => !provider || m.provider === provider)
+    .toArray()
 
 export const listModels = Effect.fn("listModels")(function* (
   adapter: HarnessDefinition,
@@ -43,15 +47,19 @@ export const listModels = Effect.fn("listModels")(function* (
   const { id, binary, checkProvider, models: lister } = adapter
   const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
   const providerError = checkProvider?.(provider)
+
   if (providerError) return yield* unavailable(providerError)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cwd = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
   const problem = yield* adapter.checkEnvironment?.(cwd) ?? Effect.succeed(undefined)
+
   if (problem) return yield* unavailable(problem)
+
   const stdin =
     lister.request === undefined
       ? "ignore"
       : Stream.concat(Stream.make(new TextEncoder().encode(lister.request)), Stream.never)
+
   const lines = yield* spawner
     .streamLines(
       ChildProcess.make(binary, lister.args(provider), {
@@ -75,14 +83,20 @@ export const listModels = Effect.fn("listModels")(function* (
       Effect.timeout("30 seconds"),
       Effect.mapError((e) => unavailable(`${binary} did not list its models: ${e.message}`)),
     )
+
   const raw = lister.answer(lines)
+
   if (!raw) {
     const last = lines.findLast((l) => l.trim())?.trim()
+
     return yield* unavailable(`${binary} gave no model list${last ? `: ${last}` : ""}`)
   }
+
   const models = normalizeModels(id, provider, raw)
+
   if (models.length === 0)
     return yield* unavailable(`${binary} lists no models${provider ? ` for provider "${provider}"` : ""}`)
+
   return models
 })
 
@@ -94,8 +108,10 @@ export const forProvider = (
   choices.map((c) => {
     if (c.problem !== null) return c
     const refused = definitions.find(c.harness)?.checkProvider?.(provider)
+
     if (refused !== undefined) return { ...c, problem: refused, models: [] }
     const models = c.models.filter((m) => m.provider === provider)
+
     return models.length === 0
       ? { ...c, problem: `${c.binary} lists no models for provider "${provider}"`, models: [] }
       : { ...c, models }

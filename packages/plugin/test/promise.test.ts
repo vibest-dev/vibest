@@ -1,41 +1,45 @@
-import { Effect, Scope, Stream } from "effect"
-import { expect, test, vi } from "vitest"
+import { Effect, Exit, Scope, Stream } from "effect"
+import { expect, test } from "vitest"
 
 import type { Context } from "../src/effect/index.ts"
+import { fromPromise } from "../src/promise/adapter.ts"
+
+const registration = { dispose: Effect.void }
+
+const host: Context = {
+  options: {},
+  agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
+  machine: { hook: () => Effect.succeed(registration) },
+  runtime: { transform: () => Effect.succeed(registration) },
+  harness: { transform: () => Effect.succeed(registration) },
+  subscription: { report: () => Effect.void },
+  event: { subscribe: () => Stream.never },
+}
 
 test("an iterator the plugin closed is not returned again when the plugin unloads", async () => {
-  vi.resetModules()
-  vi.doMock("effect", async (importOriginal) => {
-    const effect = await importOriginal<typeof import("effect")>()
-    const toAsyncIterableWith = vi.fn((stream: never, context: never) => {
-      const source = effect.Stream.toAsyncIterableWith(stream, context)[Symbol.asyncIterator]()
-      const iterator = { next: () => source.next(), return: vi.fn(() => source.return!()) }
-      return { [Symbol.asyncIterator]: () => iterator }
-    })
-    return { ...effect, Stream: { ...effect.Stream, toAsyncIterableWith } }
-  })
-  try {
-    const mocked = await import("effect")
-    const { fromPromise } = await import("../src/promise/adapter.ts")
-    const host = { options: {}, event: { subscribe: () => Stream.make(1, 2, 3) } } as unknown as Context
-    const scope = Scope.makeUnsafe()
-    await Effect.runPromise(
-      fromPromise({
-        id: "t",
-        setup: async (ctx) => {
-          for (let i = 0; i < 2; i++) for await (const _ of ctx.event.subscribe()) break
-        },
-      })(host).pipe(Scope.provide(scope)),
-    )
-    await Effect.runPromise(Scope.close(scope, { _tag: "Success", value: undefined } as never))
-    const iterators = vi
-      .mocked(mocked.Stream.toAsyncIterableWith)
-      .mock.results.map(
-        (r) => (r.value as AsyncIterable<unknown>)[Symbol.asyncIterator]() as { return: ReturnType<typeof vi.fn> },
-      )
-    expect(iterators.map((i) => i.return.mock.calls.length)).toEqual([1, 1])
-  } finally {
-    vi.doUnmock("effect")
-    vi.resetModules()
-  }
+  const returns: Array<number> = []
+  const scope = Scope.makeUnsafe()
+
+  await Effect.runPromise(
+    fromPromise({
+      id: "t",
+      setup: async (ctx) => {
+        for (let i = 0; i < 2; i++) {
+          const iterator = ctx.event.subscribe()[Symbol.asyncIterator]()
+          const close = iterator.return!
+          returns.push(0)
+          iterator.return = () => {
+            returns[i]!++
+
+            return close()
+          }
+
+          await iterator.return()
+        }
+      },
+    })(host).pipe(Scope.provide(scope)),
+  )
+  await Effect.runPromise(Scope.close(scope, Exit.void))
+
+  expect(returns).toEqual([1, 1])
 })

@@ -13,16 +13,19 @@ export default Runtime.handler(Commands.commands.run, (o) =>
     const [harness, raw] = o.words.length === 2 ? o.words : [undefined, o.words[0]!]
     const prompt = yield* input(raw, "prompt")
     const files = yield* readAttachments(o.file)
+
     const spawned = yield* requested((client, request, ping) =>
       Effect.gen(function* () {
         if (Option.isSome(o.runtime) && ping.capabilities?.spawnRuntime !== true)
           return yield* new LaunchFailed({
             message: "this vibestd does not take --runtime on vibest run; run vibest update",
           })
+
         if (files.length > 0 && ping.capabilities?.spawnFiles !== true)
           return yield* new LaunchFailed({
             message: "this vibestd does not take --file on vibest run; run vibest update",
           })
+
         if (
           harness === undefined &&
           /^\S+$/.test(prompt) &&
@@ -31,8 +34,9 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           return yield* new EmptyInput({
             message: `the prompt is missing: ${prompt} is a harness; give the prompt after it`,
           })
+
         return yield* client.Spawn({
-          ...(request === undefined ? {} : { request }),
+          ...(request !== undefined && { request }),
           harness,
           agent: o.agent,
           prompt,
@@ -45,11 +49,12 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           runtime: Option.getOrUndefined(o.runtime),
           machine: Option.getOrUndefined(o.machine),
           callerEnv: callerEnvOf(),
-          ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
-          ...(files.length === 0 ? {} : { files }),
+          ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+          ...(files.length !== 0 && { files }),
         })
       }),
     )
+
     yield* json({ id: spawned.id })
   }),
 )

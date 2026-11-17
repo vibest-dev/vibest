@@ -4,6 +4,7 @@ import {
   Effect,
   Exit,
   Option,
+  Predicate,
   Ref,
   Schema,
   Stream,
@@ -12,7 +13,7 @@ import {
   type Scope,
 } from "effect"
 
-import type { MachineEvent, MachineHooks, MachineNote } from "./effect/index.ts"
+import type { MachineEvent, MachineHooks, MachineNote, PluginOptions } from "./effect/index.ts"
 import type { Plugin } from "./effect/plugin.ts"
 import type * as Runtime from "./effect/runtime.ts"
 
@@ -35,9 +36,12 @@ const until = <A, E, R>(
 ) =>
   Effect.gen(function* () {
     const deadline = Date.now() + Duration.toMillis(timeout)
+
     for (;;) {
       const value = yield* read
+
       if (ready(value)) return value
+
       if (Date.now() >= deadline) return yield* Effect.fail(fail(member, `${what} within ${Duration.format(timeout)}`))
       yield* Effect.sleep("100 millis")
     }
@@ -77,7 +81,8 @@ export const runtimeContract = (
       launch: { argv: ["/bin/sh"], env: { VBT_CONTRACT: marker } },
       label: `vibest contract ${marker}`,
     })
-    yield* that("open", typeof terminal.id === "string" && terminal.id !== "", "returned a terminal without an id")
+
+    yield* that("open", Predicate.isString(terminal.id) && terminal.id !== "", "returned a terminal without an id")
 
     yield* runtime.send(terminal, { text: ran("sent"), keys: ["enter"] })
     yield* until(
@@ -105,6 +110,7 @@ export const runtimeContract = (
             e.code === "not_found" ? Effect.succeed("absent" as const) : Effect.fail(e),
           ),
         )
+
       yield* that(
         "state",
         state === "absent" || state === "idle" || state === "working" || state === "blocked" || state === "unknown",
@@ -116,7 +122,7 @@ export const runtimeContract = (
       const session = yield* runtime.session(terminal)
       yield* that(
         "session",
-        session === null || typeof session === "string",
+        session === null || Predicate.isString(session),
         `returned something other than a conversation id or null: ${JSON.stringify(session)}`,
       )
     }
@@ -127,7 +133,7 @@ export const runtimeContract = (
       const argv = runtime.attach(undefined)
       yield* that(
         "attach",
-        argv.every((part) => typeof part === "string" && part !== ""),
+        argv.every((part) => Predicate.isString(part) && part !== ""),
         "returned something other than a non-empty argv",
       )
     }
@@ -138,25 +144,30 @@ export const runtimeContract = (
       launch: { argv: ["/bin/sh", "-c", "exit 3"], env: { VBT_CONTRACT: marker } },
       label: `vibest contract ${marker} exit`,
     })
+
     const gone = yield* until(
       "process",
       runtime.process(ended).pipe(Effect.exit),
       (exit) => {
         if (Exit.isFailure(exit)) {
           const error = Cause.squash(exit.cause) as { readonly code?: string }
+
           return error.code === "not_found"
         }
+
         return !exit.value.running
       },
       "did not report the exited program not running",
       timeout,
     )
+
     if (Exit.isSuccess(gone) && gone.value.exitCode !== undefined)
       yield* that(
         "process",
         gone.value.exitCode === 3,
         `reported exit code ${gone.value.exitCode} for a program that ran exit 3`,
       )
+
     if (runtime.run !== undefined && Exit.isSuccess(gone)) {
       yield* runtime.run(ended, { argv: ["/bin/sh", "-c", ran("again")], env: { VBT_CONTRACT: marker } })
       yield* until(
@@ -167,6 +178,7 @@ export const runtimeContract = (
         timeout,
       )
     }
+
     if (Exit.isSuccess(gone)) yield* runtime.close(ended)
 
     yield* runtime.close(terminal)
@@ -189,7 +201,7 @@ export const runtimeContract = (
 
 export const machineHooks = (
   plugin: Plugin,
-  options: Readonly<Record<string, unknown>> = {},
+  options: PluginOptions = {},
 ): Effect.Effect<
   {
     readonly runtimes: ReadonlyArray<Runtime.RuntimeDefinition>
@@ -204,18 +216,22 @@ export const machineHooks = (
 > =>
   Effect.gen(function* () {
     const runtimes: Array<Runtime.RuntimeDefinition> = []
+
     const hooks: Array<{
       readonly name: string
       readonly runtime: string | undefined
       readonly callback: (event: MachineEvent) => Effect.Effect<ReadonlyArray<MachineNote> | void>
     }> = []
+
     const editor: Runtime.RuntimeEditor = {
       add: (definition) => {
         const at = runtimes.findIndex((existing) => existing.id === definition.id)
+
         if (at === -1) runtimes.push(definition)
         else runtimes[at] = definition
       },
     }
+
     const registration = { dispose: Effect.void }
     yield* plugin.effect({
       options,
@@ -225,6 +241,7 @@ export const machineHooks = (
           name === "connect" || name === "remove"
             ? Effect.sync(() => {
                 hooks.push({ name, runtime: hookOptions?.runtime, callback })
+
                 return registration
               })
             : Effect.die(new Error(`unsupported hook machine.${String(name)}`)),
@@ -234,17 +251,20 @@ export const machineHooks = (
       subscription: { report: () => Effect.void },
       event: { subscribe: () => Stream.empty },
     })
+
     return {
       runtimes,
       fire: (hook, input, runtime) =>
         Effect.gen(function* () {
           const notes: Array<MachineNote> = []
+
           for (const entry of hooks)
             if (
               entry.name === hook &&
               (runtime === undefined || entry.runtime === undefined || entry.runtime === runtime)
             )
               notes.push(...((yield* entry.callback(Object.freeze({ ...input }))) ?? []))
+
           return notes
         }),
     }

@@ -26,6 +26,7 @@ export const OUTBOX_PAGE = 100
 const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
   const { read } = new TextEncoder().encodeInto(row.content, new Uint8Array(OUTBOX_ITEM_MAX))
+
   return read === row.content.length
     ? { ...base, content: row.content }
     : { ...base, content: row.content.slice(0, read), cut: true }
@@ -46,10 +47,12 @@ const make = Effect.gen(function* () {
       input: PayloadOf<"Peer.Spawn">,
     ) {
       const bytes = new TextEncoder().encode(input.prompt).length
+
       if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
       const rows = yield* db.remote.remoteProjects
       const exact = rows.filter((row) => row.remote === input.repository)
       const { identity } = input
+
       const matched =
         exact.length > 0 || identity === undefined
           ? exact
@@ -58,22 +61,28 @@ const make = Effect.gen(function* () {
               (row) => Effect.map(repositoryIdentity(row.remote), (id) => (id === identity ? [row] : [])),
               { concurrency: 8 },
             )).flat()
+
       const found = matched.filter((row, i) => matched.findIndex((other) => other.id === row.id) === i)
       const here = `${self.name} has no checkout of ${input.repository}: clone it there and run vibest project add in it`
+
       if (found.length === 0) return yield* new NoProject({ message: here })
+
       if (found.length > 1)
         return yield* new NoProject({
           message: `${self.name} has several projects for ${input.repository}: ${found.map((p) => p.directory ?? p.id).join(", ")}`,
         })
       const target = found[0]!
+
       if (target.repositories !== 1 || target.directory === null)
         return yield* new NoProject({
           message: `${self.name}'s project for ${input.repository} has several repositories; another machine runs agents only in a single-repository project`,
         })
+
       if (!(yield* git.hasCommit(target.directory, input.commit)))
         return yield* new NoCommit({
           message: `${self.name}'s checkout ${target.directory} does not have ${input.commit}: push it and fetch it there`,
         })
+
       const spawned = yield* sessions
         .spawn({
           machine: { id: "local" },
@@ -92,11 +101,12 @@ const make = Effect.gen(function* () {
           files: input.files,
         })
         .pipe(Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })))
+
       return {
         session: spawned.id,
         harness: spawned.harness,
-        ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
-        ...(spawned.model === undefined ? {} : { model: spawned.model }),
+        ...(spawned.provider !== undefined && { provider: spawned.provider }),
+        ...(spawned.model !== undefined && { model: spawned.model }),
         directory: target.directory,
         decidedBy: spawned.decidedBy,
         trace: spawned.trace,
@@ -114,10 +124,12 @@ const make = Effect.gen(function* () {
             Effect.forkScoped,
           )
           let cursor = 0
+
           const pages = Stream.paginate(undefined, () =>
             db.remote.outboxOf(peer, cursor, OUTBOX_PAGE).pipe(
               Effect.map((rows) => {
                 cursor = rows.at(-1)?.seq ?? cursor
+
                 return [
                   rows.map(outboxItem),
                   rows.length < OUTBOX_PAGE ? Option.none() : Option.some(undefined),
@@ -125,6 +137,7 @@ const make = Effect.gen(function* () {
               }),
             ),
           )
+
           return Stream.concat(Stream.make(undefined), Stream.fromQueue(slot)).pipe(
             Stream.flatMap(() => pages, { concurrency: 1 }),
           )

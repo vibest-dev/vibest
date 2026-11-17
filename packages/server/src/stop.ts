@@ -23,25 +23,33 @@ export const stopOnce =
       if (!(yield* drain.begin)) return yield* new DaemonStopping({ method })
       let last: Array<Blocker> = []
       const busy = (id: string) => ({ id, reason: "daemon operation still running" })
+
       const blockers = Effect.gen(function* () {
         last = (yield* drain.pending).map(busy)
+
         if (last.length > 0) return last
         last = [{ id: "inbox", reason: "checking unsettled delivery" }]
         last = (yield* deliveringInbox).map((row) => ({
           id: `inbox ${row.id}`,
           reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
         }))
+
         return last
       })
+
       const acceptedOnceIdle = Effect.gen(function* () {
         if ((yield* blockers).length > 0) return Option.none<true>()
+
         if (yield* drain.accept) return Option.some(true as const)
         last = (yield* drain.pending).map(busy)
+
         return Option.none<true>()
       })
+
       const reopenUnlessShuttingDown = Effect.flatMap(Deferred.isDone(shutdown), (done) =>
         done ? Effect.void : drain.reopen,
       )
+
       return yield* Effect.gen(function* () {
         const accepted = yield* awaitEvent(
           acceptedOnceIdle,
@@ -52,8 +60,10 @@ export const stopOnce =
           DRAIN_TIMEOUT,
           Effect.map(acceptedOnceIdle, Option.isSome),
         ).pipe(Effect.provideService(Bus.Service, bus))
+
         if (!accepted) return yield* new DaemonBusy({ blockers: last })
         yield* Effect.uninterruptible(takeOver.pipe(Effect.andThen(Deferred.succeed(shutdown, undefined))))
+
         return { instance }
       }).pipe(Effect.onError(() => reopenUnlessShuttingDown))
     })

@@ -9,11 +9,13 @@ import { group } from "./group.ts"
 export const make = Effect.gen(function* () {
   const { scope, machineFromCaller, cliOnly, resolveAt } = yield* CallerChecks.Service
   const entrySession = yield* EntrySession.Service
+
   return {
     Launch: ({ argv, agent, focus, runtime, callerEnv, runtimeSession }) =>
       Effect.gen(function* () {
         const { id, directory } = yield* cliOnly("Launch").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
         const at = yield* machineFromCaller({ callerEnv, runtimeSession })
+
         return yield* entrySession.launch({ projectId: id, root: directory, at, argv, focus, runtime, agent })
       }).pipe(
         Effect.catchTag("EntryRunning", (e) =>
@@ -31,6 +33,7 @@ export const make = Effect.gen(function* () {
         const { id, directory } = yield* cliOnly("Project.StartEntry").pipe(
           Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
         )
+
         return yield* entrySession.start({ projectId: id, root: directory, harness, agent, provider, model, runtime })
       }),
 
@@ -39,6 +42,7 @@ export const make = Effect.gen(function* () {
         const { id, directory } = yield* cliOnly("Project.EntrySession").pipe(
           Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
         )
+
         return yield* entrySession.claim({
           projectId: id,
           directory,
@@ -75,6 +79,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const c = yield* cliOnly("Project.FocusEntry")
         const project = yield* resolveAt(c.repositoryRoot)
+
         return yield* entrySession.focus(project.id)
       }),
 
@@ -84,6 +89,7 @@ export const make = Effect.gen(function* () {
     "Project.StopEntry": ({ runtime, address }) =>
       Effect.gen(function* () {
         const { id } = yield* cliOnly("Project.StopEntry").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
+
         return yield* entrySession
           .stop(id, runtime, address)
           .pipe(

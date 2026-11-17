@@ -1,6 +1,6 @@
 import { type SocketConnector } from "@vibest/client/socket-connector"
 import { type Layout } from "@vibest/schema/layout"
-import { Effect } from "effect"
+import { Effect, Predicate } from "effect"
 import { Command } from "effect/cli"
 import { type HttpClient } from "effect/http"
 
@@ -16,10 +16,12 @@ export type Input<Value> =
       ? Input
       : never
 
-type RuntimeHandler = (input: unknown) => Effect.Effect<void, unknown, Environment>
+type RuntimeHandler = <Input>(input: Input) => Effect.Effect<void, unknown, Environment>
+
 type Loader<Node extends Spec.Any> = () => Promise<{
   default: (input: Input<Node>) => Effect.Effect<void, any, Environment>
 }>
+
 type ProvidedCommand = Command.Command<string, unknown, unknown, unknown, Environment>
 
 export type Handlers<Node extends Spec.Any> = keyof Node["commands"] extends never
@@ -49,20 +51,26 @@ export function handler<const Node extends Spec.Any, Error>(
   return run
 }
 
-export function handlers<const Root extends Spec.Any>(root: Root, handlers: Handlers<Root>) {
+export function handlers<const Root extends Spec.Any>(root: Root, handlers: Handlers<Root>): Array<LazyHandler>
+export function handlers(root: Spec.Any, handlers: RuntimeHandlers): Array<LazyHandler> {
   const result: Array<LazyHandler> = []
 
   function add(node: Spec.Any, value: RuntimeHandlers | undefined) {
     if (value === undefined) throw new Error(`no handler registered for command ${node.name}`)
-    if (typeof value === "function") {
+
+    if (Predicate.isFunction(value)) {
       result.push({ spec: node.spec, load: value })
+
       return
     }
+
     if (value.$) result.push({ spec: node.spec, load: value.$ })
+
     for (const [name, child] of Object.entries(node.commands)) add(child, value[name])
   }
 
-  add(root, handlers as unknown as RuntimeHandlers)
+  add(root, handlers)
+
   return result
 }
 
@@ -80,14 +88,18 @@ export function run(
 
 function provide(node: Spec.Any, handlers: ReadonlyArray<LazyHandler>, extra?: Extra): ProvidedCommand {
   const handler = handlers.find((handler) => handler.spec === node.spec)
+
   const spec = handler
     ? node.spec.pipe(
         Command.withHandler((input) => Effect.flatMap(Effect.promise(handler.load), (module) => module.default(input))),
       )
     : node.spec
+
   const children = Object.entries(node.commands).map(([name, child]) => [name, provide(child, handlers)] as const)
+
   if (children.length === 0) return spec as ProvidedCommand
   const at = extra === undefined ? children.length : children.findIndex(([name]) => name === extra.after) + 1
+
   return spec.pipe(
     Command.withSubcommands([
       ...children.slice(0, at).map(([, child]) => child),

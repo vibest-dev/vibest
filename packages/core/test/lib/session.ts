@@ -37,6 +37,7 @@ import {
   Layer,
   Path,
   Ref,
+  type Schema,
   Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -97,11 +98,12 @@ const subscriptions = LayerNode.make({
 
 export type PluginEntry =
   | VibestPlugin.Plugin.Plugin
-  | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
+  | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Schema.JsonObject }
 
 const candidateOf = (entry: PluginEntry): Candidate => {
   const plugin = "plugin" in entry ? entry.plugin : entry
   const pluginOptions = "plugin" in entry ? (entry.options ?? {}) : {}
+
   return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
 }
 
@@ -119,14 +121,17 @@ export const pluginsHost = (
     { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
   ]
+
   return LayerNode.make({
     name: "test/Plugins",
     layer: Layer.effectContext(
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
+
         const archivePlugin = yield* archiveOnIdlePlugin.pipe(
           Effect.provideService(ArchiveOnIdle, yield* archiveOnIdle),
         )
+
         const loaded = [
           ...candidates,
           {
@@ -136,10 +141,12 @@ export const pluginsHost = (
             plugin: archivePlugin,
           },
         ]
+
         if (options.activateLate) {
           const release = host.holdNow()
           yield* host.activate(loaded).pipe(Effect.andThen(release), Effect.forkScoped)
         } else yield* host.activate(loaded)
+
         return Context.make(Plugins.Service, host.service).pipe(
           Context.add(PluginHost, {
             load: (added) => host.activate([...loaded, ...added.map(candidateOf)]),
@@ -219,12 +226,14 @@ export const cryptoReplacement = (decorate: (crypto: Crypto.Crypto) => Crypto.Cr
 
 export const scriptedLeaves = (leaves: ReadonlyArray<string>) => {
   let drawn = 0
+
   return (crypto: Crypto.Crypto): Crypto.Crypto => ({
     ...crypto,
     randomBytes: (size) =>
       size === 2
         ? Effect.sync(() => {
             const leaf = leaves[drawn++ % leaves.length]!
+
             return Uint8Array.from([Number.parseInt(leaf.slice(0, 2), 16), Number.parseInt(leaf.slice(2), 16)])
           })
         : crypto.randomBytes(size),
@@ -238,6 +247,7 @@ export const makeRepository = Effect.gen(function* () {
   yield* fs.writeFileString(path.join(root, "README.md"), "hi\n")
   yield* fs.writeFileString(path.join(root, "CLAUDE.md"), "local rules\n")
   yield* (yield* FakeGit).repository(root, { files: { "README.md": "hi\n" } })
+
   return root
 }).pipe(Effect.orDie)
 
@@ -295,8 +305,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly models?: ReadonlyArray<string>
   readonly maxSessions?: number
   readonly plugins?: ReadonlyArray<
-    | VibestPlugin.Plugin.Plugin
-    | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
+    VibestPlugin.Plugin.Plugin | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Schema.JsonObject }
   >
   readonly pluginTimeout?: Duration.Input
   readonly activateLate?: boolean
@@ -311,14 +320,16 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly version?: string
 }
 
-const unusedRuntime = (
+export const unusedRuntime = (
   id: string,
-  caller: VibestPlugin.Runtime.RuntimeCaller,
+  caller: VibestPlugin.Runtime.RuntimeCaller | undefined,
+  overrides: Partial<VibestPlugin.Runtime.RuntimeDefinition> = {},
 ): VibestPlugin.Runtime.RuntimeDefinition => {
   const unused = () => Effect.die(new Error(`runtime ${id} is only a caller`))
+
   return {
     id,
-    caller,
+    ...(caller !== undefined && { caller }),
     status: () => Effect.succeed({ status: "online" }),
     open: unused,
     send: unused,
@@ -326,6 +337,7 @@ const unusedRuntime = (
     process: unused,
     close: unused,
     events: Stream.empty,
+    ...overrides,
   }
 }
 
@@ -337,11 +349,11 @@ export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCal
   })
 
 const harnessStandIn = (options: TestOptions) => ({
-  ...(options.hooked === undefined ? {} : { hooked: options.hooked }),
-  ...(options.unusable === undefined ? {} : { unusable: options.unusable }),
-  ...(options.models === undefined ? {} : { models: options.models }),
-  ...(options.missingBinary === undefined ? {} : { missingBinary: options.missingBinary }),
-  ...(options.harnesses === undefined ? {} : { harnesses: options.harnesses }),
+  ...(options.hooked !== undefined && { hooked: options.hooked }),
+  ...(options.unusable !== undefined && { unusable: options.unusable }),
+  ...(options.models !== undefined && { models: options.models }),
+  ...(options.missingBinary !== undefined && { missingBinary: options.missingBinary }),
+  ...(options.harnesses !== undefined && { harnesses: options.harnesses }),
 })
 
 export const sessionFrom = (options: TestOptions = {}) =>
@@ -364,8 +376,8 @@ export const sessionFrom = (options: TestOptions = {}) =>
         : [DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, options.identity))]),
     ],
     pluginsHost(options.plugins ?? [], {
-      ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),
-      ...(options.activateLate === undefined ? {} : { activateLate: options.activateLate }),
+      ...(options.pluginTimeout !== undefined && { timeout: options.pluginTimeout }),
+      ...(options.activateLate !== undefined && { activateLate: options.activateLate }),
     }),
   )
 
@@ -397,8 +409,10 @@ export const restartSessions = Effect.gen(function* () {
     PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
     Spawn.node.replace(defaultSpawn),
   ]
+
   const fresh = yield* Layer.build(
     Layer.fresh(LayerNode.compile(LayerNode.group([Session.node]), { replacements: held })),
   )
+
   return Context.get(fresh, Session.Service)
 })

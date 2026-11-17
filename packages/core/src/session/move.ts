@@ -38,13 +38,18 @@ const limitFailure = (
   error: string,
 ) => {
   const text = rows
+    .values()
     .filter((row) => row.harness === harness && (provider === undefined || row.provider === provider) && isLimited(row))
     .map((row) => {
       const who = row.provider === "" ? harness : `${harness}/${row.provider}`
+
       return `${who}: ${exhaustedText(row.limits)}`
     })
+    .toArray()
     .join("; ")
+
   const named = provider === undefined || provider === "" ? harness : `${harness}/${provider}`
+
   return text === "" ? `${named}: ${error}` : text
 }
 
@@ -72,6 +77,7 @@ export const make = Effect.gen(function* () {
   ) {
     const newerExecution = Effect.map(db.session.limitSource(session.id, limited), (fresh) => fresh === undefined)
     const source = yield* db.session.limitSource(session.id, limited)
+
     if (source === undefined) return true
     const task = source.working || fallbackTask || source.delivered
     let row = session
@@ -80,77 +86,105 @@ export const make = Effect.gen(function* () {
     let gone = false
     const inPlace = current !== undefined && h.run !== undefined && pidOf(session) !== undefined
     let running: "old" | "mine" | "none" = "old"
+
     const endRunning = Effect.gen(function* () {
       if (running === "none") return "sent" as const
       const pid = pidOf((yield* db.session.getSession(row.id)) ?? row)
       const sent = pid === undefined ? "gone" : yield* processes.terminate(pid)
+
       if (sent !== "denied") {
         yield* db.session.endProcess(row.id, limitedEnded ? "move" : "limited")
         limitedEnded = true
         running = "none"
       }
+
       return sent
     })
+
     const at = yield* Clock.currentTimeMillis
     const stored = yield* db.session.attempts(session.id)
     const provider = session.process?.provider ?? null ?? undefined
+
     const recorded = stored.some((a) => a.harness === harnessIdOf(session) && a.provider === provider)
       ? stored
       : [...stored, { harness: harnessIdOf(session), provider, outcome: "limited" as const, at }]
+
     let limitedEnded = false
+
     const endLeft = Effect.gen(function* () {
       yield* db.session.endProcess(row.id, limitedEnded ? "move" : "limited")
       limitedEnded = true
     })
+
     const skipped: Array<VibestPlugin.Attempt> = []
+
     const skip = (harness: string, outcome: Exclude<VibestPlugin.Attempt["outcome"], "limited">) => {
       if (!skipped.some((a) => a.harness === harness)) skipped.push({ harness, provider: undefined, outcome, at })
     }
+
     const attempts = (): ReadonlyArray<VibestPlugin.Attempt> => [
       ...recorded.map((a) => ({ ...a, provider: a.provider })),
       ...skipped,
     ]
+
     const left = () =>
       Effect.gen(function* () {
         const mine = recorded.map((a) => (a.provider !== undefined ? `${a.harness}/${a.provider}` : a.harness))
+
         const reported = (yield* subscriptions.list)
           .filter(isLimited)
           .map((s) => (s.provider !== "" ? `${s.harness}/${s.provider}` : s.harness))
+
         const other =
           skipped.length === 0 ? "" : `; ${skipped.map((a) => a.harness).join(", ")} tried and did not start`
+
         const all = reported.length === 0 ? "" : ` (${reported.join(", ")} limited)`
+
         return `no harness left for ${row.id}: ${mine.join(", ")} hit a usage limit${other} and no other candidate is available${all}`
       })
+
     const giveUp = (why: string) =>
       Effect.gen(function* () {
         const fresh = (yield* db.session.getSession(row.id)) ?? row
+
         if (inPlace) {
           if (running === "mine") yield* endRunning
           yield* finish(fresh, "failed", why)
+
           if (running === "none") yield* exited(fresh.id, limitedEnded ? "move" : "limited")
+
           return false
         }
+
         if (!(owns && terminal)) {
           yield* finish(fresh, "failed", why)
+
           return false
         }
+
         const closed = yield* h.close(terminal).pipe(Effect.exit)
+
         if (Exit.isFailure(closed)) {
           yield* finish(
             fresh,
             "failed",
             `${fresh.id} stopped after a usage limit, but closing its terminal failed (${errorMessage(closed.cause)})`,
           )
+
           return false
         }
+
         yield* finish(fresh, "failed", why)
         yield* exited(fresh.id, limitedEnded ? "move" : "limited")
+
         return false
       })
+
     const options = yield* harnessOptions.pipe(
       Effect.provideService(Harness.Service, harness),
       Effect.provideService(Harnesses.Service, harnesses),
     )
+
     const thisExecution = [
       ...(yield* db.session.limitedSince(session.id, source.since)).map((l) => ({
         harness: l.harness,
@@ -158,28 +192,35 @@ export const make = Effect.gen(function* () {
       })),
       { harness: harnessIdOf(session), provider: provider ?? "" },
     ]
+
     const ruledOut = (
       move: { harness: string | undefined; provider?: string | undefined } | undefined,
       rows: ReadonlyArray<Subscription>,
     ) => {
       if (move === undefined || harnesses.find(move.harness) === undefined) return true
       const provider = move.provider ?? ""
+
       if (thisExecution.some((l) => l.harness === move.harness && l.provider === provider)) return true
+
       return attempts().some(
         (a) =>
           a.harness === move.harness &&
           (a.outcome !== "limited" || a.provider === undefined || (a.provider === provider && stillLimited(a, rows))),
       )
     }
+
     const { root, cwd } = yield* locate(session)
+
     const base = {
       project: root,
       agent: session.agent,
       parentSessionId: source.parentSessionId,
       harnesses: options,
     }
+
     while (true) {
       const rows = yield* subscriptions.list
+
       const decided = yield* plugins
         .fail({
           ...base,
@@ -192,21 +233,29 @@ export const make = Effect.gen(function* () {
           attempts: attempts(),
         })
         .pipe(Effect.exit)
+
       if (Exit.isFailure(decided)) {
         const reason = Cause.squash(decided.cause)
+
         if (reason instanceof PluginsNotActive) return yield* giveUp(reason.message)
+
         return yield* giveUp(`${yield* left()}: ${errorMessage(decided.cause)}`)
       }
+
       if (decided.value.move === undefined) {
         const why = limitFailure(rows, harnessIdOf(row), row.process?.provider ?? null ?? undefined, error)
+
         const tried =
           skipped.length === 0
             ? ""
             : `; ${skipped.map((attempt) => attempt.harness).join(", ")} tried and did not start`
+
         return yield* giveUp(`${why}${tried}`)
       }
+
       if (ruledOut(decided.value.move, rows)) return yield* giveUp(yield* left())
       const move = decided.value.move!
+
       const decidedStart = yield* plugins
         .start({
           ...base,
@@ -221,47 +270,61 @@ export const make = Effect.gen(function* () {
           machines: [],
         })
         .pipe(Effect.exit)
+
       if (Exit.isFailure(decidedStart)) {
         const reason = Cause.squash(decidedStart.cause)
+
         if (reason instanceof PluginsNotActive) return yield* giveUp(reason.message)
       }
+
       const next = Exit.isSuccess(decidedStart) ? decidedStart.value : undefined
+
       if (next === undefined || next.harness === undefined || harnesses.find(next.harness) === undefined) {
         skip(move.harness, "refused")
         continue
       }
+
       if (ruledOut(next, rows)) return yield* giveUp(yield* left())
+
       const checked = yield* preflight(next.harness, next.provider ?? null, next.model ?? null).pipe(
         Effect.provideService(Harness.Service, harness),
         Effect.provideService(Harnesses.Service, harnesses),
         Effect.exit,
       )
+
       if (Exit.isFailure(checked)) {
         skip(next.harness, "unavailable")
         continue
       }
+
       if (!limitedEnded && (yield* newerExecution)) return true
+
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
           yield* finish(row, "failed", `${row.id} stayed on ${harnessIdOf(row)}: SIGTERM to its harness was refused`)
+
           return false
         }
       } else if (terminal !== undefined) {
         const closed = yield* h.close(terminal).pipe(Effect.exit)
+
         if (Exit.isFailure(closed)) {
           yield* finish(
             row,
             "failed",
             `${row.id} stayed on ${harnessIdOf(row)}: closing its terminal failed (${errorMessage(closed.cause)})`,
           )
+
           return false
         }
+
         terminal = undefined
         owns = false
         gone = true
         yield* endLeft
       } else yield* endLeft
       const harnessSessionId = (yield* harnesses.get(next.harness)).ownSessionId ? yield* newId() : null
+
       const nextRow: SessionRow = {
         ...row,
         process:
@@ -275,8 +338,11 @@ export const make = Effect.gen(function* () {
                 conversation: harnessSessionId,
               },
       }
+
       const plan = yield* launching(nextRow, false, yield* taskInput(nextRow, next.prompt))
+
       if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
+
       const placed = inPlace
         ? yield* plan
             .starting(
@@ -298,31 +364,41 @@ export const make = Effect.gen(function* () {
               }),
             )
             .pipe(Effect.exit)
+
       if (Exit.isFailure(placed)) {
         const failed = Cause.squash(placed.cause)
         const startDeath = failed instanceof RuntimeError && failed.code === "failed"
+
         if (!startDeath) {
           yield* finish(
             row,
             "failed",
             `${row.id} stopped after a usage limit, but placing the next pane failed (${errorMessage(placed.cause)})`,
           )
+
           if (gone || inPlace) yield* exited(row.id, "move")
+
           return false
         }
+
         skip(next.harness, "start_failed")
         continue
       }
+
       terminal = placed.value
+
       if (inPlace) running = "mine"
       else owns = true
       row = (yield* db.session.getSession(row.id))!
       const prompted = yield* plan.deliver(h, row, terminal).pipe(Effect.exit)
+
       if (Exit.isFailure(prompted) || prompted.value !== undefined) {
         skip(next.harness, "not_confirmed")
         continue
       }
+
       yield* show(h, row, terminal, root)
+
       return true
     }
   })

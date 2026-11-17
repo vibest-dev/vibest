@@ -40,4 +40,5 @@ export const session = (
   lastActive: 1,
   ...patch,
 })
+
 export const place = { runtime: RUNTIME, address: { machine: "local", id: "test/p1" } }

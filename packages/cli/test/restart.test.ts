@@ -64,6 +64,7 @@ const busyPiSubagent = Effect.gen(function* () {
     { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
     { agent: "coordinator" },
   )
+
   const { id } = yield* sessions.spawn({
     agent: "general",
     machine: { id: "local" },
@@ -75,9 +76,11 @@ const busyPiSubagent = Effect.gen(function* () {
     runtime: "herdr",
     harness: "pi",
   })
+
   yield* until(db.session.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
   yield* sessions.check(id)
   const pid = (yield* db.session.getSession(id))!.process!.pid!
+
   return { db, sessions, id, pid }
 })
 
@@ -183,6 +186,7 @@ describe("restart in place", () => {
       const entry = (yield* db.session.entryOf(projectId))!
       yield* db.session.noteConversation(entry.id, "conversation-1")
       yield* db.session.patchLive(entry.id, { pid: 100 })
+
       return { db, herdr, id: entry.id, projectId }
     })
 
@@ -257,6 +261,7 @@ describe("restart in place", () => {
       )
       assert.ok(entryRun.env.includes(`VIBEST_PROCESS=${yield* db.session.currentProcessId(entryId)}`))
       assert.strictEqual(entryRun.argv[0], "pi")
+
       const identity = new Set([
         "VIBEST_SESSION_ID",
         "VIBEST_PROCESS",
@@ -268,6 +273,7 @@ describe("restart in place", () => {
         "VIBEST_HOME",
         "VIBEST_COMMAND",
       ])
+
       for (const pair of entryRun.env) assert.ok(identity.has(pair.slice(0, pair.indexOf("="))), pair)
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
   )

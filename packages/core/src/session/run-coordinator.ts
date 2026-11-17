@@ -21,8 +21,10 @@ export const make = <Key, Wake>(options: {
         Effect.andThen(
           Effect.suspend(() => {
             const next = execution.pending
+
             if (next === undefined) return Effect.void
             execution.pending = undefined
+
             return Effect.yieldNow.pipe(Effect.andThen(loop(key, execution, next.wake)))
           }),
         ),
@@ -47,6 +49,7 @@ export const make = <Key, Wake>(options: {
     const wake = (key: Key, next: Wake) =>
       Effect.sync(() => {
         const execution = executions.get(key)
+
         if (execution === undefined) return start(key, next)
         execution.pending = {
           wake: execution.pending === undefined ? next : options.merge(execution.pending.wake, next),

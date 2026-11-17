@@ -18,7 +18,7 @@ import {
 import {
   Herdr,
   HerdrProtocolMismatch,
-  type HerdrShape,
+  type HerdrClient,
   type PushFrame,
   SocketConnector,
   type Subscription,
@@ -52,7 +52,7 @@ export class HerdrPool extends Context.Service<
   HerdrPool,
   {
     readonly resolve: (location: HerdrLocation) => Effect.Effect<string, HerdrUnreachable | HerdrProtocolMismatch>
-    readonly client: (session: string) => Effect.Effect<HerdrShape, HerdrUnreachable | HerdrProtocolMismatch>
+    readonly client: (session: string) => Effect.Effect<HerdrClient, HerdrUnreachable | HerdrProtocolMismatch>
     readonly events: Stream.Stream<SessionEvent>
     readonly restarts: Stream.Stream<string>
     readonly sessions: Effect.Effect<ReadonlyArray<string>>
@@ -68,12 +68,14 @@ export class HerdrPool extends Context.Service<
       const herdr = (socketPath: string) => Herdr.make(socketPath).pipe(Effect.provideContext(connector))
       const pubsub = yield* PubSub.unbounded<SessionEvent>()
       const restarts = yield* PubSub.unbounded<string>()
+
       const sessions = yield* SynchronizedRef.make(
         HashMap.empty<
           string,
           { readonly socketPath: string; readonly mismatch: Option.Option<HerdrProtocolMismatch> }
         >(),
       )
+
       const setMismatch = (session: string, mismatch: Option.Option<HerdrProtocolMismatch>) =>
         SynchronizedRef.update(
           sessions,
@@ -99,20 +101,20 @@ export class HerdrPool extends Context.Service<
       const watch = (session: string, socketPath: string) =>
         Effect.gen(function* () {
           const connectedBefore = yield* Ref.make(false)
+
           const connect = verifiedClient(session, socketPath).pipe(
             Effect.tap(() =>
               Ref.getAndSet(connectedBefore, true).pipe(
                 Effect.flatMap((was) => (was ? PubSub.publish(restarts, session).pipe(Effect.asVoid) : Effect.void)),
               ),
             ),
-            Effect.tapError((e) =>
-              e._tag === "HerdrProtocolMismatch" ? setMismatch(session, Option.some(e)) : Effect.void,
-            ),
+            Effect.tapErrorTag("HerdrProtocolMismatch", (e) => setMismatch(session, Option.some(e))),
             Effect.tap(() => setMismatch(session, Option.none())),
             Effect.map((h) => h.subscribe(SUBSCRIPTIONS)),
             Stream.unwrap,
             Stream.runForEach((frame) => PubSub.publish(pubsub, { session, frame })),
           )
+
           yield* connect.pipe(Effect.retry(RECONNECT_BACKOFF), Effect.andThen(Effect.sleep("1 second")), Effect.forever)
         })
 
@@ -139,6 +141,7 @@ export class HerdrPool extends Context.Service<
               stderr: "ignore",
             }),
           )
+
           yield* handle.unref
         }).pipe(
           Effect.scoped,
@@ -177,31 +180,40 @@ export class HerdrPool extends Context.Service<
         Effect.gen(function* () {
           if ("socketPath" in location) {
             const found = (yield* listSessions("?")).find((s) => s.socket_path === location.socketPath)
+
             if (!found)
               return yield* new HerdrUnreachable({
                 session: "?",
                 message: `no herdr session listens on ${location.socketPath}`,
               })
             yield* remember(found.name, found.socket_path)
+
             return found.name
           }
+
           const session = location.session
           const found = (yield* listSessions(session)).find((s) => s.name === session)
           yield* remember(session, found?.running ? found.socket_path : yield* startHeadlessServer(session))
+
           return session
         })
 
       const client = (session: string) =>
         Effect.gen(function* () {
           const known = HashMap.get(yield* SynchronizedRef.get(sessions), session)
+
           if (Option.isSome(known)) {
             if (Option.isSome(known.value.mismatch)) return yield* known.value.mismatch.value
+
             return yield* herdr(known.value.socketPath)
           }
+
           const found = (yield* listSessions(session)).find((s) => s.name === session && s.running)
+
           if (!found)
             return yield* new HerdrUnreachable({ session, message: `herdr session ${session} is not running` })
           yield* remember(session, found.socket_path)
+
           return yield* herdr(found.socket_path)
         })
 

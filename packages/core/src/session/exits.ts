@@ -27,6 +27,7 @@ export const make = Effect.gen(function* () {
   const limitOf = Effect.fn("Exits.limitOf")(function* (session: SessionRow) {
     if (executionStateOf(session) !== "failed" || (yield* db.session.creatorOf(session.id)) === undefined)
       return undefined
+
     return yield* db.session.limitedExecution(session.id)
   })
 
@@ -38,13 +39,17 @@ export const make = Effect.gen(function* () {
   ) {
     const rerun = (terminal: Terminal | undefined) =>
       move.rerun(h, session, terminal, "", false, limited.failure, limited.execution)
+
     if (exitedAt(session) !== null) return yield* rerun(undefined)
     const successor = (yield* db.session.currentProcessId(session.id)) !== limited.process
+
     if (!successor || exited) return yield* rerun(terminalOf(session).id === "" ? undefined : terminalOf(session))
     const source = yield* db.session.limitSource(session.id, limited.execution)
     const task = source === undefined ? "" : source.working || source.delivered
+
     if (task === "") return false
     yield* handTask(h, session, terminalOf(session), task)
+
     return true
   })
 
@@ -53,6 +58,7 @@ export const make = Effect.gen(function* () {
       const queued = yield* db.inbox.pendingInbox(session.id)
       const signed = queued.filter((r) => r.kind === "send" && r.sender)
       const unsigned = queued.filter((r) => !signed.includes(r))
+
       if (signed.length > 0) yield* inbox.undelivered(session, signed, `${session.id} exited before it was delivered`)
       yield* db.inbox.setInboxStatus(
         session.id,
@@ -60,8 +66,10 @@ export const make = Effect.gen(function* () {
         "failed",
       )
       const lost = unsigned.map((r) => r.message).join("\n\n")
+
       const text = (how: string) =>
         `${session.id} (${harnessIdOf(session)}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+
       if (
         execution !== undefined &&
         (yield* db.session.closeExecution(session.id, execution, "failed", {
@@ -84,16 +92,20 @@ export const make = Effect.gen(function* () {
   ) {
     const cutOff = (session.process?.placedAt ?? null) === null
     const announce = !cutOff && (executionStateOf(session) === "open" || exitedAt(session) === null)
+
     if (announce && session.entry) {
       if (execution !== undefined)
         yield* db.session.closeExecution(session.id, execution, "failed", { failure: "the harness exited" })
     } else if (announce) yield* announceExit(session, execution)
+
     if (exitedAt(session) === null) {
       yield* db.session.endProcess(session.id, cutOff ? "launch_failed" : "exited")
       yield* db.session.setStatus(session.id, "unknown")
       yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
     }
+
     if (cutOff) yield* undoCutOffStart(h, session)
+
     if (!announce)
       yield* inbox.dropQueue(
         session,
@@ -103,9 +115,11 @@ export const make = Effect.gen(function* () {
 
   const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string) {
     const session = yield* db.session.getSession(id)
+
     if (session === undefined) return
     const execution = executionStateOf(session) === "open" ? yield* db.session.openExecution(session.id) : undefined
     const limited = yield* limitOf(session)
+
     if (limited !== undefined && (yield* afterLimit(h, session, limited, true))) return
     yield* recordExit(h, session, execution)
   })

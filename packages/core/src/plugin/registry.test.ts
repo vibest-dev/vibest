@@ -8,6 +8,7 @@ type Item = { readonly id: string; readonly value: number }
 const counted = () => {
   const seen: Array<ReadonlyArray<Item>> = []
   const registry = Registry.definitions<Item>("items", (list) => Effect.sync(() => void seen.push(list)))
+
   return { registry, seen }
 }
 
@@ -108,11 +109,13 @@ describe("registry", () => {
   it.effect("a transform may not reload or register on its own registry", () =>
     Effect.gen(function* () {
       const { registry } = counted()
+
       const exit = yield* registry
         .transform(() => {
           Effect.runSync(registry.reload())
         })
         .pipe(Effect.exit)
+
       assert.isTrue(Exit.isFailure(exit))
       assert.throws(() => registry.get(), /reload inside a transform/)
     }).pipe(Effect.scoped),

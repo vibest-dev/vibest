@@ -71,6 +71,7 @@ const shown = (verb: Verb, context: PluginContext, daemon: HerdrDaemon, lines: R
   Effect.gen(function* () {
     const written: Array<string> = []
     let next = 0
+
     const result = yield* perform(
       verb,
       context,
@@ -78,6 +79,7 @@ const shown = (verb: Verb, context: PluginContext, daemon: HerdrDaemon, lines: R
       () => Effect.sync(() => lines[next++] ?? ""),
       (text) => Effect.sync(() => void written.push(text)),
     )
+
     return [...written, result].join("\n")
   })
 
@@ -128,6 +130,7 @@ describe("herdr plugin context", () => {
         worktree: { root: "/repo", checkout_path: "/repo", linked: false },
         selected_text: null,
       })
+
       const parsed = yield* parsePluginContext(raw)
       assert.strictEqual(projectDirectory(parsed), "/repo")
       assert.strictEqual(parsed.focusedPaneId, "w1:p1")
@@ -141,6 +144,7 @@ describe("herdr plugin context", () => {
       const parsed = yield* parsePluginContext(
         JSON.stringify({ focused_pane_cwd: null, workspace_cwd: "/repo", focused_pane_id: "" }),
       )
+
       assert.strictEqual(projectDirectory(parsed), "/repo")
       assert.isUndefined(parsed.focusedPaneId)
     }),
@@ -160,6 +164,7 @@ describe("herdr plugin commands", () => {
   it.effect("open-entry without a directory does not ask to open one", () =>
     Effect.gen(function* () {
       let called = false
+
       const error = yield* Effect.flip(
         shown(
           "open-entry",
@@ -168,11 +173,13 @@ describe("herdr plugin commands", () => {
             openEntry: () =>
               Effect.sync(() => {
                 called = true
+
                 return { action: "opened" as const, place: "x" }
               }),
           }),
         ),
       )
+
       assert.strictEqual(error._tag, "BadPluginContext")
       assert.isFalse(called)
     }),
@@ -182,6 +189,7 @@ describe("herdr plugin commands", () => {
     Effect.gen(function* () {
       let removed = ""
       let listed: string | undefined = "unset"
+
       const text = yield* shown(
         "stop",
         ctx({ focusedPaneId: "w1:p2" }),
@@ -189,6 +197,7 @@ describe("herdr plugin commands", () => {
           list: (directory) =>
             Effect.sync(() => {
               listed = directory
+
               return [session({ id: "aaaa1111-aaaa-4aaa-8aaa-aaaa1111aaaa", paneId: "w1:p1" }), session()]
             }),
           interrupt: (id) =>
@@ -197,11 +206,13 @@ describe("herdr plugin commands", () => {
             }),
         }),
       )
+
       assert.strictEqual(text, "stopped abcd1234")
       assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
       assert.isUndefined(listed)
 
       removed = ""
+
       const moved = yield* shown(
         "stop",
         ctx({ focusedPaneId: "w9:p9", focusedPaneAgent: "s-abcd1234abcd4abc8abcabcd1234ab" }),
@@ -213,6 +224,7 @@ describe("herdr plugin commands", () => {
             }),
         }),
       )
+
       assert.strictEqual(moved, "stopped abcd1234")
       assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
     }),
@@ -221,6 +233,7 @@ describe("herdr plugin commands", () => {
   it.effect("stop with no session in the focused pane interrupts nothing", () =>
     Effect.gen(function* () {
       let removed = false
+
       const daemon = fake({
         list: () => Effect.succeed([session()]),
         interrupt: () =>
@@ -228,6 +241,7 @@ describe("herdr plugin commands", () => {
             removed = true
           }),
       })
+
       const missing = yield* Effect.flip(shown("stop", ctx({ focusedPaneId: "w9:p9" }), daemon))
       assert.strictEqual(missing._tag, "NoFocusedSession")
       assert.match(missing.message, /w9:p9/)
@@ -240,6 +254,7 @@ describe("herdr plugin commands", () => {
   it.effect("palette prints a numbered menu and runs the chosen action in the context directory", () =>
     Effect.gen(function* () {
       let directory = ""
+
       const runs = yield* shown(
         "palette",
         project,
@@ -247,14 +262,17 @@ describe("herdr plugin commands", () => {
           list: (dir) =>
             Effect.sync(() => {
               directory = dir ?? ""
+
               return [session()]
             }),
         }),
         ["4"],
       )
+
       assert.strictEqual(runs, `${paletteMenu()}\nabcd1234  general  pi  working  w1:p2`)
       assert.strictEqual(directory, "/repo")
       let prompt = ""
+
       const started = yield* shown(
         "palette",
         project,
@@ -262,11 +280,13 @@ describe("herdr plugin commands", () => {
           spawn: (_dir, text) =>
             Effect.sync(() => {
               prompt = text
+
               return "abcd1234-abcd-4abc-8abc-abcd1234abcd"
             }),
         }),
         ["2", "fix the login bug"],
       )
+
       assert.strictEqual(started, `${paletteMenu()}\nPrompt:\nstarted abcd1234`)
       assert.strictEqual(prompt, "fix the login bug")
       assert.strictEqual(
@@ -284,6 +304,7 @@ describe("herdr plugin commands", () => {
 describe("herdr plugin package", () => {
   it("the release archive contains herdr-plugin/", () => {
     const stage = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-archive-"))
+
     try {
       fs.mkdirSync(path.join(stage, "bin"), { recursive: true })
       fs.writeFileSync(path.join(stage, "bin", "vibest"), "")
@@ -317,20 +338,24 @@ describe("herdr plugin package", () => {
         assert.strictEqual(missing.code, 1, missing.stderr)
         assert.match(missing.stderr, /^BadPluginContext: /)
         assert.isFalse(yield* fs.exists(`${home}/vibest`))
+
         const context = JSON.stringify({
           focused_pane_cwd: `${home}/project`,
           workspace_cwd: cwd,
           focused_pane_id: "w1:p1",
         })
+
         const usage = yield* runVibest(cwd, { ...env, HERDR_PLUGIN_CONTEXT_JSON: context }, ["herdr", "subscriptions"])
         assert.strictEqual(usage.code, 0, usage.stderr)
         assert.strictEqual(usage.stdout, "unknown\n")
+
         const picked = yield* runVibest(
           cwd,
           { ...env, HERDR_PLUGIN_CONTEXT_JSON: context },
           ["herdr", "palette"],
           "5\n",
         )
+
         assert.strictEqual(picked.code, 0, picked.stderr)
         assert.match(picked.stdout, /subscriptions  Subscription usage/)
         assert.strictEqual(picked.stdout.trim().split("\n").at(-1), "unknown")
@@ -338,14 +363,17 @@ describe("herdr plugin package", () => {
         assert.strictEqual(empty.code, 1, empty.stderr)
         assert.match(empty.stderr, /^EmptyInput: /)
         assert.match(empty.stdout, /^Prompt:/)
+
         const agent = yield* runVibest(cwd, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [
           "herdr",
           "stop",
         ])
+
         assert.strictEqual(agent.code, 1, agent.stderr)
         assert.match(agent.stderr, /^Forbidden: /)
         const help = yield* runVibest(cwd, env, ["herdr", "--help"])
         assert.strictEqual(help.code, 0, help.stderr)
+
         for (const name of VERBS) assert.match(help.stdout, new RegExp(`\\b${name}\\b`))
       }).pipe(Effect.provide(Platform.services)),
     30_000,
@@ -367,11 +395,13 @@ describe("herdr open-entry", () => {
         const db = yield* Db.Service
         const herdr = yield* FakeRuntime
         const repo = yield* makeRepository
+
         const env = {
           HOME: layout.home,
           VIBEST_HOME: layout.home,
           HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: repo }),
         }
+
         const never = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.notStrictEqual(never.code, 0)
         assert.match(never.stderr, /no harness to inherit/)

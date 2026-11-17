@@ -40,6 +40,7 @@ const heldAtOpen = <A, E, R, R2>(
     const held = yield* (yield* FakeRuntime).hold("open", target)
     yield* start
     yield* held.reached
+
     return yield* body.pipe(Effect.ensuring(held.release("unreachable")))
   })
 
@@ -59,6 +60,7 @@ describe.concurrent("after a vibestd stop", () => {
         { agent: "coordinator" },
       )
       const spawned = yield* Deferred.make<string>()
+
       return yield* heldAtOpen(
         undefined,
         Effect.flatMap(Session.Service, (sessions) =>
@@ -156,6 +158,7 @@ describe.concurrent("after a vibestd stop", () => {
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
       yield* looking.reached
+
       return yield* body(id).pipe(Effect.ensuring(looking.release("unreachable")))
     })
 
@@ -170,13 +173,15 @@ describe.concurrent("after a vibestd stop", () => {
           harness: "claude",
           runtime: runtimeOf(row),
           terminal: terminalOf(row).id,
-          ...(row.process?.routing ? { routing: row.process.routing } : {}),
+          ...(row.process?.routing && { routing: row.process.routing }),
         })
         const successor = yield* db.session.currentProcessId(id)
         yield* (yield* Integration.Service).ready(id, undefined)
+
         const handed = Effect.map(herdr.callsTo("send"), (calls) =>
           calls.filter((call) => call.text?.includes("do it") === true),
         )
+
         yield* nextVibestd(Effect.map(handed, (calls) => calls.length === 1))
         assert.lengthOf(yield* herdr.callsTo("open"), 1)
         assert.lengthOf(yield* herdr.callsTo("run"), 0)

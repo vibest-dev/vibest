@@ -35,6 +35,7 @@ const project = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
+
   const entry = yield* db.session.startEntry(
     key,
     "claude",
@@ -45,8 +46,10 @@ const project = Effect.gen(function* () {
     },
     { agent: "coordinator" },
   )
+
   yield* herdr.seedAgent("test/coord")
   const sessions = yield* Session.Service
+
   const { id: worker } = yield* sessions.spawn({
     agent: "general",
     machine: { id: "local" },
@@ -58,14 +61,17 @@ const project = Effect.gen(function* () {
     runtime: "herdr",
     harness: "claude",
   })
+
   const projectId = entry.projectId
   const handle = yield* Http.make
+
   const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body = "{}") =>
     handle({
       path,
       headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), harness: "claude", ...who })),
       body,
     })
+
   return {
     db,
     herdr,
@@ -87,8 +93,10 @@ describe("vibestd's HTTP API", () => {
       const { call, db, worker } = yield* project
       yield* until(db.session.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
       const first = (yield* db.session.currentProcessId(worker))!
+
       const ready = (process: number, pid: number, pluginVersion = VERSION) =>
         call("/session/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
+
       assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
       yield* db.session.restartProcess(worker)
       const second = (yield* db.session.currentProcessId(worker))!
@@ -118,26 +126,31 @@ describe("vibestd's HTTP API", () => {
       const reportedPid = yield* pid()
       yield* TestClock.adjust("1 second")
       const now = yield* Clock.currentTimeMillis
-      const logs: Array<{
-        readonly message: unknown
-        readonly level: unknown
-        readonly annotations: Readonly<Record<string, unknown>>
-      }> = []
+
+      const logEntry = ({ fiber, logLevel, message }: Logger.Options<unknown>) => ({
+        message,
+        level: logLevel,
+        annotations: { ...fiber.getRef(CurrentLogAnnotations) },
+      })
+
+      const logs: Array<ReturnType<typeof logEntry>> = []
+
       const watched = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         effect.pipe(
           Effect.provide(
             Logger.layer([
-              Logger.make(({ fiber, logLevel, message }) => {
-                logs.push({ message, level: logLevel, annotations: { ...fiber.getRef(CurrentLogAnnotations) } })
+              Logger.make((options) => {
+                logs.push(logEntry(options))
               }),
             ]),
           ),
         )
+
       const rejected = (body: string, message: string) =>
         Effect.gen(function* () {
           const reply = yield* watched(ready(body))
           assert.strictEqual(reply.status, 400)
-          assert.deepStrictEqual(reply.body, { _tag: "InvalidRequestError", message, kind: "Payload" })
+          assert.deepStrictEqual(reply.body, Http.InvalidRequestError.make({ message, kind: "Payload" }))
           assert.deepStrictEqual(logs.at(-1), {
             message: ["schema rejection"],
             level: "Warn",
@@ -146,6 +159,7 @@ describe("vibestd's HTTP API", () => {
           assert.strictEqual(yield* db.session.readyAt(worker), readyAt)
           assert.strictEqual(yield* pid(), reportedPid)
         })
+
       yield* rejected("{", "Expected a valid JSON string")
       yield* rejected(JSON.stringify({ pid: "x" }), 'Expected number | undefined\n  at ["pid"]')
       const empty = yield* ready("{}")

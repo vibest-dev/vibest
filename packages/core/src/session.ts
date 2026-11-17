@@ -51,7 +51,9 @@ export {
 } from "@vibest/schema/session"
 
 export { CONFIRM_TIMEOUT, READY_TIMEOUT, STOP_WAIT } from "./session/executions.ts"
+
 export { HOOK_GRACE, START_TIMEOUT } from "./session/reconcile.ts"
+
 export { defaultSessionName, type SpawnInput, type Spawned } from "./session/spawn.ts"
 
 const SESSION_DEPS = [
@@ -174,33 +176,42 @@ export const make = Effect.gen(function* () {
 
   const peek = Effect.fn("Session.peek")(function* (id: string, lines: number) {
     const session = yield* getRow(id)
+
     if (exitedAt(session) !== null || terminalOf(session).id === "")
       return yield* new NoSuchSession({
         id,
         message: `${id} has no terminal to peek at (it exited or never started)`,
       })
     const h = yield* runtimes.route(runtimeOf(session))
+
     const text = yield* h
       .read(terminalOf(session), Math.max(1, Math.min(Math.floor(lines), 500)))
       .pipe(Effect.catchTag("RuntimeError", unreachable(session)))
+
     return text.trimEnd()
   })
 
   const readGit = (session: SessionRow, worktree: string) =>
     Effect.gen(function* () {
       const repos = yield* workspaceGit(worktree)
+
       if (repos) {
         const unsaved = repos.find((r) => !r.saved)
+
         const git: GitState = {
           branch: repos.map((r) => `${r.name}=${r.branch}`).join("\n"),
           pushed: repos.every((r) => r.pushed),
           saved: repos.every((r) => r.saved),
           why: unsaved ? `${unsaved.name}: ${unsaved.why}` : "",
         }
+
         const repositoryRoot = (yield* projectRoot(worktree)).root
+
         return { ...session, worktree, repositoryRoot, git } satisfies SessionView
       }
+
       const state = yield* gitState(worktree)
+
       if (state === undefined)
         return {
           ...session,
@@ -209,6 +220,7 @@ export const make = Effect.gen(function* () {
           git: unreadableGit("git cannot read it"),
         } satisfies SessionView
       const repositoryRoot = yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
+
       return { ...session, worktree, repositoryRoot, git: state } satisfies SessionView
     }).pipe(
       Effect.catch((error) =>
@@ -237,6 +249,7 @@ export const make = Effect.gen(function* () {
   })
 
   const get = Effect.fn("Session.get")((id: string) => getRow(id).pipe(Effect.flatMap(view)))
+
   const list = Effect.fn("Session.list")((filter: SessionFilter = {}) =>
     db.session
       .listSessions(filter)

@@ -22,8 +22,10 @@ import { dropHerdrSession, project } from "./inbox.ts"
 
 const applicationId = (w: World, v?: number) => {
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
+
   try {
     if (v !== undefined) db.run(`PRAGMA application_id = ${v}`)
+
     return db.query<{ application_id: number }, []>("PRAGMA application_id").get()!.application_id
   } finally {
     db.close()
@@ -34,6 +36,7 @@ const DATABASE_FILES = ["vibest.db", "vibest.db-wal", "vibest.db-shm"]
 
 const putMovedDatabaseBack = async (w: World) => {
   const file = (f: string) => path.join(w.vibestHome, f)
+
   if (
     !(await fs.stat(file("vibest.db.old")).then(
       () => true,
@@ -41,7 +44,9 @@ const putMovedDatabaseBack = async (w: World) => {
     ))
   )
     return
+
   for (const f of DATABASE_FILES) await fs.rm(file(f), { force: true })
+
   for (const f of DATABASE_FILES) await fs.rename(file(`${f}.old`), file(f)).catch(() => undefined)
 }
 
@@ -66,10 +71,12 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   olderProtocol(bytes, protocol)
   swapOnce(bytes, `"${buildVersion}"`, `"${version}"`)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
+
   if (process.platform === "darwin") {
     const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
     expect(signed.code === 0, `codesign: ${out(signed)}`)
   }
+
   await fs.cp(harnesses, path.join(dir, "harnesses"), { recursive: true })
   const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
   const source = Buffer.from(await fs.readFile(extension))
@@ -77,6 +84,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   const older = source.toString().replace(/var VERSION = "[^"]+";/, `var VERSION = "${version}";`)
   expect(older !== source.toString(), `${extension}: its version was not found`)
   await fs.writeFile(extension, older)
+
   return bin
 }
 
@@ -97,8 +105,10 @@ const olderAgents = async (
   const repo = await project(w, tag)
   const agentDir = await piDir(w, `pi-${tag}`, modelUrl)
   const vibest = (args: ReadonlyArray<string>, timeoutMs = 120_000) => w.run(repo, [link, ...args], { env, timeoutMs })
+
   const read = (where: string, arg: string) => {
     const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
     try {
       return db
         .query<{ id: string; harness_session_id: string | null; pid: number | null; version: string | null }, [string]>(
@@ -109,8 +119,10 @@ const olderAgents = async (
       db.close()
     }
   }
+
   const entryRow = () =>
     read(`s.agent_type = 'coordinator' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
+
   const reported = (row: ReturnType<typeof entryRow>, v: string) =>
     row?.version === v && row.harness_session_id !== null && row.pid !== null
 
@@ -126,10 +138,12 @@ const olderAgents = async (
     bin: link,
     timeoutMs: 60_000,
   })
+
   const ran = await w.viaEntry(
     ["run", "--runtime", "herdr", "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, ask("zero")],
     { cwd: repo, env, bin: link, timeoutMs: 120_000 },
   )
+
   expect(ran.code === 0, `vibest run exited ${ran.code}: ${out(ran)}`)
   const sub = (JSON.parse(ran.stdout) as { id: string }).id
   await until(
@@ -143,15 +157,18 @@ const olderAgents = async (
   const restartedOnBuild = async () => {
     const daemonAfter = await w.daemonPid()
     expect(daemonAfter !== undefined && daemonAfter !== daemonBefore, `vibestd ${daemonBefore} -> ${daemonAfter}`)
+
     const ps = (field: string, pid: number) =>
       Bun.spawnSync(["ps", "-o", `${field}=`, "-p", String(pid)])
         .stdout.toString()
         .trim()
+
     const parent = Number(ps("ppid", daemonAfter!))
     expect(
       parent === 1 || !ps("command", parent).includes("vibest"),
       `vibestd ${daemonAfter} is a child of ${parent} (${ps("command", parent)}), which may never reap it`,
     )
+
     for (const [name, row, now] of [
       ["subagent", before.sub, () => read("s.id = ?", sub)],
       ["entry session", before.entry, entryRow],
@@ -172,6 +189,7 @@ const olderAgents = async (
       expect(!alive(row.pid!), `the ${name}'s old harness ${row.pid} still runs`)
     }
   }
+
   return { repo, vibest, before, restartedOnBuild }
 }
 
@@ -184,6 +202,7 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       const r = await w.vibest(["update"], { timeoutMs: 60_000 })
       const said = `exit ${r.code}: ${r.stdout}${r.stderr}`
+
       if (method === "build")
         expect(r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout), said)
       else expect(r.code === 0 && r.stdout.includes(`vibest is already up to date (v${buildVersion})`), said)
@@ -224,23 +243,31 @@ const checks: ReadonlyArray<Check> = [
       expect(packed.code === 0, `tar: ${out(packed)}`)
       const installSh = path.join(checkout, "packages", "cli", "install.sh")
       let downloads = 0
+
       const server = Bun.serve({
         port: 0,
         hostname: "127.0.0.1",
         fetch: (req) => {
           const url = new URL(req.url).pathname
+
           if (url === "/version") return new Response("999.0.0\n")
+
           if (url === "/install.sh") return new Response(Bun.file(installSh))
+
           if (url === `/${archive}`) {
             downloads++
+
             return new Response(Bun.file(path.join(root, archive)))
           }
+
           return new Response("not found", { status: 404 })
         },
       })
+
       const env = { VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${server.port}`, npm_config_registry: "http://127.0.0.1:9" }
       const vibest = (args: ReadonlyArray<string>) => w.run(w.repository, [old, ...args], { env, timeoutMs: 120_000 })
       let schema: number | undefined
+
       try {
         const started = await vibest(["daemon"])
         expect(started.code === 0, `old vibest daemon exited ${started.code}: ${out(started)}`)
@@ -322,6 +349,7 @@ const checks: ReadonlyArray<Check> = [
         await server.stop(true)
         await w.stopDaemon()
         await putMovedDatabaseBack(w)
+
         if (schema !== undefined) applicationId(w, schema)
       }
     },
@@ -342,6 +370,7 @@ const checks: ReadonlyArray<Check> = [
       expect(before !== undefined, "no vibestd pid")
       const schema = applicationId(w)
       applicationId(w, schema + 1)
+
       try {
         const refused = await w.tty(["daemon", "restart"], "y\n", { timeoutMs: 120_000 })
         const said = out(refused)
@@ -361,6 +390,7 @@ const checks: ReadonlyArray<Check> = [
         expect(replaced.code === 0, `daemon restart once the database fits exited ${replaced.code}: ${out(replaced)}`)
         await until("a new vibestd", async () => {
           const pid = await w.daemonPid()
+
           return pid !== undefined && pid !== before
         })
         expect(!alive(before!), `old vibestd ${before} still alive`)
@@ -393,28 +423,36 @@ const checks: ReadonlyArray<Check> = [
       await fs.cp(harnesses, path.join(release, "harnesses"), { recursive: true })
       const packed = await w.run(root, ["tar", "-czf", path.join(root, archive), "-C", release, "bin", "harnesses"])
       expect(packed.code === 0, `tar: ${out(packed)}`)
+
       const server = Bun.serve({
         port: 0,
         hostname: "127.0.0.1",
         fetch: (req) => {
           const url = new URL(req.url).pathname
+
           if (url === "/version") return new Response(`${buildVersion}\n`)
+
           if (url === "/install.sh") return new Response(Bun.file(path.join(checkout, "packages", "cli", "install.sh")))
+
           if (url === `/${archive}`) return new Response(Bun.file(path.join(root, archive)))
+
           return new Response("not found", { status: 404 })
         },
       })
+
       try {
         const old = await olderVibest(w, share, version, protocol)
         await fs.mkdir(bin, { recursive: true })
         await fs.symlink(old, link)
         await fs.writeFile(path.join(share, "bin"), `${bin}\n`)
         await fs.writeFile(path.join(share, "current"), `${version}\n`)
+
         const env = {
           PATH: `${bin}:${w.env().PATH}`,
           VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${server.port}`,
           npm_config_registry: "http://127.0.0.1:9",
         }
+
         const agents = await olderAgents(w, "u11", link, env, model.url, version)
 
         const updated = await agents.vibest(["update", "--yes"], 300_000)
@@ -453,6 +491,7 @@ const checks: ReadonlyArray<Check> = [
       const model = holdsSlowMessageModel()
       await fs.mkdir(path.join(w.root, "u12-install"), { recursive: true })
       const root = await fs.realpath(path.join(w.root, "u12-install"))
+
       try {
         const old = await olderVibest(w, path.join(root, "share"), version, await buildProtocol())
         const env = { PATH: `${path.dirname(old)}:${w.env().PATH}` }

@@ -1,13 +1,18 @@
+import { Predicate } from "effect"
+
 const isSource = (file) => /\/packages\/.+\/src\//.test(file) && !file.endsWith(".test.ts")
 const normalized = (context) => context.filename.replaceAll("\\", "/")
 
 const textRule = ({ matches, exempt, message }) => ({
   create(context) {
     const file = normalized(context)
+
     if (!isSource(file) || exempt.some((part) => file.includes(part))) return {}
+
     const check = (node, text) => {
-      if (typeof text === "string" && matches(text)) context.report({ node, message })
+      if (Predicate.isString(text) && matches(text)) context.report({ node, message })
     }
+
     return {
       Literal: (node) => check(node, node.value),
       TemplateElement: (node) => check(node, node.value.cooked),
@@ -18,9 +23,11 @@ const textRule = ({ matches, exempt, message }) => ({
 const approvedOperations = (file, operations) => {
   const approved = operations.find((operation) => file.endsWith(operation.file))
   let used = 0
+
   return (text) => {
     if (approved === undefined || !approved.accepts(text) || used >= approved.count) return false
     used++
+
     return true
   }
 }
@@ -32,11 +39,14 @@ const ledgerFiles = ["/packages/core/src/bus.ts", "/packages/core/src/database/d
 const eventReads = {
   create(context) {
     const file = normalized(context)
+
     if (!isSource(file) || ledgerFiles.some((part) => file.endsWith(part))) return {}
     const message = "Only the bus reads the event table and its local position."
+
     const check = (node, text) => {
-      if (typeof text === "string" && (eventTable.test(text) || position.test(text))) context.report({ node, message })
+      if (Predicate.isString(text) && (eventTable.test(text) || position.test(text))) context.report({ node, message })
     }
+
     return {
       Literal: (node) => check(node, node.value),
       TemplateElement: (node) => check(node, node.value.cooked),
@@ -52,6 +62,7 @@ const noPayloadSql = textRule({
 })
 
 const writeStatement = /INSERT INTO|UPDATE |DELETE FROM/
+
 const writers = [
   "/packages/core/src/bus.ts",
   "/packages/core/src/project/projector.ts",
@@ -61,28 +72,34 @@ const writers = [
   "/packages/core/src/import/",
   "/packages/core/src/database/migration",
 ]
+
 const openingWrite = {
   file: "/packages/core/src/database/db.ts",
   count: 1,
   accepts: (text) => text.trim() === "UPDATE meta SET value = value WHERE key = ''",
 }
+
 const writeMessage = "Only the bus, the projectors, the schema, migrations and the import write tables."
 const isSqlBuilder = (node) => node?.name === "sql" || node?.property?.name === "sql"
 
 const projectorWrites = {
   create(context) {
     const file = normalized(context)
+
     if (!isSource(file) || writers.some((part) => file.includes(part))) return {}
     const approvedWrite = approvedOperations(file, [openingWrite])
+
     const check = (node, text) => {
-      if (typeof text === "string" && writeStatement.test(text) && !approvedWrite(text))
+      if (Predicate.isString(text) && writeStatement.test(text) && !approvedWrite(text))
         context.report({ node, message: writeMessage })
     }
+
     return {
       Literal: (node) => check(node, node.value),
       TemplateElement: (node) => check(node, node.value.cooked),
       CallExpression(node) {
         const callee = node.callee
+
         if (
           callee.type === "MemberExpression" &&
           isSqlBuilder(callee.object) &&
@@ -97,21 +114,27 @@ const projectorWrites = {
 const loopFiles = ["/packages/core/src/", "/packages/server/src/"]
 const approvedLoops = [{ file: "/packages/core/src/plugin/supervisor.ts", kind: "Effect.forever", count: 1 }]
 const boundedRepeat = /\b(until|while|times)\b/
+
 const member = (node, object, property) =>
   node?.type === "MemberExpression" && node.object.name === object && node.property.name === property
 
 const noBackgroundLoop = {
   create(context) {
     const file = normalized(context)
+
     if (!isSource(file) || !loopFiles.some((part) => file.includes(part))) return {}
     const used = {}
+
     const approved = (kind) => {
       const loop = approvedLoops.find((l) => file.endsWith(l.file) && l.kind === kind)
       used[kind] = (used[kind] ?? 0) + 1
+
       return loop !== undefined && used[kind] <= loop.count
     }
-    const report = (node, shape) =>
-      context.report({ node, message: `No background loop (${shape}): vibestd does nothing between events.` })
+
+    const report = (node, loopKind) =>
+      context.report({ node, message: `No background loop (${loopKind}): vibestd does nothing between events.` })
+
     return {
       Identifier(node) {
         if (node.name === "setInterval") report(node, "setInterval")
@@ -121,10 +144,12 @@ const noBackgroundLoop = {
       },
       MemberExpression(node) {
         if (member(node, "Effect", "forever") && !approved("Effect.forever")) report(node, "Effect.forever")
+
         if (member(node, "Stream", "tick")) report(node, "Stream.tick")
       },
       CallExpression(node) {
         if (member(node.callee, "Effect", "schedule")) report(node, "Effect.schedule")
+
         if (
           member(node.callee, "Effect", "repeat") &&
           !boundedRepeat.test(context.sourceCode.getText(node)) &&

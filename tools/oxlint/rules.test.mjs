@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import url from "node:url"
 
+import { Predicate } from "effect"
 import { describe, expect, it } from "vitest"
 
 const root = url.fileURLToPath(new URL("../..", import.meta.url))
@@ -12,25 +13,29 @@ const configAt = (dir) => {
   const config = JSON.parse(fs.readFileSync(path.join(root, ".oxlintrc.json"), "utf8"))
   const absolute = (specifier) => path.join(root, specifier)
   config.jsPlugins = config.jsPlugins.map((plugin) =>
-    typeof plugin === "string" ? absolute(plugin) : { ...plugin, specifier: absolute(plugin.specifier) },
+    Predicate.isString(plugin) ? absolute(plugin) : { ...plugin, specifier: absolute(plugin.specifier) },
   )
   const file = path.join(dir, "oxlintrc.json")
   fs.writeFileSync(file, JSON.stringify(config))
+
   return file
 }
 
 const oxlintFindings = (source, file = "fixture.ts", { scoped = false } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-oxlint-"))
+
   try {
     fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
     fs.writeFileSync(path.join(dir, file), source)
+
     const run = childProcess.spawnSync(
       path.join(root, "node_modules/.bin/oxlint"),
       ["-c", scoped ? configAt(dir) : path.join(root, ".oxlintrc.json"), "-f", "json", dir],
       { encoding: "utf8" },
     )
+
     return JSON.parse(run.stdout)
-      .diagnostics.map((d) => `${d.labels[0].span.line} ${d.code}`)
+      .diagnostics.flatMap((d) => (d.code.startsWith("anti-slop") ? [] : [`${d.labels[0].span.line} ${d.code}`]))
       .sort()
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
@@ -204,6 +209,7 @@ describe("import policy", () => {
   it("the herdr SDKs and tools/verify refuse Bun outside bun.ts and platform/", () => {
     for (const file of ["packages/effect-herdr-sdk/src/bun.ts", "packages/effect-herdr-core-sdk/src/platform/a.ts"])
       expect(scopedFindings(bun, file)).toEqual([])
+
     for (const file of ["packages/effect-herdr-sdk/src/a.ts", "tools/verify/src/a.ts"])
       expect(scopedFindings(bun, file)).toEqual(refused)
   })
@@ -265,6 +271,7 @@ export const g = Effect.schedule(Effect.void, Schedule.spaced("1 second"))
 export const h = globalThis.setInterval
 export const i = setInterval
 `
+
     expect(oxlintFindings(source, "packages/server/src/a.ts")).toEqual([
       "10 vibest(no-background-loop)",
       "2 vibest(no-background-loop)",
@@ -312,6 +319,7 @@ export type D = typeof import("@vibest/client/client")
 export const e = [a, b, import("@vibest/protocol/rpc"), import("@vibest/schema/id")]
 export { f } from "@vibest/server/server"
 `
+
     expect(oxlintFindings(source, "packages/core/src/x.ts")).toEqual([
       "2 vibest(package-imports)",
       "4 vibest(package-imports)",
@@ -326,6 +334,7 @@ export { f } from "@vibest/server/server"
     const named = `import { HANDOFF_ENV } from "@vibest/server/server"\nexport const v = HANDOFF_ENV\n`
     expect(oxlintFindings(named, handler)).toEqual([])
     expect(oxlintFindings(named, "packages/cli/src/commands/handlers/status.ts")).toEqual(["1 vibest(package-imports)"])
+
     for (const other of [
       `import { layer } from "@vibest/server/server"\nexport const v = layer\n`,
       `import * as Server from "@vibest/server/server"\nexport const v = Server\n`,

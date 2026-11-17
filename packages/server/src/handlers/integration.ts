@@ -7,7 +7,7 @@ import { forProvider } from "@vibest/core/models"
 import { guardInputOf } from "@vibest/core/replies"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"
 import { Caller, Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
-import { Effect } from "effect"
+import { Effect, Predicate } from "effect"
 import type * as Headers from "effect/http/Headers"
 
 import { noteOpen, processOf, reader } from "../gates.ts"
@@ -31,6 +31,7 @@ export const make = Effect.gen(function* () {
       const read = reader(headers)
       yield* noteOpen(db, read, sessionId)
       const row = yield* db.session.sessionIdentity(sessionId)
+
       if (!row || row.harness !== harness) return
       yield* run({ id: row.id, entry: row.entry, harness, process: processOf(read) })
     }).pipe(Effect.orDie)
@@ -44,30 +45,38 @@ export const make = Effect.gen(function* () {
               method: "Harnesses.List",
               message: "a peer asks for this machine's harnesses only",
             })
+
           return yield* remote.harnesses(machine, provider)
         }
+
         const choices = yield* harnessCatalog
+
         return provider === undefined ? choices : forProvider(choices, harnesses, provider)
       }),
 
     "Integration.Guard": ({ harness, input }: { readonly harness: string; readonly input: string }) =>
       Effect.gen(function* () {
         const definition = harnesses.find(harness)
+
         if (definition === undefined) return yield* unprovided(harness, harnesses.all)
         const caller = yield* Caller
-        if (caller._tag !== "Session")
+
+        if (!Predicate.isTagged(caller, "Session"))
           return yield* new InvalidCaller({
             method: "Integration.Guard",
             message: "Integration.Guard checks the tool call of a session",
           })
         const call = guardInputOf(definition, input)
+
         const reason =
           call === undefined
             ? undefined
             : yield* integration
                 .guard(caller.sessionId, call)
                 .pipe(Effect.mapError((e) => new InvalidCaller({ method: "Integration.Guard", message: String(e) })))
+
         const answer = definition.guardAnswer === undefined ? reason : definition.guardAnswer(reason)
+
         return answer === undefined ? {} : { answer }
       }),
 

@@ -36,6 +36,7 @@ const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: st
 
 const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void, PluginRefused>) =>
   Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) })
+
 const write = (id: string, f: (e: AgentStartBefore) => Partial<AgentStartBefore> | void) =>
   hook(id, (e) => Effect.sync(() => void Object.assign(e, f(e))))
 
@@ -47,6 +48,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
   const db = yield* Db.Service
   const herdr = yield* FakeRuntime
+
   return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
 
@@ -59,9 +61,11 @@ describe("plugins: spawn hook", () => {
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
+
       const s = yield* (yield* Session.Service).spawn(
         yield* spawnInput(yield* mainCheckout(nested), { prompt: "research: how does the cache work?" }),
       )
+
       assert.strictEqual(s.harness, "claude")
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
@@ -81,6 +85,7 @@ describe("plugins: spawn hook", () => {
         hook("route", (e) =>
           Effect.sync(() => {
             assert.strictEqual(e.project.endsWith("/sub"), false)
+
             if (e.prompt.startsWith("research:")) Object.assign(e, { harness: "claude", model: "claude-haiku-5-5" })
           }),
         ),
@@ -94,9 +99,11 @@ describe("plugins: spawn hook", () => {
     "P3: a hook stuck in an uninterruptible sleep times out and refuses the start",
     Effect.gen(function* () {
       const repo = yield* makeRepository
+
       const spawning = yield* Effect.forkChild(
         (yield* Session.Service).spawn(yield* spawnInput(repo, { harness: "pi" })),
       )
+
       yield* until(
         Effect.sync(() => stuckHookEntered.value),
         (x) => x,
@@ -145,9 +152,8 @@ describe("plugins: spawn hook", () => {
     }),
     {
       plugins: [
-        write(
-          "untyped",
-          () => ({ prompt: undefined, machine: undefined, model: "m" }) as unknown as Partial<AgentStartBefore>,
+        hook("untyped", (e) =>
+          Effect.sync(() => void Object.assign(e, { prompt: undefined, machine: undefined, model: "m" })),
         ),
       ],
     },
@@ -264,6 +270,7 @@ describe("plugins: spawn hook", () => {
           { source: "ok", revision: "-", options: {}, plugin: write("ok", () => {}) },
         ]),
       )
+
       yield* TestClock.adjust("5 seconds")
       const plugins = yield* Fiber.join(building)
       assert.deepStrictEqual(
@@ -295,6 +302,7 @@ describe("plugins: spawn hook", () => {
           },
         ]),
       )
+
       yield* TestClock.adjust("5 seconds")
       const joined = yield* Effect.forkChild(Fiber.join(building).pipe(Effect.timeoutOption("4 seconds")))
       yield* TestClock.adjust("4 seconds")
@@ -320,6 +328,7 @@ describe("plugins: spawn hook", () => {
       Effect.gen(function* () {
         const calls: Array<string> = []
         const registrations: Record<string, Registration> = {}
+
         const recorder = (id: string, after: () => Effect.Effect<void> = () => Effect.void) =>
           Plugin.define({
             id,
@@ -328,10 +337,12 @@ describe("plugins: spawn hook", () => {
                 .hook("start.before", () => Effect.sync(() => calls.push(id)).pipe(Effect.andThen(after())))
                 .pipe(Effect.map((registration) => void (registrations[id] = registration))),
           })
+
         const plugins = yield* makePlugins([
           { source: "a", revision: "-", options: {}, plugin: recorder("a", () => registrations.b!.dispose) },
           { source: "b", revision: "-", options: {}, plugin: recorder("b") },
         ])
+
         yield* plugins.start(event)
         assert.deepStrictEqual(calls, ["a", "b"])
         yield* plugins.start(event)
@@ -364,6 +375,7 @@ const packageHome = Effect.gen(function* () {
   const path = yield* Path.Path
   const dir = yield* fs.makeTempDirectoryScoped({ directory: import.meta.dirname, prefix: ".tmp-" })
   yield* fs.makeDirectory(path.join(dir, "plugins"))
+
   return dir
 })
 
@@ -423,16 +435,20 @@ const loadingFixture = Effect.gen(function* () {
   yield* fs.makeDirectory(path.join(plugins, "empty"))
   yield* fs.makeDirectory(path.join(plugins, "node_modules"))
   yield* fs.writeFileString(path.join(plugins, "broken.ts"), "export default 42\n")
+
   for (const name of ["x", "y"]) {
     yield* fs.makeDirectory(path.join(dir, name))
     yield* fs.writeFileString(path.join(dir, name, "index.ts"), source(name, `from-${name}`))
   }
+
   yield* fs.writeFileString(path.join(dir, "a-file.ts"), source("f", "from-f"))
+
   const config = (entries: ReadonlyArray<unknown>) =>
     fs.writeFileString(
       path.join(dir, "vibest.json"),
       `// comments are fine\n{ "plugins": ${JSON.stringify(entries)}, }\n`,
     )
+
   return { dir, plugins, path, config }
 })
 
@@ -499,6 +515,7 @@ describe("plugins: loading", () => {
 
 const held: Array<Fact> = []
 const { promise: gate, resolve: release } = Promise.withResolvers<void>()
+
 const watcher = Plugin.define({
   id: "watcher",
   effect: (ctx) =>
@@ -526,13 +543,15 @@ describe("plugins: event.subscribe", () => {
         Effect.sync(() => held),
         (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "process.started"),
       )
+
       for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
-        const seqs = held.filter((fact) => fact.aggregate === aggregate).map((fact) => fact.seq)
+        const seqs = held.flatMap((fact) => (fact.aggregate === aggregate ? [fact.seq] : []))
         assert.deepStrictEqual(
           seqs,
           seqs.map((_, i) => seqs[0]! + i),
         )
       }
+
       assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))
     }),
     { plugins: [watcher] },

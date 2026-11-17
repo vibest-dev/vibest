@@ -20,27 +20,33 @@ export type PrepareClaudeTypes = {
 const readIfVerified = (file: string, expected: string): Uint8Array | undefined => {
   if (!fs.existsSync(file)) return undefined
   const bytes = fs.readFileSync(file)
+
   return sha256(bytes) === expected ? bytes : undefined
 }
 
 export const prepareClaudeTypes = async (options: PrepareClaudeTypes): Promise<"reused" | "acquired"> => {
   const expected = options.expectedSha256
+
   if (readIfVerified(options.cachePath, expected)) return "reused"
   fs.rmSync(options.cachePath, { force: true })
   const fetched = await options.fetch(options.url)
+
   if (sha256(fetched) !== expected) throw new Error(`claude-code types from ${options.url} failed checksum ${expected}`)
   fs.mkdirSync(path.dirname(options.cachePath), { recursive: true })
   const tmp = `${options.cachePath}.${process.pid}.tmp`
   fs.writeFileSync(tmp, fetched)
   fs.renameSync(tmp, options.cachePath)
+
   if (!readIfVerified(options.cachePath, expected)) {
     fs.rmSync(options.cachePath, { force: true })
     throw new Error("claude-code types cache failed checksum after write")
   }
+
   return "acquired"
 }
 
 const invoked = process.argv[1] !== undefined && path.resolve(process.argv[1]) === url.fileURLToPath(import.meta.url)
+
 if (invoked) {
   const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))
   prepareClaudeTypes({
@@ -49,11 +55,13 @@ if (invoked) {
     url: CLAUDE_TYPES_URL,
     fetch: async (url) => {
       const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
+
       if (!response.ok) throw new Error(`claude-code types fetch ${url} returned ${response.status}`)
+
       return new Uint8Array(await response.arrayBuffer())
     },
-  }).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error)
+  }).catch((cause: unknown) => {
+    console.error(cause instanceof Error ? cause.message : cause)
     process.exit(1)
   })
 }

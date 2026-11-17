@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { copyEvidence, privateIn, redactWith } from "../src/world.ts"
+import { copyEvidence, privateIn, redactWith } from "../src/world/redact.ts"
 
 test("evidence loses the user's model value but keeps longer names that contain it", () => {
   const text = JSON.stringify({
@@ -11,6 +11,7 @@ test("evidence loses the user's model value but keeps longer names that contain 
     models: ["claude-opus-9", "opus"],
     doctor: "runs opus by default",
   })
+
   const out = redactWith(text, ["s3cret"], ["opus"])
   expect(privateIn(out, ["opus"])).toEqual([])
   expect(out).toContain("claude-opus-9")

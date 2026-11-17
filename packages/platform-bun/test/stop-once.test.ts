@@ -12,6 +12,7 @@ const stopper = Effect.gen(function* () {
   const drain = yield* Drain.Service
   const bus = yield* Bus.Service
   const shutdown = yield* Deferred.make<void>()
+
   return { drain, shutdown, stop: stopOnce({ drain, bus, deliveringInbox: Effect.succeed([]), shutdown }) }
 })
 

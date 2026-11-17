@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@vibest/protocol": "workspace:*",
-    "@vibest/schema": "workspace:*"
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
   }
 }

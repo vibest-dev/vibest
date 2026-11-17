@@ -56,22 +56,23 @@ export const settleEntry = (sessions: Session.Interface, entryId: string) => ses
 export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks: number }) =>
   m.tracked <= 1 && m.locks === 0
 
-export const writeEnd = (id: string, harness: string, payload: object, offsetMs = 1000) =>
+export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject, offsetMs = 1000) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses.Service).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* Db.Service).session.endObserved(
-      id,
-      executionEndFrom(adapter, payload as Record<string, unknown>, at),
-    )
+    yield* (yield* Db.Service).session.endObserved(id, executionEndFrom(adapter, payload, at))
   })
+
+const decodeEventData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))
 
 export const eventsOf = (sessionId: string, type?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     const rows = yield* sql<{ seq: number; type: string; at: number; data: string }>`SELECT seq, type, at, data
       FROM event WHERE aggregate = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY seq`
-    return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
+
+    return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: decodeEventData(r.data) }))
   }).pipe(Effect.orDie)
 
 export const replyText = (id: string) => replyOf(id).pipe(Effect.map((reply) => reply ?? ""))
@@ -79,16 +80,20 @@ export const replyText = (id: string) => replyOf(id).pipe(Effect.map((reply) => 
 export const replyOf = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     const [row] = yield* sql<{ reply: string | null }>`SELECT reply FROM execution
       WHERE session_id = ${id} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+
     return row?.reply ?? undefined
   })
 
 export const lastSentBy = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     const [row] = yield* sql<{ id: number; kind: string; status: string; content: string }>`SELECT id, kind, status,
         content FROM inbox WHERE sender_session_id = ${id} ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+
     return row
   })
 
@@ -108,5 +113,6 @@ export const processEnds = (sessionId: string) =>
 export const systemPromptFile = (id: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
+
     return path.join(yield* systemPromptRoot, id, "system-prompt.md")
   })

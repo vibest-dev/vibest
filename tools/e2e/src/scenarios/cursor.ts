@@ -8,7 +8,9 @@ import { isolatedCore } from "./hc.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Runtime = "herdr" | "hc"
+
 type Listed = { id: string; status: string; executionState: string }
+
 type Execution = { id: number; outcome: string | null; reply: string | null; typed: string | null }
 
 const HOOK_LOG = "cursor-hooks.log"
@@ -17,6 +19,7 @@ const requireCursor = async (w: World, runtime: Runtime) => {
   for (const bin of ["cursor-agent", runtime])
     if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
   const login = await w.run(w.repository, ["cursor-agent", "status"])
+
   if (!/Logged in/.test(login.stdout + login.stderr))
     throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
 }
@@ -37,6 +40,7 @@ const loggingHarnesses = async (w: World) => {
       "",
     ].join("\n"),
   )
+
   return dir
 }
 
@@ -47,12 +51,14 @@ export const hookEvents = async (w: World) =>
     .map((line) => {
       const space = line.indexOf(" ")
       const action = line.slice(0, space)
+
       try {
         const event = JSON.parse(line.slice(space + 1)) as {
           hook_event_name?: string
           conversation_id?: string
           text?: string
         }
+
         return { action, event: event.hook_event_name ?? "?", conversation: event.conversation_id, text: event.text }
       } catch {
         return { action, event: "?", conversation: undefined, text: undefined }
@@ -84,48 +90,61 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
   const herdrSocket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   await w.stopDaemon()
   const core = runtime === "hc" ? await isolatedCore(w, w.config.pi, name) : undefined
+
   if (core) w.ownRuntimes.add("hc")
+
   const placement = core
     ? { runtime: "hc", extra: ["--runtime", "hc"], hc: { run: core.hc }, name: `${name}-entry` }
     : { session }
+
   if (entry === "pi") await w.entry({ cwd: repo, processEnv: daemonEnv, ...placement })
   else {
     await w.ok(["daemon"], { cwd: repo, env: daemonEnv })
     await w.startEntry({ harness: "cursor", cwd: repo, processEnv: daemonEnv, timeoutMs: 120_000, ...placement })
   }
+
   const runtimeOf = (id: string) =>
     (
       JSON.parse(row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, id)?.r ?? "{}") as {
         id?: string
       }
     ).id ?? ""
+
   const terminalOf = (id: string) => {
     const at = runtimeOf(id)
+
     return core ? at.slice(0, at.indexOf("@")) : (at.split("/")[1] ?? "")
   }
+
   const screen = async (id: string) => {
     if (core) return (await core.hc("read", terminalOf(id))).stdout
+
     const read = await herdr(herdrSocket, "pane.read", {
       pane_id: terminalOf(id),
       source: "visible",
       strip_ansi: true,
     }).catch((e: Error) => ({ read: { text: `(no screen: ${e.message})` } }))
+
     return String((read.read as { text?: string } | undefined)?.text ?? "")
   }
+
   const typeText = async (id: string, text: string) => {
     if (core) {
       const r = await core.hc("keys", terminalOf(id), ...[...text].map(hcKey))
       expect(r.code === 0, `hc keys: ${r.stderr}${r.stdout}`)
     } else await herdr(herdrSocket, "pane.send_text", { pane_id: terminalOf(id), text })
   }
+
   const pressKeys = async (id: string, keys: ReadonlyArray<string>) => {
     if (core) {
       const r = await core.hc("keys", terminalOf(id), ...keys)
       expect(r.code === 0, `hc keys: ${r.stderr}${r.stdout}`)
     } else await herdr(herdrSocket, "pane.send_keys", { pane_id: terminalOf(id), keys })
   }
+
   const freshScreen = async () => {
     const command = `cd '${repo}' && cursor-agent --trust`
+
     if (core) {
       const name = "fresh-cursor"
       expect((await core.hc("run", "--bg", "--keep", "--name", name)).code === 0, "hc run for the fresh Cursor")
@@ -135,8 +154,10 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
       await core.hc("keys", name, "ctrl+c")
       await core.hc("keys", name, "ctrl+c")
       await core.hc("kill", name)
+
       return read
     }
+
     const created = await herdr(herdrSocket, "tab.create", { cwd: repo, env: w.env(), focus: false })
     const pane = (created.root_pane as { pane_id: string }).pane_id
     await Bun.sleep(2_000)
@@ -147,8 +168,10 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
     await herdr(herdrSocket, "pane.send_keys", { pane_id: pane, keys: ["ctrl+c"] })
     await herdr(herdrSocket, "pane.send_keys", { pane_id: pane, keys: ["ctrl+c"] })
     await herdr(herdrSocket, "pane.close", { pane_id: pane }).catch(() => undefined)
+
     return String((r.read as { text?: string } | undefined)?.text ?? "")
   }
+
   const start = async (task: string, ...flags: Array<string>) =>
     (
       JSON.parse(
@@ -158,19 +181,26 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
         ),
       ) as { id: string }
     ).id
+
   const listed = async (id: string) =>
     (await w.json<{ sessions: Array<Listed> }>(["ls"], { cwd: repo })).sessions.find((e) => e.id === id)
+
   const executions = (id: string) =>
     rows<Execution>(w, "SELECT id, outcome, reply, typed FROM execution WHERE session_id = ? ORDER BY id", id)
+
   const notices = (id: string) =>
     row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)?.n ?? 0
+
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
+
   const close = async (ids: ReadonlyArray<string>) => {
     for (const id of ids) await w.vibest(["archive", id], { cwd: repo, timeoutMs: 60_000 })
     await w.stopDaemon()
+
     if (core) await core.stop()
     else await dropHerdrSession(w, session)
   }
+
   return {
     repo,
     core,
@@ -192,6 +222,7 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
 
 const TOOL_TASK =
   "First write one short sentence saying you are starting. Then run this shell command exactly: echo i10-tool. Then reply with exactly: pong"
+
 const EARLY_TASK = "Run this shell command exactly: sleep 60. Then reply with exactly: i10-early"
 const LONG_TASK = "Run this shell command exactly: sleep 120. Then reply with exactly: slept"
 
@@ -204,6 +235,7 @@ const reports = (runtime: Runtime): Check => ({
     const ids: Array<string> = []
     const screens: Array<string> = []
     const keep = (label: string, text: string) => screens.push(`=== ${label}\n${text}`)
+
     try {
       const id = await c.start(TOOL_TASK)
       ids.push(id)
@@ -213,8 +245,11 @@ const reports = (runtime: Runtime): Check => ({
         "the first execution to end",
         async () => {
           const e = await c.listed(id)
+
           if (e) seen.add(`${e.status}/${e.executionState}`)
+
           if (e?.executionState === "open" && workingScreen === "") workingScreen = await c.screen(id)
+
           return c.executions(id)[0]?.outcome != null
         },
         240_000,
@@ -281,12 +316,14 @@ const reports = (runtime: Runtime): Check => ({
         180_000,
       )
       const fresh = c.executions(id).at(-1)!
+
       const handed = rows<{ content: string }>(
         w,
         "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
         id,
         fresh.id,
       ).map((r) => r.content)
+
       expect(
         handed.length === 1 && handed[0]!.includes("i10-fresh") && !(fresh.reply ?? "").includes("i10-early"),
         `the message after the early interrupt was not delivered alone: ${JSON.stringify({ fresh, handed })}`,
@@ -299,12 +336,14 @@ const reports = (runtime: Runtime): Check => ({
         "the plugin wrote to the terminal",
       )
       keep("fresh, before any input", await c.freshScreen())
+
       const timing = row<{ placed: number | null; started: number }>(
         w,
         `SELECT p.placed_at AS placed, (SELECT min(started_at) FROM execution x WHERE x.session_id = p.session_id) AS started
           FROM process p WHERE p.session_id = ? ORDER BY p.id LIMIT 1`,
         id,
       )
+
       expect(
         timing?.placed != null && timing.started <= timing.placed,
         `the first task did not start with the process: ${JSON.stringify(timing)}`,
@@ -332,6 +371,7 @@ const noApprovalDialog: Check = {
       JSON.stringify({ version: 1, approvalMode: "allowlist", permissions: { allow: [], deny: [] } }),
     )
     const ids: Array<string> = []
+
     try {
       const id = await c.start(SEND_THEN_HERDR)
       ids.push(id)
@@ -340,7 +380,9 @@ const noApprovalDialog: Check = {
         "the execution to end",
         async () => {
           const e = await c.listed(id)
+
           if (e) seen.add(e.status)
+
           return c.executions(id).some((x) => x.outcome !== null)
         },
         240_000,
@@ -353,15 +395,19 @@ const noApprovalDialog: Check = {
         `the execution: ${JSON.stringify(execution)}`,
       )
       expect(!seen.has("blocked"), `the session was blocked: ${[...seen].join(", ")}`)
+
       const sent = row<{ n: number }>(
         w,
         "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send' AND instr(content, 'i12-hello') > 0",
         id,
       )?.n
+
       expect((sent ?? 0) >= 1, `messages with i12-hello from ${id}: ${sent}`)
+
       const worktree = await fs.realpath(
         row<{ d: string }>(w, `SELECT directory AS d FROM ${SESSIONS} s WHERE id = ?`, id)?.d ?? "",
       )
+
       expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
     } finally {
       await c.close(ids)
@@ -377,6 +423,7 @@ const conversationAtStart: Check = {
   run: async (w) => {
     const c = await cursorWorld(w, "herdr", "i13")
     const ids: Array<string> = []
+
     const fact = (id: string, type: string) =>
       rows<{ at: number; data: string }>(
         w,
@@ -384,11 +431,13 @@ const conversationAtStart: Check = {
         id,
         type,
       )
+
     const closePane = async (id: string) => {
       const ended = fact(id, "process.ended").length
       await herdr(c.herdrSocket, "pane.close", { pane_id: c.terminalOf(id) })
       await until("the closed pane seen exited", () => fact(id, "process.ended").length > ended, 30_000)
     }
+
     const replied = (id: string, marker: string) =>
       until(
         `the reply ${marker}`,
@@ -397,6 +446,7 @@ const conversationAtStart: Check = {
       ).catch(async (e: Error) => {
         throw new Error(`${e.message}; executions ${JSON.stringify(c.executions(id))}\n${(await c.log()).slice(-3000)}`)
       })
+
     try {
       const id = await c.start("Run this shell command exactly: sleep 90. Then reply with exactly: i13-first")
       ids.push(id)
@@ -417,9 +467,11 @@ const conversationAtStart: Check = {
       )
       await w.ok(["send", id, "--", "Reply with exactly: i13-second"], { cwd: c.repo })
       await replied(id, "i13-second")
+
       const resumed = fact(id, "process.conversation").map(
         (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
       )
+
       expect(
         resumed.every((r) => r === conversation),
         `the reopened Cursor is in another conversation: ${conversation} then ${resumed.join(", ")}`,
@@ -427,9 +479,11 @@ const conversationAtStart: Check = {
       await closePane(id)
       await w.ok(["send", id, "--", "Reply with exactly: i13-third"], { cwd: c.repo })
       await replied(id, "i13-third")
+
       const third = fact(id, "process.conversation").map(
         (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
       )
+
       expect(
         third.every((r) => r === conversation),
         `conversations: ${third.join(", ")}`,
@@ -450,6 +504,7 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
     const screens: Array<string> = []
     const keep = (label: string, text: string) => screens.push(`=== ${label}\n${text.trimEnd()}`)
     const entry = (await w.entryOf(c.repo))!
+
     const answered = (marker: string) =>
       until(
         `the reply ${marker}`,
@@ -458,8 +513,10 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
       ).catch(async (e: Error) => {
         throw new Error(`${e.message}; executions ${JSON.stringify(c.executions(entry))}\n${await c.screen(entry)}`)
       })
+
     const onScreen = (marker: string, ms: number) =>
       until(`${marker} on the screen`, async () => (await c.screen(entry)).includes(marker), ms)
+
     try {
       await until(
         "the Cursor entry session ready and idle",
@@ -480,12 +537,14 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
       await w.ok(["send", entry, "--", "Reply with exactly: i14-two"], { cwd: c.repo })
       await answered("i14-two")
       const two = c.executions(entry).at(-1)!
+
       const handed = rows<{ content: string }>(
         w,
         "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
         entry,
         two.id,
       ).map((r) => r.content)
+
       expect(
         handed.length === 1 && handed[0]!.includes("i14-two") && !(two.reply ?? "").includes("i14-draft"),
         `the message was not typed alone: ${JSON.stringify({ two, handed })}`,

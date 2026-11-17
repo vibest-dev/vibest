@@ -33,13 +33,16 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
       const sql = yield* SqlClient.SqlClient
+
       const [execution] = yield* sql<{
         input: string
         inbox: number
       }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`
+
       const sent = yield* sql<{
         id: number
       }>`SELECT id FROM inbox WHERE session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
+
       assert.strictEqual(execution!.input, "one\n\ntwo")
       assert.strictEqual(execution!.inbox, sent[1]!.id)
     }),
@@ -60,11 +63,13 @@ describe.concurrent("Session", () => {
       yield* second.reached
       assert.notStrictEqual(executionStateOf((yield* (yield* Db.Service).session.getSession(id))!), "open")
       yield* sessions.userPrompt(id, "typed during the ready wait")
+
       const working = sql<{
         input: string
       }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
         Effect.orDie,
       )
+
       assert.deepStrictEqual(
         (yield* working).map((row) => row.input),
         ["typed during the ready wait"],
@@ -185,10 +190,12 @@ describe.concurrent("Session", () => {
       yield* sessions.userPrompt(id, "next")
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: landed" }, 5_000)
       yield* held.release("busy")
+
       const done = yield* until(
         db.session.getSession(id),
         (w): w is NonNullable<typeof w> => (w ? executionStateOf(w) : undefined) === "completed",
       )
+
       assert.strictEqual(executionStateOf(done), "completed")
       yield* settled
       assert.deepStrictEqual(
@@ -239,6 +246,7 @@ describe.concurrent("Session", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       const sql = yield* SqlClient.SqlClient
+
       const all = (receiverId: string) =>
         sql<{
           id: number
@@ -304,10 +312,12 @@ describe.concurrent("Session", () => {
         (yield* db.inbox.pendingInbox(id)).map((r) => r.message),
         ["second"],
       )
+
       for (let i = 0; i < 3; i++) {
         yield* TestClock.adjust("10 seconds")
         yield* sessions.check(id)
       }
+
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).map((c) => unwrapped(c.text!)),
         ["first", "second"],
@@ -374,6 +384,7 @@ describe.concurrent("Session", () => {
       const db = yield* Db.Service
       const repo = yield* makeRepository
       yield* herdr.seedAgent("test/cursor-entry")
+
       const { sessionId } = yield* db.session.startEntry(
         yield* projectOf(repo),
         "cursor",
@@ -381,6 +392,7 @@ describe.concurrent("Session", () => {
         { runtime: RUNTIME, address: { machine: "local", id: "test/cursor-entry" } },
         { agent: "coordinator" },
       )
+
       yield* db.session.patchLive(sessionId, { ready: yield* Clock.currentTimeMillis })
       yield* sessions.deliverTo(sessionId, "hello entry")
       yield* untilVirtual(herdr.callsTo("send"), (calls) =>
@@ -431,10 +443,12 @@ describe.concurrent("Session", () => {
       yield* until(db.session.getSession(id), (row) => row !== undefined && executionStateOf(row) === "completed")
       yield* settled
       const sql = yield* SqlClient.SqlClient
+
       const executions = yield* sql<{
         status: string
         input: string
       }>`SELECT status, input FROM ${sql.literal(EXECUTIONS)} e WHERE e.session_id = ${id}`.pipe(Effect.orDie)
+
       assert.deepStrictEqual(
         executions.map((e) => [e.status, e.input.includes("do it")]),
         [["completed", true]],
@@ -492,6 +506,7 @@ describe.concurrent("Session", () => {
       )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo, "cursor"))
       yield* until(db.session.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
+
       for (let i = 0; i < 20; i++) yield* untilVirtual(Effect.succeed(0), () => true)
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
       assert.include((yield* herdr.callsTo("open"))[0]!.argv.at(-1)!, "do it")
@@ -593,13 +608,16 @@ describe.concurrent("Session", () => {
           .transform((editor) => editor.add({ ...PI, id: "leaving-pi" }))
           .pipe(Scope.provide(yield* Scope.make()))
         const checking = yield* Effect.forkChild(sessions.check(id))
+
         for (let i = 0; i < 30; i++) yield* yieldToIo
         yield* Deferred.succeed(go, undefined)
         yield* Fiber.join(checking)
         yield* settled
+
         const [row] = yield* sql<{
           status: string
         }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'hello'`.pipe(Effect.orDie)
+
         const sent = (yield* herdr.callsTo("send")).filter((call) => call.text?.includes("hello")).length
         assert.deepStrictEqual({ status: row?.status, sent }, { status: "failed", sent: 0 })
       }),
@@ -638,14 +656,17 @@ describe.concurrent("Session", () => {
       yield* held.reached
       yield* sessions.send(id, "second")
       yield* held.release()
+
       const undeliveredNotices = Effect.map(sqlNotices(id), (rows) =>
         rows.filter((message) => message.includes("was not delivered")),
       )
+
       const notices = yield* until(undeliveredNotices, (rows) => rows.length === 2)
       assert.deepStrictEqual(
         notices.map((message) => message.split("\n\n").at(-1)),
         ["first", "second"],
       )
+
       for (const message of notices)
         assert.include(
           message,
@@ -665,6 +686,7 @@ describe.concurrent("Session", () => {
       yield* sessions.check(id)
       yield* settled
       const prompts = (yield* herdr.callsTo("send")).length
+
       const notices = entryPending(db, (yield* db.session.getSession(id))!.projectId).pipe(
         Effect.map((rows) => rows.filter((r) => r.kind === "notice")),
       )

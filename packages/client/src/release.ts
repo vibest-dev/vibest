@@ -16,8 +16,10 @@ export const releasesUrl = Effect.gen(function* () {
 export const installMethod = (self: ReadonlyArray<string>, harnesses: string | undefined) => {
   if (harnesses) return { kind: "npm" } as const
   const m = self.length === 1 ? /^(.+)\/versions\/[^/]+\/bin\/vibest$/.exec(self[0]!) : null
+
   return m ? ({ kind: "curl", share: m[1]! } as const) : undefined
 }
+
 export type InstallMethod = NonNullable<ReturnType<typeof installMethod>>
 
 const latestVersion = (
@@ -39,6 +41,7 @@ const latestVersion = (
 
 const npmLatest = Effect.gen(function* () {
   const registry = yield* Config.String("npm_config_registry").pipe(Config.withDefault("https://registry.npmjs.org"))
+
   return yield* latestVersion(`${registry.replace(/\/+$/, "")}/@vibest/cli/beta`, (r) =>
     Effect.map(HttpClientResponse.schemaBodyJson(Schema.Struct({ version: Schema.String }))(r), (b) => b.version),
   )

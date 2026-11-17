@@ -50,19 +50,22 @@ type ProcessColumns = {
 }
 
 const encodeRouting = Schema.encodeSync(Routing)
-const routingJson = (routing: unknown) =>
-  routing === undefined || routing === null ? null : JSON.stringify(encodeRouting(routing as Routing))
+
+const decodeRoutingJson = Schema.decodeSync(Schema.fromJsonString(Routing))
+
+const routingJson = (routing: Routing | undefined) =>
+  routing === undefined ? null : JSON.stringify(encodeRouting(routing))
 
 const currentOf = (row: ProcessColumns): Current => ({
   id: row.id,
   start: {
     harness: row.harness,
-    ...(row.provider === null ? {} : { provider: row.provider }),
-    ...(row.model === null ? {} : { model: row.model }),
-    ...(row.routing === null ? {} : { routing: JSON.parse(row.routing) as unknown }),
+    ...(row.provider !== null && { provider: row.provider }),
+    ...(row.model !== null && { model: row.model }),
+    ...(row.routing !== null && { routing: decodeRoutingJson(row.routing) }),
     runtime: row.runtime,
     terminal: row.terminal ?? "",
-    ...(row.pid === null ? {} : { pid: row.pid }),
+    ...(row.pid !== null && { pid: row.pid }),
   },
   ended: row.endedAt,
   terminal: row.terminal,
@@ -86,11 +89,13 @@ export const statements = Effect.gen(function* () {
   const reads = ledgerReads(sql)
   const now = Clock.currentTimeMillis
   const moving = new Set<string>()
+
   const remember = (row: Pick<SessionRow, "id" | "status" | "entry" | "endedAt">) =>
     archived(row) ? sessionLive.ended(row.id) : sessionLive.setStatus(row.id, row.status)
 
   const running = sql`p_ended IS NULL`
   const selectRaw = reads.sessionRows
+
   const selectSessions = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     selectRaw(where, filter).pipe(
       Effect.flatMap((rows) =>
@@ -105,6 +110,7 @@ export const statements = Effect.gen(function* () {
       ),
       Effect.flatMap(decodeSessions),
     )
+
   const findSession = (id: string) => selectSessions([sql`s.id = ${id}`]).pipe(Effect.map((rows) => rows[0]))
 
   const currentProcess = (id: string) =>
@@ -112,6 +118,7 @@ export const statements = Effect.gen(function* () {
       WHERE session_id = ${id} AND id = (SELECT process_id FROM session WHERE id = ${id})`.pipe(
       Effect.map((rows) => (rows[0] === undefined ? undefined : currentOf(rows[0]))),
     )
+
   const liveProcess = (id: string) =>
     sql<ProcessColumns>`SELECT ${sql.literal(PROCESS_COLUMNS)} FROM process
       WHERE session_id = ${id} AND ended_at IS NULL`.pipe(
@@ -145,14 +152,17 @@ export const statements = Effect.gen(function* () {
   const startExecution = (sessionId: string, at: number, typed?: string) =>
     Effect.gen(function* () {
       const process = yield* currentProcessId(sessionId)
+
       const left = yield* sql<{ id: number }>`SELECT id FROM execution
         WHERE session_id = ${sessionId} AND outcome IS NULL AND process_id IS NOT ${process ?? null}`
+
       for (const { id } of left)
         yield* publish(ExecutionEnded, { sessionId, at, data: { execution: id, outcome: "not_started" } })
+
       return yield* publish(ExecutionStarted, {
         sessionId,
         at,
-        data: { ...(process === undefined ? {} : { process }), ...(typed ? { typed } : {}) },
+        data: { ...(process !== undefined && { process }), ...(typed && { typed }) },
       })
     })
 
@@ -163,8 +173,10 @@ export const statements = Effect.gen(function* () {
   const accept = (id: string, execution: number) =>
     Effect.gen(function* () {
       if ((yield* openExecution(id)) !== execution) return false
+
       if ((yield* acceptedAt(id, execution)) === null)
         yield* publish(ExecutionAccepted, { sessionId: id, data: { execution } })
+
       return true
     })
 
@@ -182,13 +194,15 @@ export const statements = Effect.gen(function* () {
   const endProcess = (id: string, reason: ProcessEndReason, at?: number) =>
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
+
       if (current === undefined || current.ended !== null) return false
       yield* publish(ProcessEnded, {
         sessionId: id,
-        ...(at === undefined ? {} : { at }),
+        ...(at !== undefined && { at }),
         data: { process: current.id, reason },
       })
       yield* afterCommitLive(sessionLive.dropIntegration(id))
+
       return true
     })
 
@@ -202,12 +216,14 @@ export const statements = Effect.gen(function* () {
   const placeProcess = (id: string, terminal: string, pid?: number, at?: number) =>
     Effect.gen(function* () {
       const live = yield* liveProcess(id)
+
       if (live === undefined || live.terminal !== null) return undefined
       yield* publish(ProcessPlaced, {
         sessionId: id,
-        ...(at === undefined ? {} : { at }),
-        data: { process: live.id, terminal, ...(pid === undefined ? {} : { pid }) },
+        ...(at !== undefined && { at }),
+        data: { process: live.id, terminal, ...(pid !== undefined && { pid }) },
       })
+
       return live.id
     })
 
@@ -215,70 +231,87 @@ export const statements = Effect.gen(function* () {
     Effect.gen(function* () {
       const live = yield* liveProcess(id)
       const stamp = at === undefined ? {} : { at }
+
       if (live !== undefined && live.terminal === null && start.terminal !== "" && sameChoice(live, start)) {
         yield* placeProcess(id, start.terminal, start.pid, at)
+
         if (start.resume && start.resume !== live.conversation)
           yield* publish(ProcessConversation, {
             sessionId: id,
             ...stamp,
             data: { process: live.id, conversation: start.resume },
           })
+
         return live.id
       }
+
       if (live !== undefined)
         yield* publish(ProcessEnded, { sessionId: id, ...stamp, data: { process: live.id, reason: "superseded" } })
+
       const seq = yield* publish(ProcessStarted, {
         sessionId: id,
         ...stamp,
         data: {
           harness: start.harness,
-          ...(start.provider ? { provider: start.provider } : {}),
-          ...(start.model ? { model: start.model } : {}),
-          ...(start.routing === undefined || start.routing === null ? {} : { routing: start.routing as Routing }),
-          ...(start.resume ? { resume: start.resume } : {}),
+          ...(start.provider && { provider: start.provider }),
+          ...(start.model && { model: start.model }),
+          ...(start.routing !== undefined && { routing: start.routing }),
+          ...(start.resume && { resume: start.resume }),
           runtime: start.runtime,
-          ...(start.terminal === "" ? {} : { terminal: start.terminal }),
-          ...(start.pid === undefined ? {} : { pid: start.pid }),
+          ...(start.terminal !== "" && { terminal: start.terminal }),
+          ...(start.pid !== undefined && { pid: start.pid }),
         },
       })
+
       yield* afterCommitLive(sessionLive.dropIntegration(id))
+
       return seq
     })
 
   const ensureProcess = (id: string, start: ProcessStart) =>
     Effect.gen(function* () {
       const live = yield* liveProcess(id)
+
       if (live !== undefined && live.terminal === null && sameChoice(live, start)) {
         if (start.resume && start.resume !== live.conversation)
           yield* publish(ProcessConversation, { sessionId: id, data: { process: live.id, conversation: start.resume } })
+
         return live.id
       }
+
       return yield* startProcess(id, start)
     })
 
   const rename = (id: string, name: string) =>
     Effect.gen(function* () {
       const [row] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${id}`
+
       if (row === undefined || row.name === name) return false
       yield* publish(SessionRenamed, { sessionId: id, data: { name } })
+
       return true
     })
 
   const archive = (id: string) =>
     Effect.gen(function* () {
       const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
+
       if (row === undefined || row.endedAt !== null) return false
       yield* publish(SessionEnded, { sessionId: id, data: { reason: "archived" } })
       yield* afterCommitLive(sessionLive.ended(id))
+
       return true
     })
 
   const noteConversation = (id: string, conversation: string, process?: number) =>
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
+
       if (current === undefined || current.conversation === conversation) return false
+
       if (process !== undefined && process !== current.id) return false
       yield* publish(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
+
       return true
     })
 
@@ -292,17 +325,19 @@ export const statements = Effect.gen(function* () {
         data: {
           execution,
           outcome: end.outcome,
-          ...(end.failure === undefined ? {} : { failure: end.failure }),
-          ...(end.conversation === undefined ? {} : { conversation: end.conversation }),
-          ...(end.reply === undefined ? {} : { reply: end.reply }),
+          ...(end.failure !== undefined && { failure: end.failure }),
+          ...(end.conversation !== undefined && { conversation: end.conversation }),
+          ...(end.reply !== undefined && { reply: end.reply }),
         },
       })
+
       return execution
     })
 
   const setStatus = (id: string, status: AgentStatus) =>
     Effect.gen(function* () {
       const current = yield* findSession(id)
+
       if (current === undefined) return
       yield* afterCommitLive(remember({ ...current, status }))
       yield* observe({ type: "session.changed", sessionId: id })
@@ -321,6 +356,7 @@ export const statements = Effect.gen(function* () {
         JOIN process p ON p.session_id = s.id AND p.id = s.process_id
         WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL
           ${except === undefined ? sql`` : sql`AND s.project_id != ${except}`}`
+
       return rows.filter((r) => !moving.has(r.project))
     })
 
@@ -328,6 +364,7 @@ export const statements = Effect.gen(function* () {
     sql`SELECT 1 FROM session WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
+
   const unusedId = newId(sessionPrefixTaken)
 
   const conversationOf = (id: string) =>
@@ -344,8 +381,11 @@ export const statements = Effect.gen(function* () {
       FROM session WHERE id = ${id}`.pipe(
       Effect.map(([row]): Creator => {
         if (row === undefined) return undefined
+
         if (row.peer !== null && row.session !== null) return { peer: row.peer, session: row.session }
+
         if (row.parent !== null) return { local: row.parent }
+
         return undefined
       }),
       Effect.orDie,
@@ -354,9 +394,12 @@ export const statements = Effect.gen(function* () {
   const nearestAlive = (id: string): Effect.Effect<Creator> =>
     Effect.gen(function* () {
       let current = id
+
       for (;;) {
         const creator = yield* creatorOf(current)
+
         if (creator === undefined || "peer" in creator) return creator
+
         if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
           return creator
         current = creator.local

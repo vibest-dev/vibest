@@ -112,6 +112,7 @@ const checks: ReadonlyArray<Check> = [
       )
       await until("all three plugins active", async () => {
         const all = await list(w)
+
         return ["home", "configured", "spaced"].every((id) => all.some((p) => p.id === id && p.status === "active"))
       })
       await until("the single-file entry refused", async () =>
@@ -140,6 +141,7 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       await until("the failures reported", async () => {
         const all = await list(w)
+
         return (
           all.some((p) => p.status === "failed" && p.source.endsWith("broken.ts")) &&
           all.some((p) => p.id === "a-throw" && p.status === "failed" && p.error?.includes("e2e setup throw")) &&
@@ -184,9 +186,11 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       await until("the throwing plugin active", async () =>
         (await list(w)).some((p) => p.id === "throw" && p.status === "active"),
       )
+
       const thrown = await w.viaEntry(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
         timeoutMs: 60_000,
       })
+
       expect(thrown.code !== 0, `run exited 0: ${thrown.stdout}`)
       expect(thrown.stderr.includes("plugin throw crashed: e2e hook throw"), `crash not shown: ${thrown.stderr}`)
       expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
@@ -234,6 +238,7 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       await write(path.join(w.vibestHome, "plugins", "b-after.ts"), counting("after", after))
       await until("both plugins active", async () => {
         const all = await list(w)
+
         return ["keep", "after"].every((id) => all.some((p) => p.id === id && p.status === "active"))
       })
       await write(source, `throw new Error("broken on purpose")\n`)
@@ -283,6 +288,7 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       await until("foo active with the configured options", async () => {
         const active = (await list(w)).some((p) => p.id === "foo" && p.status === "active")
+
         return active && (await setups(seen)).at(-1) === JSON.stringify({ tag: "e2e" })
       })
       const foo = (await list(w)).filter((p) => p.source.includes(`${path.sep}foo${path.sep}`))

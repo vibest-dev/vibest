@@ -1,4 +1,4 @@
-import { Config, Context, Data, Effect, FileSystem, Option, Path, Random } from "effect"
+import { Config, Context, Data, Effect, FileSystem, Option, Path, Predicate, Random } from "effect"
 
 export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
 
@@ -20,26 +20,32 @@ export const privateTmp = Effect.fn("privateTmp")(function* (tmpdir: string, fal
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const unsafe = (message: string) => new SystemPromptDirUnsafe({ message })
+
   if (tmpdir !== "") {
     const dir = path.join(tmpdir, "vibest")
     yield* fs.makeDirectory(dir, { recursive: true, mode: 0o700 }).pipe(Effect.mapError((e) => unsafe(e.message)))
+
     return dir
   }
+
   const user = yield* UserPlatform
+
   if (user.uid === undefined) return yield* unsafe("TMPDIR is not set and this platform has no user id")
   const dir = path.join(fallbackParent, `vibest-${user.uid}`)
   yield* fs
     .makeDirectory(dir, { mode: 0o700 })
     .pipe(
       Effect.catchTag("PlatformError", (e) =>
-        e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(unsafe(e.message)),
+        Predicate.isTagged(e.reason, "AlreadyExists") ? Effect.void : Effect.fail(unsafe(e.message)),
       ),
     )
   const st = yield* Effect.tryPromise({ try: () => user.lstat(dir), catch: (e) => unsafe(`${dir}: ${String(e)}`) })
+
   if (st.symlink || !st.directory || st.uid !== user.uid || (st.mode & 0o777) !== 0o700)
     return yield* unsafe(
       `${dir} is not a private directory of this user (it must be a directory, not a symlink, owned by uid ${user.uid} with mode 0700); remove it or set TMPDIR`,
     )
+
   return dir
 })
 
@@ -62,6 +68,7 @@ const writeAtomic = Effect.fn("writeAtomic")(function* (file: string, content: s
 const promptFile = (id: string, name: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
+
     return path.join(yield* systemPromptRoot, id, name)
   })
 
@@ -71,6 +78,7 @@ export const writeSystemPrompt = (id: string, text: string) =>
   Effect.gen(function* () {
     const file = yield* systemPromptFile(id)
     yield* writeAtomic(file, text)
+
     return file
   })
 
@@ -78,6 +86,7 @@ const writeFirstInput = (id: string, text: string) =>
   Effect.gen(function* () {
     const file = yield* promptFile(id, "first-input.md")
     yield* writeAtomic(file, text)
+
     return file
   })
 
@@ -110,6 +119,7 @@ const IDENTITY_ENV = [
 const identityPairs = (env: Readonly<Record<string, string>>) =>
   IDENTITY_ENV.flatMap((key) => {
     const value = env[key]
+
     return value === undefined ? [] : [`${key}=${value}`]
   })
 
@@ -119,12 +129,16 @@ const messageFromFile = (argv: ReadonlyArray<string>, file: string) => ["sh", "-
 
 export const launchLine = Effect.fn("launchLine")(function* (launch: Launch) {
   const id = launch.env.VIBEST_SESSION_ID
+
   if (launch.prompt !== undefined && id === undefined)
     return yield* Effect.die("a launch with a prompt has no session id")
+
   const argv =
     launch.prompt === undefined || id === undefined
       ? [...launch.argv]
       : messageFromFile(launch.argv.slice(0, -1), yield* writeFirstInput(id, launch.prompt))
+
   const prefix = identityPairs(launch.env)
+
   return prefix.length === 0 ? argv : ["env", ...prefix, ...argv]
 })

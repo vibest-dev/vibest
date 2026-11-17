@@ -2,9 +2,13 @@ import { type Launch, Runtime as R } from "@vibest/plugin/effect"
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
 
 type Runtime = R.RuntimeDefinition
+
 type Terminal = R.Terminal
+
 type RuntimeError = R.RuntimeError
+
 type RuntimeEvent = R.RuntimeEvent
+
 type AgentState = R.AgentState
 
 export const KIND = "herdr"
@@ -55,7 +59,8 @@ export interface RuntimeCalls {
   readonly focus: { readonly terminal: string }
 }
 
-type Entry = { [M in keyof RuntimeCalls]: { readonly method: M; readonly params: RuntimeCalls[M] } }[keyof RuntimeCalls]
+type CallLog = { readonly [M in keyof RuntimeCalls]: Array<RuntimeCalls[M]> }
+
 type Workspace = { readonly path: string; readonly root: string; readonly open: boolean; readonly standalone?: boolean }
 
 export interface WorkspaceState {
@@ -110,7 +115,20 @@ export class FakeRuntime extends Context.Service<
 >()("test/FakeRuntime") {
   static readonly make = (options: FakeRuntimeOptions) =>
     Effect.gen(function* () {
-      const log = yield* Ref.make<ReadonlyArray<Entry>>([])
+      const log: CallLog = {
+        open: [],
+        send: [],
+        read: [],
+        process: [],
+        state: [],
+        session: [],
+        close: [],
+        run: [],
+        present: [],
+        see: [],
+        focus: [],
+      }
+
       const callCount = yield* Ref.make(0)
       const agents = yield* Ref.make(HashMap.empty<string, FakeAgent>())
       const workspaces = yield* Ref.make(HashMap.empty<string, Workspace>())
@@ -119,16 +137,19 @@ export class FakeRuntime extends Context.Service<
       const events = yield* PubSub.unbounded<RuntimeEvent>()
       const onStarted = yield* Ref.make<(session: string) => Effect.Effect<void>>(() => Effect.void)
       const marks = yield* Ref.make(HashMap.empty<string, R.Seen>())
+
       const markOf = (terminal: string) =>
         Effect.map(Ref.get(marks), (map) =>
           Option.getOrElse(HashMap.get(map, terminal), (): R.Seen => ({ finished: 0, seen: 0 })),
         )
+
       const mark = (terminal: string, f: (now: R.Seen) => R.Seen) =>
         markOf(terminal).pipe(
           Effect.flatMap((now) => Ref.update(marks, (map) => HashMap.set(map, terminal, f(now)))),
           Effect.andThen(PubSub.publish(events, { type: "seen", terminal: { id: terminal } })),
           Effect.asVoid,
         )
+
       let counter = 0
       const next = () => Effect.sync(() => ++counter)
 
@@ -152,6 +173,7 @@ export class FakeRuntime extends Context.Service<
               ? Effect.void
               : Effect.gen(function* () {
                   yield* Ref.update(agents, (map) => HashMap.modify(map, id, f))
+
                   if (options.statusEvents) {
                     const after = Option.getOrThrow(HashMap.get(yield* Ref.get(agents), id))
                     yield* PubSub.publish(events, {
@@ -172,7 +194,9 @@ export class FakeRuntime extends Context.Service<
           const follows = Option.flatMap(HashMap.get(yield* Ref.get(holds), method), (hold) =>
             hold.raw === undefined ? Option.none<string>() : Option.some(hold.raw),
           )
+
           const moving = Option.isSome(follows) ? yield* resolve(follows.value) : undefined
+
           const found = Ref.modify(holds, (map) => {
             const hit = HashMap.get(map, method).pipe(
               Option.filter(
@@ -183,13 +207,16 @@ export class FakeRuntime extends Context.Service<
                   (moving !== undefined && target === moving),
               ),
             )
+
             if (Option.isSome(hit) && hit.value.skip > 0)
               return [
                 Option.none<Hold>(),
                 HashMap.set(map, method, { ...hit.value, skip: hit.value.skip - 1 }),
               ] as const
+
             return [hit, Option.isSome(hit) ? HashMap.remove(map, method) : map] as const
           })
+
           return yield* found
         }).pipe(
           Effect.flatMap(
@@ -200,6 +227,7 @@ export class FakeRuntime extends Context.Service<
                   Effect.andThen(Deferred.await(hold.release)),
                   Effect.flatMap((code) => {
                     const codes = ["not_found", "busy", "unreachable", "incompatible", "failed"] as const
+
                     return code === undefined
                       ? Effect.void
                       : codes.includes(code as never)
@@ -219,7 +247,7 @@ export class FakeRuntime extends Context.Service<
         body: Effect.Effect<A, RuntimeError>,
       ) =>
         Ref.update(callCount, (n) => n + 1).pipe(
-          Effect.andThen(Ref.update(log, (entries) => [...entries, { method, params } as Entry])),
+          Effect.andThen(Effect.sync(() => void log[method].push(params))),
           Effect.andThen(Effect.flatMap(Ref.get(reachable), (up) => (up ? Effect.void : fail(method, "unreachable")))),
           Effect.andThen(awaitHold(method, target)),
           Effect.andThen(body),
@@ -227,6 +255,7 @@ export class FakeRuntime extends Context.Service<
 
       const reachable = yield* Ref.make(true)
       const skipPromptUpdates = yield* Ref.make(0)
+
       const registers = (launch: Launch) =>
         launch.prompt !== undefined && !options.promptsIgnored
           ? Ref.modify(skipPromptUpdates, (n) => [n === 0, n > 0 ? n - 1 : 0] as const)
@@ -241,8 +270,10 @@ export class FakeRuntime extends Context.Service<
       const kill = (paneIds: ReadonlyArray<string>) =>
         Ref.update(agents, (map) => {
           let out = map
+
           for (const [id, agent] of HashMap.toEntries(map))
             if (paneIds.includes(id)) out = HashMap.set(out, id, { ...agent, alive: false })
+
           return out
         })
 
@@ -252,34 +283,44 @@ export class FakeRuntime extends Context.Service<
             HashMap.findFirst(yield* Ref.get(workspaces), (workspace) => workspace.open && workspace.path === root),
             ([id]) => id,
           )
+
           if (Option.isSome(grouped)) return grouped.value
           const at = HashMap.toEntries(yield* Ref.get(panes)).find(([, pane]) => pane.cwd === root)
+
           return at === undefined ? undefined : at[1].workspaceId
         })
 
       const shutWorkspace = (id: string) =>
         Effect.gen(function* () {
           const workspace = HashMap.get(yield* Ref.get(workspaces), id)
+
           if (Option.isSome(workspace)) {
             const closed: Workspace = { ...workspace.value, open: false }
             yield* Ref.update(workspaces, (map) => HashMap.set(map, id, closed))
           }
+
           const inside = HashMap.toEntries(yield* Ref.get(panes))
             .filter(([, pane]) => pane.workspaceId === id)
             .map(([paneId]) => paneId)
+
           yield* Ref.update(panes, (map) => inside.reduce((acc, paneId) => HashMap.remove(acc, paneId), map))
+
           return inside
         })
 
       const agentOf = (method: keyof RuntimeCalls, terminal: Terminal) =>
         Effect.gen(function* () {
           const map = yield* Ref.get(agents)
+
           const agent = yield* Option.match(HashMap.get(map, terminal.id), {
             onNone: () => fail(method, "not_found"),
             onSome: Effect.succeed,
           })
+
           if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail(method, "not_found")
+
           if (!agent.alive) return yield* fail(method, "not_found")
+
           return agent
         })
 
@@ -291,6 +332,7 @@ export class FakeRuntime extends Context.Service<
           Effect.gen(function* () {
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
             const record = HashMap.get(yield* Ref.get(agents), terminal.id)
+
             if (Option.isNone(record)) return
             const working = yield* registers(launch)
             yield* updateAgent(terminal.id, (current) => ({
@@ -300,13 +342,14 @@ export class FakeRuntime extends Context.Service<
               seq: working ? current.seq + 1 : current.seq,
             }))
             const session = record.value.vibestSession
+
             if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
           }),
         )
 
       const runtime: Runtime = {
         id: KIND,
-        ...(options.noRun ? {} : { run }),
+        ...(!options.noRun && { run }),
         status: () =>
           Effect.succeed(
             options.offline === undefined
@@ -325,18 +368,21 @@ export class FakeRuntime extends Context.Service<
               near: input.near?.id,
               split: input.split,
               focus: input.focus,
-              ...(input.remote === true ? { remote: true } : {}),
-              ...(input.target !== undefined ? { target: input.target } : {}),
+              ...(input.remote === true && { remote: true }),
+              ...(input.target !== undefined && { target: input.target }),
             },
             input.launch.env.VIBEST_SESSION_ID,
             Effect.gen(function* () {
               if (options.startError) return yield* fail("open", "failed", options.startError)
               const near = input.near === undefined ? Option.none() : HashMap.get(yield* Ref.get(panes), input.near.id)
+
               const grouped = Option.isSome(near)
                 ? Option.some(near.value.workspaceId)
                 : Option.filter(yield* Effect.option(workspaceAt(input.project)), (id) => id !== undefined)
+
               const fresh = Option.isNone(grouped)
               let workspaceId: string
+
               if (fresh) {
                 workspaceId = `ws${yield* next()}`
                 const opened: Workspace = { path: input.project, root: input.project, open: true }
@@ -345,35 +391,45 @@ export class FakeRuntime extends Context.Service<
               } else workspaceId = Option.getOrThrow(grouped)
               let paneId = ""
               let taken = true
+
               while (taken) {
                 const made = yield* next()
                 paneId = `${workspaceId}:p${made}`
                 taken = HashMap.has(yield* Ref.get(panes), paneId)
               }
+
               yield* addPane(paneId, workspaceId, input.cwd)
               const session = input.launch.env.VIBEST_SESSION_ID
+
               const prior =
                 session === undefined
                   ? undefined
                   : HashMap.toEntries(yield* Ref.get(agents)).find(([, agent]) => agent.vibestSession === session)?.[1]
+
               const coordinator = session === undefined && input.launch.argv.some((part) => part.includes("vibest"))
               const working = yield* registers(input.launch)
+
               const started: FakeAgent = {
                 ...prior,
-                ...(session !== undefined ? { vibestSession: session } : {}),
+                ...(session !== undefined && { vibestSession: session }),
                 status: coordinator || working ? "working" : "idle",
                 seq: working ? 1 : 0,
                 alive: true,
               }
+
               yield* Ref.update(agents, (map) => {
                 let next = HashMap.set(map, paneId, started)
+
                 if (prior !== undefined)
                   for (const [id, agent] of HashMap.toEntries(map))
                     if (agent.vibestSession === session && id !== paneId) next = HashMap.remove(next, id)
+
                 return next
               })
+
               if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
               const terminal: Terminal = { id: paneId }
+
               return terminal
             }),
           ),
@@ -382,12 +438,13 @@ export class FakeRuntime extends Context.Service<
             "send",
             {
               terminal: terminal.id,
-              ...("text" in input && input.text !== undefined ? { text: input.text } : {}),
-              ...("keys" in input && input.keys !== undefined ? { keys: [...input.keys] } : {}),
+              ...("text" in input && input.text !== undefined && { text: input.text }),
+              ...("keys" in input && input.keys !== undefined && { keys: [...input.keys] }),
             },
             terminal.id,
             Effect.gen(function* () {
               const agent = yield* agentOf("send", terminal)
+
               if (
                 input.text !== undefined &&
                 !options.promptsIgnored &&
@@ -396,6 +453,7 @@ export class FakeRuntime extends Context.Service<
               )
                 yield* updateAgent(terminal.id, (current) => ({ ...current, status: "working", seq: current.seq + 1 }))
               const interrupts = (input.keys ?? []).some((key) => key === "esc" || key === "ctrl+c")
+
               if (interrupts && !options.interruptIgnored && (agent.status === "working" || agent.status === "blocked"))
                 yield* updateAgent(terminal.id, (current) => ({ ...current, status: "idle", seq: current.seq + 1 }))
             }),
@@ -419,7 +477,9 @@ export class FakeRuntime extends Context.Service<
             Effect.gen(function* () {
               if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("process", "not_found")
               const record = HashMap.get(yield* Ref.get(agents), terminal.id)
+
               if (Option.isSome(record)) return { running: record.value.alive }
+
               return { running: true }
             }),
           ),
@@ -454,27 +514,34 @@ export class FakeRuntime extends Context.Service<
             terminal.id,
             Effect.gen(function* () {
               const closing = HashMap.get(yield* Ref.get(panes), terminal.id)
+
               if (Option.isNone(closing)) return yield* fail("close", "not_found")
               yield* Ref.update(panes, (map) => HashMap.remove(map, terminal.id))
               const gone = [terminal.id]
+
               if (
                 Option.isSome(closing) &&
                 !HashMap.some(yield* Ref.get(panes), (pane) => pane.workspaceId === closing.value.workspaceId)
               ) {
                 const all = yield* Ref.get(workspaces)
                 const workspace = HashMap.get(all, closing.value.workspaceId)
+
                 const main =
                   Option.isSome(workspace) &&
                   !workspace.value.standalone &&
                   workspace.value.path === workspace.value.root
+
                 const group = main
                   ? HashMap.toEntries(all)
                       .filter(([, item]) => item.open && !item.standalone && item.root === workspace.value.root)
                       .map(([id]) => id)
                   : [closing.value.workspaceId]
+
                 for (const id of group) gone.push(...(yield* shutWorkspace(id)))
               }
+
               yield* kill(gone)
+
               if (options.statusEvents) yield* PubSub.publish(events, { type: "exited", terminal: { id: terminal.id } })
             }),
           ),
@@ -489,25 +556,20 @@ export class FakeRuntime extends Context.Service<
             mark(terminal.id, (now) => ({ ...now, seen: finished })),
           ),
         attach: () => ["fake", "attach"],
-        ...(options.noFocus
-          ? {}
-          : {
-              focus: (terminal: { readonly id: string }) =>
-                call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
-            }),
+        ...(!options.noFocus && {
+          focus: (terminal: { readonly id: string }) =>
+            call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
+        }),
       }
 
       return FakeRuntime.of({
         runtime,
-        callsTo: (method) =>
-          Ref.get(log).pipe(
-            Effect.map(
-              (entries) =>
-                entries.flatMap((entry) => (entry.method === method ? [entry.params] : [])) as unknown as ReadonlyArray<
-                  RuntimeCalls[typeof method]
-                >,
-            ),
-          ),
+        callsTo: <M extends keyof RuntimeCalls>(method: M) =>
+          Effect.sync(() => {
+            const calls: ReadonlyArray<RuntimeCalls[M]> = log[method]
+
+            return [...calls]
+          }),
         callCount: Ref.get(callCount),
         terminalOf: (session) =>
           Ref.get(agents).pipe(
@@ -520,6 +582,7 @@ export class FakeRuntime extends Context.Service<
               const found = HashMap.toEntries(map).find(
                 ([id, agent]) => id === target || agent.vibestSession === target,
               )
+
               return found === undefined ? undefined : { terminal: found[0], agent: found[1] }
             }),
           ),
@@ -554,6 +617,7 @@ export class FakeRuntime extends Context.Service<
             yield* Ref.update(holds, (map) =>
               HashMap.set(map, method, { target: resolved, raw: target, skip, reached, release }),
             )
+
             return {
               reached: Deferred.await(reached),
               release: (code?: string) => Deferred.succeed(release, code).pipe(Effect.asVoid),

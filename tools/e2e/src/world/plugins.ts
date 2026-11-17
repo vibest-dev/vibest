@@ -15,6 +15,7 @@ export const addCursorPlugin = (w: { readonly vibestHome: string }, harnesses: s
 
 export const addAgyPlugin = async (w: { readonly vibestHome: string }, harnesses: string, binary: string) => {
   const plugins = [path.join(harnesses, "agy")]
+
   if (binary !== "agy") {
     const dir = path.join(w.vibestHome, "agy-binary")
     await fs.mkdir(dir, { recursive: true })
@@ -30,5 +31,6 @@ export default Plugin.define({
     )
     plugins.push(dir)
   }
+
   await configurePlugins(w, (existing) => [...existing, ...plugins])
 }

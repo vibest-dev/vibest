@@ -34,15 +34,19 @@ import { piShadow } from "../world/shadow.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
+
 type Agent = { name?: string | null; pane_id: string; agent?: string | null }
 
 const OLD = "0.0.0-old"
 
 const ensureRuntime = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
   if (args.includes("--runtime")) return args
+
   if (args[0] === "run") return ["run", "--runtime", "herdr", ...args.slice(1)]
+
   if (args.length === 0 || (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help"))
     return ["--runtime", "herdr", ...args]
+
   return args
 }
 
@@ -52,12 +56,14 @@ const oldInstall = async (w: World, name: string) => {
   await fs.copyFile(compiled, path.join(old, "bin", "vibest"))
   await fs.chmod(path.join(old, "bin", "vibest"), 0o755)
   await fs.cp(harnesses, path.join(old, "harnesses"), { recursive: true })
+
   const patch = async (file: string, from: RegExp, to: string) => {
     const source = await fs.readFile(file, "utf8")
     const patched = source.replace(from, to)
     expect(patched !== source, `${file}: its version was not found`)
     await fs.writeFile(file, patched)
   }
+
   await patch(path.join(old, "harnesses", "pi", "extension.mjs"), /var VERSION = "[^"]+";/, `var VERSION = "${OLD}";`)
   await patch(
     path.join(old, "harnesses", "claude", "hooks", "register.mjs"),
@@ -69,6 +75,7 @@ const oldInstall = async (w: World, name: string) => {
   const wrapper = path.join(bin, "vibest")
   const point = (target: string) => fs.writeFile(wrapper, `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 })
   await point(path.join(old, "bin", "vibest"))
+
   return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}` } }
 }
 
@@ -89,15 +96,18 @@ const usageLimitMove = async (
   const session = `${w.herdrSession}-${o.name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
+
   try {
     const repo = await project(w, o.name)
     const base = `http://127.0.0.1:${model.port}`
+
     const agentDir = await piShadow(
       path.join(w.root, `pi-${o.name}`),
       w.profile,
       { first: { baseUrl: `${base}/v1` }, second: { baseUrl: `${base}/v2` } },
       undefined,
     )
+
     await fs.mkdir(path.dirname(plugin), { recursive: true })
     await fs.writeFile(plugin, o.plugin)
     const env = { PI_CODING_AGENT_DIR: agentDir }
@@ -112,6 +122,7 @@ const usageLimitMove = async (
       30_000,
     )
     await w.entry({ cwd: repo, session, processEnv: env })
+
     const id = (
       JSON.parse(
         await w.okViaEntry(["run", "pi", "--provider", "first", "--model", "m", "--session", session, ask("limit")], {
@@ -121,14 +132,17 @@ const usageLimitMove = async (
         }),
       ) as { id: string }
     ).id
+
     const read = <A>(sql: string) => {
       const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
       try {
         return db.query<A, [string]>(sql).all(id)
       } finally {
         db.close()
       }
     }
+
     await body({
       id,
       seen: model.seen,
@@ -161,15 +175,19 @@ const checks: ReadonlyArray<Check> = [
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = holdsSlowMessageModel()
       const session = `${w.herdrSession}-restart`
+
       try {
         const repo = await project(w, "restart")
         const agentDir = await piDir(w, "pi-restart", model.url)
         const { old, wrapper, point, env } = await oldInstall(w, "restart")
         const piEnv = `PI_CODING_AGENT_DIR=${agentDir}`
+
         const viaEntry = (args: ReadonlyArray<string>) =>
           w.okViaEntry(ensureRuntime(args), { cwd: repo, env, bin: wrapper })
+
         const read = (where: string, arg: string) => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
           try {
             return db
               .query<Row, [string]>(
@@ -180,12 +198,16 @@ const checks: ReadonlyArray<Check> = [
             db.close()
           }
         }
+
         const entryId = () =>
           read(`s.agent_type = 'coordinator' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
+
         const subRow = (id: string) => read("s.id = ?", id)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+
         const listed = async (id: string) =>
           ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.pane_id === paneOf(w, id))
+
         const reached = (what: string, ok: (messages: ReadonlyArray<string>) => boolean) =>
           until(what, () => model.seen.some(ok), 120_000).catch(async (e: Error) => {
             const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
@@ -197,6 +219,7 @@ const checks: ReadonlyArray<Check> = [
               )}\nvibestd.log:\n${log.slice(-4000)}`,
             )
           })
+
         const result = (marker: string) => (m: ReadonlyArray<string>) =>
           m.at(-1)!.includes("<agent-") && m.at(-1)!.includes(marker)
 
@@ -210,14 +233,17 @@ const checks: ReadonlyArray<Check> = [
           bin: wrapper,
           timeoutMs: 60_000,
         })
+
         const zero = (
           JSON.parse(await viaEntry(["run", "pi", "--session", session, "--env", piEnv, ask("zero")])) as { id: string }
         ).id
+
         await reached("the entry session's execution on the first message", result("done-zero"))
         await until("herdr finds the subagent in its pane", async () => (await listed(zero))?.agent === "pi", 60_000)
         const subPane = (await listed(zero))!.pane_id
         await until("the subagent reports the old integration", () => {
           const row = subRow(zero)
+
           return row?.version === old && row.pid !== null
         })
         const subBefore = subRow(zero)!
@@ -225,30 +251,36 @@ const checks: ReadonlyArray<Check> = [
           "the entry session reports the old integration and its conversation",
           () => {
             const row = entryId()
+
             return row?.version === old && row.harness_session_id !== null && row.pid !== null
           },
           60_000,
         )
         const before = entryId()!
         const daemonBefore = await w.daemonPid()
+
         const address = async () =>
           (
             await w
               .json<{ sessions: Array<{ id: string; address: unknown }> }>(["ls"], { cwd: repo, env })
               .then((l) => l.sessions)
           ).find((e) => e.id === before.id)?.address
+
         const addressBefore = await address()
         await viaEntry(["run", "pi", "--session", session, "--env", piEnv, ask("slow")])
         await until("the entry session's held execution", () => model.held() > 0, 120_000)
 
         await point(binary)
+
         const update = async (answer: string) => {
           const pty = ["python3", "-I", path.join(import.meta.dirname, "..", "terminal.py"), wrapper, "update"]
           const r = await w.run(repo, pty, { env, stdin: `${answer}\n`, timeoutMs: 180_000 })
           const out = r.stdout.replace(/\r/g, "")
           expect(r.code === 0, `vibest update (${answer}) exited ${r.code}: ${out}${r.stderr}`)
+
           return out
         }
+
         const no = await update("n")
         expect(/vibestd: handoff\./.test(no), `vibestd was not handed over: ${no}`)
         expect(no.includes("They keep the old integration"), `No did not keep the agent: ${no}`)
@@ -261,12 +293,14 @@ const checks: ReadonlyArray<Check> = [
           `No restarted the entry session: ${JSON.stringify(kept)}`,
         )
         expect(kept?.version === old, `the kept agent's integration: ${kept?.version}`)
+
         const refused = await fetch("http://vibestd/inbox/take", {
           unix: path.join(w.vibestHome, "vibest-http.sock"),
           method: "POST",
           headers: { "vibest-protocol": "2", "vibest-session-id": before.id },
           body: "{}",
         } as RequestInit)
+
         const answer = (await refused.json()) as { error?: string; action?: string }
         expect(
           refused.status === 409 && answer.action === "vibest update" && /vibest update/.test(answer.error ?? ""),
@@ -285,6 +319,7 @@ const checks: ReadonlyArray<Check> = [
           "the subagent restarted on this integration",
           () => {
             const row = subRow(zero)
+
             return row?.pid != null && row.pid !== subBefore.pid && row.version !== old && row.version !== null
           },
           120_000,
@@ -305,6 +340,7 @@ const checks: ReadonlyArray<Check> = [
           "the entry session restarted on this integration",
           () => {
             after = entryId()
+
             return after?.pid != null && after.pid !== before.pid && after.version !== old && after.version !== null
           },
           120_000,
@@ -332,13 +368,16 @@ const checks: ReadonlyArray<Check> = [
         )
         await viaEntry(["run", "pi", "--session", session, "--env", piEnv, ask("after")])
         await reached("the entry session's execution on a message after the update", result("done-after"))
+
         for (const id of [before.id, zero]) {
           expectFacts(w, id, ["process.started", "process.ended", "process.started", "process.ready"])
+
           const ends = rows<{ reason: string | null }>(
             w,
             "SELECT end_reason AS reason FROM process WHERE session_id = ? ORDER BY id",
             id,
           )
+
           expect(
             JSON.stringify(ends.map((e) => e.reason)) === '["restart",null]',
             `${id}'s processes: ${JSON.stringify(ends)}`,
@@ -359,19 +398,25 @@ const checks: ReadonlyArray<Check> = [
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = holdsSlowMessageModel()
       const session = `${w.herdrSession}-drestart`
+
       try {
         const repo = await project(w, "drestart")
         const agentDir = await piDir(w, "pi-drestart", model.url)
         const { old, wrapper, point, env } = await oldInstall(w, "drestart")
+
         const ok = async (args: ReadonlyArray<string>) => {
           const r = await w.run(repo, [wrapper, ...ensureRuntime(args)], { env, timeoutMs: 60_000 })
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
+
           return r.stdout
         }
+
         const viaEntry = (args: ReadonlyArray<string>) =>
           w.okViaEntry(ensureRuntime(args), { cwd: repo, env, bin: wrapper })
+
         const row = (id: string) => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
           try {
             return db
               .query<Row, [string]>(
@@ -382,29 +427,36 @@ const checks: ReadonlyArray<Check> = [
             db.close()
           }
         }
+
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+
         const listed = async (id: string) =>
           ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.pane_id === paneOf(w, id))
 
         await w.stopDaemon()
         await ok(["daemon"])
         await w.entry({ cwd: repo, session, processEnv: env })
+
         const id = (
           JSON.parse(
             await viaEntry(["run", "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, ask("one")]),
           ) as { id: string }
         ).id
+
         await until(
           "the subagent reports the old integration and its conversation",
           () => {
             const r = row(id)
+
             return r?.version === old && r.pid !== null && r.harness_session_id !== null
           },
           120_000,
         )
         const before = row(id)!
+
         const processOf = () =>
           rows<{ process: number }>(w, "SELECT process_id AS process FROM session WHERE id = ?", id)[0]?.process
+
         const oldProcess = processOf()
         await until("herdr finds the subagent in its pane", async () => (await listed(id))?.agent === "pi", 60_000)
         const pane = (await listed(id))!.pane_id
@@ -429,6 +481,7 @@ const checks: ReadonlyArray<Check> = [
           "the subagent restarted on this integration",
           () => {
             const now = row(id)
+
             return now?.pid != null && now.pid !== before.pid && now.version !== old && now.version !== null
           },
           120_000,
@@ -446,10 +499,12 @@ const checks: ReadonlyArray<Check> = [
         expect((await listed(id))?.pane_id === pane, `the subagent's pane changed: ${pane}`)
         expect(processOf() !== oldProcess, `the restarted subagent is still process ${oldProcess}`)
         const LATE = "a late reply from the harness the restart replaced"
+
         const late = await w.run(repo, [wrapper, "integration", "stop", "--harness", "pi"], {
           env: { ...env, VIBEST_SESSION_ID: id, VIBEST_PROCESS: String(oldProcess) },
           stdin: JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
         })
+
         expect(late.code === 0, `the old process's execution end was not taken: ${late.stderr}`)
         expect(
           rows(w, "SELECT id FROM execution WHERE session_id = ? AND reply = ?", id, LATE).length === 0,
@@ -472,24 +527,32 @@ const checks: ReadonlyArray<Check> = [
       const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
       const UPDATE = "Run vibest update --yes now."
       let updates = 0
+
       const model = fakeAnthropic((r) => {
         const last = text(lastUser(r))
+
         if (last.includes(UPDATE)) {
           if (r.tools.length > 0) updates++
+
           return { tool: "Bash", input: { command: "vibest update --yes" } }
         }
+
         return last.includes('"tool_result"') ? "UPDATED" : "ok"
       })
+
       try {
         const repo = await project(w, "claude-update")
         const install = await oldInstall(w, "cupdate")
         const configTheResumeCheckReads = w.config.claude
         const flags = await claudeEnv(w, "cupdate", model.url, configTheResumeCheckReads)
+
         const vibest = async (args: ReadonlyArray<string>, timeoutMs = 120_000) => {
           const r = await w.run(repo, [install.wrapper, ...ensureRuntime(args)], { env: install.env, timeoutMs })
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
+
           return r.stdout
         }
+
         type EntryRow = {
           id: string
           conversation: string | null
@@ -497,8 +560,10 @@ const checks: ReadonlyArray<Check> = [
           pid: number | null
           version: string | null
         }
+
         const entryId = () => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
           try {
             return (
               db
@@ -512,13 +577,18 @@ const checks: ReadonlyArray<Check> = [
             db.close()
           }
         }
+
         const pane = () => ((JSON.parse(entryId()?.runtime ?? "{}") as { id?: string }).id ?? "").split("/")[1] ?? ""
+
         const screen = async () => {
           const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true })
+
           return String((r.read as { text?: string } | undefined)?.text ?? "")
         }
+
         const log = async () =>
           (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000)
+
         const failWith = async (e: Error) => {
           throw new Error(`${e.message}; row ${JSON.stringify(entryId())}; screen:\n${await screen()}\n${await log()}`)
         }
@@ -671,6 +741,7 @@ export default Plugin.define({
         async ({ id, seen, row, status, log }) => {
           const notices = () => {
             const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
             try {
               return db
                 .query<{ content: string }, [string]>(
@@ -682,11 +753,13 @@ export default Plugin.define({
               db.close()
             }
           }
+
           const fail = async (e: Error) => {
             throw new Error(
               `${e.message}; row ${JSON.stringify(row())}; executions ${JSON.stringify(status())}; notices ${JSON.stringify(notices())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
             )
           }
+
           await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)
           await until(
             "the no-harness-left notice",

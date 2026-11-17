@@ -1,32 +1,31 @@
 import type { HarnessId } from "@vibest/schema/session"
+import { Option, Predicate, Schema } from "effect"
 
 import type { HarnessDefinition } from "./plugin/domains.ts"
 
-export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
-  try {
-    const value = JSON.parse(raw) as unknown
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
-    return value as Record<string, unknown>
-  } catch {
-    return undefined
-  }
-}
+const decodeJsonObject = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))
+
+export const jsonObject = (raw: string) => Option.getOrUndefined(decodeJsonObject(raw))
 
 export const guardInputOf = (adapter: HarnessDefinition, raw: string) => {
   if (adapter.guardCall === undefined) return raw
   const event = jsonObject(raw)
+
   if (event === undefined) return raw
   const call = adapter.guardCall(event)
+
   return call === undefined ? undefined : JSON.stringify(call)
 }
 
 export const promptOf = (adapter: HarnessDefinition, raw: string) => {
   const event = jsonObject(raw)
+
   return event && adapter.userPrompt?.(event)
 }
 
 export const isUsageLimitError = (error: string | undefined) => {
   const head = error?.split(":")[0]
+
   return head !== undefined && head !== "" && /rate[_ -]?limits?\b|usage limits?\b|too many requests/i.test(head)
 }
 
@@ -39,7 +38,7 @@ export const envelope = (
 ) =>
   [
     `<${tag}>`,
-    ...fields.filter(([, v]) => v !== "").map(([k, v]) => `<${k}>${escapeText(v)}</${k}>`),
+    ...fields.flatMap(([k, v]) => (v === "" ? [] : [`<${k}>${escapeText(v)}</${k}>`])),
     `<${text[0]}>`,
     text[1],
     `</${text[0]}>`,
@@ -80,35 +79,36 @@ export type ObservedEnd = {
 export const executionEndOf = (adapter: HarnessDefinition, raw: string, at: number): ObservedEnd | undefined => {
   const event = jsonObject(raw)
   const payload = event && adapter.executionEnd?.(event)?.end
+
   return payload ? executionEndFrom(adapter, payload, at) : undefined
 }
 
 const PLAIN_ID_NOT_A_FLAG = /^\w[\w.:-]{0,127}$/
-const errorOf = (payload: Readonly<Record<string, unknown>>) => {
+
+const errorOf = (payload: Schema.JsonObject) => {
   const error = payload.error
   const details = payload.error_details
-  if (typeof error !== "string" || !error) return undefined
-  return typeof details === "string" && details ? `${error}: ${details}` : error
+
+  if (!Predicate.isString(error) || !error) return undefined
+
+  return Predicate.isString(details) && details ? `${error}: ${details}` : error
 }
 
-export const executionEndFrom = (
-  adapter: HarnessDefinition,
-  payload: Readonly<Record<string, unknown>>,
-  at: number,
-): ObservedEnd => {
+export const executionEndFrom = (adapter: HarnessDefinition, payload: Schema.JsonObject, at: number): ObservedEnd => {
   const text = payload[adapter.replyField]
   const conversation = payload.conversation_id
   const interrupted = payload.aborted === true
   const error = interrupted ? undefined : errorOf(payload)
+
   return {
     harness: adapter.id,
     at,
     status: interrupted ? "interrupted" : error ? "failed" : "completed",
-    reply: typeof text === "string" ? text : "",
+    reply: Predicate.isString(text) ? text : "",
     failure: error,
     limited: isUsageLimitError(error),
     conversation:
-      !adapter.ownSessionId && typeof conversation === "string" && PLAIN_ID_NOT_A_FLAG.test(conversation)
+      !adapter.ownSessionId && Predicate.isString(conversation) && PLAIN_ID_NOT_A_FLAG.test(conversation)
         ? conversation
         : undefined,
     needsReady: adapter.ready === "integration",

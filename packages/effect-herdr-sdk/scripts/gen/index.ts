@@ -14,9 +14,11 @@ const main = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const schema = yield* loadSchema
+
   const pin = yield* Schema.decodeUnknownEffect(HerdrVersionPin)(
     yield* fs.readFileString(yield* packagePath("schema", "herdr-version.json")),
   )
+
   if (schema.protocol !== pin.protocol)
     return yield* Effect.fail(
       new Error(`schema/herdr-api.schema.json is protocol ${schema.protocol}, herdr-version.json pins ${pin.protocol}`),
@@ -25,7 +27,7 @@ const main = Effect.gen(function* () {
   const outDir = yield* packagePath("src", "generated")
   yield* fs.makeDirectory(outDir, { recursive: true })
 
-  const files: Record<string, string> = {
+  const files = {
     "params.ts": emitParams(schema, h),
     "results.ts": emitResults(schema, h),
     "errors.ts": emitErrors(schema, h),
@@ -49,6 +51,7 @@ export const PROTOCOL = ${JSON.stringify(schema.protocol)} as const;
 export const SCHEMA_VERSION = ${JSON.stringify(schema.schema_version)} as const;
 `,
   }
+
   if (check) {
     const stale = yield* Effect.filter(Object.entries(files), ([name, body]) =>
       fs.readFileString(path.join(outDir, name)).pipe(
@@ -56,12 +59,15 @@ export const SCHEMA_VERSION = ${JSON.stringify(schema.schema_version)} as const;
         Effect.orElseSucceed(() => true),
       ),
     )
+
     if (stale.length)
       return yield* Effect.fail(
         new Error(`src/generated is stale (${stale.map(([n]) => n).join(", ")}); run bun run generate`),
       )
+
     return yield* Console.log(`src/generated matches herdr ${pin.version} (protocol ${pin.protocol})`)
   }
+
   yield* Effect.forEach(Object.entries(files), ([name, body]) => fs.writeFileString(path.join(outDir, name), body), {
     discard: true,
   })

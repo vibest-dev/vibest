@@ -6,6 +6,7 @@ import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import { agentName, fromPool, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Fiber, Stream } from "effect"
+import type { HerdrClient } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
@@ -24,29 +25,37 @@ const fake = (
 ) => {
   const calls: Array<ReadonlyArray<string>> = []
   const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" })
+
   const cli: Cli = (args) =>
     (options.addHangs && args[1] === "add" ? Effect.never : Effect.void).pipe(
       Effect.map(() => {
         calls.push(args)
         const [a, b, c] = args
+
         if (a === "machine" && b === "list")
           return options.listFails ? { code: 1, stdout: "", stderr: "boom\n" } : ok(JSON.stringify(catalog))
+
         if (a === "machine" && b === "add") {
           if (options.addFails !== undefined) return { code: 1, stdout: "", stderr: options.addFails }
           catalog.push({ id: `p${catalog.length + 1}`, label: args[4]!, target: c!, session: args[6]!, enabled: true })
+
           return ok("Saved SSH machine. Remote server is ready.\n")
         }
+
         if (a === "machine" && b === "remove") {
           if (options.removeFails) return { code: 1, stdout: "", stderr: "cannot\n" }
           catalog.splice(
             catalog.findIndex((p) => p.id === c),
             1,
           )
+
           return ok("")
         }
+
         return { code: 2, stdout: "", stderr: `unexpected ${args.join(" ")}` }
       }),
     )
+
   return { cli, calls, catalog }
 }
 
@@ -63,6 +72,7 @@ type Noted = MachineEvent & { readonly notes: Array<MachineNote> }
 
 const noting = (hook: typeof Mirror.connect) => (cli: Cli, event: Noted) =>
   hook(cli, event).pipe(Effect.map((notes) => void event.notes.push(...notes)))
+
 const connect = noting(Mirror.connect)
 const remove = noting(Mirror.remove)
 
@@ -70,7 +80,7 @@ const event = (link?: Record<string, string>, extra: Partial<Noted> = {}): Noted
   name: "racknerd",
   target: "b-host",
   vibestd: "v",
-  runtimes: [{ kind: "herdr", status: "online", ...(link === undefined ? {} : { link }) }],
+  runtimes: [{ kind: "herdr", status: "online", ...(link !== undefined && { link }) }],
   notes: [],
   ...extra,
 })
@@ -79,27 +89,32 @@ const adds = (calls: ReadonlyArray<ReadonlyArray<string>>) => calls.filter((c) =
 
 const pinging = (version: string, detached?: boolean) => {
   const asked: Array<string> = []
+
   const pool = HerdrPool.of({
     resolve: () => Effect.die("resolve reached"),
     client: (session) =>
       Effect.sync(() => {
         asked.push(session)
-        return {
-          call: () =>
+
+        const client: HerdrClient = {
+          socketPath: "/nowhere",
+          subscribe: () => Stream.die(new Error("subscribe reached")),
+          call: (() =>
             Effect.succeed({
               type: "pong",
               version,
               protocol: 1,
-              ...(detached === undefined
-                ? {}
-                : { capabilities: { live_handoff: true, detached_server_daemon: detached } }),
-            }),
-        } as unknown as Effect.Success<ReturnType<HerdrPool["Service"]["client"]>>
+              ...(detached !== undefined && { capabilities: { live_handoff: true, detached_server_daemon: detached } }),
+            })) as HerdrClient["call"],
+        }
+
+        return client
       }),
     events: Stream.empty,
     restarts: Stream.empty,
     sessions: Effect.succeed([]),
   })
+
   return { pool, asked }
 }
 
@@ -111,10 +126,12 @@ describe("runtime-herdr machines: link", () => {
         const herdr = pinging("0.9.6")
         assert.deepStrictEqual(yield* link(herdr.pool), { session: "default", version: "0.9.6" })
         assert.deepStrictEqual(herdr.asked, ["default"])
+
         const down = HerdrPool.of({
           ...herdr.pool,
           client: (session) => Effect.fail(new RuntimeUnreachable({ session, message: "not running" })),
         })
+
         assert.deepStrictEqual(yield* link(down), { session: "default" })
         assert.deepStrictEqual(yield* link(pinging("0.9.5", true).pool), { session: "default", version: "0.9.5" })
         assert.deepStrictEqual(yield* link(pinging("0.9.5", false).pool), {
@@ -163,6 +180,7 @@ describe("runtime-herdr machines: connect", () => {
       const herdr = fake({
         addFails: "remote herdr server is still running v0.9.5\nerror: remote server is not ready for saved machines\n",
       })
+
       const e = event({ session: "vibest" })
       yield* connect(herdr.cli, e)
       assert.include(e.notes[0]!.message, "error: remote server is not ready for saved machines")
@@ -209,6 +227,7 @@ describe("runtime-herdr machines: remove", () => {
         profile({ id: "p1", session: "work" }),
         profile({ id: "p2", label: "x", session: "vibest" }),
       ])
+
       yield* remove(herdr.cli, event({ session: "work" }))
       assert.deepStrictEqual(
         herdr.catalog.map((p) => p.id),
@@ -260,6 +279,7 @@ describe("runtime-herdr machines: locate", () => {
       Effect.gen(function* () {
         const herdr = fake({}, [profile({ id: "p7", label: "racknerd/vibest" })])
         const other = "99999999-2222-4333-8444-555555555555"
+
         const found = yield* locate(
           herdr.cli,
           peer,
@@ -268,6 +288,7 @@ describe("runtime-herdr machines: locate", () => {
             [other, `work/w2:p1/${agentName(other)}`],
           ]),
         )
+
         assert.deepStrictEqual(found.terminals.get(SESSION), { id: `${there}@racknerd/vibest` })
         assert.isFalse(found.terminals.has(other))
         assert.include(found.note!, "no enabled saved machine for that agent's herdr session on racknerd")
@@ -307,13 +328,16 @@ describe("runtime-herdr machines: remote terminal ids", () => {
         restarts: Stream.empty,
         sessions: Effect.succeed([]),
       })
+
       const runtime = yield* fromPool({
         pool,
         spawner: yield* ChildProcessSpawner.ChildProcessSpawner,
         fs: undefined,
         scope: yield* Effect.scope,
       })
+
       const terminal = { machine: "local", id: `vibest/w1:p3/${agentName(SESSION)}@racknerd/vibest` }
+
       const members = [
         runtime.send(terminal, { text: "x" }),
         runtime.read(terminal, 10),
@@ -325,6 +349,7 @@ describe("runtime-herdr machines: remote terminal ids", () => {
         runtime.session!(terminal),
         runtime.present!(terminal, { agent: "a" }),
       ]
+
       for (const member of members) {
         const error = yield* Effect.flip(member)
         assert.strictEqual(error.code, "not_found")

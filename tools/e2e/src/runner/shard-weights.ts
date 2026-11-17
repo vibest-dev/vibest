@@ -1,4 +1,4 @@
-export const shardWeights: Readonly<Record<string, number>> = {
+export const shardWeights = {
   D1: 4,
   D12: 4,
   D5: 2,
@@ -76,4 +76,4 @@ export const shardWeights: Readonly<Record<string, number>> = {
   U10: 4,
   U11: 24,
   U12: 20,
-}
+} satisfies Readonly<Record<string, number>>

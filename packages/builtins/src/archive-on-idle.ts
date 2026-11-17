@@ -1,18 +1,18 @@
 import { Plugin } from "@vibest/plugin/effect"
 import { Cause, Context, Effect, Stream } from "effect"
 
-export interface ArchiveOnIdleShape {
+export interface ArchiveOnIdleOperations {
   readonly optedIn: (id: string) => Effect.Effect<boolean>
   readonly consider: (ids: ReadonlyArray<string>) => Effect.Effect<void>
   readonly parties: (sessionId: string, inbox: number) => Effect.Effect<ReadonlyArray<string>>
   readonly localCreator: (sessionId: string) => Effect.Effect<string | undefined>
 }
 
-export class ArchiveOnIdle extends Context.Service<ArchiveOnIdle, ArchiveOnIdleShape>()(
+export class ArchiveOnIdle extends Context.Service<ArchiveOnIdle, ArchiveOnIdleOperations>()(
   "vibest/builtin/ArchiveOnIdle",
 ) {}
 
-const opted = (deps: ArchiveOnIdleShape, ids: ReadonlyArray<string>) =>
+const opted = (deps: ArchiveOnIdleOperations, ids: ReadonlyArray<string>) =>
   Effect.forEach(ids, (id) => deps.optedIn(id).pipe(Effect.map((yes) => (yes ? id : undefined)))).pipe(
     Effect.map((checked) => checked.filter((id): id is string => id !== undefined)),
     Effect.flatMap((ids) => (ids.length === 0 ? Effect.void : deps.consider(ids))),
@@ -26,8 +26,10 @@ export const archiveOnIdlePlugin = Effect.map(ArchiveOnIdle, (deps) =>
         const facts = ctx.event.subscribe({
           types: ["execution.ended", "inbox.moved", "session.ended"],
         })
+
         yield* Stream.runForEach(facts, (event) => {
           const id = event.sessionId
+
           const act =
             id === undefined
               ? Effect.void
@@ -46,6 +48,7 @@ export const archiveOnIdlePlugin = Effect.map(ArchiveOnIdle, (deps) =>
                           Effect.flatMap((creator) => (creator === undefined ? Effect.void : opted(deps, [creator]))),
                         )
                     : Effect.void
+
           return act.pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning(`archive-on-idle ${event.type}`, cause),

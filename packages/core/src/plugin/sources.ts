@@ -2,7 +2,7 @@ import type { Plugin as PromisePlugin } from "@vibest/plugin"
 import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
-import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Predicate, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
 import { LayerNode } from "../effect/layer-node.ts"
@@ -11,12 +11,12 @@ export class PluginLoader extends Context.Service<
   PluginLoader,
   {
     readonly prepare: Effect.Effect<void>
-    readonly parseJsonc: (text: string) => unknown
+    readonly parseJsonc: (text: string) => Schema.Json
     readonly graph: (entry: string) => {
       readonly files: ReadonlyArray<string>
       readonly unresolved: ReadonlyArray<string>
     }
-    readonly load: (entry: string, files: ReadonlyArray<string>) => Promise<unknown>
+    readonly load: (entry: string, files: ReadonlyArray<string>) => Promise<object>
     readonly watch: (directory: string, changed: (name: string) => void, failed: (error: Error) => void) => () => void
   }
 >()("vibest/PluginLoader") {}
@@ -30,7 +30,7 @@ export class InvalidPluginPath extends Schema.TaggedError<InvalidPluginPath>()("
 export interface Candidate {
   readonly source: string
   readonly revision: string
-  readonly options: Readonly<Record<string, unknown>>
+  readonly options: Schema.JsonObject
   readonly plugin: AnyPlugin | { readonly error: string }
 }
 
@@ -49,53 +49,71 @@ interface Collected {
 
 const ConfigEntry = Schema.Union([
   Schema.String,
-  Schema.Struct({ package: Schema.String, options: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)) }),
+  Schema.Struct({ package: Schema.String, options: Schema.optional(Schema.Record(Schema.String, Schema.Json)) }),
 ])
+
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
+
 type ConfigFile = typeof ConfigFile.Type
-const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Unknown }))
+
+const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Json }))
+
 export type AnyPlugin = EffectPlugin.Plugin | PromisePlugin.Plugin
 
 const isPlugin = (u: unknown): u is AnyPlugin =>
-  typeof u === "object" &&
-  u !== null &&
-  typeof (u as { readonly id?: unknown }).id === "string" &&
-  (typeof (u as { readonly effect?: unknown }).effect === "function" ||
-    typeof (u as { readonly setup?: unknown }).setup === "function")
+  Predicate.isObjectOrArray(u) &&
+  Predicate.hasProperty(u, "id") &&
+  Predicate.isString(u.id) &&
+  ((Predicate.hasProperty(u, "effect") && Predicate.isFunction(u.effect)) ||
+    (Predicate.hasProperty(u, "setup") && Predicate.isFunction(u.setup)))
 
 const PluginModule = Schema.Struct({
   default: Schema.declare(isPlugin),
 })
 
 const EXPORT_CONDITIONS = new Set(["bun", "import", "default"])
-const exportTarget = (value: unknown): string | undefined => {
-  if (typeof value === "string") return value
-  if (typeof value !== "object" || value === null) return undefined
+
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value)
+
+const exportTarget = (value: Schema.Json): string | undefined => {
+  if (Predicate.isString(value)) return value
+
+  if (!isJsonObject(value)) return undefined
+
   for (const [condition, target] of Object.entries(value)) {
     const found = EXPORT_CONDITIONS.has(condition) ? exportTarget(target) : undefined
+
     if (found !== undefined) return found
   }
+
   return undefined
 }
-const exportedEntries = (exports: unknown) =>
-  (typeof exports === "object" && exports !== null && Object.keys(exports).some((key) => key.startsWith("."))
-    ? [
-        exportTarget((exports as Record<string, unknown>)["./server"]),
-        exportTarget((exports as Record<string, unknown>)["."]),
-      ]
+
+const conditionTarget = (exports: Schema.JsonObject, key: string) => {
+  const target = exports[key]
+
+  return target === undefined ? undefined : exportTarget(target)
+}
+
+const exportedEntries = (exports: Schema.Json) =>
+  (isJsonObject(exports) && Object.keys(exports).some((key) => key.startsWith("."))
+    ? [conditionTarget(exports, "./server"), conditionTarget(exports, ".")]
     : [exportTarget(exports)]
   ).filter((entry) => entry !== undefined)
+
 const CONVENTIONAL_ENTRIES = ["server", "index"].flatMap((name) =>
   [".ts", ".js", ".mts", ".mjs"].map((ext) => name + ext),
 )
 
 export type Operation =
-  | { readonly type: "add"; readonly target: string; readonly options: Readonly<Record<string, unknown>> }
+  | { readonly type: "add"; readonly target: string; readonly options: Schema.JsonObject }
   | { readonly type: "remove"; readonly target: string }
 
 const SOURCE = /\.[cm]?[jt]s$/
+
 const contains = (relative: string) =>
   relative === "" || (!relative.startsWith("/") && relative !== ".." && !relative.startsWith("../"))
+
 const isLocal = (target: string) =>
   target.startsWith("/") || target.startsWith("./") || target.startsWith("../") || target.startsWith("file://")
 
@@ -103,6 +121,7 @@ export const pluginEntries = (names: ReadonlyArray<string>) =>
   names.filter((n) => n !== "node_modules" && !n.startsWith(".") && !n.endsWith(".d.ts")).sort()
 
 type Graph = ReturnType<PluginLoader["Service"]["graph"]>
+
 type Imported = {
   readonly real: string
   readonly graph: Graph
@@ -110,7 +129,7 @@ type Imported = {
   readonly plugin: Candidate["plugin"]
 }
 
-export const makeSources = Effect.fnUntraced(function* (
+export const openSources = Effect.fnUntraced(function* (
   timeout: Duration.Input,
   options?: { readonly quiet?: boolean },
 ) {
@@ -127,16 +146,19 @@ export const makeSources = Effect.fnUntraced(function* (
 
   const sha = (bytes: Uint8Array) => crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode))
   const utf8 = (s: string) => new TextEncoder().encode(s)
+
   const isDirectory = (target: string) =>
     fs.stat(target).pipe(
       Effect.map((i) => i.type === "Directory"),
       Effect.orElseSucceed(() => false),
     )
+
   const isFile = (target: string) =>
     fs.stat(target).pipe(
       Effect.map((i) => i.type === "File"),
       Effect.orElseSucceed(() => false),
     )
+
   const revisionOf = (graph: Graph, base: string) =>
     Effect.forEach(
       [...graph.files.map((f) => [f, false] as const), ...graph.unresolved.map((d) => [d, true] as const)],
@@ -164,12 +186,16 @@ export const makeSources = Effect.fnUntraced(function* (
   const entry = Effect.fn(function* (target: string, paths: Set<string>) {
     if (!(yield* isDirectory(target))) return target
     const candidates = yield* entryCandidates(target)
+
     for (const file of candidates) paths.add(file)
     const root = yield* canonical(target)
+
     for (const file of candidates) {
       if (!(yield* fs.exists(file))) continue
+
       return contains(path.relative(root, yield* canonical(file))) ? file : null
     }
+
     return undefined
   })
 
@@ -182,17 +208,21 @@ export const makeSources = Effect.fnUntraced(function* (
   const importEntry = Effect.fn(function* (file: string) {
     const previous = imported.get(file)
     const real = yield* canonical(file)
+
     if (
       previous !== undefined &&
       previous.real === real &&
       (yield* revisionOf(previous.graph, path.dirname(real))) === previous.revision
     )
       return previous
+
     const graph = yield* Effect.try(() => loader.graph(real)).pipe(
       Effect.orElseSucceed((): Graph => ({ files: [real], unresolved: [] })),
     )
+
     const revision = yield* revisionOf(graph, path.dirname(real))
     const forget = [...new Set([...graph.files, ...(previous?.graph.files ?? [])])]
+
     const module = yield* Effect.tryPromise({
       try: () => loader.load(real, forget),
       catch: (e) => `import failed: ${messageOf(e)}`,
@@ -208,13 +238,16 @@ export const makeSources = Effect.fnUntraced(function* (
       ),
       Effect.result,
     )
+
     const result: Imported = {
       real,
       graph,
       revision,
-      plugin: module._tag === "Failure" ? { error: module.failure } : module.success.default,
+      plugin: Result.isFailure(module) ? { error: module.failure } : module.success.default,
     }
+
     imported.set(file, result)
+
     return result
   })
 
@@ -226,18 +259,27 @@ export const makeSources = Effect.fnUntraced(function* (
         options,
         plugin: { error },
       })
+
       if (!isLocal(target)) return failed("npm plugins are not supported yet")
       const file = yield* entry(target, paths).pipe(Effect.orElseSucceed(() => undefined))
+
       if (file !== target) listings.add(target)
+
       if (file === null) return undefined
+
       if (file === undefined) {
         yield* warn(`plugin ${target} has no package.json exports, server.* or index.* entry; skipped`)
+
         return undefined
       }
+
       const { graph, revision, plugin } = yield* importEntry(file)
       paths.add(file)
+
       for (const f of graph.files) paths.add(f)
+
       for (const d of graph.unresolved) listings.add(d)
+
       return "error" in plugin
         ? { ...failed(plugin.error, revision), source: file }
         : ({ source: file, revision, options, plugin } satisfies Candidate)
@@ -252,15 +294,14 @@ export const makeSources = Effect.fnUntraced(function* (
 
   const readConfig = Effect.gen(function* () {
     const text = yield* fs.readFileString(layout.config).pipe(Effect.option)
+
     if (Option.isNone(text)) return (lastConfig = { plugins: [] })
+
     return yield* Effect.try(() => loader.parseJsonc(text.value)).pipe(
       Effect.tap((raw) =>
         Effect.gen(function* () {
-          const configured =
-            raw !== null &&
-            typeof raw === "object" &&
-            "runtime" in raw &&
-            (raw as { readonly runtime?: unknown }).runtime !== undefined
+          const configured = isJsonObject(raw) && raw.runtime !== undefined
+
           if (!configured || warnedConfiguredRuntime) return
           warnedConfiguredRuntime = true
           yield* warn(`${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, or pass --runtime`)
@@ -278,35 +319,45 @@ export const makeSources = Effect.fnUntraced(function* (
     const listings = new Set([layout.plugins])
     const listed = yield* fs.readDirectory(layout.plugins).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
     const discovered: Array<Operation> = []
+
     for (const name of pluginEntries(listed)) {
       const target = path.join(layout.plugins, name)
+
       if (!SOURCE.test(name) && !(yield* isDirectory(target))) continue
       discovered.push({ type: "add", target, options: {} })
     }
 
     const configured: Array<Operation> = []
+
     for (const raw of (yield* readConfig).plugins ?? []) {
-      const { target, options } =
-        typeof raw === "string" ? { target: raw, options: {} } : { target: raw.package, options: raw.options ?? {} }
+      const { target, options } = Predicate.isString(raw)
+        ? { target: raw, options: {} }
+        : { target: raw.package, options: raw.options ?? {} }
+
       if (target.startsWith("-")) {
         configured.push({ type: "remove", target: target.slice(1) })
         continue
       }
+
       if (!isLocal(target)) {
         configured.push({ type: "add", target, options })
         continue
       }
+
       const resolved = target.startsWith("file://")
         ? yield* Effect.try(() => new URL(target)).pipe(
             Effect.flatMap(path.fromFileUrl),
             Effect.mapError(() => new InvalidPluginPath({ target })),
           )
         : path.resolve(layout.home, target)
+
       paths.add(resolved)
+
       if (yield* isFile(resolved)) {
         yield* warn(`vibest.json: plugin path must be a directory: ${resolved}`)
         continue
       }
+
       configured.push({ type: "add", target: resolved, options })
     }
 
@@ -324,7 +375,7 @@ export const makeSources = Effect.fnUntraced(function* (
   return { operations, load, retain }
 })
 
-export const makeWatcher = (changed: (path: string) => void) =>
+export const openWatcher = (changed: (path: string) => void) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -343,36 +394,47 @@ export const makeWatcher = (changed: (path: string) => void) =>
     const update = Effect.fn(function* (watched: Watched) {
       const wanted = new Set<string>()
       const paths = new Set<string>()
+
       const watchFor = Effect.fnUntraced(function* (target: string) {
         let name = target
         let found = yield* isDirectory(path.dirname(name))
+
         while (!found && path.dirname(name) !== name) {
           name = path.dirname(name)
           found = yield* isDirectory(path.dirname(name))
         }
+
         paths.add(name)
+
         if (found) wanted.add(path.dirname(name))
       })
+
       for (const p of watched.paths) yield* watchFor(p)
       const listings = new Set<string>()
+
       for (const dir of watched.listings) {
         if (!(yield* isDirectory(dir))) {
           yield* watchFor(dir)
           continue
         }
+
         listings.add(dir)
         wanted.add(dir)
       }
+
       current = { paths, listings }
 
       let rewatched = false
+
       for (const dir of wanted) {
         if (running.has(dir)) continue
+
         const watching = yield* Effect.try(() =>
           loader.watch(
             dir,
             (name) => {
               const file = path.join(dir, name)
+
               if (name === "" || current.listings.has(dir) || current.paths.has(file)) changed(file)
             },
             (e) => {
@@ -386,10 +448,12 @@ export const makeWatcher = (changed: (path: string) => void) =>
           Effect.tapError((e) => Effect.logWarning(`cannot watch ${dir} for plugin changes: ${messageOf(e)}`)),
           Effect.option,
         )
+
         if (Option.isNone(watching)) continue
         running.set(dir, watching.value)
         rewatched = true
       }
+
       return rewatched
     })
 

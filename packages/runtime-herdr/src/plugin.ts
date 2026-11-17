@@ -40,12 +40,14 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const spawner = Context.get(built, ChildProcessSpawner.ChildProcessSpawner)
       const cli = Machines.cliOf(spawner)
       const pool = Context.get(built, HerdrPool)
+
       const runtime = yield* fromPool({
         pool,
         spawner,
         fs: Context.get(built, FileSystem.FileSystem),
         scope,
       })
+
       yield* context.runtime.transform((editor) =>
         editor.add({
           ...runtime,

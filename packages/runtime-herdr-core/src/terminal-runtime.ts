@@ -3,12 +3,15 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { launchLine, reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
-import { Clock, Deferred, Duration, Effect, PubSub, type Scope, Schedule, Stream } from "effect"
-import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-herdr-core-sdk"
+import { Clock, Deferred, Duration, Effect, Predicate, PubSub, type Scope, Schedule, Stream } from "effect"
+import { type api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export type Terminal = VibestPlugin.Runtime.Terminal
+
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
+
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
+
 export type AgentState = VibestPlugin.Runtime.AgentState
 
 export const agentStateOf = (status: api.Status | null | undefined): AgentState =>
@@ -40,7 +43,9 @@ export const shellTypedRecently = (
 ): boolean => {
   if (!atShellNow) return false
   const typed = labels?.[LABEL.typed]
+
   if (typed === undefined || !/^\d+$/.test(typed)) return false
+
   return now - Number(typed) < windowMs
 }
 
@@ -49,6 +54,7 @@ const SEEN_EVENTS = new Set(["turn", "labels"])
 export const seenOf = (t: api.Terminal): VibestPlugin.Runtime.Seen => {
   const label = t.labels[LABEL.seen]
   const seen = label === undefined || !/^\d+$/.test(label) ? null : Number(label)
+
   return { finished: t.turn ?? 0, seen }
 }
 
@@ -60,6 +66,7 @@ const INTERACTIVE_SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", 
 export const atShell = (foreground: api.Foreground | null | undefined): boolean => {
   if (foreground === null || foreground === undefined) return false
   const name = foreground.name.replace(/^-/, "").replace(/^.*\//, "")
+
   return INTERACTIVE_SHELLS.has(name) && foreground.argv.slice(1).every((arg) => arg.startsWith("-"))
 }
 
@@ -74,10 +81,12 @@ const slug = (text: string) =>
 export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0) => {
   const id = input.launch.env["VIBEST_SESSION_ID"]
   const session = id !== undefined && ID.test(id) ? id : undefined
+
   const title =
     session !== undefined && input.label.startsWith(`${shortId(session)} `)
       ? input.label.slice(shortId(session).length + 1)
       : input.label
+
   const base =
     session !== undefined
       ? slug(title) || slug(input.launch.env["VIBEST_HARNESS"] ?? "") || "agent"
@@ -87,7 +96,9 @@ export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0)
             .split(/[\\/]/)
             .at(-1) ?? "",
         )
+
   const suffix = `${session?.slice(0, 4) ?? "main"}${attempt === 0 ? "" : `-${attempt + 1}`}`
+
   return `${base ? `${base.slice(0, 31 - suffix.length).replace(/-+$/, "")}-` : ""}${suffix}`
 }
 
@@ -95,6 +106,7 @@ export const terminalId = (socket: string, address: string) => `${address}@${soc
 
 export const parseTerminalId = (id: string, fallbackSocket: string) => {
   const at = id.indexOf("@")
+
   return at < 0 ? { socket: fallbackSocket, address: id } : { socket: id.slice(at + 1), address: id.slice(0, at) }
 }
 
@@ -102,12 +114,16 @@ const NOT_FOUND_KINDS = new Set(["not_found", "finished", "machine_unknown"])
 
 export const failure = (error: HcFailure | { readonly message: string }): RuntimeApi.RuntimeError => {
   const tag = (error as { readonly _tag?: string })._tag
+
   if (tag === "HcTransportError") return new RuntimeApi.RuntimeError({ code: "unreachable", message: error.message })
+
   if (tag === "HcError") {
     const { kind, method } = error as { readonly kind: string; readonly method: string }
     const code = NOT_FOUND_KINDS.has(kind) ? "not_found" : kind === "blocked" ? "busy" : "failed"
+
     return new RuntimeApi.RuntimeError({ code, message: `${method}: ${error.message}` })
   }
+
   return new RuntimeApi.RuntimeError({ code: "failed", message: error.message })
 }
 
@@ -121,13 +137,13 @@ const FOLLOW_BACKOFF = reconnectSchedule({ first: Duration.millis(500), max: Dur
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 
 type Core = {
-  readonly hc: HcShape
+  readonly hc: HcClient
   readonly busy: Set<string>
   readonly waiting: Map<string, Set<Deferred.Deferred<void>>>
 }
 
 export const make = (deps: {
-  readonly connect: (socketPath: string) => Effect.Effect<HcShape>
+  readonly connect: (socketPath: string) => Effect.Effect<HcClient>
   readonly socket: string
   readonly scope: Scope.Scope
   readonly typedLaunch?: Duration.Input
@@ -143,36 +159,47 @@ export const make = (deps: {
       Effect.forEach(core.waiting.get(address) ?? [], (waiter) => Deferred.succeed(waiter, undefined), {
         discard: true,
       })
+
     const exited = (socket: string, core: Core, address: string) => {
       core.busy.delete(address)
+
       return wake(core, address).pipe(
         Effect.andThen(PubSub.publish(events, { type: "exited", terminal: { id: terminalId(socket, address) } })),
       )
     }
+
     const track = (core: Core, t: api.Terminal) => {
       if (t.state === "live" && t.foreground && !atShell(t.foreground)) core.busy.add(t.address)
     }
 
     const onNotice = (socket: string, core: Core, notice: Notice): Effect.Effect<void, HcFailure> => {
-      if (notice._tag === "Subscribed")
+      if (Predicate.isTagged(notice, "Subscribed"))
         return Effect.gen(function* () {
           core.busy.clear()
+
           for (const t of notice.result.terminals) track(core, t)
+
           for (const t of notice.result.terminals) if (!core.busy.has(t.address)) yield* wake(core, t.address)
           yield* PubSub.publish(events, { type: "reset" })
         })
-      if (notice._tag === "Notification")
+
+      if (Predicate.isTagged(notice, "Notification"))
         return notice.method === "missed"
           ? Effect.fail(new HcTransportError({ method: "events.subscribe", message: "missed events" }))
           : Effect.void
       const { type, terminal, data } = notice.event
+
       if (type === "created") {
         track(core, data as api.Terminal)
+
         return Effect.void
       }
+
       if (EXIT_EVENTS.has(type)) return exited(socket, core, terminal)
+
       if (type === "status") {
         const state = agentStateOf((data as { readonly status?: api.Status | null }).status)
+
         return state === "unknown"
           ? Effect.void
           : PubSub.publish(events, {
@@ -181,20 +208,25 @@ export const make = (deps: {
               state,
             })
       }
+
       if (SEEN_EVENTS.has(type))
         return PubSub.publish(events, {
           type: "seen",
           terminal: { id: terminalId(socket, terminal) },
         })
+
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
           core.busy.add(terminal)
+
           return core.hc
             .call("terminal.label", { terminal, labels: { [LABEL.typed]: "" } })
             .pipe(Effect.asVoid, Effect.ignore)
         }
+
         return core.busy.has(terminal) ? exited(socket, core, terminal) : wake(core, terminal)
       }
+
       return Effect.void
     }
 
@@ -202,6 +234,7 @@ export const make = (deps: {
       Effect.gen(function* () {
         let failures = 0
         let step = yield* Schedule.toStep(FOLLOW_BACKOFF)
+
         while (failures < FOLLOW_ATTEMPTS) {
           let subscribed = false
           yield* core.hc.subscribe({ labels: { [LABEL.runtime]: KIND } }).pipe(
@@ -209,17 +242,19 @@ export const make = (deps: {
               onNotice(socket, core, notice).pipe(
                 Effect.tap(() =>
                   Effect.sync(() => {
-                    if (notice._tag === "Subscribed") subscribed = true
+                    if (Predicate.isTagged(notice, "Subscribed")) subscribed = true
                   }),
                 ),
               ),
             ),
             Effect.ignore,
           )
+
           if (subscribed) {
             yield* PubSub.publish(events, { type: "reset" })
             step = yield* Schedule.toStep(FOLLOW_BACKOFF)
           }
+
           failures = subscribed ? 1 : failures + 1
           const [, delay] = yield* Effect.orDie(step(yield* Clock.currentTimeMillis, undefined))
           yield* Effect.sleep(delay)
@@ -229,14 +264,18 @@ export const make = (deps: {
     const coreAt = (socket: string) =>
       Effect.gen(function* () {
         const known = cores.get(socket)
+
         if (known !== undefined) return known
+
         const core: Core = {
           hc: socket === deps.socket ? home : yield* connect(socket),
           busy: new Set(),
           waiting: new Map(),
         }
+
         cores.set(socket, core)
         yield* follow(socket, core).pipe(Effect.ensuring(Effect.sync(() => cores.delete(socket))), Effect.forkIn(scope))
+
         return core
       })
 
@@ -244,6 +283,7 @@ export const make = (deps: {
       Effect.gen(function* () {
         const { socket, address } = parseTerminalId(terminal.id, deps.socket)
         const core = yield* coreAt(socket)
+
         return { hc: core.hc, core, socket, address }
       })
 
@@ -252,22 +292,26 @@ export const make = (deps: {
         Effect.flatMap(({ hc, address }) => failWith(hc.call("terminal.get", { terminal: address }))),
       )
 
+    const blocked = (e: { readonly message: string }) =>
+      Effect.succeed({ status: "blocked" as const, reason: e.message })
+
     const status: Runtime["status"] = () =>
       home.hello.pipe(
         Effect.as({ status: "online" as const }),
-        Effect.catch((e) =>
-          Effect.succeed(
-            e._tag === "HcGenerationMismatch" || e._tag === "HcCoreTooOld" || e._tag === "HcMethodsMissing"
-              ? { status: "blocked" as const, reason: e.message }
-              : {
-                  status: "offline" as const,
-                  reason: `no herdr-core answers at ${home.socketPath} (start one with hc server start)`,
-                },
-          ),
+        Effect.catchTags({
+          HcGenerationMismatch: blocked,
+          HcCoreTooOld: blocked,
+          HcMethodsMissing: blocked,
+        }),
+        Effect.catch(() =>
+          Effect.succeed({
+            status: "offline" as const,
+            reason: `no herdr-core answers at ${home.socketPath} (start one with hc server start)`,
+          }),
         ),
       )
 
-    const typeLine = (hc: HcShape, address: string, argv: ReadonlyArray<string>) =>
+    const typeLine = (hc: HcClient, address: string, argv: ReadonlyArray<string>) =>
       failWith(hc.call("terminal.send", { terminal: address, text: argv.map(shellQuote).join(" ") })).pipe(
         Effect.asVoid,
       )
@@ -288,6 +332,7 @@ export const make = (deps: {
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
         let attempt = 0
+
         const started = yield* failWith(
           Effect.suspend(() =>
             hc.call("terminal.run", {
@@ -297,9 +342,9 @@ export const make = (deps: {
               labels: {
                 [LABEL.runtime]: KIND,
                 [LABEL.seen]: "0",
-                ...(project !== undefined ? { [LABEL.project]: project } : {}),
-                ...(session !== undefined ? { [LABEL.session]: session } : {}),
-                ...(input.launch.argv.length > 0 ? { [LABEL.typed]: String(Date.now()) } : {}),
+                ...(project !== undefined && { [LABEL.project]: project }),
+                ...(session !== undefined && { [LABEL.session]: session }),
+                ...(input.launch.argv.length > 0 && { [LABEL.typed]: String(Date.now()) }),
               },
               keep: true,
               no_notify: true,
@@ -307,24 +352,29 @@ export const make = (deps: {
             }),
           ).pipe(
             Effect.retry({
-              while: (e) => e._tag === "HcError" && e.kind === "name_taken",
+              while: (e) => Predicate.isTagged(e, "HcError") && e.kind === "name_taken",
               times: 8,
             }),
           ),
         )
+
         const terminal: Terminal = { id: terminalId(socket, started.address) }
+
         if (input.launch.argv.length > 0) {
           yield* typeLine(hc, started.address, yield* typed(input.launch)).pipe(
             Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
           )
         }
+
         return terminal
       })
 
     const send: Runtime["send"] = (terminal, { text, keys }) =>
       Effect.gen(function* () {
         const { hc, address } = yield* reach(terminal)
+
         if (text !== undefined) yield* failWith(hc.call("terminal.send", { terminal: address, text }))
+
         if (keys !== undefined && keys.length > 0)
           yield* failWith(hc.call("terminal.keys", { terminal: address, keys: [...keys] }))
       })
@@ -353,7 +403,9 @@ export const make = (deps: {
             return t.exit_code === null || t.exit_code === undefined
               ? { running: false }
               : { running: false, exitCode: t.exit_code }
+
           if (!atShell(t.foreground)) return { running: true }
+
           return { running: shellTypedRecently(t.labels, true, Date.now(), typedLaunchMs) }
         }),
       )
@@ -362,6 +414,7 @@ export const make = (deps: {
       Effect.gen(function* () {
         const { hc, address } = yield* reach(terminal)
         const t = yield* failWith(hc.call("terminal.get", { terminal: address }))
+
         if (t.state === "live") yield* failWith(hc.call("terminal.kill", { terminal: address }))
         yield* failWith(hc.call("terminal.rm", { terminal: address }))
       }).pipe(
@@ -376,13 +429,16 @@ export const make = (deps: {
         Effect.flatMap((back) => {
           const waiters = core.waiting.get(address) ?? new Set()
           core.waiting.set(address, waiters.add(back))
+
           return Effect.gen(function* () {
             const t = yield* failWith(core.hc.call("terminal.get", { terminal: address }))
+
             if (t.state !== "live")
               return yield* new RuntimeApi.RuntimeError({
                 code: "not_found",
                 message: `terminal ${terminal.id} has finished`,
               })
+
             if (atShell(t.foreground)) return
             yield* Deferred.await(back).pipe(
               Effect.timeoutOrElse({
@@ -400,6 +456,7 @@ export const make = (deps: {
             Effect.ensuring(
               Effect.sync(() => {
                 waiters.delete(back)
+
                 if (waiters.size === 0 && core.waiting.get(address) === waiters) core.waiting.delete(address)
               }),
             ),
@@ -430,8 +487,10 @@ export const make = (deps: {
     const present: Runtime["present"] = (terminal, info) => {
       const entrySession = info[PRESENT_ENTRY_SESSION]
       const project = info[PRESENT_PROJECT_ID]
+
       if (entrySession === undefined || entrySession === "" || project === undefined || project === "")
         return Effect.void
+
       return reach(terminal).pipe(
         Effect.flatMap(({ hc, address }) =>
           failWith(

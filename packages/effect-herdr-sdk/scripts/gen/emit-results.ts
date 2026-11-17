@@ -1,18 +1,26 @@
+import { Schema } from "effect"
+
 import { METHOD_RESULT } from "./method-result-map.js"
-import type { JSONSchema } from "./schema.js"
+import { type Document, JSONSchema } from "./schema.js"
 import { emitDefs, tsType } from "./ts-type.js"
+
+const decodeVariant = Schema.decodeUnknownSync(
+  Schema.Struct({ properties: Schema.Struct({ type: Schema.Struct({ const: Schema.String }) }) }),
+)
+
+const decodeResponseResult = Schema.decodeUnknownSync(Schema.Struct({ oneOf: Schema.Array(JSONSchema) }))
 
 const typeName = (tag: string) => "Result_" + tag.replace(/[^a-zA-Z0-9]/g, "_")
 
-export function emitResults(schema: JSONSchema, header: string): string {
-  const ok = schema.schemas.success_response as JSONSchema
-  const variants: Array<{ tag: string; name: string; ts: string }> = ok.$defs.ResponseResult.oneOf.map(
-    (v: JSONSchema) => ({
-      tag: v.properties.type.const as string,
-      name: typeName(v.properties.type.const),
-      ts: tsType(v),
-    }),
-  )
+export function emitResults(schema: Document, header: string): string {
+  const ok = schema.schemas.success_response
+
+  const variants = decodeResponseResult(ok.$defs.ResponseResult).oneOf.map((v) => {
+    const tag = decodeVariant(v).properties.type.const
+
+    return { tag, name: typeName(tag), ts: tsType(v) }
+  })
+
   return `${header}
 ${emitDefs(ok.$defs, new Set(["ResponseResult"]))}
 

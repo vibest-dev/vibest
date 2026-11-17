@@ -36,6 +36,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
           Effect.gen(function* () {
             const cwd = fs.realpathSync(os.tmpdir())
             const env = { HERDR_SOCKET_PATH: socketPath }
+
             const opened = yield* runtime
               .open({
                 project: cwd,
@@ -44,6 +45,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 label: "vibest test",
               })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
+
             const seen = TerminalRuntime.parseTerminal(opened)
             assert.isDefined(seen)
             assert.strictEqual(seen!.session, name)
@@ -51,6 +53,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             yield* runtime.send(opened, { text: "printf 'VBT_%s\\n' OPENED", keys: ["enter"] })
             const text = yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_OPENED"), "pane text")
             assert.include(text, "VBT_OPENED")
+
             if (runtime.state !== undefined) {
               const failed = yield* runtime.state(opened).pipe(Effect.flip, Effect.option)
               assert.isTrue(
@@ -58,10 +61,12 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 "open started no agent, so state finds none of this terminal's",
               )
             }
+
             yield* runtime.send(opened, { text: "sleep 2", keys: ["enter"] })
             yield* waitFor(runtime.process(opened), (p) => p.running, "foreground program")
             yield* runtime.send(opened, { keys: ["enter"] })
             yield* waitFor(runtime.process(opened), (p) => !p.running, "shell again")
+
             if (runtime.present !== undefined)
               yield* runtime.present(opened, {
                 agent: "general",
@@ -79,11 +84,14 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             assert.strictEqual(pane.tokens?.definition, "general")
             assert.strictEqual(pane.tokens?.session, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
             assert.strictEqual(pane.state_labels?.blocked, "waiting for you")
+
             const workspace = (yield* herdr.call("workspace.list", {})).workspaces.find(
               (item) => item.workspace_id === pane.workspace_id,
             )
+
             assert.strictEqual(workspace?.tokens?.project, "repo")
             assert.strictEqual(workspace?.tokens?.agents, "2")
+
             if (runtime.present !== undefined) {
               yield* runtime.present(opened, {
                 agent: "g".repeat(90),
@@ -104,7 +112,9 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 "a present right after another lands: each report's seq is newer",
               )
             }
+
             const before = (yield* herdr.call("workspace.list", {})).workspaces.map((item) => item.workspace_id)
+
             const beside = yield* runtime
               .open({
                 project: cwd,
@@ -114,20 +124,25 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 near: opened,
               })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
+
             const besidePane = (yield* herdr.call("pane.get", {
               pane_id: TerminalRuntime.parseTerminal(beside)!.paneId,
             })).pane
+
             assert.strictEqual(besidePane.workspace_id, pane.workspace_id)
             assert.deepStrictEqual(
               (yield* herdr.call("workspace.list", {})).workspaces.map((item) => item.workspace_id),
               before,
             )
+
             const tab = (yield* herdr.call("tab.list", { workspace_id: besidePane.workspace_id })).tabs.find(
               (item) => item.tab_id === besidePane.tab_id,
             )
+
             assert.strictEqual(tab?.label, "beside")
             assert.strictEqual(tab?.focused, false, "near opens an unfocused tab in that pane's workspace")
             yield* runtime.close(beside).pipe(Effect.ignore)
+
             const grouped = yield* runtime
               .open({
                 project: cwd,
@@ -136,9 +151,11 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 label: "grouped",
               })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
+
             const groupedPane = (yield* herdr.call("pane.get", {
               pane_id: TerminalRuntime.parseTerminal(grouped)!.paneId,
             })).pane
+
             assert.strictEqual(
               groupedPane.workspace_id,
               pane.workspace_id,
