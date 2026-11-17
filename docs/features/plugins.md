@@ -86,14 +86,8 @@ plugin into the `setup` form reloads it like any edit (G2).
 
 `"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-harness-default"`); `"-*"` and
 `"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts. While slow user
-plugins are still importing, a start is refused with `PluginsNotActive` and does not run on a partial set; once they
+plugins are still importing, a start is refused with `PluginsNotActive`, naming the plugins still loading, and does not run on a partial set; once they
 are active, `vibest plugins` shows the builtin gone, and deleting the line brings it back without restarting vibestd.
-
-## G15. A start waits for plugins to finish activating
-
-While user plugins are still setting up, `vibest run` is refused with `PluginsNotActive` and the names of the plugins
-still loading, and no session starts. Once they are active, the same run starts, and a routing plugin's decision is
-what `vibest ls` records.
 
 ## G16. Moving a plugin keeps it running
 
