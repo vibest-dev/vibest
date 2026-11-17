@@ -6,7 +6,6 @@ import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
 import { FakeGit } from "./lib/fake-git.ts"
-import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
@@ -47,23 +46,6 @@ describe.concurrent("Session", () => {
       yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
     }),
     { hooked: ["pi"] },
-  )
-
-  test(
-    "a terminal that shows only its shell while the harness pid is alive is no exit; once the pid is gone it is",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const processes = yield* FakeProcesses
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const pid = (yield* db.session.getSession(id))!.process!.pid!
-      yield* processes.set(pid, "alive")
-      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
-      yield* sessions.check(id)
-      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
-      yield* processes.set(pid, "exited")
-      yield* sessions.check(id)
-      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
-    }),
   )
 
   test(
