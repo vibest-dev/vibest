@@ -90,7 +90,7 @@ const privateDatabase = (filename: string) =>
         try {
           await fsPromises.chmod(filename + suffix, PRIVATE_FILE)
         } catch (error) {
-          if ((error as { code?: string }).code !== "ENOENT") throw error
+          if (!Predicate.hasProperty(error, "code") || error.code !== "ENOENT") throw error
         }
       }
     },
