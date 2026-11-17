@@ -323,7 +323,8 @@ const physical = (
       const link = yield* fs.readLink(joined).pipe(
         Effect.map((target): { readonly target: string } | undefined => ({ target })),
         Effect.catchTag("PlatformError", (e) => {
-          const code = (e.reason.cause as { code?: unknown } | undefined)?.code
+          const cause = e.reason.cause
+          const code = Predicate.hasProperty(cause, "code") ? cause.code : undefined
 
           const notALink =
             Predicate.isTagged(e.reason, "NotFound") ||

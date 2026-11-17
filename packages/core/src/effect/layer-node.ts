@@ -1,5 +1,7 @@
 import { Brand, Context, Effect, Layer, Scope } from "effect"
 
+import { implementationOf, tagValuesOf, typedRoot } from "./layer-node-erased.ts"
+
 export * as LayerNode from "./layer-node.ts"
 
 const GraphTypeId = Symbol("LayerNode.Graph")
@@ -83,7 +85,7 @@ class NodeValue<in out A, in out E, in out T extends Tag | undefined> extends Gr
 
   constructor(
     definition: Exclude<Definition, { kind: "group" }>,
-    readonly tag: T,
+    readonly tag: Tag | undefined,
   ) {
     super(definition)
   }
@@ -110,10 +112,7 @@ class ProviderNode<in out A, in out E, in out T extends Tag | undefined> extends
 
     if (definition.kind !== "layer") throw new Error(`Cannot map unbound layer node: ${this.name}`)
 
-    return new ProviderNode(
-      { ...definition, implementation: f(definition.implementation as Layer.Layer<A, E, unknown>) },
-      this.tag,
-    )
+    return new ProviderNode({ ...definition, implementation: f(implementationOf<A, E>(definition)) }, this.tag)
   }
 }
 
@@ -194,8 +193,7 @@ export type TagMaker<Config extends TagConfig, Name extends TagNames<Config>> = 
 export function tags<const Config extends { readonly [Name in keyof Config]: readonly (keyof Config & string)[] }>(
   config: Config,
 ): Tags<Config> {
-  const names = Object.keys(config) as TagNames<Config>[]
-  const values = Object.fromEntries(names.map((name) => [name, makeTag(name)])) as Tags<Config>["values"]
+  const values = tagValuesOf<Config>(Object.fromEntries(Object.keys(config).map((name) => [name, makeTag(name)])))
 
   return {
     values,
@@ -216,12 +214,12 @@ export function make<
 >(
   input: MakeInput<Implementation, Items, T>,
 ): Provider<LayerOutput<Implementation>, Layer.Error<Implementation> | Error<Items[number]>, T> {
-  return makeProvider<Implementation, Items, T>(input, input.tag as T)
+  return makeProvider<Implementation, Items, T>(input, input.tag)
 }
 
 function makeProvider<Implementation extends Layer.Any, Items extends readonly AnyGraph[], T extends Tag | undefined>(
   input: Identity & { readonly layer: Implementation; readonly deps: Items },
-  tag: T,
+  tag: Tag | undefined,
 ): Provider<LayerOutput<Implementation>, Layer.Error<Implementation> | Error<Items[number]>, T> {
   if (!Layer.isLayer(input.layer)) throw new Error("A layer node requires an Effect Layer")
 
@@ -240,7 +238,7 @@ export function unbound<R, Impl, const T extends Tag | undefined = undefined>(
   service: Context.Key<R, Impl>,
   tag?: T,
 ): Node<R, never, T> {
-  return new NodeValue({ kind: "unbound", name: service.key }, tag as T)
+  return new NodeValue({ kind: "unbound", name: service.key }, tag)
 }
 
 export function group<const Items extends readonly AnyGraph[]>(
@@ -360,56 +358,58 @@ export function compile<A, E>(root: Graph<A, E>, options: CompileOptions = {}): 
 
   const roots = resolve(root)
 
-  return Layer.fromBuild((memoMap, scope) => {
-    const releases = options.releases ?? new Releases()
+  return typedRoot<A, E>(
+    Layer.fromBuild((memoMap, scope) => {
+      const releases = options.releases ?? new Releases()
 
-    const trackRelease = <B, F, R>(name: string, nodeScope: Scope.Scope, build: () => Effect.Effect<B, F, R>) =>
-      Effect.gen(function* () {
-        let settle = () => {}
+      const trackRelease = <B, F, R>(name: string, nodeScope: Scope.Scope, build: () => Effect.Effect<B, F, R>) =>
+        Effect.gen(function* () {
+          let settle = () => {}
 
-        yield* Scope.addFinalizer(
-          nodeScope,
-          Effect.sync(() => settle()),
+          yield* Scope.addFinalizer(
+            nodeScope,
+            Effect.sync(() => settle()),
+          )
+          const result = yield* build()
+          yield* Scope.addFinalizer(
+            nodeScope,
+            Effect.sync(() => {
+              settle = releases[TrackTypeId](name)
+            }),
+          )
+
+          return result
+        })
+
+      const local = shared === undefined ? memoMap : Layer.makeMemoMapUnsafe()
+      const ambient = Layer.succeed(Layer.CurrentMemoMap, memoMap)
+      const layers = new Map<Resolved, RuntimeLayer>()
+
+      const build = (node: Resolved): RuntimeLayer => {
+        const cached = layers.get(node)
+
+        if (cached) return cached
+        const dependencies = node.dependencies.map(build)
+        const implementation = Layer.suspend(() => node.implementation.pipe(Layer.provide([ambient, ...dependencies])))
+
+        const layer = Layer.fromBuild((_, nodeScope) =>
+          trackRelease(node.name, nodeScope, () =>
+            buildContext(implementation, node.shared ? memoMap : local, nodeScope),
+          ),
         )
-        const result = yield* build()
-        yield* Scope.addFinalizer(
-          nodeScope,
-          Effect.sync(() => {
-            settle = releases[TrackTypeId](name)
-          }),
-        )
 
-        return result
-      })
+        layers.set(node, layer)
 
-    const local = shared === undefined ? memoMap : Layer.makeMemoMapUnsafe()
-    const ambient = Layer.succeed(Layer.CurrentMemoMap, memoMap)
-    const layers = new Map<Resolved, RuntimeLayer>()
+        return layer
+      }
 
-    const build = (node: Resolved): RuntimeLayer => {
-      const cached = layers.get(node)
-
-      if (cached) return cached
-      const dependencies = node.dependencies.map(build)
-      const implementation = Layer.suspend(() => node.implementation.pipe(Layer.provide([ambient, ...dependencies])))
-
-      const layer = Layer.fromBuild((_, nodeScope) =>
-        trackRelease(node.name, nodeScope, () =>
-          buildContext(implementation, node.shared ? memoMap : local, nodeScope),
-        ),
+      return buildContext(
+        roots.map(build).reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty),
+        memoMap,
+        scope,
       )
-
-      layers.set(node, layer)
-
-      return layer
-    }
-
-    return buildContext(
-      roots.map(build).reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty),
-      memoMap,
-      scope,
-    )
-  }) as Layer.Layer<A, E>
+    }),
+  )
 }
 
 class BuildResult extends Context.Service<BuildResult, Context.Context<never>>()("vibest/LayerNode/BuildResult") {}

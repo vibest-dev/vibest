@@ -63,8 +63,7 @@ export type Outcome<N extends Name> = { readonly ms: number } & (
 
 export const errorMessage = (cause: Cause.Cause<unknown>) => messageOf(Cause.squash(cause))
 
-const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused =>
-  (e as { _tag?: unknown } | undefined)?._tag === "AgentRefused"
+const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused => Predicate.isTagged(e, "AgentRefused")
 
 const decision = <A>(value: A | void) => (Predicate.isObjectOrArray(value) ? value : undefined)
 

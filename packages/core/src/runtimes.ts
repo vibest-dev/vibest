@@ -50,9 +50,10 @@ const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
   })
 
 const sameMembers = (a: Runtime, b: Runtime) => {
-  const keys = Object.keys(a) as Array<keyof Runtime>
+  const members = Object.entries(a)
+  const others = new Map(Object.entries(b))
 
-  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
+  return members.length === others.size && members.every(([key, value]) => others.get(key) === value)
 }
 
 const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })

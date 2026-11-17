@@ -6,6 +6,7 @@ import {
   type Fact,
   type FactOf,
   type FactType,
+  isFactOf,
   type Row,
   UnknownFact,
 } from "@vibest/schema/event"
@@ -67,15 +68,14 @@ export interface PublishInput<D extends Definition> {
   readonly data: D["data"]["Type"]
 }
 
-const Buffer = Context.Reference<
-  | {
-      readonly events: Array<BusEvent>
-      readonly after: Array<() => void>
-      readonly fiberId: number
-      closed: boolean
-    }
-  | undefined
->("vibest/BusBuffer", { defaultValue: () => undefined })
+interface TransactionBuffer {
+  readonly events: Array<BusEvent>
+  readonly after: Array<() => void>
+  readonly fiberId: number
+  closed: boolean
+}
+
+const Buffer = Context.Reference<TransactionBuffer | undefined>("vibest/BusBuffer", { defaultValue: () => undefined })
 
 const REPLAY_PAGE = 1000
 
@@ -87,24 +87,24 @@ const readLog = (sql: SqlClient.SqlClient, after: number) =>
 
 type Cursor = { readonly aggregate: string; readonly after: number } | { readonly log: number }
 
+type Step = readonly [ReadonlyArray<Row>, Cursor]
+
 const readPage = (sql: SqlClient.SqlClient, cursor: Cursor, until: number | undefined) =>
   "aggregate" in cursor
-    ? sql<Row>`SELECT aggregate, seq, at, type, data
+    ? sql<Logged>`SELECT position, aggregate, seq, at, type, data
         FROM event WHERE aggregate = ${cursor.aggregate} AND seq > ${cursor.after} AND seq <= ${until ?? Number.MAX_SAFE_INTEGER}
         ORDER BY seq LIMIT ${REPLAY_PAGE}`
     : sql<Logged>`SELECT position, aggregate, seq, at, type, data
         FROM event WHERE position > ${cursor.log} AND position <= ${until ?? Number.MAX_SAFE_INTEGER}
         ORDER BY position LIMIT ${REPLAY_PAGE}`
 
-const watermark = (sql: SqlClient.SqlClient, cursor: Cursor) =>
-  (
-    ("aggregate" in cursor
-      ? sql<{ latest: number }>`SELECT coalesce(max(seq), 0) AS latest FROM event WHERE aggregate = ${cursor.aggregate}`
-      : sql<{ latest: number }>`SELECT coalesce(max(position), 0) AS latest FROM event`) as Effect.Effect<
-      ReadonlyArray<{ latest: number }>,
-      SqlError.SqlError
-    >
-  ).pipe(Effect.map((rows) => rows[0]!.latest))
+const watermark = (sql: SqlClient.SqlClient, cursor: Cursor) => {
+  const latest: Effect.Effect<ReadonlyArray<{ latest: number }>, SqlError.SqlError> = "aggregate" in cursor
+    ? sql<{ latest: number }>`SELECT coalesce(max(seq), 0) AS latest FROM event WHERE aggregate = ${cursor.aggregate}`
+    : sql<{ latest: number }>`SELECT coalesce(max(position), 0) AS latest FROM event`
+
+  return latest.pipe(Effect.map((rows) => rows[0]!.latest))
+}
 
 const publicRow = (row: Row): Row => ({
   aggregate: row.aggregate,
@@ -114,8 +114,8 @@ const publicRow = (row: Row): Row => ({
   data: row.data,
 })
 
-const advance = (cursor: Cursor, page: ReadonlyArray<Row>): Cursor => {
-  const last = page[page.length - 1]! as Logged
+const advance = (cursor: Cursor, page: ReadonlyArray<Logged>): Cursor => {
+  const last = page[page.length - 1]!
 
   return "aggregate" in cursor ? { aggregate: cursor.aggregate, after: last.seq } : { log: last.position }
 }
@@ -132,9 +132,9 @@ const followFacts = (
         readPage(sql, cursor, until).pipe(
           Effect.flatMap((page) =>
             page.length > 0
-              ? Effect.succeed([page.map(publicRow) as ReadonlyArray<Row>, advance(cursor, page)] as const)
+              ? Effect.succeed<Step>([page.map(publicRow), advance(cursor, page)])
               : follow
-                ? wake.pipe(Effect.andThen(Effect.succeed([[] as ReadonlyArray<Row>, cursor] as const)))
+                ? wake.pipe(Effect.andThen(Effect.succeed<Step>([[], cursor])))
                 : Effect.undefined,
           ),
         ),
@@ -156,10 +156,17 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const pubsub = yield* PubSub.unbounded<BusEvent>()
   const typed = new Map<string, Set<PubSub.PubSub<BusEvent>>>()
-  const projectors = new Map<string, (fact: never) => ReturnType<Projector<Definition>>>()
+  const projectors = new Map<string, (fact: Fact) => ReturnType<Projector<Definition>>>()
 
   const project = Effect.fn("Bus.project")(<D extends Definition>(definition: D, projector: Projector<D>) =>
-    Effect.sync(() => void projectors.set(definition.type, projector)),
+    Effect.sync(
+      () =>
+        void projectors.set(definition.type, (fact) =>
+          isFactOf<D["type"]>(definition.type, fact)
+            ? projector(fact)
+            : Effect.die(new Error(`${fact.type} reached the ${definition.type} projector`)),
+        ),
+    ),
   )
 
   const projectFact = (fact: Fact) => {
@@ -174,7 +181,7 @@ const make = Effect.gen(function* () {
             message: `event ${fact.aggregate} ${fact.seq}: ${fact.type} has no projector`,
           }),
         )
-      : projector(fact as never)
+      : projector(fact)
   }
 
   const deliverTyped = (event: BusEvent) =>
@@ -226,17 +233,22 @@ const make = Effect.gen(function* () {
     ).pipe(Effect.flatMap(PubSub.subscribe))
   }
 
-  const subscribe = ((definitions?: ReadonlyArray<{ readonly type: string }>) =>
-    definitions === undefined ? PubSub.subscribe(pubsub) : subscribeTyped(definitions)) as Subscribe
+  function subscribe(): Effect.Effect<PubSub.Subscription<BusEvent>, never, Scope.Scope>
+  function subscribe<T extends BusEvent["type"]>(
+    definitions: ReadonlyArray<{ readonly type: T }>,
+  ): Effect.Effect<PubSub.Subscription<EventOf<T>>, never, Scope.Scope>
+  function subscribe(definitions?: ReadonlyArray<{ readonly type: string }>) {
+    return definitions === undefined ? PubSub.subscribe(pubsub) : subscribeTyped(definitions)
+  }
 
   const transaction = Effect.fn("Bus.transaction")(function* <A, E, R>(body: Effect.Effect<A, E, R>) {
     if ((yield* Buffer) !== undefined) return yield* body
 
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        const buffer = {
-          events: [] as Array<BusEvent>,
-          after: [] as Array<() => void>,
+        const buffer: TransactionBuffer = {
+          events: [],
+          after: [],
           fiberId: yield* Effect.fiberId,
           closed: false,
         }
@@ -298,7 +310,7 @@ const make = Effect.gen(function* () {
           return yield* Effect.die(new Error("publish not from the transaction fiber"))
         const aggregate = yield* aggregateOf(definition, input)
         const at = input.at ?? (yield* Clock.currentTimeMillis)
-        const data = yield* encodeData(definition, input.data as never).pipe(Effect.orDie)
+        const data = yield* encodeData(definition, input.data).pipe(Effect.orDie)
         const fact = yield* write(aggregate, at, definition.type, data).pipe(Effect.orDie)
         buffer.events.push(fact)
 
@@ -382,8 +394,8 @@ export const node = LayerNode.make({ service: Service, layer, deps: [PlatformNod
 
 type ProjectionRow = Readonly<Record<string, string | number | null>>
 
-const dump = (sql: SqlClient.SqlClient, table: keyof typeof PROJECTION_TABLES) =>
-  sql.unsafe<ProjectionRow>(`SELECT * FROM ${table} ORDER BY ${PROJECTION_TABLES[table]}`)
+const dump = (sql: SqlClient.SqlClient, table: string, key: string) =>
+  sql.unsafe<ProjectionRow>(`SELECT * FROM ${table} ORDER BY ${key}`)
 
 const copyLog = (
   from: SqlClient.SqlClient,
@@ -430,20 +442,20 @@ export const equalToReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const scratch = yield* SqlClient.SqlClient
     const bus = yield* Service
-    const tables = Object.keys(PROJECTION_TABLES) as Array<keyof typeof PROJECTION_TABLES>
+    const tables = Object.entries(PROJECTION_TABLES)
 
     const storedTables = yield* stored.withTransaction(
       Effect.gen(function* () {
         yield* copyWholeLog(stored, scratch)
 
-        return yield* Effect.forEach(tables, (table) => dump(stored, table))
+        return yield* Effect.forEach(tables, ([table, key]) => dump(stored, table, key))
       }),
     )
 
     yield* bus.rebuild
 
-    for (const [i, table] of tables.entries()) {
-      const difference = firstDifference(table, PROJECTION_TABLES[table], storedTables[i]!, yield* dump(scratch, table))
+    for (const [i, [table, key]] of tables.entries()) {
+      const difference = firstDifference(table, key, storedTables[i]!, yield* dump(scratch, table, key))
 
       if (difference !== undefined) return difference
     }

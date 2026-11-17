@@ -1,4 +1,4 @@
-import { ExecutionOutcome, type InboxKind, ProcessEndReason } from "@vibest/schema/event"
+import { ExecutionOutcome, ProcessEndReason } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
 import { Routing } from "@vibest/schema/plugin"
 import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
@@ -172,10 +172,16 @@ export type ProcessStart = {
 
 export type Integration = { readonly version: string; readonly protocol: number }
 
+const decodeAttempts = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ harness: Schema.String, provider: Schema.NullOr(Schema.String), at: Schema.Number })),
+  ),
+)
+
 export const attemptsOf = (raw: string | null) => {
   const seen: Array<{ harness: string; provider?: string; outcome: "limited"; at: number }> = []
 
-  for (const a of JSON.parse(raw ?? "[]") as ReadonlyArray<{ harness: string; provider: string | null; at: number }>) {
+  for (const a of decodeAttempts(raw ?? "[]")) {
     const provider = a.provider ?? undefined
 
     if (seen.some((s) => s.harness === a.harness && s.provider === provider)) continue
@@ -204,20 +210,18 @@ export type ExecutionEnd = {
 export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
   error === undefined || error === "" ? undefined : { message: error }
 
-export const toInbox = (row: InboxSql) => {
-  const kind = row.kind as InboxKind
+export const toInbox = (row: InboxSql) => ({
+  id: row.id,
+  sender: row.senderSessionId,
+  recipient: row.sessionId,
+  kind: row.kind,
+  message: row.content,
+  status: row.status,
+})
 
-  return {
-    id: row.id,
-    sender: row.senderSessionId,
-    recipient: row.sessionId,
-    kind,
-    message: row.content,
-    status: row.status,
-  }
-}
+export const isMessageStatus = Schema.is(MessageStatus)
 
-export const MESSAGE_STATUSES: ReadonlySet<string> = new Set(MessageStatus.literals)
+export const decodeRoutingJson = Schema.decodeSync(Schema.fromJsonString(Routing))
 
 export type MessageStatusName = typeof MessageStatus.Type
 

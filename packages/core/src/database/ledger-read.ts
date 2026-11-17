@@ -4,8 +4,8 @@ import type { SqlClient, Statement } from "effect/sql"
 
 import { unwrapped } from "../replies.ts"
 import {
-  MESSAGE_STATUSES,
-  type MessageStatusName,
+  isMessageStatus,
+  decodeRoutingJson,
   SessionRow,
   type Integration,
   type SessionBrief,
@@ -15,13 +15,6 @@ import {
 import type { MachineRow, OutboxRow } from "./remote.ts"
 
 export const LOCAL_MACHINE = "local"
-
-export type RescheduleSource = {
-  readonly working: string
-  readonly delivered: string
-  readonly parentSessionId: string | undefined
-  readonly since: number
-}
 
 const retried = (execution: { readonly outcome: string | null }) =>
   execution.outcome === "failed" || execution.outcome === "not_started"
@@ -91,6 +84,8 @@ export type Live = {
   readonly integration: Integration | undefined
 }
 
+const decodeUnknownJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))
+
 const NOT_LIVE: Live = { status: "unknown", integration: undefined }
 
 const processOf = (row: SessionColumns, integration: Integration | undefined) =>
@@ -101,7 +96,7 @@ const processOf = (row: SessionColumns, integration: Integration | undefined) =>
         harness: row.harness ?? "",
         provider: row.provider,
         model: row.model,
-        routing: row.routing === null ? null : (JSON.parse(row.routing) as unknown),
+        routing: row.routing === null ? null : decodeUnknownJson(row.routing),
         runtime: row.runtime ?? "",
         machine: LOCAL_MACHINE,
         terminal: row.terminal,
@@ -185,7 +180,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
   const briefs = (ids: ReadonlyArray<string>) =>
     Effect.gen(function* () {
-      if (ids.length === 0) return new Map<string, SessionBrief>() as ReadonlyMap<string, SessionBrief>
+      if (ids.length === 0) return new Map<string, SessionBrief>()
 
       const rows = yield* sql<{
         id: string
@@ -205,7 +200,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
       for (const row of rows) {
         const raw = row.executionId === null ? undefined : (row.outcome ?? "working")
-        const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
+        const status = raw !== undefined && isMessageStatus(raw) ? raw : undefined
         found.set(row.id, {
           task: row.task === null ? null : unwrapped(row.task),
           latest:
@@ -215,7 +210,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         })
       }
 
-      return found as ReadonlyMap<string, SessionBrief>
+      return found
     })
 
   const hadTerminal = (id: string) =>
@@ -257,7 +252,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
           provider: found.provider ?? undefined,
           model: found.model ?? undefined,
           runtime: found.runtime,
-          routing: found.routing === null ? undefined : (JSON.parse(found.routing) as SpawnedBefore["routing"]),
+          routing: found.routing === null ? undefined : decodeRoutingJson(found.routing),
         }
       }),
     )
@@ -275,8 +270,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         parentSessionId: string | null
       }>`SELECT parent_session_id FROM session WHERE id = ${id}`
 
-      if (head === undefined)
-        return { working: "", delivered: "", parentSessionId: undefined, since: 0 } as RescheduleSource
+      if (head === undefined) return { working: "", delivered: "", parentSessionId: undefined, since: 0 }
 
       const executions = yield* sql<{
         id: number
@@ -314,7 +308,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         delivered: latestRun(rows),
         parentSessionId: head.parentSessionId ?? undefined,
         since: (execution ?? executions[0])?.startedAt ?? 0,
-      } as RescheduleSource
+      }
     })
 
   return {

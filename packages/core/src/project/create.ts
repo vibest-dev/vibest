@@ -263,7 +263,7 @@ const removeWorktrees = (
 
     for (const { repository, worktree } of worktrees.toReversed())
       yield* removeWorktree(repository, worktree).pipe(Effect.ignore)
-    const left = yield* fs.readDirectory(workspace).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
+    const left = yield* fs.readDirectory(workspace).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
 
     if (left.length === 0) yield* fs.remove(workspace, { recursive: true }).pipe(Effect.ignore)
   })

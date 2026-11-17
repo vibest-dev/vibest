@@ -24,7 +24,7 @@ const repairWorktrees = Effect.fn("Project.repairWorktrees")(function* (reposito
 
   for (const repository of repositories) {
     const admin = path.join(repository, ".git", "worktrees")
-    const names = yield* fs.readDirectory(admin).pipe(Effect.orElseSucceed(() => [] as Array<string>))
+    const names = yield* fs.readDirectory(admin).pipe(Effect.orElseSucceed((): Array<string> => []))
 
     for (const name of names) {
       const gitFile = (yield* fs

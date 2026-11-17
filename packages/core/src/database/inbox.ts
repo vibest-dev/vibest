@@ -1,5 +1,5 @@
 import { InboxMoved, InboxQueued, type InboxKind } from "@vibest/schema/event"
-import { InboxRow, InboxStatus } from "@vibest/schema/session"
+import { InboxStatus } from "@vibest/schema/session"
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
@@ -396,7 +396,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
       claim: Effect.fn("Db.inbox.claim")((sessionId: string, ids: ReadonlyArray<number>) =>
         Effect.gen(function* () {
-          if (ids.length === 0) return [] as ReadonlyArray<number>
+          if (ids.length === 0) return []
 
           const claimed = yield* moveInbox(
             sql`session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
@@ -454,7 +454,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       setInboxStatus: Effect.fn("Db.inbox.setInboxStatus")(
         (sessionId: string, ids: ReadonlyArray<number>, status: InboxStatus, from?: InboxStatus, into?: number) =>
           Effect.gen(function* () {
-            if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
+            if (ids.length === 0) return []
 
             const moved = yield* moveInbox(
               sql`session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,

@@ -19,6 +19,12 @@ export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r
 export const MODELS_TTL = Duration.minutes(5)
 const MODEL_CACHE_CAPACITY = 32
 
+const decodeModelCacheKey = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Tuple([Schema.String, Schema.String, Schema.Array(Schema.Tuple([Schema.String, Schema.String]))]),
+  ),
+)
+
 const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Record<string, string>>) =>
   JSON.stringify([
     id,
@@ -69,7 +75,7 @@ export const make = Effect.gen(function* () {
 
   const cached = yield* Cache.makeWith(
     (key: string) => {
-      const [id, providerName, entries] = JSON.parse(key) as [string, string, ReadonlyArray<readonly [string, string]>]
+      const [id, providerName, entries] = decodeModelCacheKey(key)
       const definition = harnesses.find(id)
 
       return definition === undefined
