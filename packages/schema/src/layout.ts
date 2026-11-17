@@ -17,6 +17,7 @@ export class Layout extends Context.Service<
     readonly allocationWorktree: (repository: string, name: string) => string
     readonly project: (projectId: string) => string
     readonly artifacts: (projectId: string) => string
+    readonly sessionFolder: (projectId: string, sessionId: string) => string
   }
 >()("vibest/Layout") {
   static readonly make = (home: string) =>
@@ -37,6 +38,7 @@ export class Layout extends Context.Service<
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
         project: (projectId) => path.join(home, "projects", projectId),
         artifacts: (projectId) => path.join(home, "projects", projectId, "artifacts"),
+        sessionFolder: (projectId, sessionId) => path.join(home, "projects", projectId, "sessions", sessionId),
       })
     })
 

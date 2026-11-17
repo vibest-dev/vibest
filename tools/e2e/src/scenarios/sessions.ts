@@ -92,6 +92,40 @@ const spawningModel = (child: string, flags: string) => {
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
+const fileReadingModel = () => {
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    idleTimeout: 0,
+    fetch: async (req) => {
+      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const last = messages.at(-1)
+      const attached = /Attached files: ([^\s\\"]+)/.exec(text(last))?.[1]
+      const word = /s57-word-(\w+)/.exec(text(last))?.[1]
+      const answer =
+        last?.role === "user" && attached !== undefined
+          ? toolCall("call-read", "bash", { command: `cat ${attached}` })
+          : last?.role === "tool" && word !== undefined
+            ? reply(`done-s57 ${word}\nstatus: completed`)
+            : reply("ok")
+      return new Response(answer, { headers: sseHeaders })
+    },
+  })
+  return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
+}
+
+const filesPlugin = (out: string) => `import fs from "node:fs"
+import { Plugin } from "@vibest/plugin/effect"
+import { Effect } from "effect"
+export default Plugin.define({
+  id: "see-files",
+  effect: (ctx) =>
+    ctx.agent.hook("start.before", (event) =>
+      Effect.sync(() => fs.appendFileSync(${JSON.stringify(out)}, JSON.stringify({ prompt: event.prompt, files: event.files, contents: event.files.map((file) => fs.readFileSync(file, "utf8")) }) + "\\n")),
+    ),
+})
+`
+
 const checks: ReadonlyArray<Check> = [
   {
     id: "S1",
@@ -474,6 +508,80 @@ const checks: ReadonlyArray<Check> = [
         )
       } finally {
         spawning.stop()
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S57",
+    title:
+      "vibest run --file copies the file into the session's files folder in the project folder and ends the task with a line naming the copy; a plugin sees that path in agent.start.before files and reads the copy during the hook; the Pi subagent reads the copy and answers with a word from it; archive removes the session's folder",
+    run: async (w) => {
+      const p = await piProject(w, "s57")
+      const model = fileReadingModel()
+      try {
+        p.model.release()
+        const subDir = await piShadow(path.join(w.root, "pi-s57-sub"), w.profile, { fake: { baseUrl: model.url } })
+        const seenFile = path.join(w.root, "s57-start-before.jsonl")
+        const pluginFile = path.join(w.vibestHome, "plugins", "see-files.ts")
+        await fs.mkdir(path.dirname(pluginFile), { recursive: true })
+        await fs.writeFile(pluginFile, filesPlugin(seenFile))
+        await until("the see-files plugin active", async () =>
+          (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
+            (plugin) => plugin.id === "see-files" && plugin.status === "active",
+          ),
+        )
+        const notes = path.join(w.root, "s57-notes.md")
+        await fs.writeFile(notes, "the answer is s57-word-hazel\n")
+        const id = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--session",
+                `${w.herdrSession}-s57`,
+                "--env",
+                `PI_CODING_AGENT_DIR=${subDir}`,
+                "--file",
+                notes,
+                "--",
+                "Read the attached file and answer with its word.",
+              ],
+              { cwd: p.repo, env: p.env, timeoutMs: 90_000 },
+            ),
+          ) as { id: string }
+        ).id
+        const seen = (await fs.readFile(seenFile, "utf8"))
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { prompt: string; files: Array<string>; contents: Array<string> })
+          .find((event) => event.files.length > 0)
+        const copy = seen?.files[0] ?? ""
+        const folder = path.dirname(path.dirname(copy))
+        expect(
+          seen !== undefined &&
+            seen.files.length === 1 &&
+            seen.contents[0] === "the answer is s57-word-hazel\n" &&
+            path.basename(copy) === "s57-notes.md" &&
+            folder.endsWith(`/sessions/${id}`) &&
+            path.dirname(path.dirname(path.dirname(folder))).endsWith("/projects") &&
+            seen.prompt === `Read the attached file and answer with its word.\n\nAttached files: ${copy}` &&
+            !seen.prompt.includes("s57-word-hazel"),
+          `agent.start.before saw ${JSON.stringify(seen)} for ${id}`,
+        )
+        expect((await fs.readFile(copy, "utf8")) === "the answer is s57-word-hazel\n", `${copy} is not the copy`)
+        await until(
+          "the subagent's answer from the attached file",
+          async () => ((await resultOf(w, p, id)).reply?.text ?? "").includes("done-s57 hazel"),
+          90_000,
+        )
+        expect(await exists(folder), `${folder} is gone while the session runs`)
+        await archive(w, p, id)
+        expect(!(await exists(folder)), `${folder} is still there after archive`)
+      } finally {
+        await fs.rm(path.join(w.vibestHome, "plugins", "see-files.ts"), { force: true })
+        model.stop()
         await p.close()
       }
     },

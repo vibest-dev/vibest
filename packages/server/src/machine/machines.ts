@@ -151,6 +151,7 @@ interface Link {
     effect: Effect.Effect<A, E | LineError>,
   ) => Effect.Effect<A, Exclude<E, LineError> | MachineUnavailable | MachineIncompatible>
   readonly exited: Effect.Effect<PipeExit>
+  readonly capabilities: Readonly<Record<string, boolean>>
 }
 
 type Entry = {
@@ -327,7 +328,11 @@ const make = Effect.gen(function* () {
           peerHeaders(self.id),
         ),
       ).pipe(Effect.mapError(failed))
-      return { hello, version: ping.version, link: { client, call, exited: pipe.exited } satisfies Link }
+      return {
+        hello,
+        version: ping.version,
+        link: { client, call, exited: pipe.exited, capabilities: ping.capabilities ?? {} } satisfies Link,
+      }
     })
 
   const receive = (name: string, link: Link, item: OutboxItem) =>

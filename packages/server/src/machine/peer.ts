@@ -89,6 +89,7 @@ const make = Effect.gen(function* () {
           request: input.request,
           commit: input.commit,
           origin: { peer, project, reportTo },
+          files: input.files,
         })
         .pipe(Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })))
       return {

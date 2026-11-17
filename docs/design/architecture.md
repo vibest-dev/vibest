@@ -748,7 +748,7 @@ starting it, not its life.
 | `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every Agent starts, the entry session included    |
 | `agent.fail`         | `move` (`{ harness, provider?, model? }`)                             | a started Agent's execution failed (today a usage limit) |
 
-Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. A callback returns
+Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. `agent.start.before` also carries `files`, the absolute paths of the copies of the files attached with `vibest run --file`; it is read only. A callback returns
 nothing and changes the event by assigning to its fields (OpenCode's shared mutated event). Each callback gets its own
 copy of the event as decided so far and core copies the changed fields back only when the callback succeeded within
 its deadline, so a callback that times out, fails or writes after its deadline leaves no partial or late write. Callbacks

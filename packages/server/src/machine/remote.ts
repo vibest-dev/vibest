@@ -179,6 +179,13 @@ const make = Effect.gen(function* () {
       )
       if (refused.length > 0)
         return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })
+      if (input.files !== undefined && input.files.length > 0) {
+        const link = yield* machines.link(machine)
+        if (link.capabilities.peerSpawnFiles !== true)
+          return yield* new MachineFailed({
+            message: `${machine} runs a vibest that does not take --file; run vibest update there`,
+          })
+      }
       const repositories = yield* db.project.projectRemote(from.project)
       const repository = repositories[0]
       if (repositories.length !== 1 || repository === undefined)
@@ -218,6 +225,7 @@ const make = Effect.gen(function* () {
             ...(input.name === undefined ? {} : { title: input.name }),
             ...(runtime === undefined ? {} : { runtime }),
             request: input.request ?? randomId(),
+            ...(input.files === undefined ? {} : { files: input.files }),
           },
           { headers },
         ),

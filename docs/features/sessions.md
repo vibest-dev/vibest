@@ -8,10 +8,7 @@ counts as working.
 `vibest run`, run by an agent in a session (the entry session or another one), starts a session in a new worktree: a linked worktree of the
 repository, detached, at its HEAD. Its options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
 never stored, `--session` picks the herdr session it opens in, and `--share` runs a second session in the same worktree
-in another pane. `--file <path>`, repeated, reads each file on the machine that runs the command and appends it to the
-prompt under a header naming its path, so the task that reaches the agent and `agent.start.before` is the prompt plus
-those files; a file over 10 MiB, or one that cannot be read or is not text, refuses the run. A path written only in the
-prompt is not opened. `vibest ls` shows the title, harness, provider, model and where it runs. The started session records the session that ran
+in another pane. `--file <path>` attaches a file (S57). `vibest ls` shows the title, harness, provider, model and where it runs. The started session records the session that ran
 it as its creator. `vibest run` in a terminal that is not a session is refused and says to open a session with bare
 `vibest`: no worktree or pane is made.
 
@@ -79,3 +76,15 @@ rules to the ones every agent has. Bare `vibest` opens the entry session as `coo
 `general` session unless `--agent` names another registered id, and on another machine the same id is looked up there. An
 id that is not registered is refused with the registered ids listed, before any worktree or pane is made. A session may
 manage (send to, interrupt, peek at, remove) only the sessions it started.
+
+## S57. Attaching files to a run
+
+`vibest run --file <path>`, repeated, attaches files of any type. The command reads each file on the machine that runs
+it and vibestd copies it to `<project folder>/sessions/<session id>/files/<file name>`; two files of the same name are
+both kept (the second as `<name>-2.<extension>`). The file content is not put into the task: the task ends with one line,
+`Attached files: <absolute path>, …`, naming the copies, and the agent reads them itself (every harness can read the
+project folder). A plugin sees that line in `agent.start.before` `prompt` and the copies' paths in `files`. Archiving the
+session removes `<project folder>/sessions/<session id>/`. A file over 10 MiB, one that cannot be read, or one that is
+not a regular file refuses the run. With `--machine`, the files go with the run and the vibestd there copies them into its own project folder, so
+the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest
+update` there.

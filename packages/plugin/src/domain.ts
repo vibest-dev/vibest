@@ -103,6 +103,7 @@ interface AgentContext {
 
 export interface AgentStartBefore extends AgentContext {
   prompt: string
+  readonly files: ReadonlyArray<string>
   harness: string | undefined
   provider: string | undefined
   model: string | undefined

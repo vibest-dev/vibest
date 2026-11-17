@@ -1,3 +1,4 @@
+import { Layout } from "@vibest/schema/layout"
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
@@ -31,6 +32,7 @@ export * as Archive from "./archive.ts"
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const fs = yield* FileSystem.FileSystem
+  const layout = yield* Layout
   const runtimes = yield* Runtimes.Service
   const inbox = yield* Inbox.Service
   const drain = yield* Drain.Service
@@ -116,6 +118,9 @@ export const make = Effect.gen(function* () {
         }
         session = yield* getRow(id)
       }
+      yield* fs
+        .remove(layout.sessionFolder(session.projectId, id), { recursive: true, force: true })
+        .pipe(Effect.ignore)
       const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(id)) ?? ""))(
         removal.release({
           h,
