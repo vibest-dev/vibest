@@ -1,5 +1,6 @@
 import { Effect, PubSub, Schema, Stream } from "effect"
 
+import type { Launch } from "./launch.ts"
 import type { Transform } from "./registration.ts"
 
 export interface Peer {
@@ -81,8 +82,7 @@ export interface RuntimeDefinition {
   readonly open: (input: {
     readonly project: string
     readonly cwd: string
-    readonly argv: ReadonlyArray<string>
-    readonly env: Readonly<Record<string, string>>
+    readonly launch: Launch
     readonly label: string
     readonly near?: Terminal
     readonly split?: boolean
@@ -105,7 +105,7 @@ export interface RuntimeDefinition {
   readonly session?: (terminal: Terminal) => Effect.Effect<string | null, RuntimeError>
   readonly seen?: (terminal: Terminal) => Effect.Effect<Seen, RuntimeError>
   readonly see?: (terminal: Terminal, finished: number) => Effect.Effect<void, RuntimeError>
-  readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
+  readonly run?: (terminal: Terminal, launch: Launch) => Effect.Effect<void, RuntimeError>
   readonly focus?: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
   readonly present?: (terminal: Terminal, info: Readonly<Record<string, string>>) => Effect.Effect<void, RuntimeError>
   readonly doctor?: (harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>

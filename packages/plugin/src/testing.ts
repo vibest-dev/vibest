@@ -1,4 +1,16 @@
-import { Cause, Duration, Effect, Exit, Option, Ref, Schema, type Scope, Stream } from "effect"
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  Option,
+  Ref,
+  Schema,
+  Stream,
+  type FileSystem,
+  type Path,
+  type Scope,
+} from "effect"
 
 import type { MachineEvent, MachineHooks, MachineNote } from "./effect/index.ts"
 import type { Plugin } from "./effect/plugin.ts"
@@ -39,7 +51,7 @@ interface ContractOptions {
 export const runtimeContract = (
   runtime: Runtime.RuntimeDefinition,
   options: ContractOptions,
-): Effect.Effect<void, ContractError, Scope.Scope> =>
+): Effect.Effect<void, ContractError, Scope.Scope | FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const timeout = Duration.fromInputUnsafe(options.timeout ?? "15 seconds")
     const marker = `vbt-contract-${Math.random().toString(16).slice(2, 8)}`
@@ -62,8 +74,7 @@ export const runtimeContract = (
     const terminal = yield* runtime.open({
       project: options.cwd,
       cwd: options.cwd,
-      argv: ["/bin/sh"],
-      env: { VBT_CONTRACT: marker },
+      launch: { argv: ["/bin/sh"], env: { VBT_CONTRACT: marker } },
       label: `vibest contract ${marker}`,
     })
     yield* that("open", typeof terminal.id === "string" && terminal.id !== "", "returned a terminal without an id")
@@ -124,8 +135,7 @@ export const runtimeContract = (
     const ended = yield* runtime.open({
       project: options.cwd,
       cwd: options.cwd,
-      argv: ["/bin/sh", "-c", "exit 3"],
-      env: { VBT_CONTRACT: marker },
+      launch: { argv: ["/bin/sh", "-c", "exit 3"], env: { VBT_CONTRACT: marker } },
       label: `vibest contract ${marker} exit`,
     })
     const gone = yield* until(
@@ -148,7 +158,7 @@ export const runtimeContract = (
         `reported exit code ${gone.value.exitCode} for a program that ran exit 3`,
       )
     if (runtime.run !== undefined && Exit.isSuccess(gone)) {
-      yield* runtime.run(ended, ["/bin/sh", "-c", ran("again")])
+      yield* runtime.run(ended, { argv: ["/bin/sh", "-c", ran("again")], env: { VBT_CONTRACT: marker } })
       yield* until(
         "run",
         runtime.read(ended, 40),

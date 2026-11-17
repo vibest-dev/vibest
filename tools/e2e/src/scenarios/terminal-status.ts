@@ -474,7 +474,7 @@ const checks: ReadonlyArray<Check> = [
               return (
                 auth.reported &&
                 (["blocked", "error"].includes(auth.status?.state ?? "") ||
-                  (await hc("read", terminal())).includes("Retrying"))
+                  /retrying/i.test(await hc("read", terminal())))
               )
             },
             30_000,

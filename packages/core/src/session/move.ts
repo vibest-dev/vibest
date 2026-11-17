@@ -282,7 +282,9 @@ export const make = Effect.gen(function* () {
             .starting(
               Effect.andThen(
                 plan.beforeStart,
-                Effect.flatMap(db.session.currentProcessId(row.id), (process) => h.run!(terminal!, plan.argv(process))),
+                Effect.flatMap(db.session.currentProcessId(row.id), (process) =>
+                  h.run!(terminal!, plan.launch(process)),
+                ),
               ),
             )
             .pipe(Effect.as(terminal!), Effect.exit)
@@ -291,7 +293,7 @@ export const make = Effect.gen(function* () {
               openTerminal(h, undefined, nextRow, {
                 project: root,
                 cwd,
-                argv: plan.argv,
+                launch: plan.launch,
                 beforeStart: plan.beforeStart,
               }),
             )

@@ -258,9 +258,7 @@ const make = Effect.gen(function* () {
       )
       if (opened === undefined) return yield* Effect.die("launch opened no terminal")
       const pane = opened
-      yield* run(pane, Launch.launchLine(command)).pipe(
-        Effect.mapError((error) => new LaunchFailed({ message: error.message })),
-      )
+      yield* run(pane, command).pipe(Effect.mapError((error) => new LaunchFailed({ message: error.message })))
       const routing =
         Object.keys(decision.decidedBy).length === 0
           ? undefined
@@ -375,12 +373,17 @@ const make = Effect.gen(function* () {
           yield* rt
             .present(address, { entrySession: claimed.sessionId, projectId })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
+        const typed = yield* Launch.launchLine(command).pipe(
+          Effect.mapError((e) => new LaunchFailed({ message: e.message })),
+        )
+        const at = typed[0] === "env" ? 1 + typed.slice(1).findIndex((part) => !/^[A-Z_]+=/.test(part)) : 0
+        const [file, ...args] = typed.slice(at)
         return {
           sessionId: claimed.sessionId,
           harnessSessionId: claimed.harnessSessionId,
           projectId: claimed.projectId,
           runtime: claimed.runtime,
-          command: { file: command.file, args: [...command.args], env: { ...command.env } },
+          command: { file: file!, args, env: command.env },
         }
       }),
     )

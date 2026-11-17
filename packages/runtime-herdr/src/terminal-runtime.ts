@@ -1,5 +1,6 @@
+import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { launchLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
 import { Cause, Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
@@ -284,6 +285,13 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         Effect.andThen(failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))),
       )
 
+    const typed = (launch: VibestPlugin.Launch) =>
+      launchLine(launch).pipe(
+        Effect.mapError((e) => new RuntimeApi.RuntimeError({ code: "failed", message: e.message })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(NodePath.layer),
+      )
+
     const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
         const near = input.near !== undefined && input.remote !== true ? parseTerminal(input.near) : undefined
@@ -315,7 +323,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 target_pane_id: nearPane!.pane_id,
                 direction: "right",
                 cwd: input.cwd,
-                env: { ...input.env },
+                env: { ...input.launch.env },
                 focus: input.focus === true,
               }),
             )).pane.pane_id
@@ -323,7 +331,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
               h.call("tab.create", {
                 workspace_id: workspaceId,
                 cwd: input.cwd,
-                env: { ...input.env },
+                env: { ...input.launch.env },
                 focus: input.focus === true,
                 label: input.label,
               }),
@@ -345,7 +353,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 timeout_ms: Duration.toMillis(OUTPUT_TIMEOUT),
               }),
             )
-            yield* typeLine(h, paneId, input.argv)
+            const line =
+              input.launch.argv.length === 0 && input.launch.prompt === undefined ? [] : yield* typed(input.launch)
+            if (line.length > 0) yield* typeLine(h, paneId, line)
           }),
           (error) => undo().pipe(Effect.andThen(Effect.fail(error))),
         )
@@ -398,7 +408,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         }
       })
 
-    const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
+    const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "run")
         const h = yield* client(place.session)
@@ -422,7 +432,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             code: "busy",
             message: `pane ${place.paneId} did not come back to its shell within ${Duration.format(OUTPUT_TIMEOUT)}`,
           })
-        yield* typeLine(h, place.paneId, argv)
+        yield* typeLine(h, place.paneId, yield* typed(launch))
       })
 
     const read: Runtime["read"] = (terminal, lines) =>

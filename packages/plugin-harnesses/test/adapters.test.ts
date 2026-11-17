@@ -47,6 +47,18 @@ describe("HarnessAdapter", () => {
         ])
   })
 
+  it("claude gets its project folder through --settings additionalDirectories and Read/Edit rules, never --add-dir", () => {
+    const argv = Harness.harnessArgv(claude, input, message)
+    assert.notInclude(argv, "--add-dir")
+    assert.deepStrictEqual(JSON.parse(argv[argv.indexOf("--settings") + 1]!), {
+      permissions: { additionalDirectories: [input.projectDir] },
+    })
+    assert.strictEqual(
+      argv[argv.indexOf("--allowedTools") + 1],
+      `Bash,Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
+    )
+  })
+
   it("agy's launch ends with --prompt-interactive and the message, after every option, new or resumed", () => {
     for (const resume of [false, true])
       assert.deepStrictEqual(Harness.harnessArgv(agy, { ...input, model: "m", resume }, message).slice(-2), [

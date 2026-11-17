@@ -28,7 +28,7 @@ vibest run [<harness>] --title '<Title>' --archive-on-idle -- '<task>'
 - Each session gets its own new worktree.
 - Several `vibest run` commands in one message start in parallel.
 - A subagent cannot see this conversation. Say what to achieve, where (paths, lines), what done means, and how to verify it. For code: run the tests and typecheck, commit, and send the branch and hash.
-- Long material: write it with your file tool to `$VIBEST_PROJECT_DIR/artifacts/<name>.md` (a new file name if that one exists) and give the agent its absolute path: the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name.
+- Long material: write it with your file tool to `$VIBEST_PROJECT_DIR/artifacts/<name>.md` (a new file name if that one exists) and attach it with `--file` (repeat the flag for each file). Do not put only the path in the prompt: vibest does not open a path that is merely named there. The absolute path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name.
 - If the user approved a specific action, quote their exact words.
 
 ## After you start

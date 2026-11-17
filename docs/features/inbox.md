@@ -95,7 +95,8 @@ notice that carries the failure, typed into the entry session once.
 ## S56. A first task arrives whole in the launch argv
 
 A subagent's first task is in its harness's launch arguments, multi-line and with shell characters as written: its
-execution starts before its process is placed, the model is asked it once, and it completes.
+execution starts before its process is placed, the model is asked it once, and it completes. A runtime plugin sees that
+text as `launch.prompt` and the system prompt as `launch.system`, not as paths inside a shell wrapper.
 
 ## S55. A message says who it is from
 

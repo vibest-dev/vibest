@@ -128,6 +128,12 @@ const run = Spec.make("run", {
       ),
       Flag.withDefault("general"),
     ),
+    file: Flag.String("file").pipe(
+      Flag.withDescription(
+        "Read this text file and append it to the prompt, under a header naming its path. Repeat for each file. A file over 10 MiB, or one that cannot be read or is not text, refuses the run. A path named only in the prompt is not read",
+      ),
+      Flag.atLeast(0),
+    ),
     session: sessionFlag,
   },
 })

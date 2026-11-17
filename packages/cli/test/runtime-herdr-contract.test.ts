@@ -40,8 +40,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .open({
                 project: cwd,
                 cwd,
-                argv: ["printf", "VBT_%s\\n", "TYPED"],
-                env: {},
+                launch: { argv: ["printf", "VBT_%s\\n", "TYPED"], env: {} },
                 label: "vibest test",
               })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
@@ -110,8 +109,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .open({
                 project: cwd,
                 cwd,
-                argv: ["/bin/sh"],
-                env: { VBT_NEAR: "1" },
+                launch: { argv: ["/bin/sh"], env: { VBT_NEAR: "1" } },
                 label: "beside",
                 near: opened,
               })
@@ -134,8 +132,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .open({
                 project: cwd,
                 cwd,
-                argv: ["/bin/sh"],
-                env: {},
+                launch: { argv: ["/bin/sh"], env: {} },
                 label: "grouped",
               })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
