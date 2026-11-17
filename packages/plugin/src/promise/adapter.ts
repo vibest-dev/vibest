@@ -1,4 +1,4 @@
-import { Effect, type Scope, Stream } from "effect"
+import { Effect, Predicate, type Scope, Stream } from "effect"
 
 import type { Context as EffectContext } from "../effect/index.ts"
 import type { Registration as EffectRegistration } from "../effect/registration.ts"
@@ -7,7 +7,7 @@ import type { Definitions, Registration } from "./registration.ts"
 
 type Awaitable<A> = Promise<A> | A
 
-const isRefusal = (e: unknown) => (e as { readonly _tag?: unknown } | undefined)?._tag === "AgentRefused"
+const isRefusal = (cause: unknown) => Predicate.isTagged(cause, "AgentRefused")
 
 const settle = <A>(callback: () => Awaitable<A>) => Effect.promise(() => Promise.resolve().then(callback))
 
@@ -45,7 +45,7 @@ export const fromPromise =
             next: () =>
               source.next().then(
                 (result) => (result.done === true ? close().then(() => result) : result),
-                (error: unknown) => close().then(() => Promise.reject(error)),
+                (cause: unknown) => close().then(() => Promise.reject(cause)),
               ),
             return: close,
           }

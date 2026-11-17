@@ -3,7 +3,7 @@ import { Agents } from "@vibest/core/agents"
 import { type Candidate, makeHost } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
 import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
-import { Duration, Deferred, Effect, Fiber } from "effect"
+import { Duration, Deferred, Effect, Fiber, type Schema } from "effect"
 import { TestClock } from "effect/testing"
 
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
@@ -13,7 +13,7 @@ const candidate = (
   source: string,
   revision: string,
   plugin: Candidate["plugin"],
-  options: Record<string, unknown> = {},
+  options: Schema.JsonObject = {},
 ): Candidate => ({ source, revision, options, plugin })
 
 const event = {
@@ -72,17 +72,18 @@ describe("plugins: hook events are detached copies", () => {
   it.effect("a reference a plugin keeps cannot change the result or the trace after its callback succeeded", () =>
     host((h) =>
       Effect.gen(function* () {
-        const kept: { machine?: { id: string } } = {}
+        const kept: Array<{ id: string }> = []
         yield* h.activate([
           hooked("keeper", (e) =>
             Effect.sync(() => {
-              kept.machine = { id: "chosen" }
-              e.machine = kept.machine
+              const machine = { id: "chosen" }
+              kept.push(machine)
+              e.machine = machine
             }),
           ),
         ])
         const decision = yield* h.service.start(event)
-        kept.machine!.id = "changed later"
+        kept.at(-1)!.id = "changed later"
         assert.strictEqual(decision.machine.id, "chosen")
         assert.deepStrictEqual(decision.trace[0]!.changes[0]!.to, { id: "chosen" })
       }),
@@ -95,7 +96,7 @@ describe("plugins: hook events are detached copies", () => {
         Effect.gen(function* () {
           const gate = yield* Deferred.make<void>()
           const input = structuredClone(event)
-          const late: { write?: () => void } = {}
+          const late: Array<() => void> = []
           yield* h.activate([
             hooked("crash", (e) =>
               Effect.sync(() => void Object.assign(e.harnesses[0]!, { available: false })).pipe(
@@ -109,14 +110,14 @@ describe("plugins: hook events are detached copies", () => {
             hooked("timeout", (e) =>
               Effect.sync(() => {
                 Object.assign(e.harnesses[1]!, { available: false })
-                late.write = () => void Object.assign(e.harnesses[2]!, { available: false })
+                late.push(() => void Object.assign(e.harnesses[2]!, { available: false }))
               }).pipe(Effect.andThen(Deferred.await(gate))),
             ),
           ])
           const starting = yield* Effect.forkChild(h.service.start(input).pipe(Effect.flip))
           yield* TestClock.adjust("20 millis")
           assert.strictEqual((yield* Fiber.join(starting))._tag, "AgentRefused")
-          late.write!()
+          late.at(-1)!()
           assert.deepStrictEqual(input, event)
         }),
       "20 millis",

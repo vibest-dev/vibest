@@ -892,7 +892,7 @@ describe("vibest run --machine and remote sessions", () => {
     Effect.gen(function* () {
       const { net, a, asEntry } = yield* twoMachines()
 
-      const run = (more: object) =>
+      const run = (more: Partial<Parameters<typeof a.raw.Spawn>[0]>) =>
         Effect.flip(asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {}, ...more })))
 
       assert.include((yield* run({ env: { A: "1" } })).message, "--env is not sent to another machine")

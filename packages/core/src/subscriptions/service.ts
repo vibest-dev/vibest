@@ -1,7 +1,7 @@
 import type { SubscriptionReport } from "@vibest/plugin/effect"
 import type { HarnessId } from "@vibest/schema/session"
 import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscription"
-import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
+import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Predicate, Ref, Semaphore } from "effect"
 
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harness } from "../harness.ts"
@@ -23,12 +23,12 @@ type Usage = { readonly limits: ReadonlyArray<SubscriptionLimit>; readonly error
 const keyOf = (harness: string, provider: string) => `${harness}\0${provider}`
 
 const isLimit = (limit: SubscriptionLimit) =>
-  typeof limit?.window === "string" &&
+  Predicate.isString(limit?.window) &&
   limit.window !== "" &&
-  typeof limit.percent === "number" &&
+  Predicate.isNumber(limit.percent) &&
   Number.isFinite(limit.percent) &&
   (limit.status === "available" || limit.status === "limited") &&
-  (limit.resetTime === null || (typeof limit.resetTime === "number" && Number.isFinite(limit.resetTime)))
+  (limit.resetTime === null || (Predicate.isNumber(limit.resetTime) && Number.isFinite(limit.resetTime)))
 
 const homeDir = Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
 

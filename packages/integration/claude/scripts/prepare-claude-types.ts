@@ -60,8 +60,8 @@ if (invoked) {
 
       return new Uint8Array(await response.arrayBuffer())
     },
-  }).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error)
+  }).catch((cause: unknown) => {
+    console.error(cause instanceof Error ? cause.message : cause)
     process.exit(1)
   })
 }

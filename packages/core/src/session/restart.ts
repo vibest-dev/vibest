@@ -1,7 +1,7 @@
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { HarnessId } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schedule } from "effect"
+import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Predicate, Schedule } from "effect"
 
 import { Agents } from "../agents.ts"
 import { App } from "../app.ts"
@@ -178,11 +178,11 @@ export const make = Effect.gen(function* () {
       if (event.type !== "process.ready" || event.sessionId !== id) return false
       const { pid, integration } = event.data
 
-      if (typeof pid !== "number" || typeof integration !== "object" || integration === null) return false
+      if (!Predicate.isNumber(pid) || !Predicate.isObjectOrArray(integration)) return false
       const version = "version" in integration ? integration.version : undefined
       const protocol = "protocol" in integration ? integration.protocol : undefined
 
-      return typeof version === "string" && typeof protocol === "number" && current({ version, protocol })
+      return Predicate.isString(version) && Predicate.isNumber(protocol) && current({ version, protocol })
     }
 
     return awaitEvent(

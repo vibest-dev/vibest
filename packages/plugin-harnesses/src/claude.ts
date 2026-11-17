@@ -1,7 +1,8 @@
 import type { Harness } from "@vibest/plugin/effect"
-import { Effect, Ref, Schema } from "effect"
+import { Effect, Predicate, Ref, Schema } from "effect"
 
 import { findMessage, jsonLines, noProvider, opt, withConfigured } from "./models.ts"
+import { record } from "./subscriptions/index.ts"
 
 const CLAUDE_MENUS = [
   { menu: "trust", pattern: /trust this folder/i, accept: /^\s*❯.*Yes, I trust this folder/im },
@@ -29,7 +30,7 @@ const claudeStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.
 
 const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`]
 
-const executionComplete = (event: Readonly<Record<string, unknown>>) => {
+const executionComplete = (event: Schema.JsonObject) => {
   if (event.reason === "answer") return event
 
   if (event.reason === "aborted")
@@ -41,8 +42,8 @@ const executionComplete = (event: Readonly<Record<string, unknown>>) => {
     }
 
   if (event.reason === "refusal") {
-    const r = (event.refusal ?? {}) as { readonly category?: unknown; readonly explanation?: unknown }
-    const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
+    const r = record(event.refusal)
+    const why = [r?.category, r?.explanation].filter((x) => Predicate.isString(x) && x !== "").join(": ")
 
     return { ...event, error: "refusal", error_details: why || "the model refused to answer" }
   }
@@ -149,13 +150,13 @@ export const claude: Harness.HarnessDefinition = {
     if (event.hook_event_name !== "PromptSubmit") return undefined
 
     if (event.origin === "vibest")
-      return typeof event.execution === "number"
+      return Predicate.isNumber(event.execution)
         ? { execution: event.execution, ...(event.refused === true && { refused: true as const }) }
         : undefined
 
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
 
-    return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
+    return Predicate.isString(event.text) && event.text.trim() !== "" ? { text: event.text } : undefined
   },
   executionEnd: (event) =>
     event.hook_event_name !== "ExecutionComplete" ? undefined : { end: executionComplete(event) },

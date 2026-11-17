@@ -3,6 +3,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { Predicate, Schema } from "effect"
+
 const root = path.resolve(import.meta.dirname, "../../..")
 const [version, flag, flagDir] = process.argv.slice(2)
 
@@ -37,7 +39,23 @@ const published: Array<string> = JSON.parse(run(["pnpm", "-r", "ls", "--json", "
   .filter((p: { private?: boolean }) => !p.private)
   .map((p: { name: string }) => p.name)
 
-type Manifest = Record<string, any>
+const Dependencies = Schema.optional(Schema.Record(Schema.String, Schema.String))
+
+const Manifest = Schema.Struct({
+  name: Schema.String,
+  version: Schema.String,
+  files: Schema.optional(Schema.Array(Schema.String)),
+  bin: Schema.optional(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)])),
+  main: Schema.optional(Schema.String),
+  exports: Schema.optional(Schema.Json),
+  dependencies: Dependencies,
+  optionalDependencies: Dependencies,
+  peerDependencies: Dependencies,
+})
+
+type Manifest = typeof Manifest.Type
+
+const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(Manifest))
 
 const tarballs = new Map<string, string>()
 const manifests = new Map<string, Manifest>()
@@ -50,7 +68,7 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
     .filter(Boolean)
     .map((f) => f.replace(/^package\//, ""))
 
-  const manifest: Manifest = JSON.parse(run(["tar", "-xzOf", tarball, "package/package.json"], dir))
+  const manifest = decodeManifest(run(["tar", "-xzOf", tarball, "package/package.json"], dir))
   tarballs.set(manifest.name, tarball)
   manifests.set(manifest.name, manifest)
 
@@ -65,8 +83,7 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
 
   for (const f of manifest.files ?? []) has(f, "files entry")
 
-  for (const f of typeof manifest.bin === "string" ? [manifest.bin] : Object.values(manifest.bin ?? {}))
-    has(f as string, "bin")
+  for (const f of Predicate.isString(manifest.bin) ? [manifest.bin] : Object.values(manifest.bin ?? {})) has(f, "bin")
 
   if (manifest.main) has(manifest.main, "main")
 
@@ -165,10 +182,11 @@ function escape(s: string) {
   return s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
 }
 
-function targets(exports: unknown): Array<string> {
-  if (typeof exports === "string") return [exports]
+function targets(exports: Schema.Json | undefined): Array<string> {
+  if (Predicate.isString(exports)) return [exports]
 
-  if (exports && typeof exports === "object") return Object.values(exports).flatMap(targets)
+  if (exports === null || exports === undefined || Predicate.isNumber(exports) || Predicate.isBoolean(exports))
+    return []
 
-  return []
+  return Object.values(exports).flatMap(targets)
 }

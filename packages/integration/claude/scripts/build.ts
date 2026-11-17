@@ -2,12 +2,14 @@ import fs from "node:fs"
 import path from "node:path"
 import url from "node:url"
 
+import pkg from "../package.json" with { type: "json" }
+import manifest from "../src/manifest.json" with { type: "json" }
+
 const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))
-const readJson = (file: string) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8")) as Record<string, unknown>
 
-const version = readJson("package.json").version
+const { version } = pkg
 
-if (typeof version !== "string" || version === "") throw new Error("package.json has no version")
+if (version === "") throw new Error("package.json has no version")
 
 const outdir = path.resolve(process.argv[2] ?? root)
 
@@ -16,7 +18,7 @@ const write = (name: string, text: string | Buffer) => {
   fs.writeFileSync(path.join(outdir, name), text)
 }
 
-write(".claude-plugin/plugin.json", `${JSON.stringify({ ...readJson("src/manifest.json"), version }, null, 2)}\n`)
+write(".claude-plugin/plugin.json", `${JSON.stringify({ ...manifest, version }, null, 2)}\n`)
 
 if (outdir !== root)
   for (const name of ["hooks/hooks.json", "README.md", "LICENSE"]) write(name, fs.readFileSync(path.join(root, name)))

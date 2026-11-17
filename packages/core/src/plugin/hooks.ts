@@ -1,7 +1,7 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import type { Change, TraceEntry } from "@vibest/schema/plugin"
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, type Scope } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, type Scope } from "effect"
 
 import { Bounded } from "../effect/bounded.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -40,9 +40,13 @@ export type Stats = {
   lastError: string | undefined
 }
 
+export interface Activation {
+  readonly scope: Scope.Scope
+}
+
 export type Entry<N extends Name> = {
   readonly plugin: string
-  readonly activation: object
+  readonly activation: Activation
   readonly stats: Stats
   readonly runtime: string | undefined
   readonly callback: (event: Events[N]) => Effect.Effect<Results[N] | void, Failures[N]>
@@ -62,14 +66,18 @@ export const errorMessage = (cause: Cause.Cause<unknown>) => messageOf(Cause.squ
 const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused =>
   (e as { _tag?: unknown } | undefined)?._tag === "AgentRefused"
 
-const decision = <A>(value: A | void) => (typeof value === "object" && value !== null ? value : undefined)
+const decision = <A>(value: A | void) => (Predicate.isObjectOrArray(value) ? value : undefined)
 
 export interface Interface {
   readonly register: <N extends Name>(
     name: N,
     entry: Entry<N>,
   ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
-  readonly get: <N extends Name>(name: N, runtime: string | undefined, activation: object) => ReadonlyArray<Entry<N>>
+  readonly get: <N extends Name>(
+    name: N,
+    runtime: string | undefined,
+    activation: Activation,
+  ) => ReadonlyArray<Entry<N>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("vibest/PluginHooks") {}

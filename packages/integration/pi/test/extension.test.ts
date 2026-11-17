@@ -27,7 +27,7 @@ import {
 } from "@vibest/platform-bun/test/lib/fakes"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, type Schema, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
@@ -35,6 +35,23 @@ import { vi } from "vitest"
 import { extension, services, skillsDir } from "../src/extension.ts"
 import { Pi } from "../src/pi.ts"
 import presentation from "../src/presentation.ts"
+
+type FakeEvent = Schema.JsonObject
+
+type FakeContext = {
+  readonly mode?: string
+  readonly hasUI?: boolean
+  readonly cwd?: string
+  readonly isIdle?: () => boolean
+  readonly sessionManager?: { readonly getSessionId: () => string }
+  readonly ui?: { readonly notify: (message: string) => void }
+}
+
+type FakeAnswer = Schema.Json | undefined | void
+
+type FakeHandler = (e: FakeEvent, ctx: FakeContext) => FakeAnswer | Promise<FakeAnswer>
+
+type SentMessage = Parameters<ExtensionAPI["sendMessage"]>[0]
 
 const valuesStoredByRefSet = vi.hoisted(() => [] as Array<unknown>)
 
@@ -104,12 +121,12 @@ const session = (env: Record<string, string>, withPresentation = false) =>
       }),
     )
 
-    const handlers = new Map<string, Array<(e: unknown, ctx: unknown) => unknown>>()
-    const messages: Array<{ message: unknown; options: unknown }> = []
+    const handlers = new Map<string, Array<FakeHandler>>()
+    const messages: Array<{ message: SentMessage; options: Parameters<ExtensionAPI["sendMessage"]>[1] }> = []
     const renderers: Array<unknown> = []
 
     const fake: Pick<ExtensionAPI, "sendMessage" | "registerToolRenderer"> & {
-      on: (event: string, handler: (e: unknown, ctx: unknown) => unknown) => () => void
+      on: (event: string, handler: FakeHandler) => () => void
     } = {
       on: (event, handler) => {
         handlers.set(event, [...(handlers.get(event) ?? []), handler])
@@ -126,10 +143,10 @@ const session = (env: Record<string, string>, withPresentation = false) =>
 
     const api = fake as unknown as ExtensionAPI
 
-    const emit = (event: string, e: unknown = {}, ctx: unknown = {}) =>
+    const emit = (event: string, e: FakeEvent = {}, ctx: FakeContext = {}) =>
       Effect.promise(async () => {
-        const results = []
-        const full = { sessionManager: { getSessionId: () => "pi-session" }, ...(ctx as object) }
+        const results: Array<FakeAnswer> = []
+        const full = { sessionManager: { getSessionId: () => "pi-session" }, ...ctx }
 
         for (const h of handlers.get(event) ?? []) results.push(await h(e, full))
 
@@ -162,7 +179,7 @@ const tuiStart = {
 }
 
 const finishExecution = (
-  s: { readonly emit: (event: string, e?: unknown, ctx?: unknown) => Effect.Effect<unknown> },
+  s: { readonly emit: (event: string, e?: FakeEvent, ctx?: FakeContext) => Effect.Effect<ReadonlyArray<FakeAnswer>> },
   execution: number,
 ) =>
   Effect.gen(function* () {
@@ -175,7 +192,7 @@ const finishExecution = (
     yield* s.emit("agent_settled", { aborted: false }, tuiStart)
   })
 
-const executionOf = (message: unknown) => (message as { details: { execution: number } }).details.execution
+const executionOf = (message: SentMessage) => (message.details as { execution: number }).execution
 
 const executionEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
   mode,

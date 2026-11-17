@@ -34,6 +34,10 @@ export const skillsDir = path.join(path.dirname(url.fileURLToPath(import.meta.ur
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
+const decodeRefusal = Schema.decodeUnknownOption(Schema.String)
+
+const decodeVibestDetails = Schema.decodeUnknownOption(Schema.Struct({ execution: Schema.Number }))
+
 const guarded = (sessionId: string) =>
   Effect.gen(function* () {
     const pi = yield* Pi
@@ -52,9 +56,9 @@ const guarded = (sessionId: string) =>
             block: true,
             reason: `vibest could not check this tool call (${Cause.pretty(exit.cause)}); it is refused.`,
           }
-        const reason = exit.value.answer
+        const reason = decodeRefusal(exit.value.answer)
 
-        return typeof reason === "string" && reason ? { block: true, reason } : undefined
+        return Option.isSome(reason) && reason.value ? { block: true, reason: reason.value } : undefined
       }),
     )
   })
@@ -96,11 +100,11 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
           const message = e.message
 
           if (message.role !== "custom" || message.customType !== "vibest") return
-          const details = message.details as { readonly execution?: unknown } | undefined
+          const details = decodeVibestDetails(message.details)
 
-          if (typeof details?.execution !== "number") return
+          if (Option.isNone(details)) return
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
-          const event = encodeJson({ type: "accepted", execution: details.execution })
+          const event = encodeJson({ type: "accepted", execution: details.value.execution })
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
         }),
       )

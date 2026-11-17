@@ -1,21 +1,23 @@
 import path from "node:path"
 
+import { Predicate, type Schema } from "effect"
+
 import type { World } from "./world.ts"
 import { claudeShadow, FAKE_ANTHROPIC_KEY, piShadow } from "./world/shadow.ts"
 
-export type Message = { role: string; content: unknown }
+export type Message = { role: string; content: Schema.Json }
 
-export type Step = { readonly tool: string; readonly input: Record<string, unknown>; readonly id?: string } | string
+export type Step = { readonly tool: string; readonly input: Schema.JsonObject; readonly id?: string } | string
 
 export const text = (m: Message | undefined) =>
-  m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+  m === undefined ? "" : Predicate.isString(m.content) ? m.content : JSON.stringify(m.content)
 
 export const ask = (task: string) =>
   `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
 
 export const sseHeaders = { "content-type": "text/event-stream" }
 
-const chunk = (o: object) =>
+const chunk = (o: Schema.JsonObject) =>
   `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
 
 const done = (finish: string) =>
@@ -27,7 +29,7 @@ const done = (finish: string) =>
 export const reply = (content: string) =>
   chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) + done("stop")
 
-export const toolCall = (id: string, name: string, input: object) =>
+export const toolCall = (id: string, name: string, input: Schema.JsonObject) =>
   chunk({
     choices: [
       {
@@ -326,7 +328,7 @@ export const fakeOpenAI = (
   dirs: Record<string, string>,
 ) => {
   let calls = 0
-  const answer = (s: Step) => (typeof s === "string" ? reply(s) : toolCall(`call${++calls}`, s.tool, s.input))
+  const answer = (s: Step) => (Predicate.isString(s) ? reply(s) : toolCall(`call${++calls}`, s.tool, s.input))
 
   const server = Bun.serve({
     port: 0,
@@ -363,7 +365,7 @@ export const fakeOpenAI = (
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
-export type ToolResult = { readonly tool_use_id: string; readonly is_error?: boolean; readonly content: unknown }
+export type ToolResult = { readonly tool_use_id: string; readonly is_error?: boolean; readonly content: Schema.Json }
 
 export type AnthropicRequest = {
   readonly system: string
@@ -377,7 +379,7 @@ export const subagentFolder = (system: string) =>
 
 export const lastUser = (r: AnthropicRequest) => r.messages.findLast((m) => m.role === "user")
 
-export const resultText = (r: ToolResult) => (typeof r.content === "string" ? r.content : JSON.stringify(r.content))
+export const resultText = (r: ToolResult) => (Predicate.isString(r.content) ? r.content : JSON.stringify(r.content))
 
 export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<Step>) => {
   let n = 0
@@ -425,12 +427,11 @@ export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<S
       const s =
         run === undefined ? await respond(request) : { tool: "Bash", input: { command: run.command }, id: run.id }
 
-      const content: Array<object> =
-        typeof s === "string"
-          ? [{ type: "text", text: s }]
-          : [{ type: "tool_use", id: s.id ?? `toolu_${results.length}`, name: s.tool, input: s.input }]
+      const content: Array<object> = Predicate.isString(s)
+        ? [{ type: "text", text: s }]
+        : [{ type: "tool_use", id: s.id ?? `toolu_${results.length}`, name: s.tool, input: s.input }]
 
-      const stop = typeof s === "string" ? "end_turn" : "tool_use"
+      const stop = Predicate.isString(s) ? "end_turn" : "tool_use"
 
       const message = {
         id: `msg_${++n}`,

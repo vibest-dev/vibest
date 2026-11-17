@@ -150,7 +150,7 @@ const LINE_TAGS: Record<LineError["_tag"], true> = {
 }
 
 const isLineError = (e: unknown): e is LineError =>
-  Predicate.hasProperty(e, "_tag") && typeof e._tag === "string" && Object.hasOwn(LINE_TAGS, e._tag)
+  Predicate.hasProperty(e, "_tag") && Predicate.isString(e._tag) && Object.hasOwn(LINE_TAGS, e._tag)
 
 const alreadyNamed = (name: string) =>
   `a machine named ${name} is already added; remove it first (vibest machine rm ${name})`
@@ -304,12 +304,12 @@ const make = Effect.gen(function* () {
 
       const ended = pipe.exited.pipe(Effect.map((exit) => exitReason(name, exit)))
 
-      const down = (error: unknown) =>
+      const down = (cause: unknown) =>
         ended.pipe(
           Effect.timeoutOption(EXIT_WAIT),
           Effect.map((reason) =>
             Option.getOrElse(reason, () =>
-              error instanceof Error && error.message !== "" ? error.message : `the connection to ${name} failed`,
+              cause instanceof Error && cause.message !== "" ? cause.message : `the connection to ${name} failed`,
             ),
           ),
         )

@@ -127,18 +127,20 @@ describe("vibestd's HTTP API", () => {
       yield* TestClock.adjust("1 second")
       const now = yield* Clock.currentTimeMillis
 
-      const logs: Array<{
-        readonly message: unknown
-        readonly level: unknown
-        readonly annotations: Readonly<Record<string, unknown>>
-      }> = []
+      const logEntry = ({ fiber, logLevel, message }: Logger.Options<unknown>) => ({
+        message,
+        level: logLevel,
+        annotations: { ...fiber.getRef(CurrentLogAnnotations) },
+      })
+
+      const logs: Array<ReturnType<typeof logEntry>> = []
 
       const watched = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         effect.pipe(
           Effect.provide(
             Logger.layer([
-              Logger.make(({ fiber, logLevel, message }) => {
-                logs.push({ message, level: logLevel, annotations: { ...fiber.getRef(CurrentLogAnnotations) } })
+              Logger.make((options) => {
+                logs.push(logEntry(options))
               }),
             ]),
           ),

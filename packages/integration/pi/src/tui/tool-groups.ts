@@ -1,11 +1,32 @@
+import type { SessionManager } from "@earendil-works/pi-coding-agent"
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui"
+import { Predicate, type Schema } from "effect"
 
 type Host = any
+
+type ToolArgs = Schema.Json | undefined
+
+const isFields = (value: ToolArgs): value is Schema.JsonObject =>
+  Predicate.isObjectOrArray(value) && !Array.isArray(value)
+
+const isMessage = (value: Host): boolean => Predicate.isObjectOrArray(value)
+
+const PREFERRED_ARGS = new Map([
+  ["read", ["path", "file_path"]],
+  ["write", ["path", "file_path"]],
+  ["edit", ["path", "file_path"]],
+  ["ls", ["path"]],
+  ["bash", ["command"]],
+  ["powershell", ["command"]],
+  ["grep", ["pattern"]],
+  ["find", ["pattern", "path"]],
+  ["tool_search", ["query"]],
+])
 
 type Row = {
   id: string
   name: string
-  args?: Host
+  args?: ToolArgs
   parentId?: string
   isError: boolean
   isPartial: boolean
@@ -17,7 +38,7 @@ type RowFields = { [K in keyof Row]?: Row[K] | undefined }
 type Group = { settled: boolean; expanded: boolean; members: Row[] }
 
 type ToolGroupsApi = {
-  on(event: string, handler: (event: Host, ctx: Host) => void): unknown
+  on(event: string, handler: (event: Host, ctx: Host) => void): void
   registerToolRenderer(resolver: (toolName: string, next: () => Host) => Host): void
 }
 
@@ -32,7 +53,7 @@ export default function (pi: ToolGroupsApi) {
   let bodyGroup = new WeakMap<object, Group>()
   let replaying = false
 
-  function gutter(width: number, outputPad: unknown) {
+  function gutter(width: number, outputPad: number | undefined) {
     const room = Math.max(1, Math.floor(width) || 1)
     let pad = Math.max(0, Math.floor(Number(outputPad) || 0))
 
@@ -48,14 +69,14 @@ export default function (pi: ToolGroupsApi) {
     return lines.map((line) => prefix + line)
   }
 
-  function frameLines(renderers: Host, component: Host, width: number, outputPad: unknown): string[] {
+  function frameLines(renderers: Host, component: Host, width: number, outputPad: number | undefined): string[] {
     if (renderers?.renderShell === "self") return component.render(width)
     const { pad, limit } = gutter(width, outputPad)
 
     return indent(component.render(limit), pad)
   }
 
-  function frameComponent(renderers: Host, component: Host, outputPad: unknown) {
+  function frameComponent(renderers: Host, component: Host, outputPad: number | undefined) {
     if (renderers?.renderShell === "self") return component
 
     return {
@@ -68,11 +89,11 @@ export default function (pi: ToolGroupsApi) {
     }
   }
 
-  function wrapText(text: unknown, width: number) {
+  function wrapText(text: string | undefined, width: number) {
     return wrapTextWithAnsi(String(text ?? ""), Math.max(1, width || 1))
   }
 
-  function oneLine(text: unknown, limit: number) {
+  function oneLine(text: string | undefined, limit: number) {
     const flat = String(text ?? "")
       .replace(/\s+/g, " ")
       .trim()
@@ -84,25 +105,12 @@ export default function (pi: ToolGroupsApi) {
     return flat.slice(0, Math.max(1, limit - 1)) + "\u2026"
   }
 
-  function primaryArg(name: string, args: Host) {
+  function primaryArg(name: string, args: ToolArgs) {
     if (args === undefined || args === null) return ""
 
-    if (typeof args !== "object" || Array.isArray(args))
-      return oneLine(typeof args === "string" ? args : JSON.stringify(args), 40)
+    if (!isFields(args)) return oneLine(Predicate.isString(args) ? args : JSON.stringify(args), 40)
 
-    const preferred = (
-      {
-        read: ["path", "file_path"],
-        write: ["path", "file_path"],
-        edit: ["path", "file_path"],
-        ls: ["path"],
-        bash: ["command"],
-        powershell: ["command"],
-        grep: ["pattern"],
-        find: ["pattern", "path"],
-        tool_search: ["query"],
-      } as Record<string, string[]>
-    )[name] || ["path", "file_path", "command", "query", "pattern", "url"]
+    const preferred = PREFERRED_ARGS.get(name) ?? ["path", "file_path", "command", "query", "pattern", "url"]
 
     const sensitive = /token|secret|password|authorization|credential|api[_-]?key/i
 
@@ -110,13 +118,13 @@ export default function (pi: ToolGroupsApi) {
       if (sensitive.test(key)) continue
       const value = args[key]
 
-      if (typeof value === "string" && value) return oneLine(value, 40)
+      if (Predicate.isString(value) && value) return oneLine(value, 40)
     }
 
     for (const [key, value] of Object.entries(args)) {
       if (sensitive.test(key) || key === "script" || key === "content" || key === "edits") continue
 
-      if (typeof value === "string" && value) return oneLine(value, 40)
+      if (Predicate.isString(value) && value) return oneLine(value, 40)
     }
 
     return ""
@@ -173,12 +181,12 @@ export default function (pi: ToolGroupsApi) {
     return group.members.every((member) => expandedById.get(member.id) === true)
   }
 
-  function plainCall(name: string, args: unknown, width: number) {
+  function plainCall(name: string, args: ToolArgs, width: number) {
     const lines = wrapText(name, width)
 
-    if (args && typeof args === "object" && !Array.isArray(args)) {
+    if (isFields(args)) {
       for (const [key, value] of Object.entries(args)) {
-        const shown = typeof value === "string" ? value : JSON.stringify(value)
+        const shown = Predicate.isString(value) ? value : JSON.stringify(value)
         lines.push(...wrapText(key + ": " + shown, width))
       }
     } else if (args !== undefined) {
@@ -188,7 +196,7 @@ export default function (pi: ToolGroupsApi) {
     return lines
   }
 
-  function plainResult(result: Host, isError: unknown, width: number) {
+  function plainResult(result: Host, isError: boolean | undefined, width: number) {
     const texts: string[] = []
 
     if (Array.isArray(result?.content)) {
@@ -227,7 +235,7 @@ export default function (pi: ToolGroupsApi) {
     return open
   }
 
-  function place(id: string, name: string | undefined, group: Group, args?: unknown) {
+  function place(id: string, name: string | undefined, group: Group, args?: ToolArgs) {
     const current = byId.get(id)
 
     if (current === group) {
@@ -262,7 +270,7 @@ export default function (pi: ToolGroupsApi) {
   }
 
   function note(message: Host) {
-    if (!message || typeof message !== "object") return
+    if (!isMessage(message)) return
 
     if (message.role === "user" || (message.role === "custom" && message.display)) {
       finish(open)
@@ -342,9 +350,9 @@ export default function (pi: ToolGroupsApi) {
     const paths: string[] = []
 
     for (const op of ops) {
-      const path = op.args && typeof op.args === "object" ? (op.args.path ?? op.args.file_path) : undefined
+      const path = isFields(op.args) ? (op.args.path ?? op.args.file_path) : undefined
 
-      if (typeof path !== "string" || !path) return verb + " " + ops.length
+      if (!Predicate.isString(path) || !path) return verb + " " + ops.length
       paths.push(path)
     }
 
@@ -429,10 +437,10 @@ export default function (pi: ToolGroupsApi) {
     return parts.length ? parts : [group.members.length + " tools"]
   }
 
-  function callPath(args: Host) {
-    const path = args && typeof args === "object" ? (args.path ?? args.file_path) : undefined
+  function callPath(args: ToolArgs) {
+    const path = isFields(args) ? (args.path ?? args.file_path) : undefined
 
-    return typeof path === "string" && path ? path : undefined
+    return Predicate.isString(path) && path ? path : undefined
   }
 
   function activity(call: RowFields) {
@@ -525,7 +533,7 @@ export default function (pi: ToolGroupsApi) {
   function visibleEntries(ctx: Host) {
     const build = ctx?.sessionManager?.buildContextEntries
 
-    if (typeof build !== "function") return undefined
+    if (!Predicate.isFunction(build)) return undefined
     const entries = build.call(ctx.sessionManager)
 
     return Array.isArray(entries) ? entries : undefined
@@ -568,11 +576,11 @@ export default function (pi: ToolGroupsApi) {
     unwatch = null
     const original = manager?.appendCustomMessageEntry
 
-    if (typeof original !== "function") return
+    if (!Predicate.isFunction(original)) return
     const own = Object.getOwnPropertyDescriptor(manager, "appendCustomMessageEntry")
     let active = true
 
-    const wrapper = function (this: unknown, ...args: unknown[]) {
+    const wrapper = function (this: SessionManager, ...args: Parameters<SessionManager["appendCustomMessageEntry"]>) {
       const id = original.apply(this, args)
 
       if (active) note({ role: "custom", display: args[2] })
@@ -643,7 +651,7 @@ export default function (pi: ToolGroupsApi) {
     return {
       isVibestToolGroups: true,
       renderShell: "self",
-      renderCall(args: unknown, theme: Host, ctx: Host) {
+      renderCall(args: ToolArgs, theme: Host, ctx: Host) {
         if (ctx?.toolCallId) expandedById.set(ctx.toolCallId, ctx.expanded === true)
 
         if (ctx?.invalidate) invalidators.set(ctx.toolCallId, ctx.invalidate)
@@ -710,7 +718,7 @@ export default function (pi: ToolGroupsApi) {
             }
 
             const { pad, limit } = gutter(width, ctx.outputPad)
-            const paint = (line: string) => (typeof theme?.fg === "function" ? theme.fg("muted", line) : line)
+            const paint = (line: string) => (Predicate.isFunction(theme?.fg) ? theme.fg("muted", line) : line)
             const title = indent(fit(header(current), limit).map(paint), pad)
 
             if (!current.expanded) return isAnchor ? title : []
@@ -726,7 +734,7 @@ export default function (pi: ToolGroupsApi) {
           },
         }
       },
-      renderResult(result: Host, options: Host, theme: unknown, ctx: Host) {
+      renderResult(result: Host, options: Host, theme: Host, ctx: Host) {
         if (ctx?.toolCallId) expandedById.set(ctx.toolCallId, ctx.expanded === true)
         const group = byId.get(ctx.toolCallId) ?? place(ctx.toolCallId, toolName, open ?? newGroup())
         const row = group.members.find((item) => item.id === ctx.toolCallId)!

@@ -4,6 +4,8 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { Predicate, type Schema } from "effect"
+
 import { commandOf, note } from "../../reap.ts"
 import { entryModel, entryRunMessage, nextEntryRun } from "./fake-model.ts"
 import {
@@ -182,7 +184,7 @@ export class World {
   }
 
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
-    const env: Record<string, string | undefined> = { ...this.login }
+    const env: NodeJS.ProcessEnv = { ...this.login }
     Object.assign(
       env,
       {
@@ -454,9 +456,9 @@ export class World {
     const text = await fsPromises.readFile(path.join(this.vibestHome, "vibestd.pid"), "utf8").catch(() => "")
 
     try {
-      const pid = (JSON.parse(text) as { pid?: unknown }).pid
+      const pid = (JSON.parse(text) as { pid?: Schema.Json }).pid
 
-      return typeof pid === "number" && pid > 0 ? pid : undefined
+      return Predicate.isNumber(pid) && pid > 0 ? pid : undefined
     } catch {
       return undefined
     }
@@ -531,17 +533,17 @@ export class World {
   private async noteDaemon(home: string | undefined) {
     if (home === undefined) return
     const text = await fsPromises.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "")
-    let parsed: { pid?: unknown; command?: unknown }
+    let parsed: { pid?: Schema.Json; command?: Schema.Json }
 
     try {
-      parsed = JSON.parse(text) as { pid?: unknown; command?: unknown }
+      parsed = JSON.parse(text) as { pid?: Schema.Json; command?: Schema.Json }
     } catch {
       return
     }
 
-    if (typeof parsed.pid !== "number" || !Array.isArray(parsed.command) || this.daemons.get(home) === parsed.pid)
+    if (!Predicate.isNumber(parsed.pid) || !Array.isArray(parsed.command) || this.daemons.get(home) === parsed.pid)
       return
-    const marker = parsed.command.filter((part): part is string => typeof part === "string").join(" ")
+    const marker = parsed.command.filter(Predicate.isString).join(" ")
 
     if (marker === "" || !commandOf(parsed.pid).includes("daemon --foreground")) return
     note(parsed.pid, marker, this.root)
@@ -678,9 +680,9 @@ export class World {
     )
     await this.noteDaemon(this.vibestHome)
 
-    if (typeof input.env?.VIBEST_HOME === "string") await this.noteDaemon(input.env.VIBEST_HOME)
+    if (input.env?.VIBEST_HOME !== undefined) await this.noteDaemon(input.env.VIBEST_HOME)
 
-    if (typeof input.processEnv?.VIBEST_HOME === "string") await this.noteDaemon(input.processEnv.VIBEST_HOME)
+    if (input.processEnv?.VIBEST_HOME !== undefined) await this.noteDaemon(input.processEnv.VIBEST_HOME)
   }
 
   private async killStarted() {
@@ -728,7 +730,7 @@ export class World {
       await step(() => stopRecordedDaemon(this.root))
 
       for (const name of names) await step(() => run(["session", "stop", name]).then(() => undefined))
-      await step(() => stopSocketsUnder(this.root, (args, extra) => run(args, extra)))
+      await step(() => stopSocketsUnder(this.root, (args, extra) => run(args, extra).then(() => undefined)))
 
       for (const name of names) await step(() => endHerdrSocket(path.join(sessionsDir, name, "herdr.sock"), name))
 
@@ -832,7 +834,7 @@ export const expectReplied = async (w: World, sub: string) => {
   )
 
   expect(
-    execution?.status === "completed" && typeof execution.reply === "string",
+    execution?.status === "completed" && execution.reply !== null,
     `${sub}'s task execution: ${JSON.stringify(execution)}`,
   )
 }
@@ -884,8 +886,8 @@ export const paneOf = (w: World, id: string) =>
     )?.terminal,
   )
 
-export const herdr = (socket: string, method: string, params: object) =>
-  new Promise<Record<string, unknown>>((resolve, reject) => {
+export const herdr = (socket: string, method: string, params: Schema.JsonObject) =>
+  new Promise<Schema.JsonObject>((resolve, reject) => {
     const id = crypto.randomUUID()
     let buffer = ""
     Bun.connect({
@@ -896,7 +898,7 @@ export const herdr = (socket: string, method: string, params: object) =>
           buffer += Buffer.from(chunk).toString("utf8")
 
           for (const line of buffer.split("\n").slice(0, -1)) {
-            const m = JSON.parse(line) as { id?: string; result?: Record<string, unknown>; error?: unknown }
+            const m = JSON.parse(line) as { id?: string; result?: Schema.JsonObject; error?: Schema.Json }
 
             if (m.id !== id) continue
             s.end()
@@ -912,7 +914,7 @@ export const herdr = (socket: string, method: string, params: object) =>
     }).catch(reject)
   })
 
-const firstAnswer = (w: World, request: object) =>
+const firstAnswer = (w: World, request: Schema.JsonObject) =>
   new Promise<{ result?: unknown; error?: unknown }>((resolve, reject) => {
     let buffer = ""
     Bun.connect({
@@ -932,7 +934,7 @@ const firstAnswer = (w: World, request: object) =>
     }).catch(reject)
   })
 
-export const vibestd = async (w: World, repo: string, method: string, params: unknown) => {
+export const vibestd = async (w: World, repo: string, method: string, params: Schema.Json) => {
   const ping = await firstAnswer(w, { jsonrpc: "2.0", id: 1, method: "Ping", params: null, headers: [] })
   const protocol = String((ping.result as { protocol?: number } | undefined)?.protocol)
 
@@ -956,15 +958,14 @@ export const transcript = async (w: World, cwd: string, claudeConfig = path.join
 
   for (const f of files)
     for (const raw of (await fsPromises.readFile(path.join(dir, f), "utf8")).split("\n").filter(Boolean)) {
-      const e = JSON.parse(raw) as { type?: string; message?: { content?: unknown } }
+      const e = JSON.parse(raw) as { type?: string; message?: { content?: Schema.Json } }
       const content = e.message?.content
 
-      const text =
-        typeof content === "string"
-          ? content
-          : Array.isArray(content)
-            ? content.map((c: { text?: string }) => c.text ?? "").join("")
-            : ""
+      const text = Predicate.isString(content)
+        ? content
+        : Array.isArray(content)
+          ? content.map((c: { text?: string }) => c.text ?? "").join("")
+          : ""
 
       entries.push({ type: e.type, raw, text })
     }

@@ -3,19 +3,19 @@ import { HerdrPool, type SessionEvent } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
 import { Cause, Deferred, Effect, Fiber, Logger, Queue, Stream } from "effect"
-import { HerdrError, type HerdrClient, type PushFrame } from "effect-herdr-sdk"
+import { HerdrError, type HerdrClient, type Method, type ParamsOf, type PushFrame } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-type Scripted = (method: string, params: Record<string, unknown>) => Effect.Effect<unknown, HerdrError>
+type Scripted = (method: string, params: ParamsOf<Method>) => Effect.Effect<unknown, HerdrError>
 
 const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = Stream.empty) =>
   Effect.gen(function* () {
-    const calls: Array<{ readonly method: string; readonly params: Record<string, unknown> }> = []
+    const calls: Array<{ readonly method: string; readonly params: ParamsOf<Method> }> = []
 
-    const resendingCall = ((method: string, params: Record<string, unknown>) =>
+    const resendingCall = ((method: string, params: ParamsOf<Method>) =>
       Effect.suspend(() => {
         calls.push({ method, params })
 

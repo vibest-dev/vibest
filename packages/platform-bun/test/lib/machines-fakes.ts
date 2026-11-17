@@ -9,7 +9,7 @@ import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import type { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
-import { Clock, Deferred, Effect, Layer } from "effect"
+import { Clock, Deferred, Effect, Layer, Predicate } from "effect"
 import { RpcClient } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
 
@@ -155,7 +155,7 @@ export const fakeSpawns =
           },
         )
 
-        const before = typeof inserted === "object" ? inserted : undefined
+        const before = Predicate.isObject(inserted) ? inserted : undefined
 
         return {
           id: before?.id ?? id,

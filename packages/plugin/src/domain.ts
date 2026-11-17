@@ -1,5 +1,5 @@
 import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
@@ -10,7 +10,7 @@ type LimitWindow = {
 }
 
 const resetPassed = (resetTime: number | null | undefined, now: number) =>
-  typeof resetTime === "number" && resetTime <= now
+  Predicate.isNumber(resetTime) && resetTime <= now
 
 const bucketWindow = (window: string | undefined) => window === "monthly-auto" || window === "monthly-api"
 
@@ -145,7 +145,7 @@ export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
 
 export interface GuardCall {
   readonly tool: string
-  readonly input: Readonly<Record<string, unknown>>
+  readonly input: Schema.JsonObject
   readonly cwd: string
   readonly programs: ReadonlyArray<ReadonlyArray<string>>
   readonly writes: ReadonlyArray<string> | undefined
@@ -177,4 +177,4 @@ export interface MachineHookOptions {
   readonly runtime?: string
 }
 
-export type PluginOptions = Readonly<Record<string, unknown>>
+export type PluginOptions = Schema.JsonObject

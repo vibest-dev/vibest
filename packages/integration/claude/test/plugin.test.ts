@@ -5,8 +5,16 @@ import path from "node:path"
 
 import { afterAll, assert, describe, it } from "@effect/vitest"
 
+type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
+
+type HookEvent = { readonly [key: string]: Json }
+
+type HookFilter = { readonly component?: string; readonly tool?: string }
+
 type Plugin = {
-  register: (on: (event: string, a: unknown, b?: unknown) => { catch: (handler: Function) => void }) => void
+  register: (
+    on: (event: string, a: HookFilter | Function, b?: Function) => { catch: (handler: Function) => void },
+  ) => void
   POLL_MS: number
   POLL_FAILURES_SHOWN: number
   GUARD_BACKOFF_MS: ReadonlyArray<number>
@@ -46,7 +54,7 @@ const host = (env: Record<string, string> = SESSION) => {
   const hooks: Record<string, Function> = {}
   const catches: Record<string, Function> = {}
 
-  const on = (event: string, a: unknown, b?: unknown) => {
+  const on = (event: string, a: HookFilter | Function, b?: Function) => {
     hooks[event] = (b ?? a) as Function
 
     return { catch: (handler: Function) => void (catches[event] = handler) }
@@ -110,7 +118,7 @@ const host = (env: Record<string, string> = SESSION) => {
   }
 
   plugin.register(on)
-  const pass = async (e: object) => e
+  const pass = async (e: HookEvent) => e
 
   return {
     hooks,
@@ -135,9 +143,9 @@ const host = (env: Record<string, string> = SESSION) => {
 
       return r
     },
-    prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
-    executionComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
-    preTool: (event: object) => hooks["tool.call"]!($, event, pass),
+    prompt: (text: string, origin: HookEvent) => hooks["prompt.submit"]!($, { text, origin }, pass),
+    executionComplete: (event: HookEvent) => hooks["turn.complete"]!($, event, pass),
+    preTool: (event: HookEvent) => hooks["tool.call"]!($, event, pass),
     fire: async (ms: number) => {
       for (const t of after.filter((t) => t.ms === ms && !t.cancelled)) {
         t.cancelled = true

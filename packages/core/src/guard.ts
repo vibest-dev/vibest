@@ -8,7 +8,7 @@ import { Runtimes } from "./runtimes.ts"
 
 export interface ToolCall {
   readonly tool: string
-  readonly input: Readonly<Record<string, unknown>>
+  readonly input: Schema.JsonObject
   readonly cwd: string
 }
 
@@ -38,7 +38,7 @@ const fileWritingTool = (tool: string) => {
 }
 
 const SHELL_TOOLS = new Set(["bash", "powershell", "shell"])
-const shellCommand = (input: Readonly<Record<string, unknown>>) => str(input.command)
+const shellCommand = (input: Schema.JsonObject) => str(input.command)
 
 const closingParenIgnoringQuotes = (s: string, open: number) => {
   let depth = 0
@@ -143,18 +143,18 @@ export const splitCommand = (command: string): ReadonlyArray<ReadonlyArray<strin
 const IDENTITY = /^VIBEST_SESSION_ID(?:=|$)/
 const base = (word: string) => word.slice(word.lastIndexOf("/") + 1)
 
-const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  env: ["-u", "--unset", "-C", "--chdir", "-S", "--split-string"],
-  command: [],
-  builtin: [],
-  exec: ["-a"],
-  nohup: [],
-  time: [],
-  nice: ["-n"],
-  timeout: ["-s", "-k"],
-  sudo: ["-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t"],
-  xargs: ["-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"],
-}
+const WRAPPER_VALUE_OPTIONS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+  ["env", ["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]],
+  ["command", []],
+  ["builtin", []],
+  ["exec", ["-a"]],
+  ["nohup", []],
+  ["time", []],
+  ["nice", ["-n"]],
+  ["timeout", ["-s", "-k"]],
+  ["sudo", ["-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t"]],
+  ["xargs", ["-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"]],
+])
 
 const KEYWORDS = new Set(["!", "{", "if", "then", "elif", "else", "do", "while", "until"])
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
@@ -179,7 +179,7 @@ const programs = (argv: ReadonlyArray<string>, identity = false): ReadonlyArray<
       i++
     } else if (KEYWORDS.has(w)) {
       i++
-    } else if (Object.hasOwn(WRAPPER_VALUE_OPTIONS, name)) {
+    } else if (WRAPPER_VALUE_OPTIONS.has(name)) {
       for (i++; argv[i]?.startsWith("-"); i++) {
         const o = argv[i]!
 
@@ -195,7 +195,7 @@ const programs = (argv: ReadonlyArray<string>, identity = false): ReadonlyArray<
             /^-[^-]*i/.test(o) ||
             IDENTITY.test(o.replace(/^(?:-u|--unset=)/, ""))
 
-        if (WRAPPER_VALUE_OPTIONS[name]!.includes(o)) {
+        if (WRAPPER_VALUE_OPTIONS.get(name)!.includes(o)) {
           if (name === "env" && (o === "-u" || o === "--unset")) identity ||= IDENTITY.test(argv[i + 1] ?? "")
           i++
         }
@@ -349,7 +349,7 @@ const physical = (
     return Option.some(current)
   })
 
-const str = (value: unknown) => (typeof value === "string" ? value : undefined)
+const str = (value: Schema.Json | undefined) => (Predicate.isString(value) ? value : undefined)
 
 export const toolPath = (raw: string, base: string, home: string) =>
   Effect.gen(function* () {
@@ -486,7 +486,7 @@ const decodePreToolUse = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Struct({
       tool_name: Schema.String,
-      tool_input: Schema.Record(Schema.String, Schema.Unknown),
+      tool_input: Schema.Record(Schema.String, Schema.Json),
       cwd: Schema.optional(Schema.String),
       workspace_roots: Schema.optional(Schema.Array(Schema.String)),
     }),
@@ -507,7 +507,7 @@ export const check = (
       return yield* Effect.fail(new Error("the hook input has no absolute working directory"))
     const own = input.tool_input.cwd
 
-    if (own !== undefined && typeof own !== "string")
+    if (own !== undefined && !Predicate.isString(own))
       return yield* Effect.fail(new Error("tool_input.cwd is not a string"))
     const ownPath = own ? yield* toolPath(own, base, yield* Config.String("HOME")) : base
 

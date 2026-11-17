@@ -25,7 +25,7 @@ export type Request = {
 export type Reply = { readonly status: number; readonly body?: unknown }
 
 const failure = (status: number, error: string): Reply => ({ status, body: { error } })
-const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { status: 200, body })
+const ok = <A>(body?: A): Reply => (body === undefined ? { status: 204 } : { status: 200, body })
 
 const REASON_LIMIT = 1024
 

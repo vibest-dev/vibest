@@ -2,12 +2,14 @@ import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import type { Check } from "../check.ts"
 import { answerFolderTrust } from "../drivers/claude.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
 import { expect, fail, row, SESSIONS, Skip, until } from "../world.ts"
 
-const herdr = (socket: string, method: string, params: Record<string, unknown>) =>
+const herdr = (socket: string, method: string, params: Schema.JsonObject) =>
   new Promise<any>((resolve, reject) => {
     const conn = net.createConnection(socket)
     let buffer = ""

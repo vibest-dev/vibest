@@ -2,6 +2,8 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { Predicate, Schema } from "effect"
+
 import { keptForAModel } from "./user-env.ts"
 
 export type Profile = "user" | "first-run"
@@ -53,24 +55,30 @@ export const userFilesRead: ReadonlyArray<{ readonly file: string; readonly keys
   { file: user.cursorHooks },
 ]
 
-const readJson = async (file: string): Promise<Record<string, unknown>> => {
+const isJsonObject = Schema.is(Schema.JsonObject)
+
+const readJson = async (file: string): Promise<Schema.JsonObject> => {
   const text = await fs.readFile(file, "utf8").catch(() => undefined)
 
   if (text === undefined) return {}
-  const parsed = JSON.parse(text) as unknown
+  const parsed: Schema.Json = JSON.parse(text)
 
-  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : {}
+  return isJsonObject(parsed) ? parsed : {}
 }
 
-const pick = (from: Record<string, unknown>, keys: ReadonlyArray<string>) =>
-  Object.fromEntries(keys.flatMap((k) => (k in from ? [[k, from[k]]] : [])))
+const pick = (from: Schema.JsonObject, keys: ReadonlyArray<string>): Schema.JsonObject =>
+  Object.fromEntries(
+    keys.flatMap((k) => {
+      const value = from[k]
 
-const writeJson = (file: string, value: unknown) =>
+      return value === undefined ? [] : [[k, value] as const]
+    }),
+  )
+
+const writeJson = (file: string, value: Schema.Json) =>
   fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
 
-const localNeverProxied = (env: Record<string, unknown>) => {
+const localNeverProxied = (env: Record<string, Schema.Json>) => {
   for (const name of ["NO_PROXY", "no_proxy"])
     if (name in env || "HTTPS_PROXY" in env || "HTTP_PROXY" in env || "https_proxy" in env || "http_proxy" in env)
       env[name] = [...new Set([...String(env[name] ?? "").split(","), "127.0.0.1", "localhost"].filter(Boolean))].join(
@@ -97,12 +105,12 @@ export const claudeShadow = async (dir: string, profile: Profile, from: UserPath
   }
 
   const settings = pick(await readJson(from.claudeSettings), CLAUDE_SETTINGS)
-  const permissions = (settings.permissions ?? {}) as Record<string, unknown>
+  const permissions = (settings.permissions ?? {}) as Schema.JsonObject
   await writeJson(path.join(dir, "settings.json"), {
     ...settings,
     env: localNeverProxied(
       Object.fromEntries(
-        Object.entries((settings.env ?? {}) as Record<string, unknown>).filter(([name]) => keptForAModel(name)),
+        Object.entries((settings.env ?? {}) as Schema.JsonObject).filter(([name]) => keptForAModel(name)),
       ),
     ),
     disableAutoMode: fakeModelCannotAnswerAutoModeClassifier.disableAutoMode,
@@ -119,9 +127,9 @@ export const claudeShadow = async (dir: string, profile: Profile, from: UserPath
 
 export type PiProvider = { readonly baseUrl: string; readonly models?: ReadonlyArray<string> }
 
-const strings = (...values: ReadonlyArray<unknown>): Array<string> =>
+const strings = (...values: ReadonlyArray<Schema.Json | undefined>): Array<string> =>
   values.flatMap((v) =>
-    typeof v === "string" ? [v] : typeof v === "number" ? [String(v)] : Array.isArray(v) ? strings(...v) : [],
+    Predicate.isString(v) ? [v] : Predicate.isNumber(v) ? [String(v)] : Array.isArray(v) ? strings(...v) : [],
   )
 
 export const userPrivateValues = async (from: UserPaths = user) => {
@@ -131,8 +139,7 @@ export const userPrivateValues = async (from: UserPaths = user) => {
     readJson(from.cursorConfig),
   ])
 
-  const field = (o: unknown, key: string) =>
-    o !== null && typeof o === "object" ? (o as Record<string, unknown>)[key] : undefined
+  const field = (o: Schema.Json | undefined, key: string) => (isJsonObject(o) ? o[key] : undefined)
 
   const cursorModel = field(cursor, "model")
 

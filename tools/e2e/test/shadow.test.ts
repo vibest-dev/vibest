@@ -3,9 +3,11 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import { claudeShadow, cursorShadow, userFilesRead, userPaths, userPrivateValues } from "../src/world/shadow.ts"
 
-const fakeHome = async (files: Record<string, unknown>) => {
+const fakeHome = async (files: Record<string, Schema.Json>) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-shadow-test-"))
 
   for (const [rel, value] of Object.entries(files)) {
@@ -16,7 +18,7 @@ const fakeHome = async (files: Record<string, unknown>) => {
   return userPaths(home)
 }
 
-const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>
+const read = async (file: string) => JSON.parse(await fs.readFile(file, "utf8")) as Schema.JsonObject
 
 describe("shadows", () => {
   test("Claude settings env keeps no model, provider, base URL or key, so the fake base URL wins", async () => {

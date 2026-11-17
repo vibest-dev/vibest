@@ -45,7 +45,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
         yield* write(`${repo}/.claude/skills/x/SKILL.md`, "skill\n")
         yield* write(`${outside}/out.md`, "outside\n")
 
-        const links: Record<string, string> = {
+        const links = {
           "out.md": `${outside}/out.md`,
           "dir-link": "skills",
           dangling: "nowhere",

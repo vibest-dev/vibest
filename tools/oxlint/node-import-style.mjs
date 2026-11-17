@@ -1,5 +1,7 @@
 import module from "node:module"
 
+import { Predicate } from "effect"
+
 import { ledgerAccessRules } from "./ledger-access.mjs"
 import { noComments } from "./no-comments.mjs"
 import { noModuleLet } from "./no-module-let.mjs"
@@ -38,7 +40,7 @@ const nodeImportStyle = {
     const reexport = (node) => {
       const source = node.source?.value
 
-      if (typeof source !== "string" || !isBuiltin(source) || node.exportKind === "type") return
+      if (!Predicate.isString(source) || !isBuiltin(source) || node.exportKind === "type") return
 
       if (node.specifiers?.length > 0 && node.specifiers.every((s) => s.exportKind === "type")) return
       context.report({
@@ -51,7 +53,7 @@ const nodeImportStyle = {
       ImportDeclaration(node) {
         const source = node.source.value
 
-        if (typeof source !== "string" || !isBuiltin(source)) return
+        if (!Predicate.isString(source) || !isBuiltin(source)) return
 
         if (node.importKind === "type") return
 

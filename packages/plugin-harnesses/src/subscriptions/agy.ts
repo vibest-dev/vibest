@@ -1,11 +1,11 @@
 import type { SubscriptionLimit } from "@vibest/schema/subscription"
-import { Effect } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 
 import { parseJson, record, runCli, type Spawner } from "./index.ts"
 
 const windowName = (group: string, window: string) => `${group} ${window}`
 
-export const agyLimits = (usage: unknown): ReadonlyArray<SubscriptionLimit> => {
+export const agyLimits = (usage: Schema.Json | undefined): ReadonlyArray<SubscriptionLimit> => {
   const groups = record(record(record(usage)?.command)?.data)?.groups
 
   if (!Array.isArray(groups)) return []
@@ -14,13 +14,13 @@ export const agyLimits = (usage: unknown): ReadonlyArray<SubscriptionLimit> => {
     const name = record(group)?.name
     const buckets = record(group)?.buckets
 
-    if (typeof name !== "string" || !Array.isArray(buckets)) return []
+    if (!Predicate.isString(name) || !Array.isArray(buckets)) return []
 
     return buckets.flatMap((bucket) => {
       const b = record(bucket)
 
-      if (typeof b?.window !== "string" || typeof b.remaining_fraction !== "number") return []
-      const reset = typeof b.reset_time === "string" ? Date.parse(b.reset_time) : Number.NaN
+      if (!Predicate.isString(b?.window) || !Predicate.isNumber(b.remaining_fraction)) return []
+      const reset = Predicate.isString(b.reset_time) ? Date.parse(b.reset_time) : Number.NaN
 
       return [
         {

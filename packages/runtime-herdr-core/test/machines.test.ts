@@ -24,7 +24,7 @@ const fake = (rows: Array<Row>, options: { offline?: boolean; addFails?: string;
   const calls: Array<[string, unknown]> = []
 
   const hc: Pick<HcClient, "call"> = {
-    call: ((method: string, params: Record<string, unknown>) =>
+    call: ((method: string, params: { readonly name?: string; readonly session?: string; readonly machine?: string }) =>
       Effect.suspend((): Effect.Effect<unknown, HcError | HcTransportError> => {
         calls.push([method, params])
 

@@ -21,7 +21,7 @@ import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
 import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Cause, Effect, Exit, Fiber, FileSystem, Path, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, FileSystem, Path, type Schema, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -727,7 +727,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
 
-      const serve = (result: object) =>
+      const serve = (result: Schema.JsonObject) =>
         Effect.gen(function* () {
           const home = yield* tempDirectory("vibest-ping-")
           const layout = yield* Layout.make(home)

@@ -11,7 +11,12 @@ import * as Platform from "#platform"
 
 import { FILE_CAP } from "../src/input.ts"
 
-const seen: { prompt: string; files: ReadonlyArray<string> } = { prompt: "", files: [] }
+interface Seen {
+  prompt: string
+  files: ReadonlyArray<string>
+}
+
+const seen: Seen = { prompt: "", files: [] }
 
 const capture = Plugin.define({
   id: "see-prompt",

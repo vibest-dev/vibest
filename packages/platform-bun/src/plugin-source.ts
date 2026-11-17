@@ -133,7 +133,7 @@ export const pluginLoads = () => {
       }
     })
 
-  const load = (entry: string, files: ReadonlyArray<string>): Promise<unknown> => {
+  const load = (entry: string, files: ReadonlyArray<string>) => {
     const loading = new Set(
       files.flatMap((file) => {
         try {

@@ -5,7 +5,7 @@ export const LOG_KEEP_BYTES = 5 * 1024 * 1024
 
 const CHUNK = 64 * 1024
 
-const isEnoent = (e: unknown) => e instanceof Error && "code" in e && e.code === "ENOENT"
+const isEnoent = (cause: unknown) => cause instanceof Error && "code" in cause && cause.code === "ENOENT"
 
 const lineStart = (fd: number, from: number, size: number) => {
   const chunk = Buffer.alloc(Math.min(CHUNK, Math.max(size - from, 1)))

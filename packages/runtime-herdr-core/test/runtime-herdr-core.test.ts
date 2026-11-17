@@ -5,7 +5,7 @@ import path from "node:path"
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { runtimeContract } from "@vibest/plugin/testing"
-import { Effect, Ref, Stream } from "effect"
+import { Effect, Predicate, Ref, Stream } from "effect"
 import { Hc, SocketConnector } from "effect-herdr-core-sdk"
 import * as HcBun from "effect-herdr-core-sdk/bun"
 
@@ -24,7 +24,7 @@ const hcOnPath = childProcess.spawnSync("hc", ["--version"], { stdio: "ignore" }
 const SOCKET_PATH_LIMIT_SAFE_ROOT = "/tmp/vbhc-"
 const root = hcOnPath ? fs.mkdtempSync(SOCKET_PATH_LIMIT_SAFE_ROOT) : ""
 
-const coreEnv = (): Record<string, string> => {
+const coreEnv = () => {
   const env: Record<string, string> = {}
 
   for (const [key, value] of Object.entries(process.env))
@@ -204,7 +204,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           yield* runtime.send(terminal, { text: "kill -9 $$" })
           yield* until(
             hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }),
-            (t) => t.state === "live" && typeof t.pid === "number" && t.pid !== pid,
+            (t) => t.state === "live" && Predicate.isNumber(t.pid) && t.pid !== pid,
             "the core did not replace the killed shell",
           )
           yield* runtime.run!(terminal, { argv: ["sh", "-c", 'printf "kept-%s\\n" "$VBT_KEEP"'], env: {} })

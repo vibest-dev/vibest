@@ -27,7 +27,7 @@ const main = Effect.gen(function* () {
   const outDir = yield* packagePath("src", "generated")
   yield* fs.makeDirectory(outDir, { recursive: true })
 
-  const files: Record<string, string> = {
+  const files = {
     "params.ts": emitParams(schema, h),
     "results.ts": emitResults(schema, h),
     "errors.ts": emitErrors(schema, h),

@@ -1,5 +1,5 @@
 import { type Captured, capture } from "@vibest/plugin/effect"
-import { Context, Duration, Effect, Layer, Match } from "effect"
+import { Context, Duration, Effect, Layer, Match, Predicate } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -25,7 +25,7 @@ export const livenessOf = (probe: () => void): Liveness => {
   }
 }
 
-export const validPid = (pid: unknown): pid is number => typeof pid === "number" && Number.isInteger(pid) && pid > 0
+export const validPid = <A>(pid: A): pid is A & number => Predicate.isNumber(pid) && Number.isInteger(pid) && pid > 0
 
 export class ProcessPlatform extends Context.Service<
   ProcessPlatform,

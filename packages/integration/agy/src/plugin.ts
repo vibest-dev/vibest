@@ -54,7 +54,7 @@ exit 0
 
 const hook = (action: string) => [{ type: "command", command: `sh ./hook.sh ${action}`, timeout: 30 }]
 
-export const files: Readonly<Record<string, string>> = {
+export const files = {
   [`${PLUGIN}/plugin.json`]: `${JSON.stringify({ name: "vibest", version: pkg.version, description: pkg.description }, null, 2)}\n`,
   [`${PLUGIN}/hooks.json`]: `${JSON.stringify(
     {
@@ -70,4 +70,4 @@ export const files: Readonly<Record<string, string>> = {
     2,
   )}\n`,
   [`${PLUGIN}/hook.sh`]: HOOK,
-}
+} satisfies Readonly<Record<string, string>>

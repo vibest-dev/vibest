@@ -16,7 +16,20 @@ import { Hooks } from "@vibest/core/plugin/hooks"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
-import { Clock, Context, Duration, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule } from "effect"
+import {
+  Clock,
+  Context,
+  Duration,
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Path,
+  Predicate,
+  Schedule,
+  type Schema,
+} from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "../../platform-bun/src/bun.ts"
@@ -41,7 +54,7 @@ const candidate = (
   source: string,
   revision: string,
   plugin: Candidate["plugin"],
-  options: Record<string, unknown> = {},
+  options: Schema.JsonObject = {},
 ): Candidate => ({ source, revision, options, plugin })
 
 const a1 = candidate("a", "1", logged("a", "a1"))
@@ -246,14 +259,10 @@ const untilSignal = (ready: () => boolean, what: string, within: Duration.Input 
 
 const watchers = { open: 0, opened: 0 }
 
-const watchGate: {
-  hold: boolean
-  listeners: Map<string, (name: string) => void>
-  failures: Map<string, (error: Error) => void>
-} = {
+const watchGate = {
   hold: false,
-  listeners: new Map(),
-  failures: new Map(),
+  listeners: new Map<string, (name: string) => void>(),
+  failures: new Map<string, (error: Error) => void>(),
 }
 
 const watchSees = (directory: string, name: string) => Effect.sync(() => watchGate.listeners.get(directory)!(name))
@@ -295,7 +304,7 @@ const pausingConfigReads = (fs: FileSystem.FileSystem, config: string, pause: Co
       if (prop === "readFileString") return readConfig
       const value = Reflect.get(target, prop, receiver)
 
-      return typeof value === "function" ? value.bind(target) : value
+      return Predicate.isFunction(value) ? value.bind(target) : value
     },
   })
 }

@@ -1,15 +1,16 @@
 import { capture } from "@vibest/plugin/effect"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 export type Spawner = ChildProcessSpawner.ChildProcessSpawner["Service"]
 
-export const record = (u: unknown): Record<string, unknown> | undefined =>
-  typeof u === "object" && u !== null && !Array.isArray(u) ? (u as Record<string, unknown>) : undefined
+const isJsonObject = Schema.is(Schema.JsonObject)
+
+export const record = (u: Schema.Json | undefined): Schema.JsonObject | undefined => (isJsonObject(u) ? u : undefined)
 
 export const CLI_TIMEOUT = "10 seconds"
 
-export const parseJson = (text: string | undefined): unknown => {
+export const parseJson = (text: string | undefined): Schema.Json | undefined => {
   if (text === undefined || text.trim() === "") return undefined
 
   try {

@@ -56,15 +56,14 @@ export const settleEntry = (sessions: Session.Interface, entryId: string) => ses
 export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks: number }) =>
   m.tracked <= 1 && m.locks === 0
 
-export const writeEnd = (id: string, harness: string, payload: object, offsetMs = 1000) =>
+export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject, offsetMs = 1000) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses.Service).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* Db.Service).session.endObserved(
-      id,
-      executionEndFrom(adapter, payload as Record<string, unknown>, at),
-    )
+    yield* (yield* Db.Service).session.endObserved(id, executionEndFrom(adapter, payload, at))
   })
+
+const decodeEventData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))
 
 export const eventsOf = (sessionId: string, type?: string) =>
   Effect.gen(function* () {
@@ -73,7 +72,7 @@ export const eventsOf = (sessionId: string, type?: string) =>
     const rows = yield* sql<{ seq: number; type: string; at: number; data: string }>`SELECT seq, type, at, data
       FROM event WHERE aggregate = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY seq`
 
-    return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
+    return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: decodeEventData(r.data) }))
   }).pipe(Effect.orDie)
 
 export const replyText = (id: string) => replyOf(id).pipe(Effect.map((reply) => reply ?? ""))

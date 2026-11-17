@@ -368,9 +368,11 @@ describe.concurrent("Processes", () => {
     record(104, "/")
 
   it("signal 0's errors: ESRCH exited, EPERM alive, anything else (or a throw without a code) unknown", () => {
-    const throwing = (e: unknown) => () => {
-      throw e
-    }
+    const throwing =
+      <E>(e: E) =>
+      () => {
+        throw e
+      }
 
     assert.strictEqual(
       livenessOf(() => {}),

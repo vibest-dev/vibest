@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { Predicate, type Schema } from "effect"
+
 import type { Check } from "../check.ts"
 import { binary, checkout, expect, row, Skip, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
@@ -13,7 +15,7 @@ const reports = (bytes: string) =>
     .slice(1)
     .map((record) => record.split("\x1b")[0]!.split("\x07")[0]!)
 
-type Reply = string | { tool: string; input: object } | { error: string }
+type Reply = string | { tool: string; input: Schema.JsonObject } | { error: string }
 
 const fakeModel = () => {
   const waiting: Array<(reply: Reply) => void> = []
@@ -21,12 +23,12 @@ const fakeModel = () => {
   let sequence = 0
 
   const answer = (reply: Reply, openAI = false) => {
-    if (typeof reply !== "string" && "error" in reply)
+    if (!Predicate.isString(reply) && "error" in reply)
       return Response.json(
         { type: "error", error: { type: "authentication_error", message: reply.error } },
         { status: 401 },
       )
-    const text = typeof reply === "string"
+    const text = Predicate.isString(reply)
 
     const block = text
       ? { type: "text", text: "" }
@@ -37,7 +39,7 @@ const fakeModel = () => {
       : { type: "input_json_delta", partial_json: JSON.stringify(reply.input) }
 
     if (openAI) {
-      const chunk = (delta: object, finish: string | null = null) =>
+      const chunk = (delta: Schema.JsonObject, finish: string | null = null) =>
         "data: " +
         JSON.stringify({
           id: "status",
@@ -49,20 +51,19 @@ const fakeModel = () => {
         }) +
         "\n\n"
 
-      const delta =
-        typeof reply === "string"
-          ? { role: "assistant", content: reply }
-          : {
-              role: "assistant",
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_" + sequence,
-                  type: "function",
-                  function: { name: reply.tool, arguments: JSON.stringify(reply.input) },
-                },
-              ],
-            }
+      const delta = Predicate.isString(reply)
+        ? { role: "assistant", content: reply }
+        : {
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_" + sequence,
+                type: "function",
+                function: { name: reply.tool, arguments: JSON.stringify(reply.input) },
+              },
+            ],
+          }
 
       return new Response(chunk(delta) + chunk({}, text ? "stop" : "tool_calls") + "data: [DONE]\n\n", {
         headers: { "content-type": "text/event-stream" },
@@ -142,7 +143,7 @@ const fakeModel = () => {
     stages,
     next: async (reply: Reply) => {
       await until("next model request", () => waiting.length > 0, 30_000)
-      stages.push({ at: Date.now(), event: typeof reply === "string" ? reply : JSON.stringify(reply) })
+      stages.push({ at: Date.now(), event: Predicate.isString(reply) ? reply : JSON.stringify(reply) })
       waiting.shift()!(reply)
     },
     stop: () => server.stop(true),

@@ -1,5 +1,5 @@
 import type { Harness } from "@vibest/plugin/effect"
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 
 import { findMessage, jsonLines, opt, withConfigured } from "./models.ts"
 
@@ -87,22 +87,22 @@ export const pi: Harness.HarnessDefinition = {
   },
   userPrompt: (event) => {
     if (event.type === "accepted")
-      return typeof event.execution === "number" ? { execution: event.execution } : undefined
+      return Predicate.isNumber(event.execution) ? { execution: event.execution } : undefined
 
     if (event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
 
-    if (typeof event.text !== "string" || event.text.trim() === "") return undefined
+    if (!Predicate.isString(event.text) || event.text.trim() === "") return undefined
 
     return { text: event.text }
   },
   executionEnd: (event) => {
     if (event.type !== "agent_settled") return undefined
     const aborted = event.aborted === true
-    const error = typeof event.error === "string" ? event.error : ""
+    const error = Predicate.isString(event.error) ? event.error : ""
 
     return {
       end: {
-        text: typeof event.text === "string" ? event.text : "",
+        text: Predicate.isString(event.text) ? event.text : "",
         error: error || (aborted ? "aborted" : ""),
         aborted,
       },

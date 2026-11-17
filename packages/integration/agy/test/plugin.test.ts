@@ -29,7 +29,7 @@ afterAll(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 const agent = { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd", VIBEST_PROCESS: "3" }
 
-const run = (event: string, payload: Record<string, unknown>, env: Record<string, string> = agent) => {
+const run = (event: string, payload: { readonly conversationId?: string }, env: Record<string, string> = agent) => {
   fs.rmSync(calls, { force: true })
 
   const hooks = JSON.parse(files[`${PLUGIN}/hooks.json`]!).vibest as Record<

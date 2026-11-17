@@ -27,7 +27,7 @@ const fakeHerdr = (protocol: number) => (socket: Socket.Socket) =>
     ).pipe(Stream.splitLines, Stream.runHead)
 
     const request = yield* decodeRequest(Option.getOrElse(line, () => ""))
-    const send = (o: object) => encodeLine(o).pipe(Effect.flatMap((json) => writer.write(`${json}\n`)))
+    const send = (o: Schema.Json) => encodeLine(o).pipe(Effect.flatMap((json) => writer.write(`${json}\n`)))
 
     if (request.method === "ping")
       yield* send({ id: request.id, result: { type: "pong", protocol, version: "test" } satisfies results.Result_pong })

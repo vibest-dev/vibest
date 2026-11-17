@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Predicate } from "effect"
 
 import type { Caller } from "./plugin/domains.ts"
 
@@ -76,7 +76,7 @@ export const specHits = (
 export const filterCallerEnv = (
   specs: ReadonlyArray<{ readonly env: ReadonlyArray<string> }>,
   env: Readonly<Record<string, string | undefined>>,
-): Record<string, string | undefined> => {
+) => {
   const out: Record<string, string | undefined> = {}
 
   for (const spec of specs) for (const key of spec.env) if (!(key in out) && env[key] !== undefined) out[key] = env[key]
@@ -98,7 +98,7 @@ export const callerTarget = (
   named?: string,
 ): string | undefined => {
   for (const spec of specs) {
-    if (typeof spec.target !== "function") continue
+    if (!Predicate.isFunction(spec.target)) continue
     const target = spec.target(declared(spec.env, env), named)
 
     if (target !== undefined) return target

@@ -6,7 +6,7 @@ import { tempDirectory, untilVirtual } from "@vibest/platform-bun/test/lib/fakes
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Path } from "effect"
+import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Path, type Schema } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -234,7 +234,7 @@ layer(Platform.services)("claude integration stop", (it) => {
         yield* listen(path.join(home, "vibest.sock"), lines)
         const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1", VIBEST_PROCESS: "7" }
 
-        const invoke = (report: typeof integrationStop, event: unknown, env: Record<string, string> = worker) =>
+        const invoke = (report: typeof integrationStop, event: Schema.Json, env: Record<string, string> = worker) =>
           report("cursor", JSON.stringify(event)).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(home)),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),

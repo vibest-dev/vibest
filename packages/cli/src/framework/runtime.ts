@@ -1,6 +1,6 @@
 import { type SocketConnector } from "@vibest/client/socket-connector"
 import { type Layout } from "@vibest/schema/layout"
-import { Effect } from "effect"
+import { Effect, Predicate } from "effect"
 import { Command } from "effect/cli"
 import { type HttpClient } from "effect/http"
 
@@ -16,7 +16,7 @@ export type Input<Value> =
       ? Input
       : never
 
-type RuntimeHandler = (input: unknown) => Effect.Effect<void, unknown, Environment>
+type RuntimeHandler = <Input>(input: Input) => Effect.Effect<void, unknown, Environment>
 
 type Loader<Node extends Spec.Any> = () => Promise<{
   default: (input: Input<Node>) => Effect.Effect<void, any, Environment>
@@ -57,7 +57,7 @@ export function handlers<const Root extends Spec.Any>(root: Root, handlers: Hand
   function add(node: Spec.Any, value: RuntimeHandlers | undefined) {
     if (value === undefined) throw new Error(`no handler registered for command ${node.name}`)
 
-    if (typeof value === "function") {
+    if (Predicate.isFunction(value)) {
       result.push({ spec: node.spec, load: value })
 
       return

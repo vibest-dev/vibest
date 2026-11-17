@@ -1,13 +1,13 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { Console, Effect, FileSystem, Path, Schema, Stdio } from "effect"
 
-import { emitApi, type OpenRpc } from "./emit.ts"
+import { emitApi, OpenRpc } from "./emit.ts"
 
 const VersionPin = Schema.fromJsonString(
   Schema.Struct({ version: Schema.String, minimum: Schema.String, generation: Schema.Number }),
 )
 
-const decodeDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Any)))
+const decodeDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(OpenRpc))
 
 const GENERATION_IN_DESCRIPTION = /Protocol generation (\d+)\./
 
@@ -17,9 +17,7 @@ const main = Effect.gen(function* () {
   const path = yield* Path.Path
   const root = path.join(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))), "..", "..")
 
-  const doc = (yield* decodeDocument(
-    yield* fs.readFileString(path.join(root, "schema", "hc-openrpc.json")),
-  )) as unknown as OpenRpc
+  const doc = yield* decodeDocument(yield* fs.readFileString(path.join(root, "schema", "hc-openrpc.json")))
 
   const pin = yield* Schema.decodeUnknownEffect(VersionPin)(
     yield* fs.readFileString(path.join(root, "schema", "hc-version.json")),

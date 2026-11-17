@@ -23,7 +23,21 @@ import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { readDaemonInfo } from "@vibest/server/daemon"
-import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Schedule,
+  type Schema,
+  Stdio,
+  Stream,
+} from "effect"
 import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
 import { TestClock } from "effect/testing"
 
@@ -74,7 +88,7 @@ const isolatedHome = (home: string) =>
       }),
   )
 
-const stopReply = (id: unknown, replyMembers: string) =>
+const stopReply = (id: Schema.Json | undefined, replyMembers: string) =>
   `{"jsonrpc":"2.0","id":${JSON.stringify(id)},${replyMembers}}\n`
 
 const stopRefusal = (refusal: string) =>
@@ -84,8 +98,13 @@ const daemonBusyRefusal = stopRefusal(`{"_tag":"DaemonBusy","blockers":[{"id":"s
 
 const fakeVibestd = (
   socket: string,
-  ping: object,
-  onStop: (sock: net.Socket, server: net.Server, id: unknown, request: { readonly headers?: unknown }) => void,
+  ping: Schema.JsonObject,
+  onStop: (
+    sock: net.Socket,
+    server: net.Server,
+    id: Schema.Json | undefined,
+    request: { readonly headers?: Schema.Json },
+  ) => void,
   pauseAcceptedSocketUntil?: Promise<void>,
 ) =>
   Effect.acquireRelease(
@@ -113,8 +132,7 @@ const fakeVibestd = (
       const server = net.createServer((sock) => {
         sockets.push(sock)
         sock.on("error", (err) => {
-          const code =
-            typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined
+          const code = Predicate.hasProperty(err, "code") ? err.code : undefined
 
           if (code === "EPIPE") finishPing("EPIPE")
           else if (code !== "ECONNRESET") throw err
@@ -129,9 +147,9 @@ const fakeVibestd = (
             buf = buf.slice(nl + 1)
 
             for (const req of [JSON.parse(line)].flat() as Array<{
-              id?: unknown
+              id?: Schema.Json
               method?: string
-              headers?: unknown
+              headers?: Schema.Json
             }>) {
               if (req.method === undefined) continue
               methods.push(req.method)

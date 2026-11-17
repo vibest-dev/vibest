@@ -268,7 +268,7 @@ describe("projectors", () => {
     Effect.gen(function* () {
       const { sql, subProcess, mainProcess } = yield* story
 
-      const rows = yield* rowsOf<Record<string, unknown>>(
+      const rows = yield* rowsOf<Readonly<Record<string, string | number | null>>>(
         sql,
         `SELECT id, name, agent, parent_session_id, origin_peer,
           origin_project, origin_session, created_at, ended_at, process_id, active_at
@@ -339,7 +339,7 @@ describe("projectors", () => {
     Effect.gen(function* () {
       const { sql, mainProcess, subProcess } = yield* story
 
-      const rows = yield* rowsOf<Record<string, unknown>>(
+      const rows = yield* rowsOf<Readonly<Record<string, string | number | null>>>(
         sql,
         `SELECT id, harness, provider, model, routing, runtime, terminal, pid, integration_version,
           integration_protocol, conversation, started_at, placed_at, ready_at, ended_at, end_reason

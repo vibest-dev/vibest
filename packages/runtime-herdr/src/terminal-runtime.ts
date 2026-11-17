@@ -3,7 +3,19 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { launchLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
-import { Cause, Config, Duration, Effect, Option, Predicate, PubSub, Schedule, type Scope, Stream } from "effect"
+import {
+  Cause,
+  Config,
+  Duration,
+  Effect,
+  Option,
+  Predicate,
+  PubSub,
+  Schedule,
+  Schema,
+  type Scope,
+  Stream,
+} from "effect"
 import type { FileSystem } from "effect"
 import type { HerdrFailure, HerdrClient, PushFrame, results } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -48,22 +60,22 @@ export const parseTerminal = (
 
 export const encodeTarget = (location: RuntimeLocation) => JSON.stringify(location)
 
+const decodeTargetJson = Schema.decodeOption(
+  Schema.fromJsonString(
+    Schema.Struct({ session: Schema.optionalKey(Schema.Json), socketPath: Schema.optionalKey(Schema.Json) }),
+  ),
+)
+
 export const decodeTarget = (target: string | undefined): RuntimeLocation | undefined => {
   if (target === undefined) return undefined
-  let parsed: unknown
+  const decoded = decodeTargetJson(target)
 
-  try {
-    parsed = JSON.parse(target)
-  } catch {
-    return undefined
-  }
+  if (Option.isNone(decoded)) return undefined
+  const record = decoded.value
 
-  if (typeof parsed !== "object" || parsed === null) return undefined
-  const record = parsed as Record<string, unknown>
+  if (Predicate.isString(record.session) && record.session !== "") return { session: record.session }
 
-  if (typeof record.session === "string" && record.session !== "") return { session: record.session }
-
-  if (typeof record.socketPath === "string" && record.socketPath !== "") return { socketPath: record.socketPath }
+  if (Predicate.isString(record.socketPath) && record.socketPath !== "") return { socketPath: record.socketPath }
 
   return undefined
 }

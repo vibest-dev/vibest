@@ -2,7 +2,7 @@ import type { Plugin as PromisePlugin } from "@vibest/plugin"
 import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
-import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Result, Schema } from "effect"
+import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Predicate, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
 import { LayerNode } from "../effect/layer-node.ts"
@@ -11,12 +11,12 @@ export class PluginLoader extends Context.Service<
   PluginLoader,
   {
     readonly prepare: Effect.Effect<void>
-    readonly parseJsonc: (text: string) => unknown
+    readonly parseJsonc: (text: string) => Schema.Json
     readonly graph: (entry: string) => {
       readonly files: ReadonlyArray<string>
       readonly unresolved: ReadonlyArray<string>
     }
-    readonly load: (entry: string, files: ReadonlyArray<string>) => Promise<unknown>
+    readonly load: (entry: string, files: ReadonlyArray<string>) => Promise<object>
     readonly watch: (directory: string, changed: (name: string) => void, failed: (error: Error) => void) => () => void
   }
 >()("vibest/PluginLoader") {}
@@ -30,7 +30,7 @@ export class InvalidPluginPath extends Schema.TaggedError<InvalidPluginPath>()("
 export interface Candidate {
   readonly source: string
   readonly revision: string
-  readonly options: Readonly<Record<string, unknown>>
+  readonly options: Schema.JsonObject
   readonly plugin: AnyPlugin | { readonly error: string }
 }
 
@@ -49,23 +49,23 @@ interface Collected {
 
 const ConfigEntry = Schema.Union([
   Schema.String,
-  Schema.Struct({ package: Schema.String, options: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)) }),
+  Schema.Struct({ package: Schema.String, options: Schema.optional(Schema.Record(Schema.String, Schema.Json)) }),
 ])
 
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
 
 type ConfigFile = typeof ConfigFile.Type
 
-const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Unknown }))
+const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Json }))
 
 export type AnyPlugin = EffectPlugin.Plugin | PromisePlugin.Plugin
 
 const isPlugin = (u: unknown): u is AnyPlugin =>
-  typeof u === "object" &&
-  u !== null &&
-  typeof (u as { readonly id?: unknown }).id === "string" &&
-  (typeof (u as { readonly effect?: unknown }).effect === "function" ||
-    typeof (u as { readonly setup?: unknown }).setup === "function")
+  Predicate.isObjectOrArray(u) &&
+  Predicate.hasProperty(u, "id") &&
+  Predicate.isString(u.id) &&
+  ((Predicate.hasProperty(u, "effect") && Predicate.isFunction(u.effect)) ||
+    (Predicate.hasProperty(u, "setup") && Predicate.isFunction(u.setup)))
 
 const PluginModule = Schema.Struct({
   default: Schema.declare(isPlugin),
@@ -73,10 +73,12 @@ const PluginModule = Schema.Struct({
 
 const EXPORT_CONDITIONS = new Set(["bun", "import", "default"])
 
-const exportTarget = (value: unknown): string | undefined => {
-  if (typeof value === "string") return value
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value)
 
-  if (typeof value !== "object" || value === null) return undefined
+const exportTarget = (value: Schema.Json): string | undefined => {
+  if (Predicate.isString(value)) return value
+
+  if (!isJsonObject(value)) return undefined
 
   for (const [condition, target] of Object.entries(value)) {
     const found = EXPORT_CONDITIONS.has(condition) ? exportTarget(target) : undefined
@@ -87,12 +89,15 @@ const exportTarget = (value: unknown): string | undefined => {
   return undefined
 }
 
-const exportedEntries = (exports: unknown) =>
-  (typeof exports === "object" && exports !== null && Object.keys(exports).some((key) => key.startsWith("."))
-    ? [
-        exportTarget((exports as Record<string, unknown>)["./server"]),
-        exportTarget((exports as Record<string, unknown>)["."]),
-      ]
+const conditionTarget = (exports: Schema.JsonObject, key: string) => {
+  const target = exports[key]
+
+  return target === undefined ? undefined : exportTarget(target)
+}
+
+const exportedEntries = (exports: Schema.Json) =>
+  (isJsonObject(exports) && Object.keys(exports).some((key) => key.startsWith("."))
+    ? [conditionTarget(exports, "./server"), conditionTarget(exports, ".")]
     : [exportTarget(exports)]
   ).filter((entry) => entry !== undefined)
 
@@ -101,7 +106,7 @@ const CONVENTIONAL_ENTRIES = ["server", "index"].flatMap((name) =>
 )
 
 export type Operation =
-  | { readonly type: "add"; readonly target: string; readonly options: Readonly<Record<string, unknown>> }
+  | { readonly type: "add"; readonly target: string; readonly options: Schema.JsonObject }
   | { readonly type: "remove"; readonly target: string }
 
 const SOURCE = /\.[cm]?[jt]s$/
@@ -295,11 +300,7 @@ export const openSources = Effect.fnUntraced(function* (
     return yield* Effect.try(() => loader.parseJsonc(text.value)).pipe(
       Effect.tap((raw) =>
         Effect.gen(function* () {
-          const configured =
-            raw !== null &&
-            typeof raw === "object" &&
-            "runtime" in raw &&
-            (raw as { readonly runtime?: unknown }).runtime !== undefined
+          const configured = isJsonObject(raw) && raw.runtime !== undefined
 
           if (!configured || warnedConfiguredRuntime) return
           warnedConfiguredRuntime = true
@@ -329,8 +330,9 @@ export const openSources = Effect.fnUntraced(function* (
     const configured: Array<Operation> = []
 
     for (const raw of (yield* readConfig).plugins ?? []) {
-      const { target, options } =
-        typeof raw === "string" ? { target: raw, options: {} } : { target: raw.package, options: raw.options ?? {} }
+      const { target, options } = Predicate.isString(raw)
+        ? { target: raw, options: {} }
+        : { target: raw.package, options: raw.options ?? {} }
 
       if (target.startsWith("-")) {
         configured.push({ type: "remove", target: target.slice(1) })

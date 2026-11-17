@@ -34,7 +34,7 @@ import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
-import { Effect, Layer, type Scope, Stdio, Stream } from "effect"
+import { Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -149,20 +149,20 @@ export const checkDatabase: Host["checkDatabase"] = (filename) =>
 
 export const runMain = BunRuntime.runMain
 
-const provided: Readonly<Record<string, object>> = {
-  effect,
-  "@vibest/plugin": VibestPlugin,
-  "@vibest/plugin/effect": VibestPluginEffect,
-  "effect/process/ChildProcess": ChildProcess,
-  "effect/process/ChildProcessSpawner": ChildProcessSpawner,
-  ...Object.fromEntries(
-    Object.entries(effect).flatMap(([name, value]) =>
-      /^[A-Z]/.test(name) && typeof value === "object" && value !== null ? [[`effect/${name}`, value]] : [],
-    ),
-  ),
-}
+type ModuleExports = Bun.OnLoadResultObject["exports"]
 
-const providedPackages: ReadonlySet<string> = new Set(Object.keys(provided).map(packageName))
+const provided = new Map<string, ModuleExports>([
+  ["effect", effect],
+  ["@vibest/plugin", VibestPlugin],
+  ["@vibest/plugin/effect", VibestPluginEffect],
+  ["effect/process/ChildProcess", ChildProcess],
+  ["effect/process/ChildProcessSpawner", ChildProcessSpawner],
+  ...Object.entries(effect).flatMap(([name, value]): ReadonlyArray<readonly [string, ModuleExports]> =>
+    /^[A-Z]/.test(name) && Predicate.isObject(value) ? [[`effect/${name}`, value]] : [],
+  ),
+])
+
+const providedPackages: ReadonlySet<string> = new Set(provided.keys().map(packageName))
 
 export const makePluginLoader = (): PluginLoader["Service"] => {
   const { keyLocalImports, load } = pluginLoads()
@@ -175,17 +175,14 @@ export const makePluginLoader = (): PluginLoader["Service"] => {
       Bun.plugin({
         name: "vibest-plugin-runtime",
         setup(build) {
-          const object = (exports: object) => () => ({
-            exports: exports as Record<string, unknown>,
-            loader: "object" as const,
-          })
+          const object = (exports: ModuleExports) => () => ({ exports, loader: "object" as const })
 
-          for (const [name, value] of Object.entries(provided)) build.module(name, object(value))
+          for (const [name, value] of provided) build.module(name, object(value))
           keyLocalImports(build)
         },
       })
     }),
-    parseJsonc: (text) => Bun.JSONC.parse(text),
+    parseJsonc: (text) => Schema.decodeUnknownSync(Schema.Json)(Bun.JSONC.parse(text)),
     graph: (entry) => graph(entry, providedPackages),
     load,
     watch,
@@ -280,7 +277,7 @@ export const trimDaemonLog: Host["trimLog"] = (file) =>
     }
   })
 
-const lockFailed = (file: string) => (e: unknown) => new LockFailed({ file, message: messageOf(e) })
+const lockFailed = (file: string) => (cause: unknown) => new LockFailed({ file, message: messageOf(cause) })
 
 export const lock: Host["lock"] = (file) =>
   Effect.acquireRelease(

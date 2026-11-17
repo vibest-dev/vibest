@@ -4,6 +4,7 @@ import {
   Effect,
   Exit,
   Option,
+  Predicate,
   Ref,
   Schema,
   Stream,
@@ -12,7 +13,7 @@ import {
   type Scope,
 } from "effect"
 
-import type { MachineEvent, MachineHooks, MachineNote } from "./effect/index.ts"
+import type { MachineEvent, MachineHooks, MachineNote, PluginOptions } from "./effect/index.ts"
 import type { Plugin } from "./effect/plugin.ts"
 import type * as Runtime from "./effect/runtime.ts"
 
@@ -81,7 +82,7 @@ export const runtimeContract = (
       label: `vibest contract ${marker}`,
     })
 
-    yield* that("open", typeof terminal.id === "string" && terminal.id !== "", "returned a terminal without an id")
+    yield* that("open", Predicate.isString(terminal.id) && terminal.id !== "", "returned a terminal without an id")
 
     yield* runtime.send(terminal, { text: ran("sent"), keys: ["enter"] })
     yield* until(
@@ -121,7 +122,7 @@ export const runtimeContract = (
       const session = yield* runtime.session(terminal)
       yield* that(
         "session",
-        session === null || typeof session === "string",
+        session === null || Predicate.isString(session),
         `returned something other than a conversation id or null: ${JSON.stringify(session)}`,
       )
     }
@@ -132,7 +133,7 @@ export const runtimeContract = (
       const argv = runtime.attach(undefined)
       yield* that(
         "attach",
-        argv.every((part) => typeof part === "string" && part !== ""),
+        argv.every((part) => Predicate.isString(part) && part !== ""),
         "returned something other than a non-empty argv",
       )
     }
@@ -200,7 +201,7 @@ export const runtimeContract = (
 
 export const machineHooks = (
   plugin: Plugin,
-  options: Readonly<Record<string, unknown>> = {},
+  options: PluginOptions = {},
 ): Effect.Effect<
   {
     readonly runtimes: ReadonlyArray<Runtime.RuntimeDefinition>

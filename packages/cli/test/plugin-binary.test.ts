@@ -14,7 +14,7 @@ import { note } from "../../../tools/reap.ts"
 const pkg = path.join(import.meta.dirname, "..")
 const binary = path.join(pkg, "dist", "vibest")
 
-const plugins: Record<string, string> = {
+const plugins = {
   "shared.ts": `import { AgentRefused, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import * as S from "effect/Schema"
@@ -35,7 +35,7 @@ export default Plugin.define({ id: "bundled", effect: (ctx) => ("ownCopy" in E ?
 }
 
 const userEnv = (home: string) => {
-  const env: Record<string, string | undefined> = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     VIBEST_HOME: home,
     PATH: "/usr/bin:/bin",

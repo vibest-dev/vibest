@@ -1,8 +1,8 @@
 import { until } from "../world.ts"
 
-export const answerFolderTrust = async (
+export const answerFolderTrust = async <A>(
   screen: () => Promise<string>,
-  press: (key: "enter" | "down") => Promise<unknown>,
+  press: (key: "enter" | "down") => Promise<A>,
   timeoutMs = 60_000,
 ) => {
   await until(
@@ -19,9 +19,9 @@ export const answerFolderTrust = async (
 
 const squeeze = (s: string) => s.replace(/\s+/g, "")
 
-export const typeAndEnter = async (
+export const typeAndEnter = async <T, E>(
   screen: () => Promise<string>,
-  send: { readonly text: (text: string) => Promise<unknown>; readonly enter: () => Promise<unknown> },
+  send: { readonly text: (text: string) => Promise<T>; readonly enter: () => Promise<E> },
   text: string,
   timeoutMs = 30_000,
 ) => {

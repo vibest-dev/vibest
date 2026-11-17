@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import url from "node:url"
 
+import { Predicate } from "effect"
 import { describe, expect, it } from "vitest"
 
 const root = url.fileURLToPath(new URL("../..", import.meta.url))
@@ -12,7 +13,7 @@ const configAt = (dir) => {
   const config = JSON.parse(fs.readFileSync(path.join(root, ".oxlintrc.json"), "utf8"))
   const absolute = (specifier) => path.join(root, specifier)
   config.jsPlugins = config.jsPlugins.map((plugin) =>
-    typeof plugin === "string" ? absolute(plugin) : { ...plugin, specifier: absolute(plugin.specifier) },
+    Predicate.isString(plugin) ? absolute(plugin) : { ...plugin, specifier: absolute(plugin.specifier) },
   )
   const file = path.join(dir, "oxlintrc.json")
   fs.writeFileSync(file, JSON.stringify(config))

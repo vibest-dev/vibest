@@ -14,7 +14,7 @@ import {
 } from "@vibest/platform-bun/test/lib/fakes"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { Effect, Layer, type Scope } from "effect"
+import { Effect, Layer, Predicate, type Schema, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
@@ -34,7 +34,7 @@ const served = Server.layer.pipe(
 
 const headers = (record: Record<string, string>) => Object.entries(record)
 
-const request = (id: number, method: string, params: unknown, sent: Record<string, string>) => ({
+const request = (id: number, method: string, params: Schema.Json, sent: Record<string, string>) => ({
   jsonrpc: "2.0",
   id,
   method,
@@ -63,19 +63,22 @@ const normalizer = (paths: Record<string, string>) => {
       .replace(/"fiberId":\d+/g, '"fiberId":0')
   }
 
-  const walk = (value: unknown, key?: string): unknown => {
-    if (typeof value === "string") return text(value)
+  const walk = (value: Schema.Json, key?: string): Schema.Json => {
+    if (Predicate.isString(value)) return text(value)
 
-    if (typeof value === "number" && key !== undefined && TIME_KEYS.has(key)) return FIXED_TIME
+    if (Predicate.isNumber(value)) {
+      if (key !== undefined && TIME_KEYS.has(key)) return FIXED_TIME
 
-    if (typeof value === "number" && key === "fiberId") return 0
+      if (key === "fiberId") return 0
+
+      return value
+    }
+
+    if (value === null || Predicate.isBoolean(value)) return value
 
     if (Array.isArray(value)) return value.map((item) => walk(item))
 
-    if (value !== null && typeof value === "object")
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v, k)]))
-
-    return value
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v, k)]))
   }
 
   return walk

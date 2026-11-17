@@ -21,7 +21,7 @@ afterEach(() => {
 
 const bytes = (text: string) => new TextEncoder().encode(text)
 
-const rejects = async (run: () => Promise<unknown>, pattern: RegExp) => {
+const rejects = async <A>(run: () => Promise<A>, pattern: RegExp) => {
   try {
     await run()
   } catch (error) {

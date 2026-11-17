@@ -97,7 +97,7 @@ const copyFailed = (src: string, dst: string) => (e: PlatformError.PlatformError
   return new CopyFailed({
     source: src,
     destination: dst,
-    message: `copy ${src} -> ${dst}: ${e.message}${typeof code === "string" ? ` (${code})` : ""}`,
+    message: `copy ${src} -> ${dst}: ${e.message}${Predicate.isString(code) ? ` (${code})` : ""}`,
   })
 }
 

@@ -1,4 +1,4 @@
-import { Cause, Console, Effect, Exit, Option, type Runtime } from "effect"
+import { Cause, Console, Effect, Exit, Option, Predicate, type Runtime } from "effect"
 import { CliError } from "effect/cli"
 
 export const printFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -8,11 +8,11 @@ export const printFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       const error = Cause.findErrorOption(cause)
 
       if (Option.isNone(error)) return Console.error(Cause.pretty(cause))
-      const e: unknown = error.value
+      const e = error.value
 
       if (CliError.isCliError(e)) return Effect.void
 
-      if (typeof e !== "object" || e === null || !("_tag" in e)) return Console.error(String(e))
+      if (!Predicate.hasProperty(e, "_tag")) return Console.error(String(e))
       const { _tag, message } = e as { readonly _tag: string; readonly message?: string }
 
       return Console.error(message ? `${_tag}: ${message}` : _tag)

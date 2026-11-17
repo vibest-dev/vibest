@@ -37,6 +37,7 @@ import {
   Layer,
   Path,
   Ref,
+  type Schema,
   Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -97,7 +98,7 @@ const subscriptions = LayerNode.make({
 
 export type PluginEntry =
   | VibestPlugin.Plugin.Plugin
-  | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
+  | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Schema.JsonObject }
 
 const candidateOf = (entry: PluginEntry): Candidate => {
   const plugin = "plugin" in entry ? entry.plugin : entry
@@ -304,8 +305,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly models?: ReadonlyArray<string>
   readonly maxSessions?: number
   readonly plugins?: ReadonlyArray<
-    | VibestPlugin.Plugin.Plugin
-    | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
+    VibestPlugin.Plugin.Plugin | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Schema.JsonObject }
   >
   readonly pluginTimeout?: Duration.Input
   readonly activateLate?: boolean

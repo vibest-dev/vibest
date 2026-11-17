@@ -2,6 +2,8 @@ import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
+import { Predicate, type Schema } from "effect"
+
 import { LOG_KEEP_BYTES, LOG_MAX_BYTES } from "../../../../packages/platform-bun/src/log-file.ts"
 import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
@@ -14,8 +16,8 @@ type Status = { daemon: { status: string; pid?: number | null; protocol?: number
 const status = (w: World) => w.json<Status>(["status"])
 const running = async (w: World) => (await status(w)).daemon
 
-const raw = (w: World, request: object) =>
-  new Promise<Record<string, unknown>>((resolve, reject) => {
+const raw = (w: World, request: Schema.JsonObject) =>
+  new Promise<Schema.JsonObject>((resolve, reject) => {
     const socket = net.connect(path.join(w.vibestHome, "vibest.sock"))
     let buffer = ""
     socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`))
@@ -25,7 +27,7 @@ const raw = (w: World, request: object) =>
 
       if (buffer.includes("\n") && line) {
         socket.destroy()
-        resolve(JSON.parse(line) as Record<string, unknown>)
+        resolve(JSON.parse(line) as Schema.JsonObject)
       }
     })
     socket.on("error", reject)
@@ -53,7 +55,7 @@ const startWithHungPlugin = async (w: World) => {
 
 const logOf = (w: World) => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
 
-const exitsAtDeadline = async (w: World, pid: number, stop: () => Promise<unknown>) => {
+const exitsAtDeadline = async <A>(w: World, pid: number, stop: () => Promise<A>) => {
   const logged = (await logOf(w)).length
   const t0 = Date.now()
   await stop()
@@ -90,7 +92,7 @@ const checks: ReadonlyArray<Check> = [
       {
         await w.ok(["daemon"])
         const first = await running(w)
-        expect(first.status === "running" && typeof first.pid === "number", `not running: ${JSON.stringify(first)}`)
+        expect(first.status === "running" && Predicate.isNumber(first.pid), `not running: ${JSON.stringify(first)}`)
         await w.ok(["daemon"])
         const second = await running(w)
         expect(second.pid === first.pid, `pid changed: ${first.pid} → ${second.pid}`)

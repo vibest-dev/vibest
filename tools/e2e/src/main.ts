@@ -43,7 +43,7 @@ import {
 import { privateIn, redactor } from "./world/redact.ts"
 import { capture } from "./world/user-env.ts"
 
-const areas: Record<string, ReadonlyArray<Check>> = {
+const areas = {
   agy,
   daemon,
   project,
@@ -62,7 +62,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   entry: entrySession,
   machines: [...machines, ...machinesHerdr],
   "terminal-status": terminalStatus,
-}
+} satisfies Record<string, ReadonlyArray<Check>>
 
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check, id: check.id })))
 
@@ -211,12 +211,12 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
   const foreign = world.foreignTerminals()
 
   if (foreign.length > 0) problem(`terminals outside this check's herdr sessions: ${foreign.join(", ")}`)
-  await world.close().catch((e: unknown) => problem(`closing the world: ${String(e)}`))
+  await world.close().catch((cause: unknown) => problem(`closing the world: ${String(cause)}`))
 
-  const ledger = await world.vibest(["daemon", "import-check"]).catch((e: unknown) => ({
+  const ledger = await world.vibest(["daemon", "import-check"]).catch((cause: unknown) => ({
     code: 1,
     stdout: "",
-    stderr: String(e),
+    stderr: String(cause),
   }))
 
   if (ledger.code !== 0) problem(`import-check of the world's database: ${ledger.stderr}${ledger.stdout}`)

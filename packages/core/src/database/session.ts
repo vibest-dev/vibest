@@ -9,6 +9,7 @@ import {
   SessionDirectoryChanged,
   SessionEnded,
 } from "@vibest/schema/event"
+import type { Routing } from "@vibest/schema/plugin"
 import {
   type AgentStatus,
   AmbiguousSession,
@@ -17,7 +18,7 @@ import {
   RuntimeAddress,
   type HarnessId,
 } from "@vibest/schema/session"
-import { Clock, Effect } from "effect"
+import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
@@ -404,7 +405,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           start: {
             readonly provider?: string | undefined
             readonly model?: string | undefined
-            readonly routing?: unknown
+            readonly routing?: Routing | undefined
             readonly projectDirectory?: string | undefined
             readonly pid?: number | undefined
             readonly sessionId?: string | undefined
@@ -472,7 +473,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     harness,
                     ...(start.provider && { provider: start.provider }),
                     ...(start.model && { model: start.model }),
-                    ...(Boolean(start.routing) && { routing: start.routing }),
+                    ...(start.routing && { routing: start.routing }),
                     runtime: location.runtime,
                     terminal: location.address.id,
                     ...(resume !== undefined && { resume }),
@@ -563,9 +564,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ) =>
           tx(
             Effect.gen(function* () {
-              const ready = typeof patch.ready === "number"
+              const ready = Predicate.isNumber(patch.ready)
 
-              if (!ready && typeof patch.pid !== "number") return undefined
+              if (!ready && !Predicate.isNumber(patch.pid)) return undefined
               const current = yield* currentProcess(id)
 
               if (current === undefined) return undefined
@@ -586,7 +587,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 at: patch.ready as number,
                 data: {
                   process: current.id,
-                  ...(typeof patch.pid === "number" && { pid: patch.pid }),
+                  ...(Predicate.isNumber(patch.pid) && { pid: patch.pid }),
                   ...(integration !== undefined && { integration }),
                 },
               })

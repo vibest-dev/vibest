@@ -33,7 +33,7 @@ describe("vibest CLI without vibestd", () => {
     TIMEOUT,
   )
 
-  const fakeDaemon = (capabilities: Record<string, boolean>, answer: (n: number) => object | undefined) =>
+  const fakeDaemon = (capabilities: Record<string, boolean>, answer: (n: number) => Schema.JsonObject | undefined) =>
     Effect.gen(function* () {
       const home = yield* tempDirectory("vibest-requests-")
       const sends: Array<{ id: string; request?: string }> = []
@@ -46,7 +46,9 @@ describe("vibest CLI without vibestd", () => {
           for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
             const req = JSON.parse(buf.slice(0, nl)) as { id?: string; method?: string; params?: never }
             buf = buf.slice(nl + 1)
-            const reply = (body: object) => sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
+
+            const reply = (body: Schema.JsonObject) =>
+              sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
 
             if (req.method === "Ping")
               reply({ result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities } })

@@ -1,5 +1,5 @@
 import type { Harness } from "@vibest/plugin/effect"
-import { Effect, FileSystem, Path } from "effect"
+import { Effect, FileSystem, Path, Predicate } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { noProvider, opt } from "./models.ts"
@@ -69,11 +69,11 @@ export const cursor: Harness.HarnessDefinition = {
     }).pipe(Effect.provide(nodePlatform)),
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
-  conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
+  conversationOf: (event) => (Predicate.isString(event.conversation_id) ? event.conversation_id : undefined),
   userPrompt: (event) => {
     if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
 
-    if (event.hook_event_name !== "beforeSubmitPrompt" || typeof event.prompt !== "string" || !event.prompt.trim())
+    if (event.hook_event_name !== "beforeSubmitPrompt" || !Predicate.isString(event.prompt) || !event.prompt.trim())
       return undefined
 
     return { text: event.prompt }

@@ -6,7 +6,7 @@ import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Predicate, type Schema } from "effect"
 
 const checkout = path.resolve(import.meta.dirname, "../../..")
 const binary = path.join(checkout, "packages/cli/dist/vibest")
@@ -70,9 +70,9 @@ const run = async (cwd: string, argv: ReadonlyArray<string>, env: Record<string,
 
 const stop = async (home: string) => {
   const text = await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "")
-  const pid = text === "" ? undefined : (JSON.parse(text) as { pid?: unknown }).pid
+  const pid = text === "" ? undefined : (JSON.parse(text) as { pid?: Schema.Json }).pid
 
-  if (typeof pid !== "number" || pid <= 0) return
+  if (!Predicate.isNumber(pid) || pid <= 0) return
 
   try {
     process.kill(pid, "SIGTERM")

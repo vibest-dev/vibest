@@ -1,18 +1,11 @@
 import type { HarnessId } from "@vibest/schema/session"
+import { Option, Predicate, Schema } from "effect"
 
 import type { HarnessDefinition } from "./plugin/domains.ts"
 
-export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
-  try {
-    const value = JSON.parse(raw) as unknown
+const decodeJsonObject = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))
 
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
-
-    return value as Record<string, unknown>
-  } catch {
-    return undefined
-  }
-}
+export const jsonObject = (raw: string) => Option.getOrUndefined(decodeJsonObject(raw))
 
 export const guardInputOf = (adapter: HarnessDefinition, raw: string) => {
   if (adapter.guardCall === undefined) return raw
@@ -92,20 +85,16 @@ export const executionEndOf = (adapter: HarnessDefinition, raw: string, at: numb
 
 const PLAIN_ID_NOT_A_FLAG = /^\w[\w.:-]{0,127}$/
 
-const errorOf = (payload: Readonly<Record<string, unknown>>) => {
+const errorOf = (payload: Schema.JsonObject) => {
   const error = payload.error
   const details = payload.error_details
 
-  if (typeof error !== "string" || !error) return undefined
+  if (!Predicate.isString(error) || !error) return undefined
 
-  return typeof details === "string" && details ? `${error}: ${details}` : error
+  return Predicate.isString(details) && details ? `${error}: ${details}` : error
 }
 
-export const executionEndFrom = (
-  adapter: HarnessDefinition,
-  payload: Readonly<Record<string, unknown>>,
-  at: number,
-): ObservedEnd => {
+export const executionEndFrom = (adapter: HarnessDefinition, payload: Schema.JsonObject, at: number): ObservedEnd => {
   const text = payload[adapter.replyField]
   const conversation = payload.conversation_id
   const interrupted = payload.aborted === true
@@ -115,11 +104,11 @@ export const executionEndFrom = (
     harness: adapter.id,
     at,
     status: interrupted ? "interrupted" : error ? "failed" : "completed",
-    reply: typeof text === "string" ? text : "",
+    reply: Predicate.isString(text) ? text : "",
     failure: error,
     limited: isUsageLimitError(error),
     conversation:
-      !adapter.ownSessionId && typeof conversation === "string" && PLAIN_ID_NOT_A_FLAG.test(conversation)
+      !adapter.ownSessionId && Predicate.isString(conversation) && PLAIN_ID_NOT_A_FLAG.test(conversation)
         ? conversation
         : undefined,
     needsReady: adapter.ready === "integration",

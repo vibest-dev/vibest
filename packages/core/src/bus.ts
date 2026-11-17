@@ -380,8 +380,10 @@ export const layer = Layer.effect(Service, make)
 
 export const node = LayerNode.make({ service: Service, layer, deps: [PlatformNode.sqlClient] })
 
+type ProjectionRow = Readonly<Record<string, string | number | null>>
+
 const dump = (sql: SqlClient.SqlClient, table: keyof typeof PROJECTION_TABLES) =>
-  sql.unsafe<Record<string, unknown>>(`SELECT * FROM ${table} ORDER BY ${PROJECTION_TABLES[table]}`)
+  sql.unsafe<ProjectionRow>(`SELECT * FROM ${table} ORDER BY ${PROJECTION_TABLES[table]}`)
 
 const copyLog = (
   from: SqlClient.SqlClient,
@@ -403,8 +405,8 @@ const copyLog = (
 const firstDifference = (
   table: string,
   key: string,
-  stored: ReadonlyArray<Record<string, unknown>>,
-  replayed: ReadonlyArray<Record<string, unknown>>,
+  stored: ReadonlyArray<ProjectionRow>,
+  replayed: ReadonlyArray<ProjectionRow>,
 ) => {
   for (let i = 0; i < Math.max(stored.length, replayed.length); i++) {
     const a = stored[i] === undefined ? undefined : JSON.stringify(stored[i])

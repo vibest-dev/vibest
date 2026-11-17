@@ -288,7 +288,7 @@ const checks: ReadonlyArray<Check> = [
 
         await until("the entry session ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop() })
+        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop()! })
         await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)

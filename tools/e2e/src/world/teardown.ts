@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { Predicate, type Schema } from "effect"
+
 import { commandOf, endOwned } from "../../../reap.ts"
 import {
   DAY_MS,
@@ -40,7 +42,7 @@ const sessionOfSocket = (sock: string) => {
 
 export const stopSocketsUnder = async (
   root: string,
-  run: (args: ReadonlyArray<string>, env: Record<string, string>) => Promise<unknown>,
+  run: (args: ReadonlyArray<string>, env: Record<string, string>) => Promise<void>,
 ) => {
   for (const sock of await pathsNamed(root, "herdr.sock")) {
     const session = sessionOfSocket(sock)
@@ -114,11 +116,11 @@ export const stopRecordedDaemon = async (root: string) => {
     let socket = ""
 
     try {
-      const parsed = JSON.parse(text) as { pid?: unknown; socket?: unknown }
+      const parsed = JSON.parse(text) as { pid?: Schema.Json; socket?: Schema.Json }
 
-      if (typeof parsed.pid === "number") pid = parsed.pid
+      if (Predicate.isNumber(parsed.pid)) pid = parsed.pid
 
-      if (typeof parsed.socket === "string") socket = parsed.socket
+      if (Predicate.isString(parsed.socket)) socket = parsed.socket
     } catch {
       continue
     }
@@ -146,7 +148,7 @@ export const stopRecordedDaemon = async (root: string) => {
 }
 
 const herdrRun = async (args: ReadonlyArray<string>, extra: Record<string, string> = {}) => {
-  const env: Record<string, string> = { ...extra }
+  const env = { ...extra }
 
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && !key.startsWith("HERDR_") && env[key] === undefined) env[key] = value
@@ -232,7 +234,7 @@ export const removeExpiredWorlds = async (
     sessionsDir?: string
     now?: number
     maxAgeMs?: number
-    run?: (args: ReadonlyArray<string>, env?: Record<string, string>) => Promise<unknown>
+    run?: (args: ReadonlyArray<string>, env?: Record<string, string>) => Promise<void>
   } = {},
 ) => {
   const tmpBase = options.tmpBase ?? worldTmpBase()
@@ -241,7 +243,7 @@ export const removeExpiredWorlds = async (
   const maxAgeMs = options.maxAgeMs ?? DAY_MS
   const run = options.run ?? herdrRun
 
-  const forget = async (task: () => Promise<unknown>) => {
+  const forget = async (task: () => Promise<void>) => {
     try {
       await task()
     } catch {

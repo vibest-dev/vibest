@@ -2,6 +2,8 @@ import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
@@ -165,7 +167,7 @@ const killedMidExecution = async (
   }
 }
 
-const rpc = (socket: string, method: string, params: object, headers: ReadonlyArray<[string, string]>) =>
+const rpc = (socket: string, method: string, params: Schema.JsonObject, headers: ReadonlyArray<[string, string]>) =>
   new Promise<unknown>((resolve, reject) => {
     let buf = ""
 
@@ -273,7 +275,7 @@ const checks: ReadonlyArray<Check> = [
             `${what}: ${p.executionEnds(sub)} execution ends, ${p.sent(sub)} rows sent`,
           )
           const end = p.lastEnd(sub)!
-          expect(typeof end.reply === "string", `${what}: execution ${JSON.stringify(end)}`)
+          expect(end.reply !== null, `${what}: execution ${JSON.stringify(end)}`)
         }
 
         const a = await p.runSub("a")

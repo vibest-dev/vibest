@@ -5,7 +5,7 @@ import type { HarnessDefinition, HarnessesDomain } from "@vibest/core/plugin/dom
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { HarnessUnavailable } from "@vibest/schema/session"
-import { Effect, Layer, Match, type Scope } from "effect"
+import { Effect, Layer, Match, Predicate, type Scope } from "effect"
 
 const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
 
@@ -34,11 +34,11 @@ export const PI: HarnessDefinition = {
   executionEnd: (event) =>
     event.type !== "agent_settled"
       ? undefined
-      : { end: { text: typeof event.text === "string" ? event.text : "", error: "", aborted: false } },
+      : { end: { text: Predicate.isString(event.text) ? event.text : "", error: "", aborted: false } },
   userPrompt: (event) =>
-    event.type === "accepted" && typeof event.execution === "number"
+    event.type === "accepted" && Predicate.isNumber(event.execution)
       ? { execution: event.execution }
-      : event.type !== "input" || typeof event.text !== "string" || event.text.trim() === ""
+      : event.type !== "input" || !Predicate.isString(event.text) || event.text.trim() === ""
         ? undefined
         : { text: event.text },
 }
@@ -82,9 +82,9 @@ export const CLAUDE: HarnessDefinition = {
           ),
         },
   userPrompt: (event) =>
-    event.hook_event_name === "PromptSubmit" && event.origin === "vibest" && typeof event.execution === "number"
+    event.hook_event_name === "PromptSubmit" && event.origin === "vibest" && Predicate.isNumber(event.execution)
       ? { execution: event.execution }
-      : event.hook_event_name !== "PromptSubmit" || typeof event.text !== "string" || !event.text.trim()
+      : event.hook_event_name !== "PromptSubmit" || !Predicate.isString(event.text) || !event.text.trim()
         ? undefined
         : { text: event.text },
 }
@@ -110,12 +110,12 @@ export const CURSOR: HarnessDefinition = {
   models: { args: () => [], answer: () => undefined },
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
-  conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
+  conversationOf: (event) => (Predicate.isString(event.conversation_id) ? event.conversation_id : undefined),
   executionEnd: (event) => (event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined),
   userPrompt: (event) => {
     if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
 
-    return event.hook_event_name === "beforeSubmitPrompt" && typeof event.prompt === "string" && event.prompt.trim()
+    return event.hook_event_name === "beforeSubmitPrompt" && Predicate.isString(event.prompt) && event.prompt.trim()
       ? { text: event.prompt }
       : undefined
   },

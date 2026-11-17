@@ -1,6 +1,7 @@
 import { hookRoute, isTaken, sessionHeaders, TAKE_ROUTE } from "@vibest/protocol/protocol"
 import type { Taken } from "@vibest/schema/session"
-import type { EngineInterface, On, Register } from "claude-code"
+import type { EngineInterface, On, Register, ToolCallInput } from "claude-code"
+import * as Predicate from "effect/Predicate"
 
 declare const VIBEST_PLUGIN_VERSION: string
 
@@ -13,7 +14,9 @@ export const REPORT_TRY_MS = 10_000
 export const UNREACHABLE = "vibestd unreachable; the tool call is refused."
 export const FULL_MAX = 100
 
-type Reply = { readonly status: number; readonly body: unknown }
+type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
+
+type Reply = { readonly status: number; readonly body: Json | undefined }
 
 type Env =
   | "VIBEST_SESSION_ID"
@@ -66,15 +69,8 @@ type Host = ReturnType<typeof nativeHost>
 
 const TOOL_CALL_RESERVED_KEYS = new Set(["tool", "tool_use_id", "consent", "agentId"])
 
-const toolInput = (event: object): Record<string, unknown> => {
-  const input: Record<string, unknown> = {}
-
-  for (const [key, value] of Object.entries(event)) {
-    if (!TOOL_CALL_RESERVED_KEYS.has(key)) input[key] = value
-  }
-
-  return input
-}
+const toolInput = (event: ToolCallInput) =>
+  Object.fromEntries(Object.entries(event).filter(([key]) => !TOOL_CALL_RESERVED_KEYS.has(key)))
 
 const timeout = <T>(promise: Promise<T>, ms: number, after: Host["after"]) =>
   new Promise<T>((resolve, reject) => {
@@ -84,14 +80,14 @@ const timeout = <T>(promise: Promise<T>, ms: number, after: Host["after"]) =>
         timer.cancel()
         resolve(value)
       },
-      (error: unknown) => {
+      (cause: unknown) => {
         timer.cancel()
-        reject(error)
+        reject(cause)
       },
     )
   })
 
-const parse = (text: string): unknown => {
+const parse = (text: string): Json | undefined => {
   try {
     return JSON.parse(text)
   } catch {
@@ -99,12 +95,18 @@ const parse = (text: string): unknown => {
   }
 }
 
-const errorOf = (body: unknown) =>
-  typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string"
-    ? (body as { error: string }).error
-    : undefined
+const isFields = (value: Json | undefined): value is { readonly [key: string]: Json } =>
+  value instanceof Object && !Array.isArray(value)
 
-export function register(on: On, _options?: unknown) {
+const member = (body: Json | undefined, name: string) => (isFields(body) ? body[name] : undefined)
+
+const errorOf = (body: Json | undefined) => {
+  const error = member(body, "error")
+
+  return Predicate.isString(error) ? error : undefined
+}
+
+export function register(on: On) {
   const queue: Array<Taken> = []
   const full = new Map<string, Array<{ readonly text: string; readonly execution: number }>>()
   let idle = false
@@ -124,7 +126,7 @@ export function register(on: On, _options?: unknown) {
     return { sessionId, socket: `${home}/vibest-http.sock` }
   }
 
-  const post = async (host: Host, path: string, body: unknown, ms: number): Promise<Reply> => {
+  const post = async <Body>(host: Host, path: string, body: Body, ms: number): Promise<Reply> => {
     const who = await identity(host)
 
     if (!who) throw new Error("not an VIBEST session")
@@ -159,7 +161,7 @@ export function register(on: On, _options?: unknown) {
     return reply
   }
 
-  const report = async (host: Host, path: string, body: unknown, answered?: (body: unknown) => void) => {
+  const report = async <Body>(host: Host, path: string, body: Body, answered?: (body: Json | undefined) => void) => {
     const attempt = async (n: number): Promise<void> => {
       let retry = true
 
@@ -230,9 +232,9 @@ export function register(on: On, _options?: unknown) {
     if (await identity(host).catch(() => undefined)) {
       const pid = await host.claudeCodePid().catch(() => undefined)
       void report(host, "/session/ready", pid === undefined ? {} : { pid }, (body) => {
-        const current = (body as { process?: unknown } | undefined)?.process
+        const current = member(body, "process")
 
-        if (typeof current === "number") processId = String(current)
+        if (Predicate.isNumber(current)) processId = String(current)
       })
     }
 
@@ -346,9 +348,9 @@ export function register(on: On, _options?: unknown) {
         const r = await post(host, hookRoute("claude", "guard"), body, GUARD_TRY_MS)
 
         if (r.status === 200) {
-          const deny = (r.body as { deny?: unknown } | undefined)?.deny
+          const deny = member(r.body, "deny")
 
-          return typeof deny === "string" ? { deny } : next(event)
+          return Predicate.isString(deny) ? { deny } : next(event)
         }
 
         if (r.status < 500) return { deny: `vibest refused the tool call: ${errorOf(r.body) ?? `status ${r.status}`}` }

@@ -19,7 +19,8 @@ const typical = () => {
 
 export const shardOf = <T extends { readonly id: string }>(items: ReadonlyArray<T>, shard: Shard): Array<T> => {
   const fallback = typical()
-  const weight = (item: T) => shardWeights[item.id] ?? fallback
+  const weights = new Map(Object.entries(shardWeights))
+  const weight = (item: T) => weights.get(item.id) ?? fallback
   const bins = Array.from({ length: shard.count }, () => ({ load: 0, items: [] as Array<T> }))
 
   for (const item of [...items].sort((a, b) => weight(b) - weight(a) || a.id.localeCompare(b.id))) {

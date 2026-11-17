@@ -3,6 +3,11 @@ import * as Logging from "@vibest/client/logging"
 import { Cause, ConfigProvider, Effect, Layer, Random } from "effect"
 import { TestConsole } from "effect/testing"
 
+interface Cyclic {
+  readonly name: string
+  self?: Cyclic
+}
+
 const capture = (env: Record<string, string>, program: Effect.Effect<void>) =>
   Effect.gen(function* () {
     yield* program
@@ -45,7 +50,7 @@ describe("Logging.layer", () => {
 
   it.effect("a cyclic value is rendered as [Circular]", () =>
     Effect.gen(function* () {
-      const cyclic: Record<string, unknown> = { name: "a" }
+      const cyclic: Cyclic = { name: "a" }
       cyclic.self = cyclic
       const [line] = yield* capture({}, Effect.logInfo({ cyclic }))
       assert.include(line!, "cyclic.self=[Circular]")

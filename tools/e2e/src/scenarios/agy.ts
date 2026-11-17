@@ -321,7 +321,7 @@ const checks: ReadonlyArray<Check> = [
 
         await until("the entry's own first task completed", settled, 300_000)
 
-        const answered = async (send: () => Promise<unknown>) => {
+        const answered = async <A>(send: () => Promise<A>) => {
           const done = completed(w, entry)
           await send()
           await until("the message's execution completed", () => completed(w, entry) > done && settled(), 300_000)

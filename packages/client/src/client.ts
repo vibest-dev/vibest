@@ -162,14 +162,18 @@ export const HOOK_RETRY_DELAY = Duration.millis(300)
 
 const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOENT"])
 
-const notConnected = (error: unknown) => {
-  if (!Predicate.hasProperty(error, "reason")) return false
+const notConnected = (cause: unknown) => {
+  if (!Predicate.hasProperty(cause, "reason")) return false
 
-  if (!Predicate.isTagged(error.reason, "SocketOpenError") || !Predicate.hasProperty(error.reason, "cause"))
+  if (!Predicate.isTagged(cause.reason, "SocketOpenError") || !Predicate.hasProperty(cause.reason, "cause"))
     return false
-  const cause = error.reason.cause
+  const socketCause = cause.reason.cause
 
-  return Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code) && CONNECT_CODES.has(cause.code)
+  return (
+    Predicate.hasProperty(socketCause, "code") &&
+    Predicate.isString(socketCause.code) &&
+    CONNECT_CODES.has(socketCause.code)
+  )
 }
 
 export const hookCall = <A = void>(

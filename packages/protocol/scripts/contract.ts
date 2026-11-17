@@ -21,26 +21,31 @@ const document = (schema: Schema.Top) => {
 }
 
 const contract = () => {
-  const methods: Record<string, unknown> = {}
+  const methods = Object.fromEntries(
+    [...VibestRpcs.requests]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([tag, rpc]) => {
+        const stream = RpcSchema.isStreamSchema(rpc.successSchema)
+        const success = stream ? rpc.successSchema.success : rpc.successSchema
 
-  for (const [tag, rpc] of [...VibestRpcs.requests].sort(([a], [b]) => a.localeCompare(b))) {
-    const stream = RpcSchema.isStreamSchema(rpc.successSchema)
-    const success = stream ? rpc.successSchema.success : rpc.successSchema
+        const errors = [
+          ...(stream ? [rpc.successSchema.error] : []),
+          rpc.errorSchema,
+          ...[...rpc.middlewares].map((middleware) => middleware.error),
+        ]
 
-    const errors = [
-      ...(stream ? [rpc.successSchema.error] : []),
-      rpc.errorSchema,
-      ...[...rpc.middlewares].map((middleware) => middleware.error),
-    ]
-
-    methods[tag] = {
-      access: ACCESS[tag as keyof typeof ACCESS],
-      stream,
-      payload: document(rpc.payloadSchema),
-      success: document(success),
-      error: document(Schema.Union(errors)),
-    }
-  }
+        return [
+          tag,
+          {
+            access: ACCESS[tag as keyof typeof ACCESS],
+            stream,
+            payload: document(rpc.payloadSchema),
+            success: document(success),
+            error: document(Schema.Union(errors)),
+          },
+        ] as const
+      }),
+  )
 
   return { protocol: PROTOCOL, capabilities: CAPABILITIES, methods }
 }

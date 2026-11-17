@@ -3,7 +3,21 @@ import { fromPromise } from "@vibest/plugin/promise/adapter"
 import { messageOf } from "@vibest/schema/error"
 import { UnknownFact } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
-import { Clock, Config, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
+import {
+  Clock,
+  Config,
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  Latch,
+  Layer,
+  Option,
+  Predicate,
+  Queue,
+  Scope,
+  Stream,
+} from "effect"
 import { SqlError } from "effect/sql"
 
 import { Agents } from "./agents.ts"
@@ -130,10 +144,10 @@ const routed = (before: VibestPlugin.AgentStartBefore, after: VibestPlugin.Agent
 
 const readOnly = <T extends object>(event: T): T => Object.freeze(structuredClone(event))
 
-const decide = (
+const decide = <V>(
   field: string,
-  from: unknown,
-  to: unknown,
+  from: V,
+  to: V,
   plugin: string,
   decidedBy: Record<string, string>,
 ): typeof Change.Type => {
@@ -281,7 +295,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             ? previous.failure!
             : yield* setUp({ ...candidate, plugin }, stats)
 
-      if (typeof outcome !== "string") return { ...base, running: outcome }
+      if (!Predicate.isString(outcome)) return { ...base, running: outcome }
       const failed: Slot = { ...base, failure: outcome, setupFailed: !("error" in plugin) }
       const last = "error" in plugin ? undefined : previous?.running?.candidate
 
@@ -291,7 +305,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 
       const restored = ids.has(last.plugin.id) ? `Duplicate plugin ID: ${last.plugin.id}` : yield* setUp(last, stats)
 
-      return typeof restored === "string"
+      return Predicate.isString(restored)
         ? { ...failed, rollback: `revision ${last.revision} not restored: ${restored}` }
         : { ...failed, running: restored }
     })

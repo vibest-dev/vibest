@@ -68,7 +68,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   const pluginDir = yield* harness.plugin(input.harness)
   yield* unsafeOnly(systemPromptRoot)
 
-  const env: Record<string, string> = {
+  const env = {
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
     VIBEST_COMMAND: encodeCommand(vibest),
@@ -90,7 +90,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
     .pipe(Effect.ignore)
 
-  const commandEnv: Record<string, string> = {
+  const commandEnv = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
     VIBEST_PROJECT_ID: saved.projectId,

@@ -10,7 +10,7 @@ import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { DaemonHandlers } from "@vibest/server/handlers/daemon"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Schema, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
 
@@ -237,7 +237,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
 
-      const piExtensionHook = (call: "Prompt", event: object) =>
+      const piExtensionHook = (call: "Prompt", event: Schema.JsonObject) =>
         Effect.forkScoped(
           Effect.exit(
             raw[call]({ sessionId: id, harness: "pi", event: JSON.stringify(event) }, { headers: protocolHeaders() }),

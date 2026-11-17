@@ -20,7 +20,7 @@ import { NOT_CHECKED } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import { UpdateCheck } from "@vibest/server/update-check"
-import { Effect, FileSystem, Layer, Option, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, Predicate, type Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -56,23 +56,17 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver)
 
-      if (typeof value !== "function") return value
+      if (!Predicate.isFunction(value)) return value
 
-      return (input: unknown, options?: { headers?: Record<string, string> }) => {
+      return (input: { readonly runtime?: string } | undefined, options?: { headers?: Record<string, string> }) => {
         const payload =
-          input !== null &&
-          typeof input === "object" &&
-          !Array.isArray(input) &&
+          input !== undefined &&
           !("runtime" in input) &&
           (prop === "Spawn" || prop === "Launch" || prop === "Project.EntrySession" || prop === "Project.RunningEntry")
             ? { ...input, runtime: TEST_HERDR }
             : input
 
-        return (value as (payload: unknown, options?: { headers?: Record<string, string> }) => unknown).call(
-          target,
-          payload,
-          { ...options, headers: { ...headers, ...options?.headers } },
-        )
+        return value.call(target, payload, { ...options, headers: { ...headers, ...options?.headers } })
       }
     },
   })
@@ -237,7 +231,7 @@ export const stopRecorded = (daemonInfo: string) =>
     yield* Effect.promise(() => endDaemonPid(running.pid))
   }).pipe(Effect.ignore)
 
-export type Line = Record<string, unknown>
+export type Line = Schema.JsonObject
 
 export interface Wire {
   readonly send: (message: Line) => Effect.Effect<void>

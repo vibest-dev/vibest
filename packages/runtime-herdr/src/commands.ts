@@ -5,7 +5,7 @@ import { isLimited } from "@vibest/plugin/effect"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { VibestCommand } from "@vibest/schema/layout"
-import { Config, Console, Effect, Option, Schema } from "effect"
+import { Config, Console, Effect, Option, Predicate, Schema } from "effect"
 import { Command } from "effect/cli"
 
 import { agentName, KIND, parseTerminal } from "./terminal-runtime.ts"
@@ -58,23 +58,29 @@ export interface HerdrDaemon<E = never, R = never> {
   readonly usage: () => Step<ReadonlyArray<UsageWindow> | undefined, E, R>
 }
 
-const field = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
+const field = (value: Schema.Json | undefined) => (Predicate.isString(value) && value !== "" ? value : undefined)
+
+const decodeJson = Schema.decodeEffect(Schema.fromJsonString(Schema.Json))
+
+const decodeContext = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    workspace_id: Schema.optionalKey(Schema.Json),
+    workspace_cwd: Schema.optionalKey(Schema.Json),
+    focused_pane_id: Schema.optionalKey(Schema.Json),
+    focused_pane_cwd: Schema.optionalKey(Schema.Json),
+    focused_pane_agent: Schema.optionalKey(Schema.Json),
+  }),
+)
 
 export const parsePluginContext = (raw: string) =>
   Effect.gen(function* () {
-    let parsed: unknown
+    const parsed = yield* decodeJson(raw).pipe(
+      Effect.mapError(() => new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not JSON" })),
+    )
 
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      return yield* new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not JSON" })
-    }
-
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return yield* new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not an object" })
-    }
-
-    const record = parsed as Record<string, unknown>
+    const record = yield* decodeContext(parsed).pipe(
+      Effect.mapError(() => new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not an object" })),
+    )
 
     return {
       workspaceId: field(record.workspace_id),

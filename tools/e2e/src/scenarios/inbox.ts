@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
@@ -39,6 +41,13 @@ import {
   until,
   type World,
 } from "../world.ts"
+
+interface Taken {
+  execution: number
+  ids: Array<number>
+  line: string
+  text: string
+}
 
 type Entry = { id: string; agent: string }
 
@@ -221,7 +230,7 @@ export const curl = async (
   route: string,
   who: { entryId: string; projectId: number | string; protocol?: string },
   harness = "claude",
-  body: object = {},
+  body: Schema.JsonObject = {},
 ) => {
   const headers = {
     "vibest-protocol": who.protocol ?? String(PROTOCOL),
@@ -449,7 +458,7 @@ const checks: ReadonlyArray<Check> = [
         const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
 
-        let taken: { execution: number; ids: Array<number>; line: string; text: string } = {
+        let taken: Taken = {
           execution: 0,
           ids: [],
           line: "",

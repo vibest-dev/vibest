@@ -1,6 +1,6 @@
 import { InboxMoved, InboxQueued, type InboxKind } from "@vibest/schema/event"
 import { InboxRow, InboxStatus } from "@vibest/schema/session"
-import { Clock, Effect } from "effect"
+import { Clock, Effect, Predicate } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { nextBatch } from "../batch.ts"
@@ -312,7 +312,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         }>`SELECT session_id AS recipient, sender_session_id AS sender FROM inbox
           WHERE session_id = ${sessionId} AND id = ${inboxId}`.pipe(
           Effect.map((rows) =>
-            [rows[0]?.recipient, rows[0]?.sender].filter((id): id is string => typeof id === "string"),
+            [rows[0]?.recipient, rows[0]?.sender].filter((id): id is string => Predicate.isString(id)),
           ),
           Effect.orDie,
         ),

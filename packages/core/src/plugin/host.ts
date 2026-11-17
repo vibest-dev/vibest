@@ -1,6 +1,6 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Catalog, type FactOf, type FactType } from "@vibest/schema/event"
-import { Effect, Stream } from "effect"
+import { Effect, Predicate, Stream } from "effect"
 
 import { Agents } from "../agents.ts"
 import { Bus } from "../bus.ts"
@@ -37,8 +37,8 @@ const factsFor =
 
 export interface Input {
   readonly plugin: string
-  readonly activation: object
-  readonly options: Readonly<Record<string, unknown>>
+  readonly activation: Hooks.Activation
+  readonly options: VibestPlugin.PluginOptions
   readonly stats: Hooks.Stats
 }
 
@@ -58,7 +58,7 @@ export const make = Effect.gen(function* () {
     ) => hooks.register(name, { plugin, activation, stats, runtime, callback })
 
     const hook: VibestPlugin.AgentDomain["hook"] = (short, callback) => {
-      if (typeof short !== "string" || !HOOKS.includes(short)) {
+      if (!Predicate.isString(short) || !HOOKS.includes(short)) {
         return Effect.die(
           new Error(
             `unsupported hook ${JSON.stringify(`agent.${String(short)}`)}; supported: ${HOOKS.map((s) => `agent.${s}`).join(", ")}`,

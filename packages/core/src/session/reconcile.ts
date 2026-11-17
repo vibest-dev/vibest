@@ -1,6 +1,6 @@
 import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
 import { shortId } from "@vibest/schema/id"
-import { Clock, Context, Duration, Effect, Layer, Option, Ref } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
 import {
@@ -111,7 +111,7 @@ export const make = Effect.gen(function* () {
         const reportedPid = session.process?.pid
 
         return (
-          !terminalRunning || (typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited")
+          !terminalRunning || (Predicate.isNumber(reportedPid) && (yield* processes.liveness(reportedPid)) === "exited")
         )
       }))
 

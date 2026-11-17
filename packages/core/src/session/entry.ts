@@ -1,4 +1,5 @@
 import { Layout, VibestCommand } from "@vibest/schema/layout"
+import type { Routing } from "@vibest/schema/plugin"
 import {
   addPluginHint,
   describeSpawn,
@@ -339,7 +340,7 @@ const make = Effect.gen(function* () {
     readonly runtime: string | undefined
     readonly provider: string | undefined
     readonly model: string | undefined
-    readonly routing: unknown
+    readonly routing: Routing | undefined
     readonly pid: number | undefined
     readonly agent: string
   }) {

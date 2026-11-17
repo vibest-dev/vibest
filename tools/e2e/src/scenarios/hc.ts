@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { binary, expect, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
@@ -76,7 +78,7 @@ export const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
 const configureRuntime = async (w: World, runtime: string | undefined) => {
   const file = path.join(w.vibestHome, "vibest.json")
   const before = await fs.readFile(file, "utf8").catch(() => undefined)
-  const config = before === undefined ? {} : (JSON.parse(before) as Record<string, unknown>)
+  const config = before === undefined ? {} : (JSON.parse(before) as Schema.JsonObject)
   await fs.writeFile(file, JSON.stringify({ ...config, runtime }))
 
   return () => (before === undefined ? fs.rm(file, { force: true }) : fs.writeFile(file, before))

@@ -1,5 +1,7 @@
 import path from "node:path"
 
+import { Predicate } from "effect"
+
 const allowed = {
   schema: [],
   plugin: ["@vibest/schema"],
@@ -57,7 +59,7 @@ const isHandoff = (file, node, source) =>
   node.specifiers[0].imported.name === handoff.name
 
 const specifierOf = (source) => {
-  if (typeof source?.value === "string") return source.value
+  if (Predicate.isString(source?.value)) return source.value
 
   if (source?.type === "TemplateLiteral" && source.expressions.length === 0) return source.quasis[0].value.cooked
 

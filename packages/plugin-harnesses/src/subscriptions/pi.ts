@@ -1,12 +1,12 @@
 import type { Harness } from "@vibest/plugin/effect"
 import type { SubscriptionAccount } from "@vibest/schema/subscription"
-import { Effect } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 
 import { parseJson, record, runCli, type Spawner } from "./index.ts"
 
-export const piAccount = (check: unknown): SubscriptionAccount => {
+export const piAccount = (check: Schema.Json | undefined): SubscriptionAccount => {
   const c = record(check)
-  const provider = typeof c?.provider === "string" ? c.provider : undefined
+  const provider = Predicate.isString(c?.provider) ? c.provider : undefined
 
   const withProvider = (a: SubscriptionAccount): SubscriptionAccount =>
     provider === undefined ? a : { ...a, provider }

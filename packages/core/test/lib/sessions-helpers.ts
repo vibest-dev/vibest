@@ -58,16 +58,12 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   })
 
 export const claudeEnd = (reason: string) =>
-  (
-    CLAUDE.executionEnd!({
-      hook_event_name: "ExecutionComplete",
-      session_id: "c1",
-      reason,
-      last_assistant_message: "",
-    }) as {
-      readonly end: object
-    }
-  ).end
+  CLAUDE.executionEnd!({
+    hook_event_name: "ExecutionComplete",
+    session_id: "c1",
+    reason,
+    last_assistant_message: "",
+  })!.end
 
 export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {

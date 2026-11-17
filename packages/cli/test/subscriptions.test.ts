@@ -133,7 +133,7 @@ const fakeMachine = (options: {
 
       const ctx = {
         harness: {
-          transform: (edit: (e: typeof editor) => unknown) => Effect.sync(() => (edit(editor), registration)),
+          transform: (edit: (e: typeof editor) => void) => Effect.sync(() => (edit(editor), registration)),
         },
       } as unknown as Parameters<typeof plugin.effect>[0]
 
@@ -196,7 +196,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         "fake keychain; no real CLI",
       )
 
-      const commands: Record<string, string> = {
+      const commands = {
         "claude auth status --json": claudeStatus,
         "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
         "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),

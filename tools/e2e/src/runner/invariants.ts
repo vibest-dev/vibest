@@ -3,6 +3,8 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import { userFilesRead } from "../world/shadow.ts"
 import { historyFiles } from "../world/user-env.ts"
 
@@ -14,7 +16,7 @@ const contentHash = async (file: string, keys: ReadonlyArray<string> | undefined
   const hashed =
     keys === undefined
       ? bytes
-      : JSON.stringify(keys.map((k) => [k, (JSON.parse(bytes.toString("utf8")) as Record<string, unknown>)[k]]))
+      : JSON.stringify(keys.map((k) => [k, (JSON.parse(bytes.toString("utf8")) as Schema.JsonObject)[k]]))
 
   return crypto.createHash("sha256").update(hashed).digest("hex")
 }

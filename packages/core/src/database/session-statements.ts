@@ -51,8 +51,10 @@ type ProcessColumns = {
 
 const encodeRouting = Schema.encodeSync(Routing)
 
-const routingJson = (routing: unknown) =>
-  routing === undefined || routing === null ? null : JSON.stringify(encodeRouting(routing as Routing))
+const decodeRoutingJson = Schema.decodeSync(Schema.fromJsonString(Routing))
+
+const routingJson = (routing: Routing | undefined) =>
+  routing === undefined ? null : JSON.stringify(encodeRouting(routing))
 
 const currentOf = (row: ProcessColumns): Current => ({
   id: row.id,
@@ -60,7 +62,7 @@ const currentOf = (row: ProcessColumns): Current => ({
     harness: row.harness,
     ...(row.provider !== null && { provider: row.provider }),
     ...(row.model !== null && { model: row.model }),
-    ...(row.routing !== null && { routing: JSON.parse(row.routing) as unknown }),
+    ...(row.routing !== null && { routing: decodeRoutingJson(row.routing) }),
     runtime: row.runtime,
     terminal: row.terminal ?? "",
     ...(row.pid !== null && { pid: row.pid }),
@@ -253,7 +255,7 @@ export const statements = Effect.gen(function* () {
           harness: start.harness,
           ...(start.provider && { provider: start.provider }),
           ...(start.model && { model: start.model }),
-          ...(start.routing !== undefined && start.routing !== null && { routing: start.routing as Routing }),
+          ...(start.routing !== undefined && { routing: start.routing }),
           ...(start.resume && { resume: start.resume }),
           runtime: start.runtime,
           ...(start.terminal !== "" && { terminal: start.terminal }),

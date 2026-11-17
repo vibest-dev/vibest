@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/plugin/effect"
+import type { Schema } from "effect"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
@@ -78,8 +79,7 @@ describe("HarnessAdapter", () => {
   })
 
   it("agy's tool calls reach the guard in the shape it reads; a tool it has no rule for is not asked", () => {
-    const call = (name: string, args: Record<string, unknown>) =>
-      agy.guardCall!({ cwd: "/w", toolCall: { name, args } })
+    const call = (name: string, args: Schema.JsonObject) => agy.guardCall!({ cwd: "/w", toolCall: { name, args } })
 
     assert.deepStrictEqual(call("run_command", { CommandLine: "ls", Cwd: "/w/sub" }), {
       cwd: "/w",
@@ -235,8 +235,9 @@ describe("HarnessAdapter", () => {
     assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }), { text: "look here" })
     assert.isUndefined(userPrompt({ ...typed, text: "  " }))
 
-    for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified", undefined])
-      assert.isUndefined(userPrompt({ ...typed, origin }), String(origin))
+    for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified"])
+      assert.isUndefined(userPrompt({ ...typed, origin }), origin)
+    assert.isUndefined(userPrompt({ hook_event_name: typed.hook_event_name, text: typed.text }), "no origin")
     assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }))
   })
 
@@ -279,7 +280,7 @@ describe("harness output", () => {
   })
 
   it("model lists: each harness's own output, its run-without-model choice marked default", () => {
-    const j = (v: unknown) => JSON.stringify(v)
+    const j = (v: Schema.Json) => JSON.stringify(v)
 
     const claudeList = j({
       type: "control_response",

@@ -1,4 +1,4 @@
-import { Config, Effect, Formatter, Layer, Logger, Option, Random, References } from "effect"
+import { Config, Effect, Formatter, Layer, Logger, Option, Predicate, Random, References } from "effect"
 
 const logfmt = (run: string) =>
   Logger.map(Logger.formatStructured, (output) => {
@@ -8,7 +8,11 @@ const logfmt = (run: string) =>
       ["timestamp", output.timestamp],
       ["level", output.level],
       ["run", run],
-      ...messages.flatMap((value) => (plain(value) ? flatten(value) : [["message", value] as const])),
+      ...messages.flatMap((value) => {
+        const record = plainRecord(value)
+
+        return record === undefined ? [["message", value] as const] : flatten(record)
+      }),
       ...(output.cause === undefined ? [] : [["cause", output.cause] as const]),
       ...flatten(output.spans),
       ...flatten(output.annotations),
@@ -17,8 +21,13 @@ const logfmt = (run: string) =>
       .join(" ")
   })
 
-function flatten(
-  input: Record<string, unknown>,
+const plainPrototypes: ReadonlySet<object | null> = new Set([Object.prototype, null])
+
+const plainRecord = <A>(value: A) =>
+  Predicate.isObject(value) && plainPrototypes.has(Object.getPrototypeOf(value)) ? value : undefined
+
+function flatten<V>(
+  input: { readonly [key: string]: V },
   prefix = "",
   seen = new WeakSet<object>(),
 ): Array<readonly [string, unknown]> {
@@ -30,20 +39,14 @@ function flatten(
 
   return entries.flatMap(([key, value]) => {
     const path = prefix ? `${prefix}.${key}` : key
+    const record = plainRecord(value)
 
-    return plain(value) ? flatten(value, path, seen) : [[path, value] as const]
+    return record === undefined ? [[path, value] as const] : flatten(record, path, seen)
   })
 }
 
-function plain(input: unknown): input is Record<string, unknown> {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return false
-  const prototype = Object.getPrototypeOf(input)
-
-  return prototype === Object.prototype || prototype === null
-}
-
-function format(input: unknown) {
-  const value = typeof input === "string" ? input : Formatter.format(input)
+function format<A>(input: A) {
+  const value = Predicate.isString(input) ? input : Formatter.format(input)
 
   return /^[^\s="\\]+$/.test(value) ? value : JSON.stringify(value)
 }

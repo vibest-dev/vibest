@@ -32,6 +32,7 @@ import {
   Option,
   Path,
   Queue,
+  type Schema,
   Stdio,
   Terminal,
 } from "effect"
@@ -49,7 +50,7 @@ import { Host as CliHost } from "../src/host.ts"
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const RUNTIME_PROGRAMS = new Set(["herdr"])
 
-const bareGuard = (agent: string, tool: string, input: Record<string, unknown>) =>
+const bareGuard = (agent: string, tool: string, input: Schema.JsonObject) =>
   guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, input, "/")
 
 const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAMS)
@@ -220,7 +221,7 @@ describe("Shell denials", () => {
 
 const guardOf =
   (vibestHome: string, home: string, agent: string, projectDir: string) =>
-  (tool: string, input: Record<string, unknown>, cwd: string) =>
+  (tool: string, input: Schema.JsonObject, cwd: string) =>
     check(
       { id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", agent, projectDir },
       JSON.stringify({ tool_name: tool, tool_input: input, cwd }),
@@ -250,7 +251,7 @@ layer(
       yield* fs.makeDirectory(other, { recursive: true })
       yield* fs.symlink(other, path.join(own, "artifacts", "out"))
 
-      const asCoordinator = (tool: string, input: Record<string, unknown>, dir: string = own) =>
+      const asCoordinator = (tool: string, input: Schema.JsonObject, dir: string = own) =>
         guardOf(vibestHome, home, "coordinator", dir)(tool, input, home)
 
       for (const [tool, input] of [
@@ -336,12 +337,12 @@ layer(
       yield* fs.writeFileString(path.join(work, "file.txt"), "x")
       yield* fs.writeFileString(path.join(own, "artifacts", "file.txt"), "x")
 
-      const asSession = (tool: string, input: Record<string, unknown>) =>
+      const asSession = (tool: string, input: Schema.JsonObject) =>
         guardOf(vibestHome, home, "general", own)(tool, input, work)
 
       assert.isUndefined(yield* asSession("Bash", { command: `cat ${path.join(work, "file.txt")}/x` }))
 
-      const asCoordinator = (input: Record<string, unknown>) =>
+      const asCoordinator = (input: Schema.JsonObject) =>
         guardOf(vibestHome, home, "coordinator", own)("Write", input, work)
 
       assert.isUndefined(
@@ -370,7 +371,7 @@ layer(
             yield* fs.makeDirectory(path.join(dir, kind), { recursive: true })
         const missing = path.join(projects, "missing")
 
-        const asSession = (tool: string, input: Record<string, unknown>, dir: string | null = own) =>
+        const asSession = (tool: string, input: Schema.JsonObject, dir: string | null = own) =>
           guardOf(vibestHome, home, "general", dir ?? missing)(tool, input, worktree)
 
         const offLimits =
@@ -479,7 +480,7 @@ layer(
         yield* fs.symlink(path.join(other, "docs", "sub"), path.join(work, "deep"))
         yield* fs.symlink(path.join(project, "docs", "sub"), path.join(work, "mine"))
 
-        const asSession = (tool: string, input: Record<string, unknown>) =>
+        const asSession = (tool: string, input: Schema.JsonObject) =>
           guardOf(vibestHome, home, "general", project)(tool, input, home)
 
         const tilde = "~/.vibest/projects/own/artifacts/w1"
@@ -621,7 +622,7 @@ layer(
       const project = path.join(vibestHome, "projects", "own")
       yield* fs.makeDirectory(project, { recursive: true })
 
-      const as = (tool: string, input: Record<string, unknown>) =>
+      const as = (tool: string, input: Schema.JsonObject) =>
         guardOf(vibestHome, home, "coordinator", project)(tool, input, project)
 
       for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit"]) {

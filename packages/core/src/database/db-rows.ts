@@ -163,7 +163,7 @@ export type ProcessStart = {
   readonly harness: string
   readonly provider?: string
   readonly model?: string
-  readonly routing?: unknown
+  readonly routing?: Routing
   readonly runtime: string
   readonly terminal: string
   readonly resume?: string

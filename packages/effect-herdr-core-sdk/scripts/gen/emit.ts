@@ -1,15 +1,51 @@
-export type JSONSchema = Record<string, any>
+import { Predicate, Schema } from "effect"
 
-export interface OpenRpc {
-  readonly info: { readonly version: string; readonly description: string }
-  readonly methods: ReadonlyArray<{
-    readonly name: string
-    readonly params: ReadonlyArray<{ readonly name: string; readonly required?: boolean; readonly schema: JSONSchema }>
-    readonly result: { readonly schema: JSONSchema }
-    readonly errors: ReadonlyArray<{ readonly data?: { readonly kind?: string } }>
-  }>
-  readonly components: { readonly schemas: Record<string, JSONSchema> }
+export interface JSONSchema {
+  readonly $ref?: string
+  readonly enum?: ReadonlyArray<Schema.Json>
+  readonly anyOf?: ReadonlyArray<SchemaNode>
+  readonly oneOf?: ReadonlyArray<SchemaNode>
+  readonly type?: string | ReadonlyArray<string>
+  readonly properties?: { readonly [name: string]: SchemaNode }
+  readonly required?: ReadonlyArray<string>
+  readonly additionalProperties?: SchemaNode
+  readonly items?: SchemaNode
 }
+
+type SchemaNode = JSONSchema | boolean
+
+const Node: Schema.Codec<SchemaNode> = Schema.suspend(() => Schema.Union([JSONSchema, Schema.Boolean]))
+
+const JSONSchema: Schema.Codec<JSONSchema> = Schema.Struct({
+  $ref: Schema.optionalKey(Schema.String),
+  enum: Schema.optionalKey(Schema.Array(Schema.Json)),
+  anyOf: Schema.optionalKey(Schema.Array(Node)),
+  oneOf: Schema.optionalKey(Schema.Array(Node)),
+  type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+  properties: Schema.optionalKey(Schema.Record(Schema.String, Node)),
+  required: Schema.optionalKey(Schema.Array(Schema.String)),
+  additionalProperties: Schema.optionalKey(Node),
+  items: Schema.optionalKey(Node),
+})
+
+export const OpenRpc = Schema.Struct({
+  info: Schema.Struct({ version: Schema.String, description: Schema.String }),
+  methods: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      params: Schema.Array(
+        Schema.Struct({ name: Schema.String, required: Schema.optionalKey(Schema.Boolean), schema: Node }),
+      ),
+      result: Schema.Struct({ schema: Node }),
+      errors: Schema.Array(
+        Schema.Struct({ data: Schema.optionalKey(Schema.Struct({ kind: Schema.optionalKey(Schema.String) })) }),
+      ),
+    }),
+  ),
+  components: Schema.Struct({ schemas: Schema.Record(Schema.String, Node) }),
+})
+
+export type OpenRpc = typeof OpenRpc.Type
 
 interface Emitted {
   readonly ts: string
@@ -60,32 +96,38 @@ export const struct = (
 })
 
 const object = (s: JSONSchema): Emitted => {
-  const props: Record<string, JSONSchema> = s.properties ?? {}
+  const props = s.properties ?? {}
 
   if (Object.keys(props).length === 0)
-    return record(typeof s.additionalProperties === "object" ? emit(s.additionalProperties) : UNKNOWN)
-  const required = new Set<string>(s.required ?? [])
+    return record(
+      s.additionalProperties !== undefined && !Predicate.isBoolean(s.additionalProperties)
+        ? emit(s.additionalProperties)
+        : UNKNOWN,
+    )
+  const required = new Set(s.required ?? [])
 
   return struct(Object.entries(props).map(([name, v]) => ({ name, optional: !required.has(name), value: emit(v) })))
 }
 
-export const emit = (s: JSONSchema): Emitted => {
-  if (typeof s.$ref === "string") {
+export const emit = (s: SchemaNode): Emitted => {
+  if (Predicate.isBoolean(s)) return UNKNOWN
+
+  if (s.$ref !== undefined) {
     if (!s.$ref.startsWith(COMPONENT_REF)) return UNKNOWN
     const name = s.$ref.slice(COMPONENT_REF.length)
 
     return { ts: name, schema: `Schema.suspend((): Schema.Codec<${name}> => ${name})` }
   }
 
-  if (Array.isArray(s.enum))
+  if (s.enum !== undefined)
     return {
-      ts: s.enum.map((v: unknown) => JSON.stringify(v)).join(" | "),
-      schema: `Schema.Literals([${s.enum.map((v: unknown) => JSON.stringify(v)).join(", ")}])`,
+      ts: s.enum.map((v) => JSON.stringify(v)).join(" | "),
+      schema: `Schema.Literals([${s.enum.map((v) => JSON.stringify(v)).join(", ")}])`,
     }
-  const alternatives: ReadonlyArray<JSONSchema> | undefined = s.anyOf ?? s.oneOf
+  const alternatives = s.anyOf ?? s.oneOf
 
   if (alternatives !== undefined) {
-    const nonNull = alternatives.filter((a) => a.type !== "null")
+    const nonNull = alternatives.filter((a) => Predicate.isBoolean(a) || a.type !== "null")
 
     const inner =
       nonNull.length === 1
@@ -98,7 +140,7 @@ export const emit = (s: JSONSchema): Emitted => {
     return nonNull.length === alternatives.length ? inner : nullable(inner)
   }
 
-  const types: ReadonlyArray<string> = Array.isArray(s.type) ? s.type : s.type ? [s.type] : []
+  const types = Predicate.isString(s.type) ? (s.type ? [s.type] : []) : (s.type ?? [])
 
   if (types.length === 0) return s.properties ? object(s) : UNKNOWN
   const nonNull = types.filter((t) => t !== "null")
@@ -126,7 +168,9 @@ export const emitApi = (doc: OpenRpc, generation: number, minimum: string): stri
     const result = emit(m.result.schema)
 
     const resultName =
-      typeof m.result.schema.$ref === "string" && result.ts !== "unknown" ? result.ts : `${pascal(m.name)}Result`
+      !Predicate.isBoolean(m.result.schema) && m.result.schema.$ref !== undefined && result.ts !== "unknown"
+        ? result.ts
+        : `${pascal(m.name)}Result`
 
     const kinds = [...new Set(m.errors.flatMap((e) => (e.data?.kind ? [e.data.kind] : [])))]
 

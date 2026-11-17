@@ -147,7 +147,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
       ...(error.data?.hint !== undefined && { hint: error.data.hint }),
     })
 
-  const open = (method: string, params: unknown) =>
+  const open = <M extends Method>(method: M, params: ParamsOf<M>) =>
     Effect.gen(function* () {
       const id = ++nextId
       const socket = yield* connect(socketPath)
@@ -169,8 +169,8 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
   const response = (method: string, id: number) => (m: Message) =>
     m.method === undefined && (m.id === id || m.id === null)
 
-  const decodeResult = <M extends Method>(method: M, raw: unknown) =>
-    Schema.decodeUnknownEffect(METHODS[method].result as Schema.Codec<ResultOf<M>>)(raw).pipe(
+  const decodeResult = <M extends Method>(method: M, message: Message) =>
+    Schema.decodeUnknownEffect(METHODS[method].result as Schema.Codec<ResultOf<M>>)(message.result).pipe(
       Effect.mapError((e) => new HcTransportError({ method, message: `the result does not match hc schema: ${e}` })),
     )
 
@@ -184,7 +184,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
 
       if (found.value.error) return yield* serverError(method, found.value.error)
 
-      return yield* decodeResult(method, found.value.result)
+      return yield* decodeResult(method, found.value)
     }).pipe(Effect.scoped)
 
   const hello = call("hello", {}).pipe(
@@ -243,7 +243,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
           if (response(method, id)(m))
             return m.error
               ? Effect.fail(serverError(method, m.error))
-              : decodeResult(method, m.result).pipe(Effect.map((result) => ({ _tag: "Subscribed" as const, result })))
+              : decodeResult(method, m).pipe(Effect.map((result) => ({ _tag: "Subscribed" as const, result })))
 
           if (m.method === "event")
             return decodeEvent(m.params).pipe(

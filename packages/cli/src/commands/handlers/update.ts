@@ -5,7 +5,7 @@ import { Config, Console, Duration, Effect, FileSystem, Match, Option } from "ef
 
 import { userOnly } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
-import { compareVersions, replaceAnyway, versionOf } from "../../replace.ts"
+import { compareVersions, replaceAnyway, type Target, versionOf } from "../../replace.ts"
 import {
   daemonPlan,
   extraVibests,
@@ -29,7 +29,7 @@ export default Runtime.handler(Commands.commands.update, ({ yes, restartAgentsAf
     const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
     const layout = yield* Layout
 
-    let target: { readonly version: string; readonly command: ReadonlyArray<string> } = {
+    let target: Target = {
       version: VERSION,
       command: self,
     }

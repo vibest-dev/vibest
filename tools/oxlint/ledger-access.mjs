@@ -1,3 +1,5 @@
+import { Predicate } from "effect"
+
 const isSource = (file) => /\/packages\/.+\/src\//.test(file) && !file.endsWith(".test.ts")
 const normalized = (context) => context.filename.replaceAll("\\", "/")
 
@@ -8,7 +10,7 @@ const textRule = ({ matches, exempt, message }) => ({
     if (!isSource(file) || exempt.some((part) => file.includes(part))) return {}
 
     const check = (node, text) => {
-      if (typeof text === "string" && matches(text)) context.report({ node, message })
+      if (Predicate.isString(text) && matches(text)) context.report({ node, message })
     }
 
     return {
@@ -42,7 +44,7 @@ const eventReads = {
     const message = "Only the bus reads the event table and its local position."
 
     const check = (node, text) => {
-      if (typeof text === "string" && (eventTable.test(text) || position.test(text))) context.report({ node, message })
+      if (Predicate.isString(text) && (eventTable.test(text) || position.test(text))) context.report({ node, message })
     }
 
     return {
@@ -88,7 +90,7 @@ const projectorWrites = {
     const approvedWrite = approvedOperations(file, [openingWrite])
 
     const check = (node, text) => {
-      if (typeof text === "string" && writeStatement.test(text) && !approvedWrite(text))
+      if (Predicate.isString(text) && writeStatement.test(text) && !approvedWrite(text))
         context.report({ node, message: writeMessage })
     }
 
