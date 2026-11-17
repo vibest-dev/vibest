@@ -191,11 +191,12 @@ export const statements = Effect.gen(function* () {
   const fromOldProcess = (id: string, process: number | undefined) =>
     Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
 
-  const endProcess = (id: string, reason: ProcessEndReason, at?: number) =>
+  const endProcess = (id: string, reason: ProcessEndReason, at?: number, process?: number) =>
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
 
-      if (current === undefined || current.ended !== null) return false
+      if (current === undefined || current.ended !== null || (process !== undefined && process !== current.id))
+        return false
       yield* publish(ProcessEnded, {
         sessionId: id,
         ...(at !== undefined && { at }),
@@ -348,12 +349,6 @@ export const statements = Effect.gen(function* () {
       JOIN process p ON p.session_id = s.id AND p.id = s.process_id
       WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL`
 
-  const sessionAt = (runtime: string, address: RuntimeAddress) =>
-    sql<{ id: string }>`SELECT s.id FROM session s JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-      WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL
-      ORDER BY s.created_at, s.id
-      LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
-
   const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
@@ -439,7 +434,6 @@ export const statements = Effect.gen(function* () {
     noteConversation,
     endExecution,
     setStatus,
-    sessionAt,
     entrySessionsAt,
     processesAt,
     unusedId,

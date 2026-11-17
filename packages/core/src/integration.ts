@@ -42,11 +42,16 @@ const make = Effect.gen(function* () {
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
 
-  const terminalClosed = (id: string) =>
+  const terminalClosed = (who: HookCaller) =>
     Effect.gen(function* () {
-      const session = yield* db.session.getSession(id)
+      const session = yield* db.session.getSession(who.id)
 
-      if (session === undefined || terminalOf(session).id === "") return false
+      if (
+        session === undefined ||
+        terminalOf(session).id === "" ||
+        (who.process !== undefined && who.process !== session.process?.id)
+      )
+        return false
       const runtime = yield* runtimes.route(runtimeOf(session)).pipe(Effect.option)
 
       return Option.isSome(runtime) && !(yield* alive(runtime.value, terminalOf(session)))
@@ -60,10 +65,10 @@ const make = Effect.gen(function* () {
 
     if (!end) return yield* noteConversation(definition, who, raw)
 
-    if (end.status === "interrupted" && (yield* terminalClosed(who.id))) {
+    if (end.status === "interrupted" && (yield* terminalClosed(who))) {
       yield* Effect.log(`execution end ${who.id} (${end.harness}, interrupted as its terminal closed: an exit)`)
 
-      return yield* sessions.check(who.id)
+      return yield* sessions.check(who.id, who.process)
     }
 
     const written = yield* db.session.endObserved(who.id, end, who.process)

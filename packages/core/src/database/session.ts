@@ -392,10 +392,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ),
       ),
 
-      sessionAt: Effect.fn("Db.session.sessionAt")((runtime: string, address: RuntimeAddress) =>
-        session.sessionAt(runtime, address).pipe(Effect.orDie),
-      ),
-
       startEntry: Effect.fn("Db.session.startEntry")(
         (
           project: string,
@@ -622,8 +618,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(ensureProcess(id, start)).pipe(Effect.orDie),
       ),
 
-      endProcess: Effect.fn("Db.session.endProcess")((id: string, reason: ProcessEndReason) =>
-        tx(endProcess(id, reason)).pipe(Effect.orDie),
+      endProcess: Effect.fn("Db.session.endProcess")((id: string, reason: ProcessEndReason, process?: number) =>
+        tx(endProcess(id, reason, undefined, process)).pipe(Effect.orDie),
       ),
 
       detachEntry: Effect.fn("Db.session.detachEntry")(
@@ -652,13 +648,12 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(
           Effect.forEach(exited, ({ sessionId, process }) =>
             Effect.gen(function* () {
-              const [entry] = yield* sql<{ project: string }>`SELECT q.id AS project FROM project q
-                JOIN session s ON s.id = q.entry_session_id
-                WHERE s.id = ${sessionId} AND s.process_id = ${process}`
+              const [entry] = yield* sql<{ project: string }>`SELECT id AS project FROM project
+                WHERE entry_session_id = ${sessionId}`
 
               if (entry === undefined || moving.has(entry.project)) return
-              yield* endProcess(sessionId, "exited")
-              yield* dropWaiting(entry.project)
+
+              if (yield* endProcess(sessionId, "exited", undefined, process)) yield* dropWaiting(entry.project)
             }),
           ),
         ).pipe(Effect.asVoid, Effect.orDie),

@@ -33,6 +33,7 @@ export type Signal =
       readonly runtime: string
       readonly terminal: RuntimeAddress
       readonly state: Runtime.AgentState
+      readonly processes: ReadonlyArray<BoundProcess>
     }
   | {
       readonly type: "terminal.exited"

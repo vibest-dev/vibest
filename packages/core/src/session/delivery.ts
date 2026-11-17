@@ -203,7 +203,7 @@ export const make = Effect.gen(function* () {
     if (state !== undefined && busy(state)) return
 
     if (state === undefined && !(yield* alive(h, terminal))) {
-      if (exitedAt(session) === null) return yield* exits.settle(h, id)
+      if (exitedAt(session) === null) return yield* exits.settle(h, id, session.process?.id)
 
       if ((yield* db.inbox.pendingInbox(id)).length === 0) return
 

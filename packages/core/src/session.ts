@@ -133,7 +133,7 @@ export interface Interface {
   readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
   readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
   readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
-  readonly check: (id: string) => Effect.Effect<void>
+  readonly check: (id: string, bound?: number) => Effect.Effect<void>
   readonly userPrompt: (id: string, text: string, at?: number, process?: number) => Effect.Effect<void>
   readonly typeTaken: (id: string, execution: number) => Effect.Effect<void>
   readonly republish: Effect.Effect<number>

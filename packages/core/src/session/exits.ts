@@ -98,8 +98,10 @@ export const make = Effect.gen(function* () {
         yield* db.session.closeExecution(session.id, execution, "failed", { failure: "the harness exited" })
     } else if (announce) yield* announceExit(session, execution)
 
-    if (exitedAt(session) === null) {
-      yield* db.session.endProcess(session.id, cutOff ? "launch_failed" : "exited")
+    if (
+      exitedAt(session) === null &&
+      (yield* db.session.endProcess(session.id, cutOff ? "launch_failed" : "exited", session.process?.id))
+    ) {
       yield* db.session.setStatus(session.id, "unknown")
       yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
     }
@@ -113,10 +115,10 @@ export const make = Effect.gen(function* () {
       )
   })
 
-  const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string) {
+  const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string, process: number | undefined) {
     const session = yield* db.session.getSession(id)
 
-    if (session === undefined) return
+    if (session === undefined || session.process?.id !== process) return
     const execution = executionStateOf(session) === "open" ? yield* db.session.openExecution(session.id) : undefined
     const limited = yield* limitOf(session)
 

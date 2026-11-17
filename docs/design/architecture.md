@@ -404,10 +404,12 @@ How these modules keep the rules:
   A harness whose reported
   pid has died is an exit even when that report still says the terminal is running: a launch herdr has not finished
   keeps saying so after the process was killed. A terminal the runtime cannot
-  find is. A terminal's exit event is bound, as vibestd receives it from the runtime, to the processes vibestd
-  had recorded at that terminal (`terminal.exited` carries them), and clearing an entry session acts only on a bound
-  process that is still the session's current one: the event is handled later, and by then `vibest` typed in the same
-  pane may have started the entry session again, whose new process must keep running. An execution counts
+  find is. A terminal's exit and state events are bound, as vibestd receives them from the runtime, to the
+  processes vibestd had recorded at that terminal (`terminal.exited` and `terminal.state` carry them). Ending a process
+  names the process it means (`endProcess` does nothing once another process is the session's current one): clearing an
+  entry session passes the bound process, a check woken by a bound event checks only that process, and an exit a check
+  records passes the process its session snapshot read. The event or the check is handled later, and by then `vibest`
+  typed in the same pane may have started the entry session again, whose new process must keep running. An execution counts
   as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
 - A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start

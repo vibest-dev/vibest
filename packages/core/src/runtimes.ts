@@ -28,25 +28,19 @@ export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 
 export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
 
-const exitedAt = (processesAt: ProcessesAt, runtime: string, terminal: Terminal) =>
-  Effect.map(processesAt(runtime, terminal), (processes): Signal => ({
-    type: "terminal.exited",
-    runtime,
-    terminal,
-    processes,
-  }))
+const bound = (processesAt: ProcessesAt, runtime: string, terminal: Terminal, state?: AgentState) =>
+  Effect.map(processesAt(runtime, terminal), (processes): Signal =>
+    state === undefined
+      ? { type: "terminal.exited", runtime, terminal, processes }
+      : { type: "terminal.state", runtime, terminal, state, processes },
+  )
 
 const live = (processesAt: ProcessesAt, runtime: string, event: RuntimeEvent): Effect.Effect<Signal> => {
   switch (event.type) {
     case "state":
-      return Effect.succeed({
-        type: "terminal.state",
-        runtime,
-        terminal: addressOf(event.terminal),
-        state: event.state,
-      })
+      return bound(processesAt, runtime, addressOf(event.terminal), event.state)
     case "exited":
-      return exitedAt(processesAt, runtime, addressOf(event.terminal))
+      return bound(processesAt, runtime, addressOf(event.terminal))
     case "seen":
       return Effect.succeed({ type: "terminal.seen", runtime, terminal: addressOf(event.terminal) })
     case "reset":

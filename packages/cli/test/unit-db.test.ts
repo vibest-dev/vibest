@@ -645,6 +645,20 @@ describe("Db", () => {
       ),
   )
 
+  it.effect("endProcess naming a process that is no longer the session's current one ends nothing", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db.Service
+        const project = yield* projectOf("r")
+        const first = yield* db.session.startEntry(project, "claude", false, place, ENTRY)
+        const old = (yield* db.session.getSession(first.sessionId))!.process!.id
+        yield* db.session.startEntry(project, "claude", false, place, ENTRY)
+        assert.isFalse(yield* db.session.endProcess(first.sessionId, "exited", old))
+        assert.isNull((yield* db.session.getSession(first.sessionId))!.process!.endedAt)
+      }),
+    ),
+  )
+
   it.effect(
     "a terminal exit bound to the entry session's earlier process leaves the process started since running",
     () =>
