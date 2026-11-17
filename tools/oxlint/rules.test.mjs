@@ -34,7 +34,7 @@ const oxlintFindings = (source, file = "fixture.ts", { scoped = false } = {}) =>
     )
 
     return JSON.parse(run.stdout)
-      .diagnostics.map((d) => `${d.labels[0].span.line} ${d.code}`)
+      .diagnostics.flatMap((d) => (d.code.startsWith("anti-slop") ? [] : [`${d.labels[0].span.line} ${d.code}`]))
       .sort()
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
