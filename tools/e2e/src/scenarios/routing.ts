@@ -442,7 +442,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
       const ordered = ["session.created", "process.started", "execution.started", "execution.ended"]
 
       const of = (lines: ReadonlyArray<string>, id: string) =>
-        lines.filter((line) => line.endsWith(` ${id}`)).map((line) => line.split(" ")[0]!)
+        lines.flatMap((line) => (line.endsWith(` ${id}`) ? [line.split(" ")[0]!] : []))
 
       const inOrder = (types: ReadonlyArray<string>) => {
         let at = 0

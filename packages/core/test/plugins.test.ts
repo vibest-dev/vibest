@@ -546,7 +546,7 @@ describe("plugins: event.subscribe", () => {
       )
 
       for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
-        const seqs = held.filter((fact) => fact.aggregate === aggregate).map((fact) => fact.seq)
+        const seqs = held.flatMap((fact) => (fact.aggregate === aggregate ? [fact.seq] : []))
         assert.deepStrictEqual(
           seqs,
           seqs.map((_, i) => seqs[0]! + i),

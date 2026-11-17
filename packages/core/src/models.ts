@@ -27,6 +27,7 @@ export const normalizeModels = (
   raw: ReadonlyArray<RawModel>,
 ): ReadonlyArray<Model> =>
   raw
+    .values()
     .map((r) => ({
       harness,
       provider: r.provider ?? provider,
@@ -36,6 +37,7 @@ export const normalizeModels = (
       default: r.default,
     }))
     .filter((m) => !provider || m.provider === provider)
+    .toArray()
 
 export const listModels = Effect.fn("listModels")(function* (
   adapter: HarnessDefinition,

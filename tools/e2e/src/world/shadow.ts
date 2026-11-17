@@ -65,7 +65,7 @@ const readJson = async (file: string): Promise<Record<string, unknown>> => {
 }
 
 const pick = (from: Record<string, unknown>, keys: ReadonlyArray<string>) =>
-  Object.fromEntries(keys.filter((k) => k in from).map((k) => [k, from[k]]))
+  Object.fromEntries(keys.flatMap((k) => (k in from ? [[k, from[k]]] : [])))
 
 const writeJson = (file: string, value: unknown) =>
   fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })

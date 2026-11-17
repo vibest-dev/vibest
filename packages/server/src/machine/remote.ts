@@ -78,7 +78,7 @@ const make = Effect.gen(function* () {
               .ensure(
                 name,
                 kind,
-                new Map(shown.filter((row) => row.runtime === kind).map((row) => [row.id, row.address.id])),
+                new Map(shown.flatMap((row) => (row.runtime === kind ? [[row.id, row.address.id] as const] : []))),
               )
               .pipe(Effect.map((found) => [kind, found] as const)),
           { concurrency: "unbounded" },
@@ -186,9 +186,7 @@ const make = Effect.gen(function* () {
       input: PayloadOf<"Spawn">,
       from: { readonly project: string; readonly session: string },
     ) {
-      const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
-        ([, flag]) => flag,
-      )
+      const refused = REFUSED.flatMap(([key, flag]) => (input[key] !== undefined && input[key] !== false ? [flag] : []))
 
       if (refused.length > 0)
         return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })

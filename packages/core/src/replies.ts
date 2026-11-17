@@ -45,7 +45,7 @@ export const envelope = (
 ) =>
   [
     `<${tag}>`,
-    ...fields.filter(([, v]) => v !== "").map(([k, v]) => `<${k}>${escapeText(v)}</${k}>`),
+    ...fields.flatMap(([k, v]) => (v === "" ? [] : [`<${k}>${escapeText(v)}</${k}>`])),
     `<${text[0]}>`,
     text[1],
     `</${text[0]}>`,

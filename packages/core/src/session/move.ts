@@ -38,12 +38,14 @@ const limitFailure = (
   error: string,
 ) => {
   const text = rows
+    .values()
     .filter((row) => row.harness === harness && (provider === undefined || row.provider === provider) && isLimited(row))
     .map((row) => {
       const who = row.provider === "" ? harness : `${harness}/${row.provider}`
 
       return `${who}: ${exhaustedText(row.limits)}`
     })
+    .toArray()
     .join("; ")
 
   const named = provider === undefined || provider === "" ? harness : `${harness}/${provider}`

@@ -41,7 +41,7 @@
       }
     ],
     "oxc/no-accumulating-spread": "error",
-    "anti-slop/no-array-filter-map": "off",
+    "anti-slop/no-array-filter-map": "error",
     "anti-slop/no-reduce-accumulator-copy": "error",
     "anti-slop/no-chained-type-assertions": "off",
     "anti-slop/no-conditional-empty-object-spread": "off",

@@ -40,7 +40,7 @@ describe("RunCoordinator", () => {
       yield* Deferred.await(done)
       yield* Effect.yieldNow
       assert.deepStrictEqual(
-        drains.filter((d) => d.key === "a").map((d) => d.wake),
+        drains.flatMap((d) => (d.key === "a" ? [d.wake] : [])),
         [[0], Array.from({ length: 50 }, (_, i) => i + 1)],
       )
     }).pipe(Effect.scoped),

@@ -492,7 +492,7 @@ export default function (pi: ToolGroupsApi) {
       }
     }
 
-    const parts = partial.filter((call) => !covered.has(call.id)).map(activity)
+    const parts = partial.flatMap((call) => (covered.has(call.id) ? [] : [activity(call)]))
 
     if (!parts.length) parts.push("Working\u2026")
     const failed = summarize(group).filter((part) => part.endsWith(" failed"))

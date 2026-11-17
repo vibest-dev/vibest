@@ -22,12 +22,14 @@ export const isLimited = (row: { readonly limits: ReadonlyArray<LimitWindow> }, 
 
 export const exhaustedText = (limits: ReadonlyArray<LimitWindow & { readonly window: string }>, now = Date.now()) =>
   limits
+    .values()
     .filter((limit) => countsAsLimited(limit, now))
     .map((limit) => {
       const reset = limit.resetTime == null ? "no reset time" : `resets ${new Date(limit.resetTime).toISOString()}`
 
       return `${limit.window} limit exhausted, ${reset}`
     })
+    .toArray()
     .join("; ")
 
 export const stillLimited = (

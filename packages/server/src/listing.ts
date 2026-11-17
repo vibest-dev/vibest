@@ -103,7 +103,7 @@ export const sessionListing = (deps: {
     Effect.map(db.project.watchProjects(), (rows) =>
       rows.map((row): ProjectRow => ({
         ...row,
-        activity: projectActivity(sessions.filter((s) => s.projectId === row.id).map((s) => s.status)),
+        activity: projectActivity(sessions.flatMap((s) => (s.projectId === row.id ? [s.status] : []))),
       })),
     )
 
