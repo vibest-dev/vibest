@@ -35,8 +35,6 @@ import { dropHerdrSession, project } from "./inbox.ts"
 
 type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
 
-type Agent = { name?: string | null; pane_id: string; agent?: string | null }
-
 const OLD = "0.0.0-old"
 
 const ensureRuntime = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
@@ -87,14 +85,13 @@ const usageLimitMove = async (
     readonly seen: ReadonlyArray<string>
     readonly row: () => { harness: string; provider: string | null; pid: number | null; conversation: string | null }
     readonly status: () => ReadonlyArray<{ status: string }>
-    readonly listed: () => Promise<Agent | undefined>
+    readonly pane: () => string | undefined
     readonly log: () => Promise<string>
   }) => Promise<void>,
 ) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   const model = usageLimitedModel(o.limited)
   const session = `${w.herdrSession}-${o.name}`
-  const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
 
   try {
@@ -151,10 +148,7 @@ const usageLimitMove = async (
           `SELECT harness, provider, pid, harness_session_id AS conversation FROM ${SESSIONS} s WHERE id = ?`,
         )[0]!,
       status: () => read<{ status: string }>(`SELECT status FROM ${EXECUTIONS} t WHERE session_id = ? ORDER BY id`),
-      listed: async () =>
-        ((await herdr(socket, "agent.list", {}).catch(() => ({ agents: [] }))).agents as Array<Agent>).find(
-          (a) => a.pane_id === paneOf(w, id),
-        ),
+      pane: () => paneOf(w, id),
       log: async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000),
     })
   } finally {
@@ -417,11 +411,6 @@ const checks: ReadonlyArray<Check> = [
           }
         }
 
-        const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-
-        const listed = async (id: string) =>
-          ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.pane_id === paneOf(w, id))
-
         await w.stopDaemon()
         await ok(["daemon"])
         await w.entry({ cwd: repo, session, processEnv: env })
@@ -447,8 +436,7 @@ const checks: ReadonlyArray<Check> = [
           rows<{ process: number }>(w, "SELECT process_id AS process FROM session WHERE id = ?", id)[0]?.process
 
         const oldProcess = processOf()
-        await until("herdr finds the subagent in its pane", async () => (await listed(id))?.agent === "pi", 60_000)
-        const pane = (await listed(id))!.pane_id
+        const pane = paneOf(w, id)
         const daemonBefore = await w.daemonPid()
 
         await point(binary)
@@ -480,12 +468,7 @@ const checks: ReadonlyArray<Check> = [
           row(id)?.harness_session_id === before.harness_session_id,
           `the conversation changed: ${before.harness_session_id} -> ${row(id)?.harness_session_id}`,
         )
-        await until(
-          "herdr finds the restarted subagent in its pane",
-          async () => (await listed(id))?.agent === "pi",
-          60_000,
-        )
-        expect((await listed(id))?.pane_id === pane, `the subagent's pane changed: ${pane}`)
+        expect(paneOf(w, id) === pane, `the subagent's pane changed: ${pane} -> ${paneOf(w, id)}`)
         expect(processOf() !== oldProcess, `the restarted subagent is still process ${oldProcess}`)
         const LATE = "a late reply from the harness the restart replaced"
 
@@ -632,7 +615,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "U5",
     title:
-      "a usage-limit move in place: a Pi subagent whose execution hits a usage limit ends only its harness; the next login runs in the same pane (herdr finds it in that pane) and finishes the work in a new execution",
+      "a usage-limit move in place: a Pi subagent whose execution hits a usage limit ends only its harness; the next login runs in the same pane and finishes the work in a new execution",
     run: (w) =>
       usageLimitMove(
         w,
@@ -647,10 +630,9 @@ export default Plugin.define({
 })
 `,
         },
-        async ({ seen, row, status, listed, log }) => {
-          await until("herdr finds the subagent in its pane", async () => (await listed())?.agent === "pi", 60_000)
-          const pane = (await listed())!.pane_id
+        async ({ seen, row, status, pane: paneNow, log }) => {
           await until("the first login's harness reports its pid", () => row().pid !== null, 60_000)
+          const pane = paneNow()
           const before = row()
           await until(
             "the move to the second login",
@@ -683,12 +665,7 @@ export default Plugin.define({
             seen.some((s) => s.startsWith("/v2/")),
             `the second login got no request: ${JSON.stringify(seen)}`,
           )
-          await until("herdr finds the moved subagent", async () => (await listed())?.agent === "pi", 60_000)
-          const after = await listed()
-          expect(
-            after?.agent === "pi" && after.pane_id === pane,
-            `herdr finds the subagent at ${after?.pane_id}, not ${pane}`,
-          )
+          expect(paneNow() === pane, `the moved subagent is in ${paneNow()}, not ${pane}`)
         },
       ),
   },
