@@ -20,6 +20,8 @@ const document = (schema: Schema.Top) => {
   }
 }
 
+const accessOf = new Map<string, unknown>(Object.entries(ACCESS))
+
 const contract = () => {
   const methods = Object.fromEntries(
     [...VibestRpcs.requests]
@@ -37,7 +39,7 @@ const contract = () => {
         return [
           tag,
           {
-            access: ACCESS[tag as keyof typeof ACCESS],
+            access: accessOf.get(tag),
             stream,
             payload: document(rpc.payloadSchema),
             success: document(success),

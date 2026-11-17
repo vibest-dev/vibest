@@ -53,22 +53,29 @@ export const peerHeaders = (peer: string, project?: string, by?: string) => ({
 
 export const TAKE_ROUTE = "/inbox/take"
 
-export type HookKind = "execution-end" | "prompt" | "guard"
+const HOOK_KINDS = ["execution-end", "prompt", "guard"] as const
+
+export type HookKind = (typeof HOOK_KINDS)[number]
 
 export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
 
 export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
   const m = /^\/hooks\/([a-z]+)\/(execution-end|prompt|guard)$/.exec(path)
+  const hook = HOOK_KINDS.find((kind) => kind === m?.[2])
 
-  return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
+  return m && hook ? { harness: m[1]!, hook } : undefined
 }
 
 export const isTaken = (body: unknown): body is Taken =>
   Predicate.isObjectOrArray(body) &&
-  Predicate.isNumber((body as Taken).execution) &&
-  Array.isArray((body as Taken).ids) &&
-  Predicate.isString((body as Taken).line) &&
-  Predicate.isString((body as Taken).text)
+  Predicate.hasProperty(body, "execution") &&
+  Predicate.isNumber(body.execution) &&
+  Predicate.hasProperty(body, "ids") &&
+  Array.isArray(body.ids) &&
+  Predicate.hasProperty(body, "line") &&
+  Predicate.isString(body.line) &&
+  Predicate.hasProperty(body, "text") &&
+  Predicate.isString(body.text)
 
 export type SessionIdentity = {
   readonly sessionId: string
