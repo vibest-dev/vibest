@@ -6,7 +6,7 @@ import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type 
 
 import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
-import type { HostEnv as HostEnvShape, RuntimesShape } from "./plugin/domains.ts"
+import type { HostEnv as PluginHostEnv, RuntimesDomain } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 
 export * as Runtimes from "./runtimes.ts"
@@ -40,7 +40,7 @@ const live = (runtime: string, event: RuntimeEvent): Signal => {
   }
 }
 
-export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {}
+export class HostEnv extends Context.Service<HostEnv, PluginHostEnv>()("vibest/HostEnv") {}
 
 export const hostEnvNode = LayerNode.unbound(HostEnv)
 
@@ -57,7 +57,7 @@ const sameMembers = (a: Runtime, b: Runtime) => {
 
 const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
 
-export const make: Effect.Effect<RuntimesShape, never, Bus.Service | HostEnv | Scope.Scope> = Effect.gen(function* () {
+export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | HostEnv | Scope.Scope> = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const env = yield* HostEnv
   const followers = yield* FiberMap.make<string>()
@@ -170,7 +170,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus.Service | HostEnv | S
   }
 })
 
-export type Interface = RuntimesShape
+export type Interface = RuntimesDomain
 
 export class Service extends Context.Service<Service, Interface>()("vibest/Runtimes") {}
 
@@ -223,7 +223,7 @@ export const paneTail = Effect.fn("Runtimes.paneTail")((h: Runtime, terminal: Te
     : Effect.succeed(""),
 )
 
-export const runtimesHere = Effect.fn("Runtimes.runtimesHere")((runtimes: RuntimesShape) =>
+export const runtimesHere = Effect.fn("Runtimes.runtimesHere")((runtimes: RuntimesDomain) =>
   Effect.flatMap(runtimes.statuses, (rows) =>
     Effect.forEach(
       rows,
@@ -243,7 +243,10 @@ export const runtimesHere = Effect.fn("Runtimes.runtimesHere")((runtimes: Runtim
 )
 
 export const machinesListing = Effect.fn("Runtimes.machinesListing")(
-  (runtimes: RuntimesShape, harnesses: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
+  (
+    runtimes: RuntimesDomain,
+    harnesses: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
     runtimes.statuses.pipe(
       Effect.map((rows) => [
         {

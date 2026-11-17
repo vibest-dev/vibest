@@ -30,7 +30,7 @@ import {
   PEER_CALLS,
   ProtocolGate,
   ProtocolRejected,
-  type CallerShape,
+  type CallerIdentity,
 } from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
 import { PROTOCOL } from "@vibest/schema/version"
@@ -97,7 +97,7 @@ type Identity = Data.TaggedEnum<{
 
 const Identity = Data.taggedEnum<Identity>()
 
-const Callers = Data.taggedEnum<CallerShape>()
+const Callers = Data.taggedEnum<CallerIdentity>()
 
 export const identify = (db: Db.Interface, read: Read) =>
   Effect.gen(function* () {

@@ -4,7 +4,7 @@ import type { PeerScope } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
-import { Caller, type CallerShape, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
+import { Caller, type CallerIdentity, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
 import type { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
@@ -22,7 +22,7 @@ type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
 const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
 
-const byOf = (c: CallerShape) => (Predicate.isTagged(c, "Session") ? c.sessionId : PEER_BY_USER)
+const byOf = (c: CallerIdentity) => (Predicate.isTagged(c, "Session") ? c.sessionId : PEER_BY_USER)
 
 const peerOf = (method: string) =>
   Effect.flatMap(Caller, (c) =>

@@ -121,7 +121,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.String,
 }) {}
 
-export type CallerShape =
+export type CallerIdentity =
   | { readonly _tag: "Cli"; readonly repositoryRoot: string }
   | {
       readonly _tag: "Session"
@@ -136,7 +136,7 @@ export type CallerShape =
       readonly session?: string
     }
 
-export class Caller extends Context.Service<Caller, CallerShape>()("vibest/Caller") {}
+export class Caller extends Context.Service<Caller, CallerIdentity>()("vibest/Caller") {}
 
 export class DaemonStopping extends Schema.TaggedError<DaemonStopping>()("DaemonStopping", { method: Schema.String }) {
   override get message() {

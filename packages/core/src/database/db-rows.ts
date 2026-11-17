@@ -32,7 +32,7 @@ export const NewSession = Schema.Struct(NewSessionFields)
 
 export type NewSession = typeof NewSession.Type
 
-const IntegrationShape = Schema.Struct({ version: Schema.String, protocol: Schema.Number })
+const IntegrationVersion = Schema.Struct({ version: Schema.String, protocol: Schema.Number })
 
 export const SessionProcess = Schema.Struct({
   id: Schema.Number,
@@ -49,7 +49,7 @@ export const SessionProcess = Schema.Struct({
   readyAt: Schema.NullOr(Schema.Number),
   endedAt: Schema.NullOr(Schema.Number),
   endReason: Schema.NullOr(ProcessEndReason),
-  integration: Schema.NullOr(IntegrationShape),
+  integration: Schema.NullOr(IntegrationVersion),
 })
 
 export const OpenExecution = Schema.Struct({

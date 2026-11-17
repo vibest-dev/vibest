@@ -1,10 +1,10 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Duration, Effect, Predicate, type Scope, Stream } from "effect"
-import type { api, HcFailure, HcShape } from "effect-herdr-core-sdk"
+import type { api, HcFailure, HcClient } from "effect-herdr-core-sdk"
 
 import { KIND, LABEL, terminalId } from "./terminal-runtime.ts"
 
-type Hc = Pick<HcShape, "call">
+type Hc = Pick<HcClient, "call">
 
 type Event = VibestPlugin.MachineEvent
 

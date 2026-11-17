@@ -34,14 +34,14 @@ export class HerdrProtocolMismatch extends Schema.TaggedError<HerdrProtocolMisma
   serverVersion: Schema.String,
 }) {}
 
-export interface HerdrShape {
+export interface HerdrClient {
   readonly socketPath: string
   readonly call: <M extends Method>(method: M, params: ParamsOf<M>) => Effect.Effect<ResultOf<M>, HerdrFailure>
   readonly subscribe: (subscriptions: ReadonlyArray<Subscription>) => Stream.Stream<PushFrame, HerdrFailure>
 }
 
-export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sdk/Herdr") {
-  static readonly verifyProtocol = (herdr: HerdrShape): Effect.Effect<void, HerdrFailure | HerdrProtocolMismatch> =>
+export class Herdr extends Context.Service<Herdr, HerdrClient>()("effect-herdr-sdk/Herdr") {
+  static readonly verifyProtocol = (herdr: HerdrClient): Effect.Effect<void, HerdrFailure | HerdrProtocolMismatch> =>
     herdr.call("ping", {}).pipe(
       Effect.flatMap((pong) =>
         pong.protocol === PROTOCOL
@@ -57,7 +57,7 @@ export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sd
       ),
     )
 
-  static readonly make = (socketPath: string): Effect.Effect<HerdrShape, never, SocketConnector> =>
+  static readonly make = (socketPath: string): Effect.Effect<HerdrClient, never, SocketConnector> =>
     Effect.map(SocketConnector, (connect) => makeClient(socketPath, connect))
   static readonly layer = (
     options: { socketPath?: string } & SocketPathOptions = {},
@@ -85,7 +85,7 @@ const isResponse = (m: typeof Response.Type | typeof Push.Type): m is typeof Res
 const requestId = (prefix: string) =>
   Random.nextIntBetween(0, 2 ** 31).pipe(Effect.map((n) => `${prefix}-${n.toString(36)}`))
 
-function makeClient(socketPath: string, connect: SocketConnector["Service"]): HerdrShape {
+function makeClient(socketPath: string, connect: SocketConnector["Service"]): HerdrClient {
   const transport = (method: string) => (e: { readonly message: string }) =>
     new HerdrTransportError({ method, message: e.message })
 

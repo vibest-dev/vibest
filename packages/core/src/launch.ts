@@ -7,7 +7,7 @@ import { Effect, FileSystem } from "effect"
 import { Agents, unknownAgent } from "./agents.ts"
 import { encodeCommand, Harness } from "./harness.ts"
 import { Harnesses } from "./harnesses.ts"
-import type { AgentsShape } from "./plugin/domains.ts"
+import type { AgentsDomain } from "./plugin/domains.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
 import {
   projectText,
@@ -20,7 +20,7 @@ import {
 
 export { launchLine, type Launch }
 
-export const definitionIn = (agents: AgentsShape, id: string) => {
+export const definitionIn = (agents: AgentsDomain, id: string) => {
   const found = agents.find(id)
 
   return found === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.succeed(found)

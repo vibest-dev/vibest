@@ -5,7 +5,7 @@ import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
 import { Cause, Config, Duration, Effect, Option, Predicate, PubSub, Schedule, type Scope, Stream } from "effect"
 import type { FileSystem } from "effect"
-import type { HerdrFailure, HerdrShape, PushFrame, results } from "effect-herdr-sdk"
+import type { HerdrFailure, HerdrClient, PushFrame, results } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"
@@ -149,7 +149,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
     const client = (session: string) => pool.client(session).pipe(Effect.mapError(failure))
 
-    const groupWorkspace = (h: HerdrShape, root: string) =>
+    const groupWorkspace = (h: HerdrClient, root: string) =>
       Effect.gen(function* () {
         const grouped = yield* h.call("worktree.list", { cwd: root }).pipe(
           Effect.map((r) => r.source.source_workspace_id ?? undefined),
@@ -273,7 +273,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       )
     }
 
-    const paneOf = (h: HerdrShape, paneId: string) =>
+    const paneOf = (h: HerdrClient, paneId: string) =>
       h.call("pane.get", { pane_id: paneId }).pipe(
         Effect.map((r) => r.pane),
         Effect.catchTag("HerdrError", (e) =>
@@ -282,7 +282,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         failWith,
       )
 
-    const agentNamed = (h: HerdrShape, name: string) =>
+    const agentNamed = (h: HerdrClient, name: string) =>
       h.call("agent.get", { target: name }).pipe(
         Effect.map((r) => r.agent),
         Effect.catchTag("HerdrError", (e) =>
@@ -291,7 +291,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         failWith,
       )
 
-    const agentHoldingPane = (h: HerdrShape, paneId: string) =>
+    const agentHoldingPane = (h: HerdrClient, paneId: string) =>
       h.call("agent.get", { target: paneId }).pipe(
         Effect.map((r) => r.agent),
         Effect.catchTag("HerdrError", (e) =>
@@ -300,7 +300,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         failWith,
       )
 
-    const agentOfTerminal = (h: HerdrShape, paneId: string, name: string | undefined) =>
+    const agentOfTerminal = (h: HerdrClient, paneId: string, name: string | undefined) =>
       Effect.gen(function* () {
         if (name !== undefined) {
           const started = yield* agentNamed(h, name)
@@ -318,7 +318,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return undefined
       })
 
-    const typeLine = (h: HerdrShape, paneId: string, argv: ReadonlyArray<string>) =>
+    const typeLine = (h: HerdrClient, paneId: string, argv: ReadonlyArray<string>) =>
       failWith(h.call("pane.send_text", { pane_id: paneId, text: argv.map(shellQuote).join(" ") })).pipe(
         Effect.andThen(failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))),
       )
@@ -524,7 +524,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return { running: processStillRunning(r.process_info, pending) }
       })
 
-    const stillOurs = (h: HerdrShape, paneId: string, name: string | undefined) =>
+    const stillOurs = (h: HerdrClient, paneId: string, name: string | undefined) =>
       Effect.gen(function* () {
         const started = name === undefined ? undefined : yield* agentNamed(h, name)
 

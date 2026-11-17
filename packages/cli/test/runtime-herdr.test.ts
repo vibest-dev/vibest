@@ -3,7 +3,7 @@ import { HerdrPool, type SessionEvent } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
 import { Cause, Deferred, Effect, Fiber, Logger, Queue, Stream } from "effect"
-import { HerdrError, type HerdrShape, type PushFrame } from "effect-herdr-sdk"
+import { HerdrError, type HerdrClient, type PushFrame } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
@@ -20,9 +20,9 @@ const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = St
         calls.push({ method, params })
 
         return answer(method, params)
-      })) as HerdrShape["call"]
+      })) as HerdrClient["call"]
 
-    const client: HerdrShape = {
+    const client: HerdrClient = {
       socketPath: "/nowhere",
       subscribe: () => pushed,
       call: resendingCall,

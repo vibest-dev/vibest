@@ -1,7 +1,7 @@
 import { Harness } from "@vibest/core/harness"
 import { Harnesses } from "@vibest/core/harnesses"
 import { normalizeModels } from "@vibest/core/models"
-import type { HarnessDefinition, HarnessesShape } from "@vibest/core/plugin/domains"
+import type { HarnessDefinition, HarnessesDomain } from "@vibest/core/plugin/domains"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { HarnessUnavailable } from "@vibest/schema/session"
@@ -135,7 +135,7 @@ export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
 
 export const harnessesFrom = (
   definitions: ReadonlyArray<HarnessDefinition> = HARNESSES,
-): Effect.Effect<HarnessesShape, never, Scope.Scope> =>
+): Effect.Effect<HarnessesDomain, never, Scope.Scope> =>
   Effect.tap(Harnesses.make, (harnesses) =>
     harnesses.transform((editor) =>
       [...definitions, ...(definitions.some((d) => d.id === PULLING_PI.id) ? [] : [PULLING_PI])].forEach((definition) =>

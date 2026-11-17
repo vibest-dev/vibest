@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { type MachineEvent, type MachineNote, Plugin } from "@vibest/plugin/effect"
 import { machineHooks } from "@vibest/plugin/testing"
 import { Effect, Queue, Stream } from "effect"
-import { type api, HcError, type HcShape, HcTransportError } from "effect-herdr-core-sdk"
+import { type api, HcError, type HcClient, HcTransportError } from "effect-herdr-core-sdk"
 
 import * as Mirror from "../src/machines.ts"
 import { locate, mirror } from "../src/machines.ts"
@@ -23,7 +23,7 @@ const row = (name: string, id: string, extra: Partial<Row> = {}): Row => ({
 const fake = (rows: Array<Row>, options: { offline?: boolean; addFails?: string; rmFails?: string } = {}) => {
   const calls: Array<[string, unknown]> = []
 
-  const hc: Pick<HcShape, "call"> = {
+  const hc: Pick<HcClient, "call"> = {
     call: ((method: string, params: Record<string, unknown>) =>
       Effect.suspend((): Effect.Effect<unknown, HcError | HcTransportError> => {
         calls.push([method, params])
@@ -70,7 +70,7 @@ const fake = (rows: Array<Row>, options: { offline?: boolean; addFails?: string;
         }
 
         return Effect.die(new Error(`unexpected ${method}`))
-      })) as HcShape["call"],
+      })) as HcClient["call"],
   }
 
   return { hc, calls, rows, added: () => calls.filter(([m]) => m === "machine.add").length }

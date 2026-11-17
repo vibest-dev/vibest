@@ -92,15 +92,15 @@ export type Notice =
   | { readonly _tag: "Event"; readonly event: HcEvent }
   | { readonly _tag: "Notification"; readonly method: string; readonly params: unknown }
 
-export interface HcShape {
+export interface HcClient {
   readonly socketPath: string
   readonly call: <M extends Method>(method: M, params: ParamsOf<M>) => Effect.Effect<ResultOf<M>, HcFailure>
   readonly hello: Effect.Effect<ResultOf<"hello">, HcFailure | HcIncompatible>
   readonly subscribe: (params: ParamsOf<"events.subscribe">) => Stream.Stream<Notice, HcFailure>
 }
 
-export class Hc extends Context.Service<Hc, HcShape>()("effect-herdr-core-sdk/Hc") {
-  static readonly make = (socketPath: string): Effect.Effect<HcShape, never, SocketConnector> =>
+export class Hc extends Context.Service<Hc, HcClient>()("effect-herdr-core-sdk/Hc") {
+  static readonly make = (socketPath: string): Effect.Effect<HcClient, never, SocketConnector> =>
     Effect.map(SocketConnector, (connect) => makeClient(socketPath, connect))
   static readonly layer = (
     options: { readonly socketPath?: string } = {},
@@ -133,7 +133,7 @@ const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Message))
 const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const decodeEvent = Schema.decodeUnknownEffect(HcEvent)
 
-function makeClient(socketPath: string, connect: SocketConnector["Service"]): HcShape {
+function makeClient(socketPath: string, connect: SocketConnector["Service"]): HcClient {
   let nextId = 0
 
   const transport = (method: string) => (e: { readonly message: string }) =>
@@ -260,5 +260,5 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
   return { socketPath, call, hello, subscribe }
 }
 
-export const fromEnv = (): Effect.Effect<HcShape, Config.ConfigError, SocketConnector | Path.Path> =>
+export const fromEnv = (): Effect.Effect<HcClient, Config.ConfigError, SocketConnector | Path.Path> =>
   defaultSocketPath().pipe(Effect.flatMap(Hc.make))

@@ -2,7 +2,7 @@ import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { Runtimes } from "@vibest/core/runtimes"
-import { type ACCESS, Caller, type CallerShape, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
+import { type ACCESS, Caller, type CallerIdentity, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, Layer, Predicate } from "effect"
 import type { RpcGroup } from "effect/rpc"
@@ -17,7 +17,7 @@ export type MethodOf<A> = {
 
 export type Handlers = Partial<RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof VibestRpcs>>>
 
-export type Agent = Extract<CallerShape, { _tag: "Cli" | "Session" }>
+export type Agent = Extract<CallerIdentity, { _tag: "Cli" | "Session" }>
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service

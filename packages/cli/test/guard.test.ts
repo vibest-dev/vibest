@@ -3,7 +3,7 @@ import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/database/db"
 import { check, shellBlock, splitCommand } from "@vibest/core/guard"
-import type { RuntimesShape } from "@vibest/core/plugin/domains"
+import type { RuntimesDomain } from "@vibest/core/plugin/domains"
 import { Project } from "@vibest/core/project"
 import { type Runtime, Runtimes } from "@vibest/core/runtimes"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
@@ -57,7 +57,7 @@ const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAM
 const namedRuntimes = (ids: ReadonlyArray<string>) =>
   Layer.succeed(Runtimes.Service, {
     all: Effect.succeed(ids.map((id) => ({ id }) as Runtime)),
-  } as unknown as RuntimesShape)
+  } as unknown as RuntimesDomain)
 
 describe("Shell denials", () => {
   it("vibest connect and vibest machine are refused for every agent", () => {

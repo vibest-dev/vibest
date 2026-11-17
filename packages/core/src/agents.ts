@@ -2,7 +2,7 @@ import { UnknownAgent } from "@vibest/schema/session"
 import { Context, Effect, Layer } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
-import type { AgentDefinition, AgentsShape } from "./plugin/domains.ts"
+import type { AgentDefinition, AgentsDomain } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 
 export * as Agents from "./agents.ts"
@@ -13,7 +13,7 @@ export const unknownAgent = (id: string, loaded: ReadonlyArray<AgentDefinition>)
     known: loaded.map(({ id, description }) => ({ id, description })),
   })
 
-export const make: Effect.Effect<AgentsShape> = Effect.sync(() => {
+export const make: Effect.Effect<AgentsDomain> = Effect.sync(() => {
   const registry = Registry.definitions<AgentDefinition>("agent")
 
   return {
@@ -25,7 +25,7 @@ export const make: Effect.Effect<AgentsShape> = Effect.sync(() => {
   }
 })
 
-export type Interface = AgentsShape
+export type Interface = AgentsDomain
 
 export class Service extends Context.Service<Service, Interface>()("vibest/Agents") {}
 

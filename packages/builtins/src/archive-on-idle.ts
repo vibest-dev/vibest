@@ -1,18 +1,18 @@
 import { Plugin } from "@vibest/plugin/effect"
 import { Cause, Context, Effect, Stream } from "effect"
 
-export interface ArchiveOnIdleShape {
+export interface ArchiveOnIdleOperations {
   readonly optedIn: (id: string) => Effect.Effect<boolean>
   readonly consider: (ids: ReadonlyArray<string>) => Effect.Effect<void>
   readonly parties: (sessionId: string, inbox: number) => Effect.Effect<ReadonlyArray<string>>
   readonly localCreator: (sessionId: string) => Effect.Effect<string | undefined>
 }
 
-export class ArchiveOnIdle extends Context.Service<ArchiveOnIdle, ArchiveOnIdleShape>()(
+export class ArchiveOnIdle extends Context.Service<ArchiveOnIdle, ArchiveOnIdleOperations>()(
   "vibest/builtin/ArchiveOnIdle",
 ) {}
 
-const opted = (deps: ArchiveOnIdleShape, ids: ReadonlyArray<string>) =>
+const opted = (deps: ArchiveOnIdleOperations, ids: ReadonlyArray<string>) =>
   Effect.forEach(ids, (id) => deps.optedIn(id).pipe(Effect.map((yes) => (yes ? id : undefined)))).pipe(
     Effect.map((checked) => checked.filter((id): id is string => id !== undefined)),
     Effect.flatMap((ids) => (ids.length === 0 ? Effect.void : deps.consider(ids))),

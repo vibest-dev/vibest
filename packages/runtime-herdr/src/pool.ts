@@ -18,7 +18,7 @@ import {
 import {
   Herdr,
   HerdrProtocolMismatch,
-  type HerdrShape,
+  type HerdrClient,
   type PushFrame,
   SocketConnector,
   type Subscription,
@@ -52,7 +52,7 @@ export class HerdrPool extends Context.Service<
   HerdrPool,
   {
     readonly resolve: (location: HerdrLocation) => Effect.Effect<string, HerdrUnreachable | HerdrProtocolMismatch>
-    readonly client: (session: string) => Effect.Effect<HerdrShape, HerdrUnreachable | HerdrProtocolMismatch>
+    readonly client: (session: string) => Effect.Effect<HerdrClient, HerdrUnreachable | HerdrProtocolMismatch>
     readonly events: Stream.Stream<SessionEvent>
     readonly restarts: Stream.Stream<string>
     readonly sessions: Effect.Effect<ReadonlyArray<string>>

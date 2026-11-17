@@ -130,8 +130,8 @@ const noBackgroundLoop = {
       return loop !== undefined && used[kind] <= loop.count
     }
 
-    const report = (node, shape) =>
-      context.report({ node, message: `No background loop (${shape}): vibestd does nothing between events.` })
+    const report = (node, loopKind) =>
+      context.report({ node, message: `No background loop (${loopKind}): vibestd does nothing between events.` })
 
     return {
       Identifier(node) {

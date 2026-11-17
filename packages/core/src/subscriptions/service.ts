@@ -6,7 +6,7 @@ import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Se
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import type { HarnessDefinition, SubscriptionsShape } from "../plugin/domains.ts"
+import type { HarnessDefinition, SubscriptionsDomain } from "../plugin/domains.ts"
 import { logFailure } from "../reactor.ts"
 
 export * as Subscriptions from "./service.ts"
@@ -51,7 +51,7 @@ const wrote = (
   return { harness, provider, machine: MACHINE, account, limits, updatedAt: now, ...(error ? { error } : {}) }
 }
 
-export type Interface = SubscriptionsShape
+export type Interface = SubscriptionsDomain
 
 export class Service extends Context.Service<Service, Interface>()("vibest/Subscriptions") {}
 

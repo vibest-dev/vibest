@@ -4,7 +4,7 @@ import { launchLine, reconnectSchedule, Runtime as RuntimeApi } from "@vibest/pl
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, Predicate, PubSub, type Scope, Schedule, Stream } from "effect"
-import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-herdr-core-sdk"
+import { type api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export type Terminal = VibestPlugin.Runtime.Terminal
 
@@ -137,13 +137,13 @@ const FOLLOW_BACKOFF = reconnectSchedule({ first: Duration.millis(500), max: Dur
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 
 type Core = {
-  readonly hc: HcShape
+  readonly hc: HcClient
   readonly busy: Set<string>
   readonly waiting: Map<string, Set<Deferred.Deferred<void>>>
 }
 
 export const make = (deps: {
-  readonly connect: (socketPath: string) => Effect.Effect<HcShape>
+  readonly connect: (socketPath: string) => Effect.Effect<HcClient>
   readonly socket: string
   readonly scope: Scope.Scope
   readonly typedLaunch?: Duration.Input
@@ -311,7 +311,7 @@ export const make = (deps: {
         ),
       )
 
-    const typeLine = (hc: HcShape, address: string, argv: ReadonlyArray<string>) =>
+    const typeLine = (hc: HcClient, address: string, argv: ReadonlyArray<string>) =>
       failWith(hc.call("terminal.send", { terminal: address, text: argv.map(shellQuote).join(" ") })).pipe(
         Effect.asVoid,
       )
