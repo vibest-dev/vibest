@@ -29,6 +29,23 @@ interface Events {
   readonly agent_settled: { readonly event: AgentSettledEvent; readonly result: void }
 }
 
+type Registrars = {
+  readonly [K in keyof Events]: (
+    handler: (e: Events[K]["event"], ctx: ExtensionContext) => Promise<Events[K]["result"]>,
+  ) => () => void
+}
+
+const registrars = (api: Pick<ExtensionAPI, "on">): Registrars => ({
+  session_start: (handler) => api.on("session_start", handler),
+  resources_discover: (handler) => api.on("resources_discover", handler),
+  before_agent_start: (handler) => api.on("before_agent_start", handler),
+  input: (handler) => api.on("input", handler),
+  tool_call: (handler) => api.on("tool_call", handler),
+  message_start: (handler) => api.on("message_start", handler),
+  agent_end: (handler) => api.on("agent_end", handler),
+  agent_settled: (handler) => api.on("agent_settled", handler),
+})
+
 export class Pi extends Context.Service<
   Pi,
   {
@@ -50,13 +67,10 @@ export class Pi extends Context.Service<
           Effect.gen(function* () {
             const run = yield* FiberSet.makeRuntimePromise<R>()
 
-            const on = api.on as (
-              event: K,
-              handler: (e: Events[K]["event"], ctx: ExtensionContext) => Promise<Events[K]["result"]>,
-            ) => () => void
+            const on = registrars(api)[event]
 
             yield* Effect.acquireRelease(
-              Effect.sync(() => on(event, (e, ctx) => run(f(e, ctx)))),
+              Effect.sync(() => on((e, ctx) => run(f(e, ctx)))),
               (off) => Effect.sync(off),
             )
           }),
