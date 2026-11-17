@@ -405,7 +405,7 @@ How these modules keep the rules:
   pid has died is an exit even when that report still says the terminal is running: a launch herdr has not finished
   keeps saying so after the process was killed. The other way round, a terminal that shows only its shell while the
   harness's reported pid is alive is no exit: the runtime's foreground reading can miss the harness for an instant (seen
-  right after an entry session's `vibest` exec'd into Claude in its pane), and that harness then runs on.
+  on Linux right after an entry session's `vibest` exec'd into Claude in its pane), and that harness then runs on.
   A terminal the runtime cannot find is. An execution counts
   as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
