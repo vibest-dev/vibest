@@ -3,7 +3,7 @@ import path from "node:path"
 
 import { commandOf } from "../../../reap.ts"
 import type { Check } from "../check.ts"
-import { ask, delegatingModel, type Message, piDir, sendOrReply, text } from "../fake-model.ts"
+import { ask, delegatingModel, type Message, piDir, sendOrReply, text, toolCall } from "../fake-model.ts"
 import { alive, binary, expect, fail, harnesses, readDb, row, Skip, until, type World } from "../world.ts"
 import { addCursorPlugin } from "../world/plugins.ts"
 
@@ -57,6 +57,12 @@ export const subModel = () => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const task = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))?.[1]
       const headers = { "content-type": "text/event-stream" }
+      const last = messages.at(-1)
+      const attached = /Attached files: ([^\s\\"]+)/.exec(text(last))?.[1]
+      if (last?.role === "user" && attached !== undefined)
+        return new Response(toolCall("call-cat", "bash", { command: `cat ${attached}` }), { headers })
+      const word = last?.role === "tool" ? /m1-word-(\w+)/.exec(text(last))?.[1] : undefined
+      if (word !== undefined) return new Response(reply(`done-${task} ${word}`), { headers })
       if (task === undefined) return new Response(reply("ok"), { headers })
       if (messages.at(-1)?.role !== "tool") {
         asked.push(task)
@@ -223,7 +229,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M1",
     title:
-      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's entry session and none on A, A's entry session gets one message from mb/<id> with what the session sent itself, B's outbox empties; send, result, peek and archive forward to B",
+      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's entry session and none on A, A's entry session gets one message from mb/<id> with what the session sent itself, B's outbox empties; send, result, peek and archive forward to B; run --machine --file copies the file into B's project folder, the session on B reads it there and archive removes it",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -303,6 +309,59 @@ const checks: ReadonlyArray<Check> = [
           const o = outbox()
           return o !== null && o.queued >= 2 && o.queued === o.acked
         }).catch(() => fail(`B's outbox facts: ${JSON.stringify(outbox())}`))
+
+        const notes = path.join(w.root, "m1-notes.md")
+        await fs.writeFile(notes, "the answer is m1-word-hazel\n")
+        const attachedTo = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "--machine",
+                "mb",
+                "pi",
+                "--file",
+                notes,
+                "--",
+                "Reply done-mfile with the word in the attached file.",
+              ],
+              { env: s.aEnv, asIs: true },
+            ),
+          ) as { id: string }
+        ).id
+        const remoteId = attachedTo.slice("mb/".length)
+        const projects = path.join(s.bEnv.VIBEST_HOME, "projects")
+        const sessionFolders = async () =>
+          (
+            await Promise.all(
+              (await fs.readdir(projects).catch(() => [])).map(async (project) => {
+                const folder = path.join(projects, project, "sessions", remoteId)
+                return (await fs.stat(folder).then(
+                  () => true,
+                  () => false,
+                ))
+                  ? [folder]
+                  : []
+              }),
+            )
+          ).flat()
+        const [bFolder] = await sessionFolders()
+        expect(
+          bFolder !== undefined &&
+            (await fs.readFile(path.join(bFolder, "files", "m1-notes.md"), "utf8")) === "the answer is m1-word-hazel\n",
+          `B has no copy for ${attachedTo}: ${JSON.stringify(await sessionFolders())}`,
+        )
+        await until(
+          "the session on B answers with the word from its copy",
+          async () =>
+            (
+              (JSON.parse(await s!.okA(["result", attachedTo])) as { reply?: { text?: string | null } | null }).reply
+                ?.text ?? ""
+            ).includes("done-mfile hazel"),
+          120_000,
+        )
+        await s.okA(["archive", attachedTo])
+        expect((await sessionFolders()).length === 0, `B kept ${bFolder} after archive`)
       } finally {
         await s?.stop()
       }

@@ -292,6 +292,10 @@ export const EventsFact = Schema.Struct({
 
 export class WatchLagged extends Schema.TaggedError<WatchLagged>()("WatchLagged", { message: Schema.String }) {}
 
+const Attachments = Schema.optional(
+  Schema.Array(Schema.Struct({ name: Schema.String, content: Schema.Uint8ArrayFromBase64 })),
+)
+
 export class VibestRpcs extends RpcGroup.make(
   Rpc.make("Ping", { success: PingResult }),
   scoped(
@@ -312,9 +316,7 @@ export class VibestRpcs extends RpcGroup.make(
           runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),
           machine: Schema.optional(Schema.String),
-          files: Schema.optional(
-            Schema.Array(Schema.Struct({ name: Schema.String, content: Schema.Uint8ArrayFromBase64 })),
-          ),
+          files: Attachments,
         },
         success: Schema.Struct({
           id: Schema.String,
@@ -774,6 +776,7 @@ export class VibestRpcs extends RpcGroup.make(
           title: Schema.optional(Schema.String),
           runtime: Schema.optional(Schema.String),
           request: Schema.String,
+          files: Attachments,
         },
         success: Schema.Struct({
           session: Schema.String,
@@ -903,4 +906,5 @@ export const CAPABILITIES = {
   projects: true,
   spawnRuntime: true,
   spawnFiles: true,
+  peerSpawnFiles: true,
 } as const
