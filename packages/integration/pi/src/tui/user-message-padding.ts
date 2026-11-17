@@ -18,10 +18,13 @@ type Lease = {
   active: boolean
 }
 
-function readLease(proto: Rendered): Lease | undefined {
-  const lease = Object.getOwnPropertyDescriptor(proto, "vibestCompactUserMessagesLease")?.value as Lease | undefined
+const isLease = (value: unknown): value is Lease =>
+  Predicate.hasProperty(value, "by") && value.by === compactUserMessages
 
-  return lease?.by === compactUserMessages ? lease : undefined
+function readLease(proto: Rendered): Lease | undefined {
+  const lease: unknown = Object.getOwnPropertyDescriptor(proto, "vibestCompactUserMessagesLease")?.value
+
+  return isLease(lease) ? lease : undefined
 }
 
 function writeLease(proto: Rendered, lease: Lease | undefined) {
@@ -33,11 +36,6 @@ function writeLease(proto: Rendered, lease: Lease | undefined) {
       writable: false,
     })
   else Reflect.deleteProperty(proto, "vibestCompactUserMessagesLease")
-}
-
-function restoreRender(child: { render?: (width: number) => string[] }, descriptor: PropertyDescriptor | undefined) {
-  if (descriptor) Object.defineProperty(child, "render", descriptor)
-  else delete child.render
 }
 
 function compact(this: UserMessageComponent, original: Render, width: number): string[] {
@@ -52,22 +50,30 @@ function compact(this: UserMessageComponent, original: Render, width: number): s
   try {
     if (Array.isArray(children)) {
       for (const child of children) {
-        if (!Predicate.isObjectOrArray(child)) continue
-        const view = child as { paddingY?: number; render?: (width: number) => string[] }
-        const paddingY = view.paddingY
+        if (
+          !Predicate.isObjectOrArray(child) ||
+          !Predicate.hasProperty(child, "paddingY") ||
+          !Predicate.hasProperty(child, "render")
+        )
+          continue
+        const { paddingY, render: childRender } = child
 
-        if (!Number.isInteger(paddingY) || (paddingY as number) <= 0 || !Predicate.isFunction(view.render)) continue
-        const descriptor = Object.getOwnPropertyDescriptor(view, "render")
-        const childRender = view.render
-        view.render = function (innerWidth: number) {
+        if (!Predicate.isNumber(paddingY) || !Number.isInteger(paddingY) || paddingY <= 0) continue
+
+        if (!Predicate.isFunction(childRender)) continue
+        const descriptor = Object.getOwnPropertyDescriptor(child, "render")
+        child.render = function (innerWidth: number) {
           const lines = childRender.call(this, innerWidth)
 
-          if (!Array.isArray(lines) || lines.length <= (paddingY as number) * 2) return lines
+          if (!Array.isArray(lines) || lines.length <= paddingY * 2) return lines
 
-          return lines.slice(paddingY as number, lines.length - (paddingY as number))
+          return lines.slice(paddingY, lines.length - paddingY)
         }
 
-        restores.push(() => restoreRender(view, descriptor))
+        restores.push(() => {
+          if (descriptor) Object.defineProperty(child, "render", descriptor)
+          else Reflect.deleteProperty(child, "render")
+        })
       }
     }
 
