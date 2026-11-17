@@ -152,9 +152,8 @@ describe("plugins: spawn hook", () => {
     }),
     {
       plugins: [
-        write(
-          "untyped",
-          () => ({ prompt: undefined, machine: undefined, model: "m" }) as unknown as Partial<AgentStartBefore>,
+        hook("untyped", (e) =>
+          Effect.sync(() => void Object.assign(e, { prompt: undefined, machine: undefined, model: "m" })),
         ),
       ],
     },

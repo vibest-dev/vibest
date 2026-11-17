@@ -37,7 +37,6 @@ import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/mac
 import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/server/machine/machines"
 import { Cause, Clock, type Context, Duration, Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect"
 import { RpcClient } from "effect/rpc"
-import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -72,7 +71,7 @@ const overNodeSocket = (path: string) =>
   Effect.acquireRelease(
     Effect.sync(() => net.createConnection(path)),
     (conn) => Effect.sync(() => conn.destroy()),
-  ).pipe(Effect.flatMap((conn) => stdioSocket(stream.Duplex.toWeb(conn) as unknown as Socket.InputTransformStream)))
+  ).pipe(Effect.flatMap((conn) => stdioSocket(stream.Duplex.toWeb(conn))))
 
 const peers = Effect.flatMap(
   SqlClient.SqlClient,

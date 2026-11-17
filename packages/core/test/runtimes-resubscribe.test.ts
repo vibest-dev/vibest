@@ -1,11 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, type BusEvent } from "@vibest/core/bus"
-import { Runtimes, type Runtime } from "@vibest/core/runtimes"
+import { Runtimes } from "@vibest/core/runtimes"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { Effect, Layer, PubSub, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { noHostEnv } from "./lib/harnesses.ts"
+import { unusedRuntime } from "./lib/session.ts"
 import { memoryBus } from "./platform/bun.ts"
 
 const layer = Runtimes.layer.pipe(Layer.provideMerge(memoryBus), Layer.provide(noHostEnv))
@@ -22,7 +23,7 @@ const follow = (events: Stream.Stream<RuntimeApi.RuntimeEvent>) =>
       Effect.forkScoped,
     )
     yield* Effect.yieldNow
-    yield* runtimes.transform((editor) => editor.add({ id: "fake", events } as unknown as Runtime))
+    yield* runtimes.transform((editor) => editor.add(unusedRuntime("fake", undefined, { events })))
 
     return seen
   })

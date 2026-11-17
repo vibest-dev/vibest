@@ -30,7 +30,7 @@ const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" =
 
         return stop === "unsupported" ? { result: stop, reason: "it runs on another machine" } : { result: stop }
       }),
-  } as unknown as Parameters<typeof soleEntry>[0]
+  } as Parameters<typeof soleEntry>[0]
 
   const start = Effect.sync(() => {
     calls.push("start")

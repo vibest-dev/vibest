@@ -26,7 +26,6 @@ import {
   FileSystem,
   Layer,
   Path,
-  Predicate,
   Schedule,
   type Schema,
 } from "effect"
@@ -299,14 +298,7 @@ const pausingConfigReads = (fs: FileSystem.FileSystem, config: string, pause: Co
     )
   }
 
-  return new Proxy(fs, {
-    get(target, prop, receiver) {
-      if (prop === "readFileString") return readConfig
-      const value = Reflect.get(target, prop, receiver)
-
-      return Predicate.isFunction(value) ? value.bind(target) : value
-    },
-  })
+  return { ...fs, readFileString: readConfig }
 }
 
 const nativeRequire = module.createRequire(import.meta.url)

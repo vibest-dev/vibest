@@ -51,25 +51,31 @@ export {
 
 export const TEST_HERDR = "herdr"
 
-export const authed = <C extends object>(client: C, headers: Record<string, string>): C =>
-  new Proxy(client, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver)
+export const authed = <C extends object>(client: C, headers: Record<string, string>): C => {
+  const withHeaders = { ...client }
 
-      if (!Predicate.isFunction(value)) return value
+  for (const [method, call] of Object.entries(client)) {
+    if (!Predicate.isFunction(call)) continue
 
-      return (input: { readonly runtime?: string } | undefined, options?: { headers?: Record<string, string> }) => {
+    Object.assign(withHeaders, {
+      [method]: (input: { readonly runtime?: string } | undefined, options?: { headers?: Record<string, string> }) => {
         const payload =
           input !== undefined &&
           !("runtime" in input) &&
-          (prop === "Spawn" || prop === "Launch" || prop === "Project.EntrySession" || prop === "Project.RunningEntry")
+          (method === "Spawn" ||
+            method === "Launch" ||
+            method === "Project.EntrySession" ||
+            method === "Project.RunningEntry")
             ? { ...input, runtime: TEST_HERDR }
             : input
 
-        return value.call(target, payload, { ...options, headers: { ...headers, ...options?.headers } })
-      }
-    },
-  })
+        return call.call(client, payload, { ...options, headers: { ...headers, ...options?.headers } })
+      },
+    })
+  }
+
+  return withHeaders
+}
 
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {

@@ -59,7 +59,7 @@ export interface RuntimeCalls {
   readonly focus: { readonly terminal: string }
 }
 
-type Entry = { [M in keyof RuntimeCalls]: { readonly method: M; readonly params: RuntimeCalls[M] } }[keyof RuntimeCalls]
+type CallLog = { readonly [M in keyof RuntimeCalls]: Array<RuntimeCalls[M]> }
 
 type Workspace = { readonly path: string; readonly root: string; readonly open: boolean; readonly standalone?: boolean }
 
@@ -115,7 +115,20 @@ export class FakeRuntime extends Context.Service<
 >()("test/FakeRuntime") {
   static readonly make = (options: FakeRuntimeOptions) =>
     Effect.gen(function* () {
-      const log = yield* Ref.make<ReadonlyArray<Entry>>([])
+      const log: CallLog = {
+        open: [],
+        send: [],
+        read: [],
+        process: [],
+        state: [],
+        session: [],
+        close: [],
+        run: [],
+        present: [],
+        see: [],
+        focus: [],
+      }
+
       const callCount = yield* Ref.make(0)
       const agents = yield* Ref.make(HashMap.empty<string, FakeAgent>())
       const workspaces = yield* Ref.make(HashMap.empty<string, Workspace>())
@@ -234,7 +247,7 @@ export class FakeRuntime extends Context.Service<
         body: Effect.Effect<A, RuntimeError>,
       ) =>
         Ref.update(callCount, (n) => n + 1).pipe(
-          Effect.andThen(Ref.update(log, (entries) => [...entries, { method, params } as Entry])),
+          Effect.andThen(Effect.sync(() => void log[method].push(params))),
           Effect.andThen(Effect.flatMap(Ref.get(reachable), (up) => (up ? Effect.void : fail(method, "unreachable")))),
           Effect.andThen(awaitHold(method, target)),
           Effect.andThen(body),
@@ -551,15 +564,12 @@ export class FakeRuntime extends Context.Service<
 
       return FakeRuntime.of({
         runtime,
-        callsTo: (method) =>
-          Ref.get(log).pipe(
-            Effect.map(
-              (entries) =>
-                entries.flatMap((entry) => (entry.method === method ? [entry.params] : [])) as unknown as ReadonlyArray<
-                  RuntimeCalls[typeof method]
-                >,
-            ),
-          ),
+        callsTo: <M extends keyof RuntimeCalls>(method: M) =>
+          Effect.sync(() => {
+            const calls: ReadonlyArray<RuntimeCalls[M]> = log[method]
+
+            return [...calls]
+          }),
         callCount: Ref.get(callCount),
         terminalOf: (session) =>
           Ref.get(agents).pipe(

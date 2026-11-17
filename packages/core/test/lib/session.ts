@@ -320,15 +320,16 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly version?: string
 }
 
-const unusedRuntime = (
+export const unusedRuntime = (
   id: string,
-  caller: VibestPlugin.Runtime.RuntimeCaller,
+  caller: VibestPlugin.Runtime.RuntimeCaller | undefined,
+  overrides: Partial<VibestPlugin.Runtime.RuntimeDefinition> = {},
 ): VibestPlugin.Runtime.RuntimeDefinition => {
   const unused = () => Effect.die(new Error(`runtime ${id} is only a caller`))
 
   return {
     id,
-    caller,
+    ...(caller !== undefined && { caller }),
     status: () => Effect.succeed({ status: "online" }),
     open: unused,
     send: unused,
@@ -336,6 +337,7 @@ const unusedRuntime = (
     process: unused,
     close: unused,
     events: Stream.empty,
+    ...overrides,
   }
 }
 

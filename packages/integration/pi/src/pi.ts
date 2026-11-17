@@ -39,7 +39,7 @@ export class Pi extends Context.Service<
     readonly sendMessage: (...args: Parameters<ExtensionAPI["sendMessage"]>) => Effect.Effect<void>
   }
 >()("@vibest/pi/Pi") {
-  static readonly layer = (api: ExtensionAPI) =>
+  static readonly layer = (api: Pick<ExtensionAPI, "on" | "sendMessage">) =>
     Layer.succeed(
       Pi,
       Pi.of({
@@ -64,7 +64,7 @@ export class Pi extends Context.Service<
       }),
     )
 
-  static readonly runMain = <E>(api: ExtensionAPI, extension: Layer.Layer<never, E, Pi>) =>
+  static readonly runMain = <E>(api: Pick<ExtensionAPI, "on" | "sendMessage">, extension: Layer.Layer<never, E, Pi>) =>
     Effect.runPromise(
       Effect.gen(function* () {
         const scope = yield* Scope.make()

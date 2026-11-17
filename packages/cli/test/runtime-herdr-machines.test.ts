@@ -6,6 +6,7 @@ import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import { agentName, fromPool, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Fiber, Stream } from "effect"
+import type { HerdrClient } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
@@ -95,15 +96,19 @@ const pinging = (version: string, detached?: boolean) => {
       Effect.sync(() => {
         asked.push(session)
 
-        return {
-          call: () =>
+        const client: HerdrClient = {
+          socketPath: "/nowhere",
+          subscribe: () => Stream.die(new Error("subscribe reached")),
+          call: (() =>
             Effect.succeed({
               type: "pong",
               version,
               protocol: 1,
               ...(detached !== undefined && { capabilities: { live_handoff: true, detached_server_daemon: detached } }),
-            }),
-        } as unknown as Effect.Success<ReturnType<HerdrPool["Service"]["client"]>>
+            })) as HerdrClient["call"],
+        }
+
+        return client
       }),
     events: Stream.empty,
     restarts: Stream.empty,

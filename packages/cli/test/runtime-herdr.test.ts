@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { HerdrPool, type SessionEvent } from "@vibest/runtime-herdr/pool"
+import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
 import { Cause, Deferred, Effect, Fiber, Logger, Queue, Stream } from "effect"
@@ -190,9 +190,7 @@ describe("herdr event stream", () => {
       const pool = HerdrPool.of({
         resolve: () => Effect.succeed("s"),
         client: () => Effect.die("unused"),
-        events: Stream.unwrap(
-          Deferred.await(open).pipe(Effect.as(Stream.fail(new Error("socket closed")))),
-        ) as unknown as Stream.Stream<SessionEvent>,
+        events: Stream.unwrap(Deferred.await(open).pipe(Effect.as(Stream.die(new Error("socket closed"))))),
         restarts: Stream.empty,
         sessions: Effect.succeed([]),
       })

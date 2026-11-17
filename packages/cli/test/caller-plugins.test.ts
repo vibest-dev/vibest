@@ -2,8 +2,9 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { callerTarget, entryPlace, specHits, type CallerHit } from "@vibest/core/caller"
 import { Builtins, builtinsNode } from "@vibest/core/plugin"
-import type { Caller, RuntimeDefinition } from "@vibest/core/plugin/domains"
+import type { Caller } from "@vibest/core/plugin/domains"
 import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
+import { unusedRuntime } from "@vibest/core/test/lib/session"
 import { hostReplacements } from "@vibest/platform-bun/test/lib/fakes"
 import { PATH_WITHOUT_HARNESS_CLIS } from "@vibest/platform-bun/test/lib/fakes"
 import { memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
@@ -77,14 +78,11 @@ describe("where the entry session runs", () => {
 
 describe("the runtime registry", () => {
   const definition = (id: string, env: ReadonlyArray<string>, events: Stream.Stream<RuntimeEvent> = Stream.never) =>
-    ({
+    unusedRuntime(
       id,
-      caller: {
-        env,
-        terminal: (values: Readonly<Record<string, string | undefined>>) => Effect.succeed(values[env[0]!]),
-      },
-      events,
-    }) as unknown as RuntimeDefinition
+      { env, terminal: (values: Readonly<Record<string, string | undefined>>) => Effect.succeed(values[env[0]!]) },
+      { events },
+    )
 
   it.effect(
     "the first registered definition wins detection, its caller variables leave vibestd's environment, and a removed definition's events stop",
@@ -263,12 +261,13 @@ describe("caller runtimes", () => {
         effect: (context) =>
           context.runtime
             .transform((editor) =>
-              editor.add({
-                id: "user",
-                caller: { env: [key], terminal: () => Effect.succeed(undefined) },
-                status: () => Effect.succeed({ status: "offline", reason: "test" }),
-                events: Stream.never,
-              } as unknown as RuntimeDefinition),
+              editor.add(
+                unusedRuntime(
+                  "user",
+                  { env: [key], terminal: () => Effect.succeed(undefined) },
+                  { status: () => Effect.succeed({ status: "offline", reason: "test" }), events: Stream.never },
+                ),
+              ),
             )
             .pipe(Effect.asVoid),
       })

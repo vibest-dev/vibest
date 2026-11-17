@@ -1,12 +1,10 @@
-import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
-import { TuiAltScreen } from "@earendil-works/pi-tui"
+import type { ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
+import type { TuiAltScreen } from "@earendil-works/pi-tui"
 import { Predicate } from "effect"
 
 type Render = (this: UserMessageComponent, width: number) => string[]
 
 type Paint = (this: TuiAltScreen) => void
-
-type Painted = { doRender?: Paint }
 
 type Rendered = { render?: Render }
 
@@ -98,17 +96,22 @@ function isFramePaint(
   return paint.toString().includes("renderLayoutFrame")
 }
 
-export default function compactUserMessages(pi: Pick<ExtensionAPI, "on">) {
+export interface TuiClasses {
+  readonly UserMessageComponent: { readonly prototype: Rendered } | undefined
+  readonly TuiAltScreen: { readonly prototype: TuiAltScreen } | undefined
+}
+
+export default function compactUserMessages(pi: Pick<ExtensionAPI, "on">, classes: TuiClasses) {
   const owner = {}
   let nativeRender: Render | undefined
   let nativePaint: Paint | undefined
   let release: (() => void) | null = null
 
   function install(): () => void {
-    const message: Rendered | undefined = UserMessageComponent?.prototype
-    const alt = TuiAltScreen?.prototype as unknown as Painted | undefined
+    const message = classes.UserMessageComponent?.prototype
+    const alt = classes.TuiAltScreen?.prototype
     const render = message?.render
-    const paint = alt?.doRender
+    const paint = alt?.["doRender"]
 
     if (!message || !alt || !Predicate.isFunction(render)) return () => {}
 
@@ -156,7 +159,7 @@ export default function compactUserMessages(pi: Pick<ExtensionAPI, "on">) {
       }
 
       try {
-        alt.doRender = next.paint
+        alt["doRender"] = next.paint
       } catch (error) {
         message.render = render
         writeLease(message, undefined)
@@ -181,7 +184,7 @@ export default function compactUserMessages(pi: Pick<ExtensionAPI, "on">) {
 
       if (message.render === held.render) message.render = held.renderOriginal
 
-      if (alt.doRender === held.paint) alt.doRender = held.paintOriginal
+      if (alt["doRender"] === held.paint) alt["doRender"] = held.paintOriginal
 
       if (readLease(message) === held) writeLease(message, undefined)
     }

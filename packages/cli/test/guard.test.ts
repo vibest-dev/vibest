@@ -3,9 +3,9 @@ import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/database/db"
 import { check, shellBlock, splitCommand } from "@vibest/core/guard"
-import type { RuntimesDomain } from "@vibest/core/plugin/domains"
 import { Project } from "@vibest/core/project"
-import { type Runtime, Runtimes } from "@vibest/core/runtimes"
+import { Runtimes } from "@vibest/core/runtimes"
+import { unusedRuntime } from "@vibest/core/test/lib/session"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
 import {
   agentsLayer,
@@ -34,6 +34,7 @@ import {
   Queue,
   type Schema,
   Stdio,
+  Stream,
   Terminal,
 } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
@@ -55,10 +56,20 @@ const bareGuard = (agent: string, tool: string, input: Schema.JsonObject) =>
 
 const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAMS)
 
-const namedRuntimes = (ids: ReadonlyArray<string>) =>
-  Layer.succeed(Runtimes.Service, {
-    all: Effect.succeed(ids.map((id) => ({ id }) as Runtime)),
-  } as unknown as RuntimesDomain)
+const namedRuntimes = (ids: ReadonlyArray<string>) => {
+  const unused = () => Effect.die(new Error("the guard reads only Runtimes.all"))
+
+  return Layer.succeed(Runtimes.Service, {
+    all: Effect.succeed(ids.map((id) => unusedRuntime(id, undefined))),
+    route: unused,
+    find: () => undefined,
+    statuses: unused(),
+    online: unused,
+    callers: unused(),
+    added: Stream.die(new Error("the guard reads only Runtimes.all")),
+    transform: unused,
+  })
+}
 
 describe("Shell denials", () => {
   it("vibest connect and vibest machine are refused for every agent", () => {
@@ -676,6 +687,16 @@ const EntryCommands = Spec.make("vibest", {
   commands: [Spec.make("daemon", { commands: [Commands.commands.daemon.commands.restart] })],
 })
 
+const untouchableHost = (onTouch: () => void): Host => {
+  const touch = () => {
+    onTouch()
+
+    return Effect.die("host")
+  }
+
+  return { lock: touch, checkDatabase: touch, trimLog: touch, onSignals: touch, exit: touch }
+}
+
 const entryHandlers = CliRuntime.handlers(EntryCommands, {
   $: () => import("../src/commands/handlers/default.ts"),
   daemon: { restart: () => import("../src/commands/handlers/daemon/restart.ts") },
@@ -705,13 +726,8 @@ describe("wizard entry", () => {
           display: () => Effect.void,
         })
 
-        const host = new Proxy({} as Host, {
-          get: (target, prop, receiver) => {
-            if (prop in target) return Reflect.get(target, prop, receiver)
-            touched.host = true
-
-            return () => Effect.die("host")
-          },
+        const host = untouchableHost(() => {
+          touched.host = true
         })
 
         const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
@@ -794,13 +810,8 @@ describe("vibest --session inside herdr", () => {
         const back = process.cwd()
         process.chdir(repo)
 
-        const host = new Proxy({} as Host, {
-          get: (target, prop, receiver) => {
-            if (prop in target) return Reflect.get(target, prop, receiver)
-            touched.host = true
-
-            return () => Effect.die("host")
-          },
+        const host = untouchableHost(() => {
+          touched.host = true
         })
 
         const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
@@ -860,10 +871,7 @@ describe("vibest --session inside herdr", () => {
       const secret = "probe-value-9f3c"
       const herdr: Array<string> = []
 
-      const host = new Proxy({} as Host, {
-        get: (target, prop, receiver) =>
-          prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
-      })
+      const host = untouchableHost(() => undefined)
 
       const exit = yield* CliRuntime.run(EntryCommands, entryHandlers, {
         version: "0.0.0-test",

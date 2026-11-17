@@ -1,6 +1,6 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Catalog, type FactOf, type FactType } from "@vibest/schema/event"
-import { Effect, Predicate, Stream } from "effect"
+import { Effect, Predicate, type Scope, Stream } from "effect"
 
 import { Agents } from "../agents.ts"
 import { Bus } from "../bus.ts"
@@ -11,9 +11,13 @@ import { Hooks } from "./hooks.ts"
 
 type Short = keyof VibestPlugin.AgentHooks
 
-type AgentHook = `agent.${Short}`
-
 const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
+
+type AgentRegistrations = {
+  readonly [S in Short]: (
+    callback: (event: VibestPlugin.AgentHooks[S]) => Effect.Effect<void, VibestPlugin.AgentFailures[S]>,
+  ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
+}
 
 const factsFor =
   (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] =>
@@ -57,6 +61,11 @@ export const make = Effect.gen(function* () {
       runtime: string | undefined = undefined,
     ) => hooks.register(name, { plugin, activation, stats, runtime, callback })
 
+    const agentRegistrations: AgentRegistrations = {
+      "start.before": (callback) => register("agent.start.before", callback),
+      fail: (callback) => register("agent.fail", callback),
+    }
+
     const hook: VibestPlugin.AgentDomain["hook"] = (short, callback) => {
       if (!Predicate.isString(short) || !HOOKS.includes(short)) {
         return Effect.die(
@@ -66,7 +75,7 @@ export const make = Effect.gen(function* () {
         )
       }
 
-      return register(`agent.${short as Short}`, callback as unknown as Hooks.Entry<AgentHook>["callback"])
+      return agentRegistrations[short](callback)
     }
 
     const machine: VibestPlugin.MachineDomain["hook"] = (name, callback, options) => {

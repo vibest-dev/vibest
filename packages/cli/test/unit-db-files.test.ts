@@ -59,18 +59,14 @@ describe("Db", () => {
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
 
-            return new Proxy(sql, {
-              get(target, prop, receiver) {
-                if (prop !== "unsafe") return Reflect.get(target, prop, receiver)
+            const unsafe = (statement: string, params?: ReadonlyArray<unknown>) =>
+              statement.includes("event_no_update")
+                ? how === "interrupt"
+                  ? Effect.interrupt
+                  : Effect.fail(new Error("injected schema failure"))
+                : sql.unsafe(statement, params)
 
-                return (statement: string, params?: ReadonlyArray<unknown>) =>
-                  statement.includes("event_no_update")
-                    ? how === "interrupt"
-                      ? Effect.interrupt
-                      : Effect.fail(new Error("injected schema failure"))
-                    : target.unsafe(statement, params)
-              },
-            }) as SqlClient.SqlClient
+            return Object.assign(sql.bind(undefined), sql, { unsafe }) satisfies SqlClient.SqlClient
           }),
         ).pipe(Layer.provide(Platform.sqlite(file))),
       ),

@@ -6,8 +6,9 @@ export const RequestId = Schema.String.check(Schema.isUUID(4))
 
 export const shortId = (id: string) => id.slice(0, 8)
 
-export const randomId = (): string =>
-  (globalThis as unknown as { readonly crypto: { readonly randomUUID: () => string } }).crypto.randomUUID()
+declare const crypto: { readonly randomUUID: () => string }
+
+export const randomId = (): string => crypto.randomUUID()
 
 export const newId = <E = never, R = never>(
   taken: (short: string) => Effect.Effect<boolean, E, R> = () => Effect.succeed(false),

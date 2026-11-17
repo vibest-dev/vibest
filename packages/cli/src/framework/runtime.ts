@@ -51,7 +51,8 @@ export function handler<const Node extends Spec.Any, Error>(
   return run
 }
 
-export function handlers<const Root extends Spec.Any>(root: Root, handlers: Handlers<Root>) {
+export function handlers<const Root extends Spec.Any>(root: Root, handlers: Handlers<Root>): Array<LazyHandler>
+export function handlers(root: Spec.Any, handlers: RuntimeHandlers): Array<LazyHandler> {
   const result: Array<LazyHandler> = []
 
   function add(node: Spec.Any, value: RuntimeHandlers | undefined) {
@@ -68,7 +69,7 @@ export function handlers<const Root extends Spec.Any>(root: Root, handlers: Hand
     for (const [name, child] of Object.entries(node.commands)) add(child, value[name])
   }
 
-  add(root, handlers as unknown as RuntimeHandlers)
+  add(root, handlers)
 
   return result
 }

@@ -1,6 +1,6 @@
 import net from "node:net"
 
-import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
@@ -27,14 +27,14 @@ import {
 } from "@vibest/platform-bun/test/lib/fakes"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, type Schema, Scope } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Schema, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
-import { vi } from "vitest"
 
 import { extension, services, skillsDir } from "../src/extension.ts"
 import { Pi } from "../src/pi.ts"
-import presentation from "../src/presentation.ts"
+import toolGroups from "../src/tui/tool-groups.ts"
+import compactUserMessages from "../src/tui/user-message-padding.ts"
 
 type FakeEvent = Schema.JsonObject
 
@@ -53,27 +53,11 @@ type FakeHandler = (e: FakeEvent, ctx: FakeContext) => FakeAnswer | Promise<Fake
 
 type SentMessage = Parameters<ExtensionAPI["sendMessage"]>[0]
 
-const valuesStoredByRefSet = vi.hoisted(() => [] as Array<unknown>)
-
-vi.mock("effect", async (importOriginal) => {
-  const effect = await importOriginal<typeof import("effect")>()
-
-  const set = effect.Function.dual(2, <A>(self: Ref.Ref<A>, value: A) =>
-    effect.Effect.tap(effect.Ref.set(self, value), () =>
-      effect.Effect.sync(() => void valuesStoredByRefSet.push(value)),
-    ),
-  )
-
-  return { ...effect, Ref: { ...effect.Ref, set } }
-})
-
-vi.mock("@earendil-works/pi-coding-agent", () => ({
-  UserMessageComponent: class {
-    render() {
-      return []
-    }
-  },
-}))
+class UserMessageComponent {
+  render() {
+    return []
+  }
+}
 
 const pulling = () => testLayer({ harnesses: [{ ...PI, delivery: "pull" as const }, CLAUDE, CURSOR] })
 
@@ -141,7 +125,7 @@ const session = (env: Record<string, string>, withPresentation = false) =>
       registerToolRenderer: (resolver) => void renderers.push(resolver),
     }
 
-    const api = fake as unknown as ExtensionAPI
+    const api = fake as Pick<ExtensionAPI, "on" | "sendMessage" | "registerToolRenderer">
 
     const emit = (event: string, e: FakeEvent = {}, ctx: FakeContext = {}) =>
       Effect.promise(async () => {
@@ -161,7 +145,11 @@ const session = (env: Record<string, string>, withPresentation = false) =>
       Pi.runMain(api, extension.pipe(Layer.provide(Layer.merge(services, noTty)), Layer.provide(config))),
     )
 
-    if (withPresentation) presentation(api)
+    if (withPresentation) {
+      toolGroups(api)
+      compactUserMessages(api, { UserMessageComponent, TuiAltScreen })
+    }
+
     yield* Effect.addFinalizer(() => emit("session_shutdown"))
 
     return { handlers, messages, renderers, statuses, emit }
@@ -628,16 +616,10 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { type: "session_start", reason: "new" }, executionEnd("print", "s-print"))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.isNull(yield* saved)
-      assert.isFalse(
-        ["child", "s-startup", "s-reload", "s-rpc", "s-print"].some((id) => valuesStoredByRefSet.includes(id)),
-      )
       const s1 = `s1:${launched.sessionId}`
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
-      yield* until(
-        Effect.sync(() => valuesStoredByRefSet.includes(s1)),
-        Boolean,
-      )
-      assert.strictEqual(yield* saved, s1)
+      yield* until(saved, (id) => id === s1)
+      yield* TestClock.withLive(Effect.sleep("300 millis"))
       yield* db.session.noteConversation(launched.sessionId, "other")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
@@ -648,10 +630,7 @@ describe("pi-vibest", () => {
       yield* until(saved, (id) => id === "s-resume")
       yield* s.emit("session_start", { type: "session_start", reason: "fork" }, executionEnd("tui", "s-fork"))
       yield* until(saved, (id) => id === "s-fork")
-      yield* until(
-        Effect.sync(() => valuesStoredByRefSet.includes("s-fork")),
-        Boolean,
-      )
+      yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(
         (yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }))
           .harnessSessionId,

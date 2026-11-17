@@ -128,14 +128,23 @@ const fakeMachine = (options: {
     Effect.gen(function* () {
       const plugin = yield* assembled
       const added: Array<HarnessTypes.HarnessDefinition> = []
-      const editor = { add: (definition: HarnessTypes.HarnessDefinition) => added.push(definition) }
+
+      const editor: HarnessTypes.HarnessEditor = {
+        add: (definition) => void added.push(definition),
+        update: () => undefined,
+      }
+
       const registration = { dispose: Effect.void }
 
-      const ctx = {
-        harness: {
-          transform: (edit: (e: typeof editor) => void) => Effect.sync(() => (edit(editor), registration)),
-        },
-      } as unknown as Parameters<typeof plugin.effect>[0]
+      const ctx: Parameters<typeof plugin.effect>[0] = {
+        options: {},
+        agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
+        machine: { hook: () => Effect.succeed(registration) },
+        runtime: { transform: () => Effect.succeed(registration) },
+        harness: { transform: (edit) => Effect.sync(() => (edit(editor), registration)) },
+        subscription: { report: () => Effect.void },
+        event: { subscribe: () => Stream.never },
+      }
 
       yield* plugin.effect(ctx)
 
