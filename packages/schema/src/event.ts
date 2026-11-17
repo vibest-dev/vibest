@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 
+import { factOf } from "./event-fact.ts"
 import { Routing } from "./plugin.ts"
 
 export type Aggregate = "project" | "session" | "ledger"
@@ -139,41 +140,39 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
 
 export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
 
-const definitions = [
-  ProjectCreated,
-  ProjectMoved,
-  ProjectRepositoriesChanged,
-  ProjectEntryChanged,
-  SessionCreated,
-  SessionRenamed,
-  SessionDirectoryChanged,
-  SessionEnded,
-  ProcessStarted,
-  ProcessPlaced,
-  ProcessReady,
-  ProcessPid,
-  ProcessConversation,
-  ProcessEnded,
-  ExecutionStarted,
-  ExecutionAccepted,
-  ExecutionEnded,
-  InboxQueued,
-  InboxMoved,
-  MachineAdded,
-  MachineConnected,
-  MachineRemoved,
-  PeerSeen,
-  OutboxQueued,
-  OutboxAcked,
-] as const
+export const Catalog = {
+  [ProjectCreated.type]: ProjectCreated,
+  [ProjectMoved.type]: ProjectMoved,
+  [ProjectRepositoriesChanged.type]: ProjectRepositoriesChanged,
+  [ProjectEntryChanged.type]: ProjectEntryChanged,
+  [SessionCreated.type]: SessionCreated,
+  [SessionRenamed.type]: SessionRenamed,
+  [SessionDirectoryChanged.type]: SessionDirectoryChanged,
+  [SessionEnded.type]: SessionEnded,
+  [ProcessStarted.type]: ProcessStarted,
+  [ProcessPlaced.type]: ProcessPlaced,
+  [ProcessReady.type]: ProcessReady,
+  [ProcessPid.type]: ProcessPid,
+  [ProcessConversation.type]: ProcessConversation,
+  [ProcessEnded.type]: ProcessEnded,
+  [ExecutionStarted.type]: ExecutionStarted,
+  [ExecutionAccepted.type]: ExecutionAccepted,
+  [ExecutionEnded.type]: ExecutionEnded,
+  [InboxQueued.type]: InboxQueued,
+  [InboxMoved.type]: InboxMoved,
+  [MachineAdded.type]: MachineAdded,
+  [MachineConnected.type]: MachineConnected,
+  [MachineRemoved.type]: MachineRemoved,
+  [PeerSeen.type]: PeerSeen,
+  [OutboxQueued.type]: OutboxQueued,
+  [OutboxAcked.type]: OutboxAcked,
+} as const
 
-type Defined = (typeof definitions)[number]
+const byType: ReadonlyMap<string, Defined> = new Map(Object.values(Catalog).map((d) => [d.type, d]))
+
+type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
-
-export const Catalog = Object.fromEntries(definitions.map((d) => [d.type, d])) as {
-  readonly [D in Defined as D["type"]]: D
-}
 
 export const CATALOG_VERSION = 2
 
@@ -217,17 +216,20 @@ export const encodeData = <D extends Defined>(
     Effect.tap((json) => Schema.decodeUnknownEffect(definition.data)(JSON.parse(json), strict)),
   )
 
+export const isFactOf = <T extends FactType>(type: T, fact: Fact): fact is FactOf<T> => fact.type === type
+
 export const decodeRow = (row: Row): Effect.Effect<Fact, UnknownFact> => {
   const where = `event ${row.aggregate} ${row.seq}`
 
   const refuse = (message: string) =>
     new UnknownFact({ aggregate: row.aggregate, seq: row.seq, type: row.type, message: `${where}: ${message}` })
 
-  if (!Object.hasOwn(Catalog, row.type)) return Effect.fail(refuse(`${row.type} is not in the event catalog`))
-  const definition: Defined = Catalog[row.type as FactType]
+  const definition = byType.get(row.type)
+
+  if (definition === undefined) return Effect.fail(refuse(`${row.type} is not in the event catalog`))
 
   return Effect.try({
-    try: () => JSON.parse(row.data) as unknown,
+    try: () => JSON.parse(row.data),
     catch: (cause) => refuse(`${row.type} data is not JSON: ${String(cause)}`),
   }).pipe(
     Effect.flatMap((json) =>
@@ -235,17 +237,6 @@ export const decodeRow = (row: Row): Effect.Effect<Fact, UnknownFact> => {
         Effect.mapError((cause) => refuse(`${row.type} does not decode: ${cause.message}`)),
       ),
     ),
-    Effect.map(
-      (data) =>
-        ({
-          aggregate: row.aggregate,
-          seq: row.seq,
-          at: row.at,
-          type: definition.type,
-          ...(definition.aggregate === "project" && { projectId: row.aggregate }),
-          ...(definition.aggregate === "session" && { sessionId: row.aggregate }),
-          data,
-        }) as Fact,
-    ),
+    Effect.map((data) => factOf(row, definition, data)),
   )
 }
