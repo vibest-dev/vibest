@@ -21,7 +21,7 @@ import {
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { Bus } from "../bus.ts"
+import { type BoundProcess, Bus } from "../bus.ts"
 import { type ObservedEnd } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
@@ -81,9 +81,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
     const { queueInbox, insertInboxRow, dropWaiting } = inbox
 
-    const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string, startedBy?: number) =>
+    const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string) =>
       Effect.gen(function* () {
-        for (const entry of yield* entrySessionsAt(runtime, address, except, startedBy)) {
+        for (const entry of yield* entrySessionsAt(runtime, address, except)) {
           yield* endProcess(entry.id, "exited")
           yield* dropWaiting(entry.project)
         }
@@ -644,8 +644,24 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           }),
       ),
 
-      clearEntry: Effect.fn("Db.session.clearEntry")((runtime: string, address: RuntimeAddress, startedBy: number) =>
-        tx(clearEntryAt(runtime, address, undefined, startedBy)).pipe(Effect.asVoid, Effect.orDie),
+      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, address: RuntimeAddress) =>
+        session.processesAt(runtime, address).pipe(Effect.orDie),
+      ),
+
+      clearEntry: Effect.fn("Db.session.clearEntry")((exited: ReadonlyArray<BoundProcess>) =>
+        tx(
+          Effect.forEach(exited, ({ sessionId, process }) =>
+            Effect.gen(function* () {
+              const [entry] = yield* sql<{ project: string }>`SELECT q.id AS project FROM project q
+                JOIN session s ON s.id = q.entry_session_id
+                WHERE s.id = ${sessionId} AND s.process_id = ${process}`
+
+              if (entry === undefined || moving.has(entry.project)) return
+              yield* endProcess(sessionId, "exited")
+              yield* dropWaiting(entry.project)
+            }),
+          ),
+        ).pipe(Effect.asVoid, Effect.orDie),
       ),
 
       canResumeConversation,

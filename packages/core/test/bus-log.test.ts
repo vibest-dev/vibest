@@ -134,7 +134,13 @@ describe("log", () => {
   )
 })
 
-const exited = { type: "terminal.exited", runtime: "r", terminal: { machine: "local", id: "t" } } as const
+const exited = {
+  type: "terminal.exited",
+  runtime: "r",
+  terminal: { machine: "local", id: "t" },
+  processes: [],
+} as const
+
 const released = { type: "runtime.reset", runtime: "r", machine: "local" } as const
 
 describe("subscribe", () => {

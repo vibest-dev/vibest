@@ -256,10 +256,12 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
+      const terminal = { machine: "local", id: s.paneId }
       yield* (yield* Bus.Service).observe({
         type: "terminal.exited",
         runtime: s.origin.runtime,
-        terminal: { machine: "local", id: s.paneId },
+        terminal,
+        processes: yield* (yield* Db.Service).session.processesAt(s.origin.runtime, terminal),
       })
       assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "stopped" })
     }),

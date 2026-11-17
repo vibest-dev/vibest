@@ -256,7 +256,9 @@ export const make = Effect.gen(function* () {
       : Effect.void,
   )
   yield* reactor.on([TerminalState], (event) => onTerminal(event.runtime, event.terminal, event.state === "working"))
-  yield* reactor.on([TerminalExited], (event) => onTerminal(event.runtime, event.terminal, false))
+  yield* reactor.on([TerminalExited], (event) =>
+    Effect.forEach(event.processes, ({ sessionId }) => wakes.wake(sessionId, undefined), { discard: true }),
+  )
   yield* reactor.on([ProcessEnded], (event) => forgetIfDone(event.sessionId!))
   yield* reactor.on([RuntimeReset], (event) =>
     republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine }))),

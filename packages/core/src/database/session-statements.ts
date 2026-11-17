@@ -343,20 +343,24 @@ export const statements = Effect.gen(function* () {
       yield* observe({ type: "session.changed", sessionId: id })
     })
 
+  const processesAt = (runtime: string, address: RuntimeAddress) =>
+    sql<{ sessionId: string; process: number }>`SELECT s.id AS session_id, p.id AS process FROM session s
+      JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+      WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL`
+
   const sessionAt = (runtime: string, address: RuntimeAddress) =>
     sql<{ id: string }>`SELECT s.id FROM session s JOIN process p ON p.session_id = s.id AND p.id = s.process_id
       WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL
       ORDER BY s.created_at, s.id
       LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
 
-  const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string, startedBy?: number) =>
+  const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
         JOIN project q ON q.entry_session_id = s.id
         JOIN process p ON p.session_id = s.id AND p.id = s.process_id
         WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL
-          ${except === undefined ? sql`` : sql`AND s.project_id != ${except}`}
-          ${startedBy === undefined ? sql`` : sql`AND p.started_at <= ${startedBy}`}`
+          ${except === undefined ? sql`` : sql`AND s.project_id != ${except}`}`
 
       return rows.filter((r) => !moving.has(r.project))
     })
@@ -437,6 +441,7 @@ export const statements = Effect.gen(function* () {
     setStatus,
     sessionAt,
     entrySessionsAt,
+    processesAt,
     unusedId,
     conversationOf,
     creatorOf,

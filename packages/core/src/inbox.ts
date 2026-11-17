@@ -1,7 +1,7 @@
 import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued } from "@vibest/schema/event"
 import { shortId } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
-import { Clock, Context, Effect, Layer, Queue, Stream } from "effect"
+import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus, TerminalExited } from "./bus.ts"
 import { type NewInboxRow, type SessionRow, harnessIdOf } from "./database/db-rows.ts"
@@ -111,11 +111,7 @@ export const layer = Layer.effect(
     yield* reactor.on([InboxQueued], (event) => wake(event.sessionId))
     yield* reactor.on([InboxMoved], (event) => (event.data.to === "pending" ? wake(event.sessionId) : Effect.void))
     yield* reactor.on([TerminalExited], (event) =>
-      Clock.currentTimeMillis.pipe(
-        Effect.flatMap((exitedBy) =>
-          drain.work("entry session exited", db.session.clearEntry(event.runtime, event.terminal, exitedBy), true),
-        ),
-      ),
+      drain.work("entry session exited", db.session.clearEntry(event.processes), true),
     )
 
     const stream = (sessionId: string) =>

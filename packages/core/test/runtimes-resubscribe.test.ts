@@ -5,11 +5,15 @@ import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { Effect, Layer, PubSub, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { noHostEnv } from "./lib/harnesses.ts"
+import { noHostEnv, noTerminalProcesses } from "./lib/harnesses.ts"
 import { unusedRuntime } from "./lib/session.ts"
 import { memoryBus } from "./platform/bun.ts"
 
-const layer = Runtimes.layer.pipe(Layer.provideMerge(memoryBus), Layer.provide(noHostEnv))
+const layer = Runtimes.layer.pipe(
+  Layer.provideMerge(memoryBus),
+  Layer.provide(noHostEnv),
+  Layer.provide(noTerminalProcesses),
+)
 
 const follow = (events: Stream.Stream<RuntimeApi.RuntimeEvent>) =>
   Effect.gen(function* () {

@@ -146,7 +146,9 @@ export const harnessesFrom = (
 
 export const noHostEnv = Layer.succeed(Runtimes.HostEnv, { drop: () => {} })
 
-export const runtimesLayer = Runtimes.layer.pipe(Layer.provide(noHostEnv))
+export const noTerminalProcesses = Layer.succeed(Runtimes.TerminalProcesses, () => Effect.succeed([]))
+
+export const runtimesLayer = Runtimes.layer.pipe(Layer.provide(noHostEnv), Layer.provide(noTerminalProcesses))
 
 export const harnessesLayer = (definitions: ReadonlyArray<HarnessDefinition> = HARNESSES) =>
   Layer.effect(Harnesses.Service, harnessesFrom(definitions))
