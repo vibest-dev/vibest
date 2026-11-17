@@ -40,6 +40,9 @@
         "skipComments": false
       }
     ],
+    "oxc/no-accumulating-spread": "error",
+    "anti-slop/no-array-filter-map": "off",
+    "anti-slop/no-reduce-accumulator-copy": "error",
     "anti-slop/no-chained-type-assertions": "off",
     "anti-slop/no-conditional-empty-object-spread": "off",
     "anti-slop/no-known-value-widening": "off",
@@ -54,8 +57,13 @@
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "off",
     "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-readable-spacing": "off",
     "anti-slop/require-safety-comment-for-type-assertion": "off",
-    "anti-slop-effect/no-service-constructor-imports": "off"
+    "anti-slop-effect/no-manual-effect-error-tag": "off",
+    "anti-slop-effect/no-manual-tag-comparison": "off",
+    "anti-slop-effect/no-manual-tagged-construction": "off",
+    "anti-slop-effect/no-service-constructor-imports": "off",
+    "anti-slop-effect/prefer-effect-match": "off"
   },
   "overrides": [
     {
