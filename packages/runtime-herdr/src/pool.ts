@@ -19,7 +19,7 @@ import {
   Herdr,
   HerdrProtocolMismatch,
   type HerdrClient,
-  type PushFrame,
+  type Frame,
   SocketConnector,
   type Subscription,
 } from "effect-herdr-sdk"
@@ -27,7 +27,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 export interface SessionEvent {
   readonly session: string
-  readonly frame: PushFrame
+  readonly frame: Frame
 }
 
 export const SUBSCRIPTIONS: ReadonlyArray<Subscription> = [

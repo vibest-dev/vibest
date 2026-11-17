@@ -900,7 +900,7 @@ export type PayloadOf<Tag extends RpcGroup.Rpcs<typeof VibestRpcs>["_tag"]> = Rp
 
 export const PEER_CALLS: ReadonlySet<string> = new Set(
   Object.entries(ACCESS)
-    .filter(([, access]) => ([] as ReadonlyArray<string>).concat(access).includes("peer"))
+    .filter(([, access]) => [access].flat().includes("peer"))
     .map(([method]) => method),
 )
 

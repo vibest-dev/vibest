@@ -226,14 +226,13 @@ const make = Effect.gen(function* () {
   const ensure = Effect.fn("Machines.ensure")(
     (name: string, kind: string, sessions: ReadonlyMap<string, string>, always = false) =>
       lock.withLock(name)(
-        Effect.gen(function* () {
+        Effect.gen(function* (): Effect.fn.Return<View> {
           const row = yield* db.remote.machineNamed(name)
           const here = yield* runtimes.all
           const locate = here.find((r) => r.id === kind)?.locate
           const label = shownKind(here, kind)
 
-          if (row === undefined || locate === undefined)
-            return { terminals: NONE, note: cannotShow(name, label) } as View
+          if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, label) }
           const seen = there.get(name)
           const reported = seen?.runtimes.find((r) => r.kind === kind)
 
@@ -246,7 +245,7 @@ const make = Effect.gen(function* () {
                   : reported === undefined
                     ? `${name} has no ${kind} runtime`
                     : `${kind} on ${name} is ${reported.status}${reported.reason ? ` (${reported.reason})` : ""}`,
-            } as View
+            }
 
           const look = locate({ id: name, target: row.target, link: reported.link }, sessions).pipe(
             Effect.catchCause((cause) =>
@@ -260,7 +259,7 @@ const make = Effect.gen(function* () {
 
           const first = yield* look
 
-          if (!first.missing) return first as View
+          if (!first.missing) return first
           const key = `${name}\0${kind}`
           const last = repairs.get(key)
 
@@ -269,20 +268,20 @@ const make = Effect.gen(function* () {
             last !== undefined &&
             (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(REPAIR_PAUSE)
           )
-            return { terminals: NONE, note: last.note } as View
+            return { terminals: NONE, note: last.note }
           const notes = yield* fire(row, "connect", kind)
           const again = yield* look
 
           if (!again.missing) {
             repairs.delete(key)
 
-            return again as View
+            return again
           }
 
           const note = again.note ?? (notes.map(noteText).join("; ") || `${name}'s agents are not in ${label} here`)
           repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
 
-          return { terminals: NONE, note } as View
+          return { terminals: NONE, note }
         }),
       ),
   )

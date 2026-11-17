@@ -63,7 +63,13 @@
     "anti-slop-effect/no-manual-tag-comparison": "error",
     "anti-slop-effect/no-manual-tagged-construction": "error",
     "anti-slop-effect/no-service-constructor-imports": "error",
-    "anti-slop-effect/prefer-effect-match": "error"
+    "anti-slop-effect/prefer-effect-match": "error",
+    "typescript/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "never"
+      }
+    ]
   },
   "overrides": [
     {
@@ -127,6 +133,24 @@
       ],
       "rules": {
         "eslint/no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": [
+        "packages/core/src/effect/layer-node-erased.ts",
+        "packages/schema/src/event-fact.ts",
+        "packages/cli/src/framework/spec-erased.ts",
+        "packages/cli/src/framework/runtime-erased.ts",
+        "packages/effect-herdr-sdk/src/herdr-result.ts"
+      ],
+      "rules": {
+        "typescript/consistent-type-assertions": "off"
+      }
+    },
+    {
+      "files": ["**/test/**", "**/*.test.ts", "tools/e2e/**"],
+      "rules": {
+        "typescript/consistent-type-assertions": "off"
       }
     }
   ],

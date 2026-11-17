@@ -190,7 +190,7 @@ export const handoffDaemon = (
     ).pipe(Effect.scoped, Effect.exit)
 
     if (Exit.isFailure(reply)) {
-      const e = Option.getOrUndefined(Cause.findErrorOption(reply.cause)) as { readonly message?: string } | undefined
+      const e = Option.getOrUndefined(Cause.findErrorOption(reply.cause))
       const still = Option.getOrUndefined(yield* readPing(layout.socket))
 
       if (still?.instance === old.instance)

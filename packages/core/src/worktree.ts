@@ -64,7 +64,7 @@ const linkTarget = (p: string) =>
       Effect.catchIf(
         (e) =>
           Predicate.isTagged(e.reason, "NotFound") ||
-          (e.reason.cause as { code?: unknown } | undefined)?.code === "EINVAL",
+          (Predicate.hasProperty(e.reason.cause, "code") && e.reason.cause.code === "EINVAL"),
         () => Effect.succeed(Option.none<string>()),
       ),
     )
@@ -92,7 +92,8 @@ const linkOnPath = (base: string, rel: string) =>
   })
 
 const copyFailed = (src: string, dst: string) => (e: PlatformError.PlatformError) => {
-  const code = (e.reason.cause as { code?: unknown } | undefined)?.code
+  const cause = e.reason.cause
+  const code = Predicate.hasProperty(cause, "code") ? cause.code : undefined
 
   return new CopyFailed({
     source: src,

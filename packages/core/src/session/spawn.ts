@@ -507,7 +507,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
 
           return {
             id: before.id,
-            harness: before.harness as HarnessId,
+            harness: before.harness,
             provider: before.provider,
             model: before.model,
             runtime: before.runtime,
