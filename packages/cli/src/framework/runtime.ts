@@ -5,6 +5,7 @@ import { Command } from "effect/cli"
 import { type HttpClient } from "effect/http"
 
 import { type Host } from "../host.ts"
+import { withErasedInput } from "./runtime-erased.ts"
 import type { Spec } from "./spec.ts"
 
 export type Environment = Command.Environment | Host | Layout | SocketConnector.Service | HttpClient.HttpClient
@@ -22,7 +23,7 @@ type Loader<Node extends Spec.Any> = () => Promise<{
   default: (input: Input<Node>) => Effect.Effect<void, any, Environment>
 }>
 
-type ProvidedCommand = Command.Command<string, unknown, unknown, unknown, Environment>
+export type ProvidedCommand = Command.Command<string, unknown, unknown, unknown, Environment>
 
 export type Handlers<Node extends Spec.Any> = keyof Node["commands"] extends never
   ? Loader<Node>
@@ -79,11 +80,7 @@ export function run(
   handlers: ReadonlyArray<LazyHandler>,
   options: { readonly version: string; readonly extra: Extra },
 ) {
-  return Command.run(provide(commands, handlers, options.extra), { version: options.version }) as Effect.Effect<
-    void,
-    unknown,
-    Environment
-  >
+  return Command.run(provide(commands, handlers, options.extra), { version: options.version })
 }
 
 function provide(node: Spec.Any, handlers: ReadonlyArray<LazyHandler>, extra?: Extra): ProvidedCommand {
@@ -97,16 +94,18 @@ function provide(node: Spec.Any, handlers: ReadonlyArray<LazyHandler>, extra?: E
 
   const children = Object.entries(node.commands).map(([name, child]) => [name, provide(child, handlers)] as const)
 
-  if (children.length === 0) return spec as ProvidedCommand
+  if (children.length === 0) return spec
   const at = extra === undefined ? children.length : children.findIndex(([name]) => name === extra.after) + 1
 
-  return spec.pipe(
-    Command.withSubcommands([
-      ...children.slice(0, at).map(([, child]) => child),
-      ...(extra?.commands ?? []),
-      ...children.slice(at).map(([, child]) => child),
-    ]),
-  ) as ProvidedCommand
+  return withErasedInput(
+    spec.pipe(
+      Command.withSubcommands([
+        ...children.slice(0, at).map(([, child]) => child),
+        ...(extra?.commands ?? []),
+        ...children.slice(at).map(([, child]) => child),
+      ]),
+    ),
+  )
 }
 
 export * as Runtime from "./runtime.ts"
