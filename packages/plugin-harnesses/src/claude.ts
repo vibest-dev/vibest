@@ -5,7 +5,6 @@ import { findMessage, jsonLines, noProvider, opt, withConfigured } from "./model
 
 const CLAUDE_MENUS = [
   { menu: "trust", pattern: /trust this folder/i, accept: /^\s*❯.*Yes, I trust this folder/im },
-  { menu: "add-dir", pattern: /Adding a new directory/i, accept: /^\s*❯.*Yes, add it/im },
   { menu: "bypass", pattern: /bypass permissions/i, accept: /^\s*❯.*Yes, I accept/im },
 ]
 

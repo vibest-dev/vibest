@@ -251,13 +251,6 @@ describe("harness output", () => {
     assert.deepStrictEqual(claudeMenuKey(trustDialog, []), { menu: "trust", key: "down" })
     assert.deepStrictEqual(claudeMenuKey(moved, []), { menu: "trust", key: "enter" })
     assert.strictEqual(claudeMenuKey(moved, ["trust"]), undefined)
-    const addDir =
-      "Adding a new directory: /tmp/proj\n\nThis session has not worked here before. Is this a directory you created or one you trust?\n\n ❯ 1. No, exit\n   2. Yes, add it\n"
-    const addDirMoved =
-      "Adding a new directory: /tmp/proj\n\nThis session has not worked here before. Is this a directory you created or one you trust?\n\n   1. No, exit\n ❯ 2. Yes, add it\n"
-    assert.deepStrictEqual(claudeMenuKey(addDir, []), { menu: "add-dir", key: "down" })
-    assert.deepStrictEqual(claudeMenuKey(addDirMoved, []), { menu: "add-dir", key: "enter" })
-    assert.strictEqual(claudeMenuKey(addDirMoved, ["add-dir"]), undefined)
     assert.strictEqual(claudeMenuKey("❯ ready", []), undefined)
   })
 
