@@ -10,11 +10,16 @@
 2. **The Release workflow** (`.github/workflows/release.yml`) is the only way to release, started by the owner on
    `main` from the Actions page or with `gh workflow run release.yml -R vibest-dev/vibest --ref main`. It releases a
    chosen known-good commit of `main` (`-f commit=<sha>`, which must be an ancestor of `main`; without it, the head of
-   `main`): every job builds, verifies, tags and publishes exactly that commit. `-f version=<x.y.z-beta.n>` (a beta) or
-   `-f version=<x.y.z>` (stable) names the version, which must be newer than the newest release of either channel;
-   without it, the next beta after the highest `v<x.y.z>-beta.<n>` tag (refused once a stable is newer than that beta:
-   name the version then). It sets that version in every package.json of its own checkout only and fails when the
-   version is already tagged or on npm. It runs the release gate on that tree: the whole of `pnpm verify --no-cache`,
+   `main`): every job builds, verifies, tags and publishes exactly that commit. The `plan` job computes the version
+   from the `v*` tags only. `-f bump=beta` (the default) is the next `x.y.z-beta.n` after the highest tag (after a
+   stable `x.y.z`, `x.y.(z+1)-beta.0`); `-f bump=patch|minor|major` is a stable `x.y.z` bumped from the highest stable
+   tag, or, with no stable yet, from the base version of the highest beta (`0.0.1-beta.20` with patch is `0.0.1`, with
+   minor `0.1.0`). `-f version=<x.y.z-beta.n|x.y.z>` overrides the bump with an exact version. Either way the version
+   must be newer than the newest release of either channel. A stable release needs notes, `-f release_notes=<markdown>`
+   or a CHANGELOG.md section `## <version>`, and `plan` refuses one without them; a beta's notes are optional. Each job
+   writes the version into every package.json of `VERSIONED` in its own checkout with bumpp (`bumpp --release <version>
+   <files> --no-commit --no-tag --no-push --yes`, a dev dependency at an exact version), never committing, tagging or
+   pushing, and checks that every one carries it. The run fails when the version is already tagged or on npm. It runs the release gate on that tree: the whole of `pnpm verify --no-cache`,
    the single entry for all verification, whose stages run as parallel jobs on GitHub-hosted runners. `build` packs once
    (`--stage build,archive,pack`): the linux-x64 curl archive and every npm tarball, checks the tarballs, records the
    SHA-256 of every file and keeps them. `typecheck` and `test` are jobs of their own. `e2e` runs every E2E check on the
@@ -27,8 +32,9 @@
    keeps what verify installed and checked, then waits for the owner's approval (environment
    `release`). Only after the approval does it check those hashes, tag that commit `v<version>` (with
    `GITHUB_TOKEN`), publish exactly those tarballs to npm, make the GitHub Release from exactly those archives, and check
-   every package's dist-tag. Nothing is rebuilt or repacked after verify checked it. A CHANGELOG.md section for the
-   version (`## <version>`) is optional.
+   every package's dist-tag. Nothing is rebuilt or repacked after verify checked it. The release notes are
+   `release_notes` when given, else the CHANGELOG.md section of the version, else (a beta only) GitHub's generated
+   notes.
 
    There is no local release or publish path: nobody tags or publishes from a machine.
 
@@ -49,8 +55,7 @@
    updates to the newest stable only, a beta (and a build from `main`, `0.0.1-dev`) to the newest release of either
    channel, so a beta user moves to a stable once it is newer; `--stable` and `--beta` choose explicitly. An npm install
    reads the same from `@vibest/cli`'s dist-tags (`latest` for stable, the newer of `latest` and `beta` for either
-   channel). The notes are the CHANGELOG.md section of the version when there is one, otherwise GitHub's generated
-   notes. Both channels stay in this same workflow file: npm trusted publishing binds each package to one workflow file
+   channel). Both channels stay in this same workflow file: npm trusted publishing binds each package to one workflow file
    name, `release.yml`, so the file is never renamed.
 5. **Bugs are fixed on `main` and rolled forward.** There are no release branches: a bug found in a release is fixed on
    `main` like any change, and a new release ships it, cut from a known-good commit of `main` that contains the fix. A
@@ -61,8 +66,9 @@
    themselves.
 7. Only the owner's runs do anything: every job checks that the owner started the run and the attempt; anyone else's
    run is skipped. A run that is not a dry run must be on `main`.
-8. The workflow's `VERSIONED` list names every workspace package.json that carries the version; a new package goes into
-   it, and every file in it holds `0.0.1-dev` on `main`.
+8. The workflow's `VERSIONED` list names every workspace package.json that carries the version, the files bumpp writes;
+   a new package goes into it, and every file in it holds `0.0.1-dev` on `main`. bumpp gets the files, not `-r`: `-r`
+   would also rewrite the unreleased `tools/bench` and `tools/e2e`.
 9. The gate is `pnpm verify` as it is: the workflow runs its stages (`--stage`, `--leg`, `--shard`) in parallel jobs and
    replaces no part of it with other commands. Every stage, every leg and every shard must run: a new shard goes into
    the matrix and `SHARDS`. A part the runner cannot run fails the run; fix the runner or verify, never narrow the gate.
