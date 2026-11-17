@@ -3,7 +3,7 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { launchLine, reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
-import { Clock, Deferred, Duration, Effect, PubSub, type Scope, Schedule, Stream } from "effect"
+import { Clock, Deferred, Duration, Effect, Predicate, PubSub, type Scope, Schedule, Stream } from "effect"
 import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export type Terminal = VibestPlugin.Runtime.Terminal
@@ -154,14 +154,14 @@ export const make = (deps: {
     }
 
     const onNotice = (socket: string, core: Core, notice: Notice): Effect.Effect<void, HcFailure> => {
-      if (notice._tag === "Subscribed")
+      if (Predicate.isTagged(notice, "Subscribed"))
         return Effect.gen(function* () {
           core.busy.clear()
           for (const t of notice.result.terminals) track(core, t)
           for (const t of notice.result.terminals) if (!core.busy.has(t.address)) yield* wake(core, t.address)
           yield* PubSub.publish(events, { type: "reset" })
         })
-      if (notice._tag === "Notification")
+      if (Predicate.isTagged(notice, "Notification"))
         return notice.method === "missed"
           ? Effect.fail(new HcTransportError({ method: "events.subscribe", message: "missed events" }))
           : Effect.void
@@ -209,7 +209,7 @@ export const make = (deps: {
               onNotice(socket, core, notice).pipe(
                 Effect.tap(() =>
                   Effect.sync(() => {
-                    if (notice._tag === "Subscribed") subscribed = true
+                    if (Predicate.isTagged(notice, "Subscribed")) subscribed = true
                   }),
                 ),
               ),
@@ -252,18 +252,22 @@ export const make = (deps: {
         Effect.flatMap(({ hc, address }) => failWith(hc.call("terminal.get", { terminal: address }))),
       )
 
+    const blocked = (e: { readonly message: string }) =>
+      Effect.succeed({ status: "blocked" as const, reason: e.message })
+
     const status: Runtime["status"] = () =>
       home.hello.pipe(
         Effect.as({ status: "online" as const }),
-        Effect.catch((e) =>
-          Effect.succeed(
-            e._tag === "HcGenerationMismatch" || e._tag === "HcCoreTooOld" || e._tag === "HcMethodsMissing"
-              ? { status: "blocked" as const, reason: e.message }
-              : {
-                  status: "offline" as const,
-                  reason: `no herdr-core answers at ${home.socketPath} (start one with hc server start)`,
-                },
-          ),
+        Effect.catchTags({
+          HcGenerationMismatch: blocked,
+          HcCoreTooOld: blocked,
+          HcMethodsMissing: blocked,
+        }),
+        Effect.catch(() =>
+          Effect.succeed({
+            status: "offline" as const,
+            reason: `no herdr-core answers at ${home.socketPath} (start one with hc server start)`,
+          }),
         ),
       )
 
@@ -307,7 +311,7 @@ export const make = (deps: {
             }),
           ).pipe(
             Effect.retry({
-              while: (e) => e._tag === "HcError" && e.kind === "name_taken",
+              while: (e) => Predicate.isTagged(e, "HcError") && e.kind === "name_taken",
               times: 8,
             }),
           ),

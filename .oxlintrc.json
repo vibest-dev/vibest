@@ -59,11 +59,11 @@
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-readable-spacing": "off",
     "anti-slop/require-safety-comment-for-type-assertion": "off",
-    "anti-slop-effect/no-manual-effect-error-tag": "off",
-    "anti-slop-effect/no-manual-tag-comparison": "off",
-    "anti-slop-effect/no-manual-tagged-construction": "off",
-    "anti-slop-effect/no-service-constructor-imports": "off",
-    "anti-slop-effect/prefer-effect-match": "off"
+    "anti-slop-effect/no-manual-effect-error-tag": "error",
+    "anti-slop-effect/no-manual-tag-comparison": "error",
+    "anti-slop-effect/no-manual-tagged-construction": "error",
+    "anti-slop-effect/no-service-constructor-imports": "error",
+    "anti-slop-effect/prefer-effect-match": "error"
   },
   "overrides": [
     {

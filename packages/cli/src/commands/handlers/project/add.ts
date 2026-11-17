@@ -1,3 +1,4 @@
+import { Claim } from "@vibest/client/client"
 import { Effect, Path } from "effect"
 
 import { json, userOnly } from "../../../caller.ts"
@@ -9,7 +10,7 @@ export default Runtime.handler(Commands.commands.project.commands.add, (o) =>
   Effect.gen(function* () {
     yield* userOnly("project add")
     const repositoryRoot = (yield* Path.Path).resolve(o.directory)
-    const opened = yield* withVibest({ _tag: "cli", repositoryRoot }, (client) => client["Project.Open"]({}), {
+    const opened = yield* withVibest(Claim.cli({ repositoryRoot }), (client) => client["Project.Open"]({}), {
       start: true,
     })
     yield* json(opened)

@@ -170,8 +170,7 @@ export class FakeGit extends Context.Service<
               return { branch: "", pushed: false, saved: false, why: "commits not on any branch" }
             if (found.checkout.facts.stateError !== undefined)
               return yield* Effect.fail(
-                PlatformError.systemError({
-                  _tag: "Unknown",
+                PlatformError.badArgument({
                   module: "Git",
                   method: "state",
                   description: found.checkout.facts.stateError,

@@ -34,7 +34,7 @@ import {
 } from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Effect, Layer, Option } from "effect"
+import { Data, Effect, Layer, Option, Predicate } from "effect"
 import * as Headers from "effect/http/Headers"
 
 const SETTLEMENTS: ReadonlySet<string> = new Set(["ExecutionEnd", "Prompt"])
@@ -82,16 +82,29 @@ const noteConversation = (db: Db.Interface, read: Read, row: { id: string; harne
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
+type IdentityRow = NonNullable<Effect.Success<ReturnType<Db.Interface["session"]["sessionIdentity"]>>>
+
+type Identity = Data.TaggedEnum<{
+  NoSession: { readonly id: string | undefined }
+  NoProject: { readonly row: IdentityRow }
+  WrongProject: { readonly row: IdentityRow; readonly project: string }
+  Known: { readonly row: IdentityRow }
+}>
+
+const Identity = Data.taggedEnum<Identity>()
+
+const Callers = Data.taggedEnum<CallerShape>()
+
 export const identify = (db: Db.Interface, read: Read) =>
   Effect.gen(function* () {
     const id = read(SESSION_HEADER)
     const row = id ? yield* db.session.sessionIdentity(id) : undefined
-    if (!row) return { _tag: "NoSession", id } as const
+    if (!row) return Identity.NoSession({ id })
     const project = read(PROJECT_HEADER)
-    if (project === undefined) return { _tag: "NoProject", row } as const
-    if (project !== row.projectId) return { _tag: "WrongProject", row, project } as const
+    if (project === undefined) return Identity.NoProject({ row })
+    if (project !== row.projectId) return Identity.WrongProject({ row, project })
     yield* noteConversation(db, read, row)
-    return { _tag: "Known", row } as const
+    return Identity.Known({ row })
   })
 
 export const noteOpen = (db: Db.Interface, read: Read, sessionId: string) =>
@@ -120,13 +133,13 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
     const sessionId = Headers.get(headers, SESSION_HEADER)
     const repository = Headers.get(headers, REPOSITORY_HEADER)
     const bad = (message: string) => new InvalidCaller({ method, message })
-    if (kind._tag === "None")
+    if (Option.isNone(kind))
       return yield* bad(`${method} needs an ${CALLER_HEADER} header (cli or session); it does not default to cli`)
     if (kind.value === "peer") {
       const peer = read(PEER_HEADER)
       if (peer === undefined || !ID.test(peer))
         return yield* bad(`${method} claims peer without a valid ${PEER_HEADER}`)
-      if (sessionId._tag === "Some") return yield* bad(`${method} claims peer and a session id`)
+      if (Option.isSome(sessionId)) return yield* bad(`${method} claims peer and a session id`)
       if (!PEER_CALLS.has(method)) return yield* bad(`a peer vibestd may not call ${method}`)
       if (method !== "Peer.Hello" && !(yield* db.remote.peerKnown(peer)))
         return yield* bad(`peer ${peer} has not said Peer.Hello; call it first`)
@@ -137,39 +150,37 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
       )
         return yield* bad(`${method} is forwarded for the user or for a session; ${PEER_BY_HEADER} says neither`)
       const project = read(PEER_PROJECT_HEADER)
-      return {
-        _tag: "Peer",
+      return Callers.Peer({
         peerId: peer,
         ...(project === undefined ? {} : { projectId: project }),
         ...(by === undefined || by === PEER_BY_USER ? {} : { session: by }),
-      } satisfies CallerShape
+      })
     }
     if (kind.value === "cli") {
-      if (sessionId._tag === "Some") return yield* bad(`${method} claims cli and a session id`)
-      if (repository._tag === "None" || repository.value.trim() === "")
+      if (Option.isSome(sessionId)) return yield* bad(`${method} claims cli and a session id`)
+      if (Option.isNone(repository) || repository.value.trim() === "")
         return yield* bad(`${method} claims cli without a repository`)
-      return { _tag: "Cli", repositoryRoot: repository.value } satisfies CallerShape
+      return Callers.Cli({ repositoryRoot: repository.value })
     }
     if (kind.value === "session") {
-      if (sessionId._tag === "None" || sessionId.value.trim() === "")
+      if (Option.isNone(sessionId) || sessionId.value.trim() === "")
         return yield* bad(`${method} claims session without a session id`)
-      if (repository._tag === "Some" && repository.value.trim() === "")
+      if (Option.isSome(repository) && repository.value.trim() === "")
         return yield* bad(`${method} has an empty repository`)
       const who = yield* identify(db, read)
-      if (who._tag === "NoSession")
+      if (Predicate.isTagged(who, "NoSession"))
         return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
-      if (who._tag === "NoProject")
+      if (Predicate.isTagged(who, "NoProject"))
         return yield* bad(`${method} claims session ${who.row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
-      if (who._tag === "WrongProject")
+      if (Predicate.isTagged(who, "WrongProject"))
         return yield* bad(
           `${method} claims project ${who.project}; session ${who.row.id} is in project ${who.row.projectId}`,
         )
-      return {
-        _tag: "Session",
+      return Callers.Session({
         sessionId: who.row.id,
         projectId: who.row.projectId,
-        ...(repository._tag === "Some" ? { repositoryRoot: repository.value } : {}),
-      } satisfies CallerShape
+        ...(Option.isSome(repository) ? { repositoryRoot: repository.value } : {}),
+      })
     }
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })

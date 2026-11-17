@@ -1,12 +1,12 @@
 import { Cause, Duration, Effect, Queue, Semaphore, Stream } from "effect"
 
 import { logFailure } from "../reactor.ts"
-import { type Candidate, keyOf, makeSources, makeWatcher, type Operation } from "./sources.ts"
+import { type Candidate, keyOf, openSources, openWatcher, type Operation } from "./sources.ts"
 
 export const DEBOUNCE = Duration.millis(100)
 export const RECHECK = Duration.seconds(1)
 
-type Sources = Effect.Success<ReturnType<typeof makeSources>>
+type Sources = Effect.Success<ReturnType<typeof openSources>>
 
 interface Host {
   readonly activate: (candidates: ReadonlyArray<Candidate>) => Effect.Effect<void>
@@ -83,7 +83,7 @@ export const supervise = Effect.fnUntraced(function* (
     Queue.offerUnsafe(triggers, observed)
     Queue.offerUnsafe(builtinTriggers, undefined)
   }
-  const watcher = yield* makeWatcher(notify)
+  const watcher = yield* openWatcher(notify)
   const lock = yield* Semaphore.make(1)
   let users: ReadonlyArray<Candidate> = []
   let activated: string | undefined

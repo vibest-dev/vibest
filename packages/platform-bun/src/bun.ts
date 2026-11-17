@@ -42,7 +42,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { SqlClient } from "effect/sql"
 
 import { trimLog } from "./log-file.ts"
-import { graph, makeLoads, packageName, watch } from "./plugin-source.ts"
+import { graph, pluginLoads, packageName, watch } from "./plugin-source.ts"
 
 const unrefStdio = Layer.effect(
   Stdio.Stdio,
@@ -160,7 +160,7 @@ const provided: Readonly<Record<string, object>> = {
 const providedPackages: ReadonlySet<string> = new Set(Object.keys(provided).map(packageName))
 
 export const makePluginLoader = (): PluginLoader["Service"] => {
-  const { keyLocalImports, load } = makeLoads()
+  const { keyLocalImports, load } = pluginLoads()
   let mapped = false
   return {
     prepare: Effect.sync(() => {

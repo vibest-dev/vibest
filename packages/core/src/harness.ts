@@ -85,7 +85,7 @@ export const make = Effect.gen(function* () {
           ? Effect.succeed(false)
           : Effect.findFirst(searchPath, (dir) =>
               fs.exists(path.join(dir, definition.binary)).pipe(Effect.orElseSucceed(() => false)),
-            ).pipe(Effect.map((found) => found._tag === "Some"))
+            ).pipe(Effect.map(Option.isSome))
       }),
     ),
     plugin: Effect.fn("Harness.plugin")(function* (id) {

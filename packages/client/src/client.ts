@@ -12,6 +12,7 @@ import { PROTOCOL } from "@vibest/schema/version"
 import {
   Cause,
   Config,
+  Data,
   Duration,
   Effect,
   Exit,
@@ -91,6 +92,8 @@ export type Claim =
       readonly process?: string
     }
 
+export const Claim = Data.taggedEnum<Claim>()
+
 export const protocolHeaders = () => ({ [PROTOCOL_HEADER]: String(PROTOCOL) })
 
 export const cliHeaders = (repositoryRoot: string) => ({
@@ -115,7 +118,7 @@ const fromEnv = Effect.gen(function* () {
 )
 
 export const claimHeaders = (claim: Claim) =>
-  claim._tag === "cli"
+  Predicate.isTagged(claim, "cli")
     ? Effect.succeed(cliHeaders(claim.repositoryRoot))
     : Effect.map(fromEnv, (more) =>
         sessionHeaders({
@@ -153,8 +156,9 @@ export const HOOK_RETRY_DELAY = Duration.millis(300)
 
 const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOENT"])
 const notConnected = (error: unknown) => {
-  if (!Predicate.hasProperty(error, "reason") || !Predicate.hasProperty(error.reason, "_tag")) return false
-  if (error.reason._tag !== "SocketOpenError" || !Predicate.hasProperty(error.reason, "cause")) return false
+  if (!Predicate.hasProperty(error, "reason")) return false
+  if (!Predicate.isTagged(error.reason, "SocketOpenError") || !Predicate.hasProperty(error.reason, "cause"))
+    return false
   const cause = error.reason.cause
   return Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code) && CONNECT_CODES.has(cause.code)
 }

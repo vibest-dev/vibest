@@ -95,12 +95,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
       const pull = yield* Socket.readerString(socket)
       const writer = yield* socket.writer
       yield* writer.write(`${yield* encodeRequest(request).pipe(Effect.orDie)}\n`)
-      const text = pull.pipe(
-        Effect.catchIf(
-          (e) => e.reason._tag === "SocketCloseError",
-          () => Cause.done(),
-        ),
-      )
+      const text = pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))
       return Stream.fromPull(Effect.succeed(text)).pipe(
         Stream.splitLines,
         Stream.filter((l) => l.length > 0),

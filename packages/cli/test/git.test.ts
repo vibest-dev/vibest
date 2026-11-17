@@ -16,7 +16,7 @@ import { copyIncluded, gitState, mainCheckout } from "@vibest/core/worktree"
 import { tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
-import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Predicate, type Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
@@ -31,7 +31,7 @@ const ownGitHome = Layer.effect(
     const env = { HOME: home, XDG_CONFIG_HOME: home, GIT_CONFIG_NOSYSTEM: "1" }
     return ChildProcessSpawner.make((command) =>
       spawner.spawn(
-        command._tag === "StandardCommand"
+        ChildProcess.isStandardCommand(command)
           ? ChildProcess.make(command.command, command.args, {
               ...command.options,
               env: { ...command.options.env, ...env },
@@ -99,8 +99,8 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
   Effect.gen(function* () {
     const exit = yield* Effect.exit(effect)
     if (Exit.isSuccess(exit)) return assert.fail("expected a failure")
-    const error = exit.cause.reasons.find((r) => r._tag === "Fail")
-    return error?._tag === "Fail" ? error.error.message : assert.fail(`not a failure: ${exit.cause}`)
+    const error = Cause.findErrorOption(exit.cause)
+    return Option.isSome(error) ? error.value.message : assert.fail(`not a failure: ${exit.cause}`)
   })
 
 const database = (filename: string) =>
@@ -429,7 +429,9 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           const move = (directory: string, from: string) =>
             Effect.flatMap(locateProject(directory), (located) => moveProjectHere(db, located, from))
           const refusal = (directory: string, from: string) =>
-            Effect.map(Effect.flip(move(directory, from)), (e) => (e._tag === "MoveRefused" ? e.message : e._tag))
+            Effect.map(Effect.flip(move(directory, from)), (e) =>
+              Predicate.isTagged(e, "MoveRefused") ? e.message : e._tag,
+            )
           const repo = path.join(dir, "a", "repo")
           yield* fs.makeDirectory(repo, { recursive: true })
           yield* sh(repo, "init", "-q", "-b", "main")

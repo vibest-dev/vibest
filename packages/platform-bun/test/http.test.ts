@@ -137,7 +137,7 @@ describe("vibestd's HTTP API", () => {
         Effect.gen(function* () {
           const reply = yield* watched(ready(body))
           assert.strictEqual(reply.status, 400)
-          assert.deepStrictEqual(reply.body, { _tag: "InvalidRequestError", message, kind: "Payload" })
+          assert.deepStrictEqual(reply.body, Http.InvalidRequestError.make({ message, kind: "Payload" }))
           assert.deepStrictEqual(logs.at(-1), {
             message: ["schema rejection"],
             level: "Warn",

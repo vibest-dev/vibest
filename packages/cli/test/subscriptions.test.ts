@@ -23,7 +23,7 @@ import * as Server from "@vibest/server/server"
 import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
 import { Headers, HttpClient, HttpClientResponse } from "effect/http"
-import { ChildProcessSpawner } from "effect/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -89,7 +89,7 @@ const fakeMachine = (options: {
   const logs: Array<unknown> = []
   const hanging = new Set(options.commandsThatNeverExit ?? [])
   const spawner = ChildProcessSpawner.make((command) => {
-    if (command._tag !== "StandardCommand") return Effect.die("piped")
+    if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
     const id = [command.command, ...command.args].join(" ")
     spawned.push({ command: command.command, args: command.args, stdin: command.options.stdin })
     return Effect.succeed(

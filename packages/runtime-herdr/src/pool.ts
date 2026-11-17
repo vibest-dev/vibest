@@ -105,9 +105,7 @@ export class HerdrPool extends Context.Service<
                 Effect.flatMap((was) => (was ? PubSub.publish(restarts, session).pipe(Effect.asVoid) : Effect.void)),
               ),
             ),
-            Effect.tapError((e) =>
-              e._tag === "HerdrProtocolMismatch" ? setMismatch(session, Option.some(e)) : Effect.void,
-            ),
+            Effect.tapErrorTag("HerdrProtocolMismatch", (e) => setMismatch(session, Option.some(e))),
             Effect.tap(() => setMismatch(session, Option.none())),
             Effect.map((h) => h.subscribe(SUBSCRIPTIONS)),
             Stream.unwrap,

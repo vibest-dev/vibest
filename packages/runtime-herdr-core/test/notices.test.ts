@@ -88,14 +88,7 @@ const fakeCore = Effect.gen(function* () {
       const pull = yield* Socket.readerString(socket)
       const writer = yield* socket.writer
       const line = yield* Stream.fromPull(
-        Effect.succeed(
-          pull.pipe(
-            Effect.catchIf(
-              (e) => e.reason._tag === "SocketCloseError",
-              () => Cause.done(),
-            ),
-          ),
-        ),
+        Effect.succeed(pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))),
       ).pipe(Stream.splitLines, Stream.runHead)
       const text = Option.getOrElse(line, () => "")
       const request = yield* Request(text)

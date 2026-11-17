@@ -4,7 +4,7 @@ import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type ACCESS, Caller, type CallerShape, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Predicate } from "effect"
 import type { RpcGroup } from "effect/rpc"
 
 type Access = typeof ACCESS
@@ -24,7 +24,7 @@ export const make = Effect.gen(function* () {
   const agent = (method: MethodOf<"agent" | "owner">) =>
     Effect.gen(function* () {
       const c = yield* Caller
-      if (c._tag === "Cli" || c._tag === "Session") return c
+      if (Predicate.isTagged(c, "Cli") || Predicate.isTagged(c, "Session")) return c
       return yield* new Forbidden({
         method,
         message: `only the user or a session calls ${method}`,
@@ -34,7 +34,7 @@ export const make = Effect.gen(function* () {
   const atProject = (directory: string) =>
     locateProject(directory).pipe(
       Effect.catchIf(
-        (error) => error._tag !== "NotInRepository",
+        (error) => !Predicate.isTagged(error, "NotInRepository"),
         (error) => Effect.die(error),
       ),
     )
@@ -43,7 +43,7 @@ export const make = Effect.gen(function* () {
 
   const projectOf = (c: Agent, method: string) =>
     Effect.gen(function* () {
-      if (c._tag === "Cli") return yield* resolveAt(c.repositoryRoot)
+      if (Predicate.isTagged(c, "Cli")) return yield* resolveAt(c.repositoryRoot)
       const directory = yield* db.project.projectDirectory(c.projectId)
       if (directory !== undefined) return { id: c.projectId, directory }
       if (c.repositoryRoot === undefined) return yield* new NotInRepository({ path: `project ${c.projectId}` })
@@ -71,7 +71,7 @@ export const make = Effect.gen(function* () {
 
   const cliOnly = (method: MethodOf<"cli">) =>
     Effect.flatMap(Caller, (c) =>
-      c._tag === "Cli"
+      Predicate.isTagged(c, "Cli")
         ? Effect.succeed(c)
         : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
     )
@@ -79,7 +79,7 @@ export const make = Effect.gen(function* () {
   const self = (method: MethodOf<"self">, id: string) =>
     Effect.gen(function* () {
       const c = yield* Caller
-      if (c._tag === "Session" && c.sessionId === id) return undefined
+      if (Predicate.isTagged(c, "Session") && c.sessionId === id) return undefined
       return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
     })
 

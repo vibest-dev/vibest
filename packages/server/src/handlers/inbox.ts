@@ -1,6 +1,6 @@
 import { Inbox } from "@vibest/core/inbox"
 import { Caller, Forbidden } from "@vibest/protocol/rpc"
-import { Effect, Stream } from "effect"
+import { Effect, Predicate, Stream } from "effect"
 
 import { processOf, reader } from "../gates.ts"
 import type { Handlers } from "./caller.ts"
@@ -11,7 +11,8 @@ export const make = Effect.gen(function* () {
   const pullingSession = (method: "Inbox.Subscribe" | "Inbox.Take") =>
     Effect.gen(function* () {
       const c = yield* Caller
-      if (c._tag !== "Session") return yield* new Forbidden({ method, message: `${method} is a session's own` })
+      if (!Predicate.isTagged(c, "Session"))
+        return yield* new Forbidden({ method, message: `${method} is a session's own` })
       return c.sessionId
     })
   return {

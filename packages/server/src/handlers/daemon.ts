@@ -11,7 +11,7 @@ import { Caller, CAPABILITIES, type DaemonIdentity, Forbidden, WrongInstance } f
 import { shellQuote } from "@vibest/schema/layout"
 import { LaunchFailed } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Context, Deferred, Effect } from "effect"
+import { Context, Deferred, Effect, Predicate } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { stopOnce as stopDaemon } from "../stop.ts"
@@ -89,7 +89,7 @@ export const make = Effect.gen(function* () {
     "Daemon.Stop": ({ instance }) =>
       Effect.gen(function* () {
         const c = yield* Caller
-        if (c._tag !== "Cli")
+        if (!Predicate.isTagged(c, "Cli"))
           return yield* new Forbidden({
             method: "Daemon.Stop",
             message: "only the user stops vibestd (vibest daemon restart); an agent may not",

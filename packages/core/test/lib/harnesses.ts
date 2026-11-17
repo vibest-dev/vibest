@@ -5,7 +5,7 @@ import type { HarnessDefinition, HarnessesShape } from "@vibest/core/plugin/doma
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { HarnessUnavailable } from "@vibest/schema/session"
-import { Effect, Layer, type Scope } from "effect"
+import { Effect, Layer, Match, type Scope } from "effect"
 
 const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
 
@@ -70,17 +70,16 @@ export const CLAUDE: HarnessDefinition = {
     event.hook_event_name !== "ExecutionComplete"
       ? undefined
       : {
-          end:
-            event.reason === "answer"
-              ? event
-              : event.reason === "aborted"
-                ? {
-                    ...event,
-                    aborted: true,
-                    error: "interrupted",
-                    error_details: "the execution was stopped in its terminal (Esc) before it ended",
-                  }
-                : { ...event, error: "error", error_details: "the execution ended on an API error" },
+          end: Match.value(event.reason).pipe(
+            Match.when("answer", () => event),
+            Match.when("aborted", () => ({
+              ...event,
+              aborted: true,
+              error: "interrupted",
+              error_details: "the execution was stopped in its terminal (Esc) before it ended",
+            })),
+            Match.orElse(() => ({ ...event, error: "error", error_details: "the execution ended on an API error" })),
+          ),
         },
   userPrompt: (event) =>
     event.hook_event_name === "PromptSubmit" && event.origin === "vibest" && typeof event.execution === "number"

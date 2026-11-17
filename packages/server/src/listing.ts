@@ -13,9 +13,11 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import type { RuntimeAddress } from "@vibest/schema/session"
-import { Context, Effect, Layer } from "effect"
+import { Context, Data, Effect, Layer, Predicate } from "effect"
 
-import type { ListScope } from "./machine/remote.ts"
+import { ListScope } from "./machine/remote.ts"
+
+export const WatchEvents = Data.taggedEnum<WatchEvent>()
 
 const LS_TASK = 500
 const taskForLs = (task: string | null) =>
@@ -61,9 +63,9 @@ export const sessionListing = (deps: {
 
   const listed = (scope: ListScope, stopped: boolean) =>
     Effect.gen(function* () {
-      if (scope._tag === "Nothing") return []
-      if (scope._tag === "Peer") return yield* listedRows(yield* sessions.list({ peer: scope, stopped }))
-      const projectId = scope._tag === "Project" ? scope.id : undefined
+      if (Predicate.isTagged(scope, "Nothing")) return []
+      if (Predicate.isTagged(scope, "Peer")) return yield* listedRows(yield* sessions.list({ peer: scope, stopped }))
+      const projectId = Predicate.isTagged(scope, "Project") ? scope.id : undefined
       return yield* listedRows(yield* sessions.list({ ...(projectId === undefined ? {} : { projectId }), stopped }))
     })
 
@@ -112,7 +114,7 @@ export const sessionListing = (deps: {
     Effect.gen(function* () {
       const identity = yield* db.session.sessionIdentity(id)
       if (identity === undefined) return []
-      const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
+      const ended = WatchEvents.SessionEnded({ id, projectId: identity.projectId })
       const row = yield* db.session.getSession(id)
       if (row === undefined || exitedAt(row) !== null) return [ended]
       const view = yield* sessions
@@ -125,7 +127,7 @@ export const sessionListing = (deps: {
       const info = (yield* listedRows([view]))[0]
       if (info === undefined) return [ended]
       const [session] = yield* watched([info])
-      return [{ _tag: "Session", session: session! } satisfies WatchEvent]
+      return [WatchEvents.Session({ session: session! })]
     })
 
   const watchProject = (id: string) =>
@@ -133,7 +135,7 @@ export const sessionListing = (deps: {
       const rows = yield* db.project.watchProjects(id)
       if (rows.length === 0) return []
       const activity = projectActivity(yield* projectStatuses(id))
-      return rows.map((row): WatchEvent => ({ _tag: "Project", project: { ...row, activity } }))
+      return rows.map((row) => WatchEvents.Project({ project: { ...row, activity } }))
     })
 
   const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
@@ -163,7 +165,7 @@ export const sessionListing = (deps: {
         } else if (event.type === "terminal.seen")
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
         else if (event.type === "runtime.reset")
-          for (const info of yield* listed({ _tag: "All" }, false))
+          for (const info of yield* listed(ListScope.All(), false))
             if (info.runtime === event.runtime) sessionIds.add(info.id)
       }
       for (const id of sessionIds) {

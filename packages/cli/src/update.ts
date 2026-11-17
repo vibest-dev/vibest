@@ -1,11 +1,11 @@
-import { cliHeaders, connect, type VibestClient, readPing } from "@vibest/client/client"
+import { Claim, cliHeaders, connect, type VibestClient, readPing } from "@vibest/client/client"
 import { UpdateError } from "@vibest/client/release"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { type Ping } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { Layout, shellQuote } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Cause, Config, Console, Duration, Effect, Exit, FileSystem, Option, Path, Schedule } from "effect"
+import { Cause, Config, Console, Duration, Effect, Exit, FileSystem, Match, Option, Path, Schedule } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
 
@@ -23,12 +23,24 @@ export const ownerOf = (real: string) => {
 }
 
 export const upgradeCommand = (real: string, version: string, platform = `${process.platform}-${process.arch}`) => {
-  const owner = ownerOf(real)
-  return owner?.kind === "bun"
-    ? ["bun", "add", "-g", `@vibest/cli@${version}`, `@vibest/cli-${platform}@${version}`]
-    : owner?.kind === "npm"
-      ? [`${owner.prefix}/bin/npm`, "install", "-g", "--prefix", owner.prefix, `@vibest/cli@${version}`]
-      : ["npm", "install", "-g", `@vibest/cli@${version}`]
+  return Match.value(ownerOf(real)).pipe(
+    Match.when({ kind: "bun" }, () => [
+      "bun",
+      "add",
+      "-g",
+      `@vibest/cli@${version}`,
+      `@vibest/cli-${platform}@${version}`,
+    ]),
+    Match.when({ kind: "npm" }, (owner) => [
+      `${owner.prefix}/bin/npm`,
+      "install",
+      "-g",
+      "--prefix",
+      owner.prefix,
+      `@vibest/cli@${version}`,
+    ]),
+    Match.orElse(() => ["npm", "install", "-g", `@vibest/cli@${version}`]),
+  )
 }
 
 export const stageCommand = (
@@ -44,12 +56,15 @@ export const stageCommand = (
 }
 
 export const removeCommand = (link: string, real: string) => {
-  const owner = ownerOf(real)
-  return owner?.kind === "bun"
-    ? "bun remove -g @vibest/cli"
-    : owner?.kind === "npm"
-      ? `${shellQuote(`${owner.prefix}/bin/npm`)} uninstall -g --prefix ${shellQuote(owner.prefix)} @vibest/cli`
-      : `rm ${shellQuote(link)}`
+  return Match.value(ownerOf(real)).pipe(
+    Match.when({ kind: "bun" }, () => "bun remove -g @vibest/cli"),
+    Match.when(
+      { kind: "npm" },
+      (owner) =>
+        `${shellQuote(`${owner.prefix}/bin/npm`)} uninstall -g --prefix ${shellQuote(owner.prefix)} @vibest/cli`,
+    ),
+    Match.orElse(() => `rm ${shellQuote(link)}`),
+  )
 }
 
 export const extraVibests = Effect.gen(function* () {
@@ -194,7 +209,7 @@ export const restartAgents = (
   Effect.gen(function* () {
     const cwd = (yield* Path.Path).resolve(".")
     const ask = <A, E>(f: (client: VibestClient) => Effect.Effect<A, E>) =>
-      withVibest({ _tag: "cli", repositoryRoot: cwd }, f, { start: false })
+      withVibest(Claim.cli({ repositoryRoot: cwd }), f, { start: false })
     const outdated = yield* ask((client) => client["Agents.Outdated"]())
     if (outdated.length === 0) return yield* Console.log("No agent runs an old integration.")
     const working = outdated.filter((a) => a.working).map((a) => shortId(a.id))

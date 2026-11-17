@@ -2,7 +2,7 @@ import type { Plugin as PromisePlugin } from "@vibest/plugin"
 import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
-import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
 import { LayerNode } from "../effect/layer-node.ts"
@@ -110,7 +110,7 @@ type Imported = {
   readonly plugin: Candidate["plugin"]
 }
 
-export const makeSources = Effect.fnUntraced(function* (
+export const openSources = Effect.fnUntraced(function* (
   timeout: Duration.Input,
   options?: { readonly quiet?: boolean },
 ) {
@@ -212,7 +212,7 @@ export const makeSources = Effect.fnUntraced(function* (
       real,
       graph,
       revision,
-      plugin: module._tag === "Failure" ? { error: module.failure } : module.success.default,
+      plugin: Result.isFailure(module) ? { error: module.failure } : module.success.default,
     }
     imported.set(file, result)
     return result
@@ -324,7 +324,7 @@ export const makeSources = Effect.fnUntraced(function* (
   return { operations, load, retain }
 })
 
-export const makeWatcher = (changed: (path: string) => void) =>
+export const openWatcher = (changed: (path: string) => void) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path

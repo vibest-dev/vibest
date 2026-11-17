@@ -1,16 +1,13 @@
-import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect"
+import { Effect, FileSystem, Option, Path, PlatformError, Predicate, Schema } from "effect"
 
 import { Git } from "./git.ts"
 
 const gitDirectory = (p: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
-    const info = yield* fs.stat(p).pipe(
-      Effect.catchIf(
-        (e) => e.reason._tag === "NotFound",
-        () => Effect.succeed(undefined),
-      ),
-    )
+    const info = yield* fs
+      .stat(p)
+      .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
     if (info === undefined || info.type !== "Directory") return undefined
     return p
   })
@@ -56,7 +53,9 @@ const linkTarget = (p: string) =>
     return yield* fs.readLink(p).pipe(
       Effect.map(Option.some),
       Effect.catchIf(
-        (e) => e.reason._tag === "NotFound" || (e.reason.cause as { code?: unknown } | undefined)?.code === "EINVAL",
+        (e) =>
+          Predicate.isTagged(e.reason, "NotFound") ||
+          (e.reason.cause as { code?: unknown } | undefined)?.code === "EINVAL",
         () => Effect.succeed(Option.none<string>()),
       ),
     )

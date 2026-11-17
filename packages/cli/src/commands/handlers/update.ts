@@ -1,7 +1,7 @@
 import { described, importCheck, readPing, runCaptured } from "@vibest/client/client"
 import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/client/release"
 import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
-import { Config, Console, Duration, Effect, FileSystem, Option } from "effect"
+import { Config, Console, Duration, Effect, FileSystem, Match, Option } from "effect"
 
 import { userOnly } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
@@ -94,12 +94,11 @@ export default Runtime.handler(Commands.commands.update, ({ yes, restartAgentsAf
     const plan = daemonPlan(running, target)
     if (plan.action === "none") return
     yield* Console.log(`vibestd: ${plan.action}. ${plan.reason}.`)
-    const failed =
-      plan.action === "handoff"
-        ? yield* handoffDaemon(running!, target)
-        : plan.action === "restart"
-          ? yield* replaceForUpdate(target)
-          : undefined
+    const failed = yield* Match.value(plan).pipe(
+      Match.when({ action: "handoff" }, () => handoffDaemon(running!, target)),
+      Match.when({ action: "restart" }, () => replaceForUpdate(target)),
+      Match.orElse(() => Effect.succeed(undefined)),
+    )
     if (failed !== undefined)
       return yield* new UpdateError({
         message: `vibest ${target.version}: ${failed}${back === undefined ? "" : `. To go back to vibest ${VERSION} instead: ${back}`}`,

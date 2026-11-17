@@ -1,4 +1,4 @@
-import { Config, Context, Data, Effect, FileSystem, Option, Path, Random } from "effect"
+import { Config, Context, Data, Effect, FileSystem, Option, Path, Predicate, Random } from "effect"
 
 export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
 
@@ -32,7 +32,7 @@ export const privateTmp = Effect.fn("privateTmp")(function* (tmpdir: string, fal
     .makeDirectory(dir, { mode: 0o700 })
     .pipe(
       Effect.catchTag("PlatformError", (e) =>
-        e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(unsafe(e.message)),
+        Predicate.isTagged(e.reason, "AlreadyExists") ? Effect.void : Effect.fail(unsafe(e.message)),
       ),
     )
   const st = yield* Effect.tryPromise({ try: () => user.lstat(dir), catch: (e) => unsafe(`${dir}: ${String(e)}`) })

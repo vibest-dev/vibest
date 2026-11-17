@@ -67,10 +67,12 @@ export type LaunchOptions = {
   readonly commit?: string | undefined
 }
 
-export type LaunchOutcome =
-  | { readonly _tag: "Started" }
-  | { readonly _tag: "Limited"; readonly input: string; readonly error: string; readonly execution: number }
-  | { readonly _tag: "Failed" }
+export type LaunchOutcome = Data.TaggedEnum<{
+  Started: {}
+  Limited: { readonly input: string; readonly error: string; readonly execution: number }
+  Failed: {}
+}>
+const LaunchOutcome = Data.taggedEnum<LaunchOutcome>()
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
@@ -380,16 +382,15 @@ export const make = Effect.gen(function* () {
       ),
     )
     if ("limited" in terminal)
-      return {
-        _tag: "Limited",
+      return LaunchOutcome.Limited({
         input: firstPrompt,
         error: terminal.limited,
         execution: (yield* plan.opened) ?? 0,
-      } satisfies LaunchOutcome
+      })
     yield* show(h, session, terminal.terminal, root)
     const notStarted = yield* plan.deliver(h, session, terminal.terminal)
     if (notStarted) yield* notice(session, notStarted)
-    return { _tag: "Started" } satisfies LaunchOutcome
+    return LaunchOutcome.Started()
   }, Effect.scoped)
   const launchFailed = Effect.fn("Placement.launchFailed")(function* (
     session: SessionRow,
@@ -412,7 +413,9 @@ export const make = Effect.gen(function* () {
       options: LaunchOptions,
     ) =>
       launchRaw(h, target, session, root, firstPrompt, options).pipe(
-        Effect.catchCause((cause) => launchFailed(session, cause).pipe(Effect.as<LaunchOutcome>({ _tag: "Failed" }))),
+        Effect.catchCause((cause) =>
+          launchFailed(session, cause).pipe(Effect.as<LaunchOutcome>(LaunchOutcome.Failed())),
+        ),
       ),
     provided,
   )

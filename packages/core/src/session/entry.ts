@@ -396,7 +396,7 @@ const make = Effect.gen(function* () {
     if (runtime?.focus === undefined) return { place: found.place, focused: false }
     const address = yield* Schema.decodeUnknownEffect(AddressJson)(found.address).pipe(Effect.orDie)
     const focused = yield* runtime.focus(address).pipe(Effect.exit)
-    return { place: found.place, focused: focused._tag === "Success" }
+    return { place: found.place, focused: Exit.isSuccess(focused) }
   })
 
   const stop = Effect.fn("EntrySession.stop")(function* (projectId: string, runtime: string, address: string) {

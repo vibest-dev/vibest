@@ -24,7 +24,7 @@ import {
   type PluginNote,
   type SpawnDecision,
 } from "./plugin/service.ts"
-import { type AnyPlugin, type Candidate, keyOf, makeSources, PluginLoader, pluginLoaderNode } from "./plugin/sources.ts"
+import { type AnyPlugin, type Candidate, keyOf, openSources, PluginLoader, pluginLoaderNode } from "./plugin/sources.ts"
 import { supervise } from "./plugin/supervisor.ts"
 import { logFailure } from "./reactor.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
@@ -470,7 +470,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     yield* (yield* PluginLoader).prepare
     const host = yield* makeHost()
-    const sources = yield* makeSources(DEFAULT_TIMEOUT)
+    const sources = yield* openSources(DEFAULT_TIMEOUT)
     const builtins = yield* Builtins
     yield* supervise(host, builtins, sources)
     return host.service

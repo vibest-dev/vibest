@@ -125,7 +125,7 @@ describe.concurrent("Session", () => {
       const listed = yield* broken.sessions.list()
       const failed = listed.find((row) => row.id === broken.id)
       const other = listed.find((row) => row.id === fine.id)
-      assert.strictEqual(failed?.git?.unknown, "Unknown: Git.state: worktree unreadable")
+      assert.strictEqual(failed?.git?.unknown, "Git.state: worktree unreadable")
       assert.strictEqual(other?.git?.saved, true)
       assert.strictEqual(other?.git?.unknown, undefined)
     }),

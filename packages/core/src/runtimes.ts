@@ -2,7 +2,7 @@ import * as VibestPlugin from "@vibest/plugin/effect"
 import { reconnectSchedule } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
-import { Cause, Context, Duration, Effect, FiberMap, Layer, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type Signal } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -171,17 +171,15 @@ export const agentState = Effect.fn("Runtimes.agentState")(
   (h: Runtime, terminal: Terminal): Effect.Effect<AgentSeen, RuntimeError> =>
     h.state === undefined
       ? Effect.succeed("unknown")
-      : h
-          .state(terminal)
-          .pipe(
-            Effect.catchTag("RuntimeError", (error) =>
-              error.code === "not_found"
-                ? Effect.succeed("absent" as AgentSeen)
-                : error.code === "unreachable"
-                  ? Effect.fail(error)
-                  : Effect.succeed("unknown" as AgentSeen),
+      : h.state(terminal).pipe(
+          Effect.catchTag("RuntimeError", (error) =>
+            Match.value(error.code).pipe(
+              Match.when("not_found", () => Effect.succeed<AgentSeen>("absent")),
+              Match.when("unreachable", () => Effect.fail(error)),
+              Match.orElse(() => Effect.succeed<AgentSeen>("unknown")),
             ),
           ),
+        ),
 )
 
 export const sessionState = (h: Runtime, terminal: Terminal, reported: Effect.Effect<AgentState | "done">) =>

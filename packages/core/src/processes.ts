@@ -1,5 +1,5 @@
 import { type Captured, capture } from "@vibest/plugin/effect"
-import { Context, Duration, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer, Match } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -15,7 +15,11 @@ export const livenessOf = (probe: () => void): Liveness => {
     return "alive"
   } catch (e) {
     const code = (e as { readonly code?: unknown } | null)?.code
-    return code === "ESRCH" ? "exited" : code === "EPERM" ? "alive" : "unknown"
+    return Match.value(code).pipe(
+      Match.when("ESRCH", (): Liveness => "exited"),
+      Match.when("EPERM", (): Liveness => "alive"),
+      Match.orElse((): Liveness => "unknown"),
+    )
   }
 }
 

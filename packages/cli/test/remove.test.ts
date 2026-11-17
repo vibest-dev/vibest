@@ -22,7 +22,7 @@ import {
   projectOf,
   processesOn,
 } from "@vibest/platform-bun/test/lib/fakes"
-import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
+import { Clock, Effect, Fiber, FileSystem, HashMap, Option, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -600,7 +600,7 @@ describe.concurrent("Processes", () => {
         const run = yield* runFor("sh", ["-c", `trap "" TERM; echo $$ > '${file}'; exec sleep 30`], "30 seconds").pipe(
           Effect.timeoutOption("1 second"),
         )
-        assert.isTrue(run._tag === "None")
+        assert.isTrue(Option.isNone(run))
         const pid = Number((yield* fs.readFileString(file)).trim())
         assert.isTrue(pid > 0)
         assert.strictEqual(Platform.liveness(pid), "exited")

@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { Duration, Effect, type Scope, Stream } from "effect"
+import { Duration, Effect, Predicate, type Scope, Stream } from "effect"
 import type { api, HcFailure, HcShape } from "effect-herdr-core-sdk"
 
 import { KIND, LABEL, terminalId } from "./terminal-runtime.ts"
@@ -9,9 +9,9 @@ type Event = VibestPlugin.MachineEvent
 type Terminal = VibestPlugin.Runtime.Terminal
 
 const offline = (e: HcFailure) =>
-  e._tag === "HcTransportError" ? `hc here is offline (${e.message})` : `hc here: ${e.message}`
+  Predicate.isTagged(e, "HcTransportError") ? `hc here is offline (${e.message})` : `hc here: ${e.message}`
 
-const failed = (e: HcFailure) => `${offline(e)}${e._tag === "HcError" && e.hint ? ` (${e.hint})` : ""}`
+const failed = (e: HcFailure) => `${offline(e)}${Predicate.isTagged(e, "HcError") && e.hint ? ` (${e.hint})` : ""}`
 
 const stateNote = (name: string, row: api.MachineView): VibestPlugin.MachineNote => ({
   message: `hc here reaches ${name} as ${row.name}: ${row.state}${row.why ? ` (${row.why})` : ""}`,
@@ -95,8 +95,9 @@ export const connect = (hc: Hc, event: Event) => {
       Effect.sync(() =>
         notes.push({
           message: failed(e),
-          fix:
-            e._tag === "HcTransportError" ? "hc server start" : addCommand(event, hcThere(event)?.link?.session ?? ""),
+          fix: Predicate.isTagged(e, "HcTransportError")
+            ? "hc server start"
+            : addCommand(event, hcThere(event)?.link?.session ?? ""),
         }),
       ),
     ),
@@ -185,7 +186,7 @@ export const locate = (
       Effect.succeed({
         missing: false,
         terminals: NONE,
-        note: `${failed(e)}${e._tag === "HcTransportError" ? "; fix: hc server start" : ""}`,
+        note: `${failed(e)}${Predicate.isTagged(e, "HcTransportError") ? "; fix: hc server start" : ""}`,
       }),
     ),
   )

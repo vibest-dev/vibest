@@ -6,12 +6,12 @@ import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerShape, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
 import type { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, Layer, Stream } from "effect"
+import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
 import { Machines } from "../machine/machines.ts"
 import { Peer } from "../machine/peer.ts"
-import { address, type At, type ListScope, Remote } from "../machine/remote.ts"
+import { address, type At, ListScope, Remote } from "../machine/remote.ts"
 import * as CallerChecks from "./caller.ts"
 import type { Handlers } from "./caller.ts"
 import { group } from "./group.ts"
@@ -21,14 +21,16 @@ type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
 const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
 
-const byOf = (c: CallerShape) => (c._tag === "Session" ? c.sessionId : PEER_BY_USER)
+const byOf = (c: CallerShape) => (Predicate.isTagged(c, "Session") ? c.sessionId : PEER_BY_USER)
 
 const peerOf = (method: string) =>
-  Effect.flatMap(Caller, (c) => (c._tag === "Peer" ? Effect.succeed(c.peerId) : Effect.fail(notPeer(method))))
+  Effect.flatMap(Caller, (c) =>
+    Predicate.isTagged(c, "Peer") ? Effect.succeed(c.peerId) : Effect.fail(notPeer(method)),
+  )
 
 const peerScope = (method: string) =>
   Effect.flatMap(Caller, (c): Effect.Effect<PeerScope | undefined, Forbidden> => {
-    if (c._tag !== "Peer") return Effect.succeed(undefined)
+    if (!Predicate.isTagged(c, "Peer")) return Effect.succeed(undefined)
     if (c.projectId === undefined)
       return Effect.fail(
         new Forbidden({ method, message: `${method} needs the calling project (${PEER_PROJECT_HEADER})` }),
@@ -61,7 +63,7 @@ const makeRouting = Effect.gen(function* () {
     forwarded: (at: At, project: string, by: string) => Effect.Effect<B, F>,
   ) => {
     const at = address(input)
-    return at._tag === "Local"
+    return Predicate.isTagged(at, "Local")
       ? local(at.id)
       : deps.agent(method).pipe(
           Effect.flatMap((c) =>
@@ -121,12 +123,12 @@ const make = Effect.gen(function* () {
   const listScope = (all: boolean | undefined) =>
     Effect.gen(function* () {
       const { c, scope } = yield* reach("List")
-      if (c === undefined) return { _tag: "Peer", ...scope } satisfies ListScope
-      if (c._tag === "Session") return { _tag: "Project", id: c.projectId } satisfies ListScope
-      if (all === true) return { _tag: "All" } satisfies ListScope
+      if (c === undefined) return ListScope.Peer(scope)
+      if (Predicate.isTagged(c, "Session")) return ListScope.Project({ id: c.projectId })
+      if (all === true) return ListScope.All()
       return yield* findAt(c.repositoryRoot).pipe(
-        Effect.map((row): ListScope => (row === undefined ? { _tag: "Nothing" } : { _tag: "Project", id: row.id })),
-        Effect.catchTag("NotInRepository", () => Effect.succeed<ListScope>({ _tag: "All" })),
+        Effect.map((row): ListScope => (row === undefined ? ListScope.Nothing() : ListScope.Project({ id: row.id }))),
+        Effect.catchTag("NotInRepository", () => Effect.succeed(ListScope.All())),
       )
     })
 

@@ -144,12 +144,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
       const pull = yield* Socket.readerString(socket)
       const writer = yield* socket.writer
       yield* writer.write(`${yield* encodeLine({ jsonrpc: "2.0", id, method, params }).pipe(Effect.orDie)}\n`)
-      const text = pull.pipe(
-        Effect.catchIf(
-          (e) => e.reason._tag === "SocketCloseError",
-          () => Cause.done(),
-        ),
-      )
+      const text = pull.pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Cause.done()))
       const lines = Stream.fromPull(Effect.succeed(text)).pipe(
         Stream.splitLines,
         Stream.filter((l) => l.length > 0),

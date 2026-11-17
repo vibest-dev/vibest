@@ -13,7 +13,21 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import { Clock, Config, Context, Crypto, Deferred, Effect, Exit, FileSystem, Layer, Option, Path, Ref } from "effect"
+import {
+  Clock,
+  Config,
+  Context,
+  Crypto,
+  Deferred,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Predicate,
+  Ref,
+} from "effect"
 import { Hex } from "effect/encoding"
 
 import { Agents, unknownAgent } from "../agents.ts"
@@ -131,7 +145,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
     ) =>
       launch(h, target, row, root, task, options).pipe(
         Effect.flatMap((outcome) =>
-          outcome._tag === "Limited"
+          Predicate.isTagged(outcome, "Limited")
             ? rerun(h, row, undefined, outcome.input, false, outcome.error, outcome.execution).pipe(
                 Effect.onExit((exit) =>
                   Exit.isFailure(exit)
@@ -331,7 +345,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
               const made = yield* fs.makeDirectory(where).pipe(
                 Effect.as(true),
                 Effect.catchTag("PlatformError", (e) =>
-                  e.reason._tag === "AlreadyExists"
+                  Predicate.isTagged(e.reason, "AlreadyExists")
                     ? Effect.succeed(false)
                     : Effect.fail(refuse(`${where}: ${e.message}`)),
                 ),

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
-import { Effect, Fiber, Scheduler } from "effect"
+import { Effect, Fiber, Option, Scheduler } from "effect"
 import { TestClock } from "effect/testing"
 
 import { interruptOnceReady } from "./lib/interrupt-at.ts"
@@ -25,7 +25,7 @@ describe("SessionLive.restarting.own", () => {
         const next = yield* TestClock.withLive(
           live.restarting.own("a", Effect.succeed(restarted)).pipe(Effect.timeoutOption("1 second")),
         )
-        assert.isTrue(next._tag === "Some", `a restart of a after an interrupt at boundary ${op} runs`)
+        assert.isTrue(Option.isSome(next), `a restart of a after an interrupt at boundary ${op} runs`)
       }
     }),
   )

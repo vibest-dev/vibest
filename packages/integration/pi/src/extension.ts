@@ -6,10 +6,24 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import { claimHeaders, type ClientServices, connect, hookCall, makeClient } from "@vibest/client/client"
+import { Claim, claimHeaders, type ClientServices, connect, hookCall, makeClient } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
+import {
+  Cause,
+  Config,
+  Deferred,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect"
 
 import { Pi } from "./pi.ts"
 import { VERSION } from "./version.ts"
@@ -26,7 +40,7 @@ const guarded = (sessionId: string) =>
     const layout = yield* Layout
     yield* pi.handle("tool_call", (e, ctx) =>
       Effect.gen(function* () {
-        const headers = yield* claimHeaders({ _tag: "session", sessionId, pluginVersion: VERSION })
+        const headers = yield* claimHeaders(Claim.session({ sessionId, pluginVersion: VERSION }))
         const input = encodeJson({ tool_name: e.toolName, tool_input: e.input, cwd: ctx.cwd })
         const exit = yield* hookCall(layout.socket, headers, (client) =>
           client["Integration.Guard"]({ harness: "pi", input }),
@@ -52,13 +66,14 @@ const lastReply = (messages: ReadonlyArray<AgentMessage>) => {
 }
 
 const piHeaders = (sessionId: string, ctx: ExtensionContext, current?: string) =>
-  claimHeaders({
-    _tag: "session",
-    sessionId,
-    harnessSessionId: ctx.sessionManager.getSessionId(),
-    pluginVersion: VERSION,
-    ...(current === undefined ? {} : { process: current }),
-  })
+  claimHeaders(
+    Claim.session({
+      sessionId,
+      harnessSessionId: ctx.sessionManager.getSessionId(),
+      pluginVersion: VERSION,
+      ...(current === undefined ? {} : { process: current }),
+    }),
+  )
 
 type Role = Layer.Layer<never, Config.ConfigError, Pi | ClientServices | FileSystem.FileSystem>
 
@@ -159,13 +174,14 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
         ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
       )
       const identity = (ctx: ExtensionContext) =>
-        Effect.map(Ref.get(processId), (current) => ({
-          _tag: "session" as const,
-          sessionId,
-          harnessSessionId: ctx.sessionManager.getSessionId(),
-          pluginVersion: VERSION,
-          ...(current === undefined ? {} : { process: current }),
-        }))
+        Effect.map(Ref.get(processId), (current) =>
+          Claim.session({
+            sessionId,
+            harnessSessionId: ctx.sessionManager.getSessionId(),
+            pluginVersion: VERSION,
+            ...(current === undefined ? {} : { process: current }),
+          }),
+        )
       const takeNext = (ctx: ExtensionContext) =>
         Effect.gen(function* () {
           if (!ctx.isIdle()) return
@@ -192,7 +208,7 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
           ),
         ).pipe(
           Effect.retry({
-            while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
+            while: (e) => Predicate.isTagged(e, "RpcClientError") || Predicate.isTagged(e, "DaemonUnavailable"),
             schedule: Schedule.spaced("2 seconds"),
           }),
           Effect.repeat(Schedule.spaced("2 seconds")),
@@ -223,12 +239,11 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
           : Ref.get(processId).pipe(
               Effect.flatMap((current) =>
                 withVibest(
-                  {
-                    _tag: "session",
+                  Claim.session({
                     sessionId,
                     pluginVersion: VERSION,
                     ...(current === undefined ? {} : { process: current }),
-                  },
+                  }),
                   (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
                   { start: false },
                 ),
@@ -239,7 +254,9 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
               Effect.timeout("2 seconds"),
               Effect.retry({
                 while: (e) =>
-                  e._tag === "DaemonUnavailable" || e._tag === "RpcClientError" || e._tag === "TimeoutError",
+                  Predicate.isTagged(e, "DaemonUnavailable") ||
+                  Predicate.isTagged(e, "RpcClientError") ||
+                  Predicate.isTagged(e, "TimeoutError"),
                 schedule: Schedule.spaced("1 second"),
               }),
               Effect.ignore,

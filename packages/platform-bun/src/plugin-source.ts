@@ -94,7 +94,7 @@ export const graph = (entry: string, provided: ReadonlySet<string>) => {
 }
 
 const LOAD = /\?vibest-load=\d+$/
-export const makeLoads = () => {
+export const pluginLoads = () => {
   let loads = 0
   const loadOf = new Map<string, number>()
 

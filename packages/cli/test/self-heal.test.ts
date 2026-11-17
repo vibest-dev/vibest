@@ -72,6 +72,14 @@ const isolatedHome = (home: string) =>
       }),
   )
 
+const stopReply = (id: unknown, replyMembers: string) =>
+  `{"jsonrpc":"2.0","id":${JSON.stringify(id)},${replyMembers}}\n`
+
+const stopRefusal = (refusal: string) =>
+  `"error":{"_tag":"Cause","code":0,"message":"refused","data":[{"_tag":"Fail","error":${refusal}}]}`
+
+const daemonBusyRefusal = stopRefusal(`{"_tag":"DaemonBusy","blockers":[{"id":"s1","reason":"session working"}]}`)
+
 const fakeVibestd = (
   socket: string,
   ping: object,
@@ -320,22 +328,20 @@ layer(Platform.services)(
       "a refusal vibestd sends for Stop, decoded, is a refusal: nothing is watched or started, whatever vibestd does next",
       () =>
         Effect.gen(function* () {
-          for (const [error, outcome] of [
-            [{ _tag: "DaemonBusy", blockers: [{ id: "s1", reason: "session working" }] }, "busy"],
-            [{ _tag: "WrongInstance", expected: "old-instance", actual: "other" }, "unchanged"],
+          for (const [refusal, reply, outcome] of [
+            ["DaemonBusy", daemonBusyRefusal, "busy"],
+            [
+              "WrongInstance",
+              stopRefusal(`{"_tag":"WrongInstance","expected":"old-instance","actual":"other"}`),
+              "unchanged",
+            ],
           ] as const) {
             const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
             yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
               (sock, server, id) => {
-                sock.end(
-                  JSON.stringify({
-                    jsonrpc: "2.0",
-                    id,
-                    error: { _tag: "Cause", code: 0, message: "refused", data: [{ _tag: "Fail", error }] },
-                  }) + "\n",
-                )
+                sock.end(stopReply(id, reply))
                 server.close()
               },
             )
@@ -349,9 +355,9 @@ layer(Platform.services)(
               Effect.flip,
               TestClock.withLive,
             )
-            assert.strictEqual(failed.outcome, outcome, error._tag)
-            assert.isFalse(yield* probe(layout.socket), error._tag)
-            assert.isTrue(Option.isNone(yield* readDaemonInfo(layout.daemonInfo)), error._tag)
+            assert.strictEqual(failed.outcome, outcome, refusal)
+            assert.isFalse(yield* probe(layout.socket), refusal)
+            assert.isTrue(Option.isNone(yield* readDaemonInfo(layout.daemonInfo)), refusal)
           }
         }).pipe(Effect.scoped),
       60_000,
@@ -368,23 +374,7 @@ layer(Platform.services)(
             { version: "0.0.1", protocol: PROTOCOL - 1, instance: "old-instance", runtimeSessions: [] },
             (sock, server, id, request) => {
               headers.push(request.headers)
-              sock.end(
-                JSON.stringify({
-                  jsonrpc: "2.0",
-                  id,
-                  error: {
-                    _tag: "Cause",
-                    code: 0,
-                    message: "refused",
-                    data: [
-                      {
-                        _tag: "Fail",
-                        error: { _tag: "DaemonBusy", blockers: [{ id: "s1", reason: "session working" }] },
-                      },
-                    ],
-                  },
-                }) + "\n",
-              )
+              sock.end(stopReply(id, daemonBusyRefusal))
               server.close()
             },
           )
@@ -405,21 +395,11 @@ layer(Platform.services)(
     )
 
     const undecodableStopReplies = [
-      [
-        "an unknown refusal",
-        {
-          error: {
-            _tag: "Cause",
-            code: 0,
-            message: "refused",
-            data: [{ _tag: "Fail", error: { _tag: "DaemonFrozen", message: "from a later vibestd" } }],
-          },
-        },
-      ],
-      ["a malformed acceptance", { result: { bogus: 1 } }],
+      ["an unknown refusal", stopRefusal(`{"_tag":"DaemonFrozen","message":"from a later vibestd"}`)],
+      ["a malformed acceptance", `"result":{"bogus":1}`],
       [
         "an interruption vibestd reports",
-        { error: { _tag: "Cause", code: 0, message: "interrupted", data: [{ _tag: "Interrupt", fiberId: 1 }] } },
+        `"error":{"_tag":"Cause","code":0,"message":"interrupted","data":[{"_tag":"Interrupt","fiberId":1}]}`,
       ],
     ] as const
 
@@ -434,7 +414,7 @@ layer(Platform.services)(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
               (sock, _server, id) => {
-                sock.write(JSON.stringify({ jsonrpc: "2.0", id, ...reply }) + "\n")
+                sock.write(stopReply(id, reply))
               },
             )
             const exit = yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
@@ -476,7 +456,7 @@ layer(Platform.services)(
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
               (sock, server, id) => {
                 if (reply === undefined) sock.destroy()
-                else sock.end(JSON.stringify({ jsonrpc: "2.0", id, ...reply }) + "\n")
+                else sock.end(stopReply(id, reply))
                 server.close()
               },
             )

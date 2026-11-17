@@ -78,10 +78,7 @@ export const layer = Layer.effect(
 
     const gitDirectory = (p: string) =>
       fs.stat(p).pipe(
-        Effect.catchIf(
-          (e) => e.reason._tag === "NotFound",
-          () => Effect.succeed(undefined),
-        ),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
         Effect.map((info) => (info === undefined || info.type !== "Directory" ? undefined : p)),
       )
 

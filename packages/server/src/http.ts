@@ -6,7 +6,7 @@ import { Harnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Predicate, Result, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import type { ServeError } from "effect/http/HttpServerError"
@@ -32,12 +32,17 @@ const boundReason = (reason: string) =>
     ? reason
     : reason.slice(0, REASON_LIMIT) + `... (${reason.length - REASON_LIMIT} more chars)`
 
+export const InvalidRequestError = Schema.TaggedStruct("InvalidRequestError", {
+  message: Schema.String,
+  kind: Schema.Literal("Payload"),
+})
+
 const schemaRejection = (reason: string) =>
   Effect.logWarning("schema rejection").pipe(
     Effect.annotateLogs({ kind: "Payload", reason }),
     Effect.as({
       status: 400,
-      body: { _tag: "InvalidRequestError", message: reason, kind: "Payload" },
+      body: InvalidRequestError.make({ message: reason, kind: "Payload" }),
     } satisfies Reply),
   )
 
@@ -60,8 +65,8 @@ export const make = Effect.gen(function* () {
           body: { error: rejected.mismatch.message, ...rejected.mismatch },
         } satisfies Reply
       const who = yield* identify(db, read)
-      if (who._tag === "NoSession") return failure(404, `no session ${who.id ?? "(no vibest-session-id)"}`)
-      if (who._tag !== "Known")
+      if (Predicate.isTagged(who, "NoSession")) return failure(404, `no session ${who.id ?? "(no vibest-session-id)"}`)
+      if (!Predicate.isTagged(who, "Known"))
         return failure(
           403,
           `session ${who.row.id} is not in project ${read(PROJECT_HEADER) ?? "(no vibest-project-id)"}`,
@@ -85,7 +90,7 @@ export const make = Effect.gen(function* () {
       }
       if (request.path === "/session/ready") {
         const decoded = yield* Effect.result(Schema.decodeUnknownEffect(ReadyBody)(request.body))
-        if (decoded._tag === "Failure") return yield* schemaRejection(boundReason(decoded.failure.message))
+        if (Result.isFailure(decoded)) return yield* schemaRejection(boundReason(decoded.failure.message))
         const current = yield* integration.ready(
           who.id,
           decoded.success.pid,
@@ -125,7 +130,7 @@ export const layer = Layer.unwrap(
         const request = yield* HttpServerRequest.HttpServerRequest
         if (request.method !== "POST") return HttpServerResponse.jsonUnsafe({ error: "POST only" }, { status: 405 })
         const read = yield* Effect.result(request.text)
-        if (read._tag === "Failure")
+        if (Result.isFailure(read))
           return HttpServerResponse.jsonUnsafe({ error: read.failure.message }, { status: 400 })
         const body = read.success
         const reply = yield* handle({

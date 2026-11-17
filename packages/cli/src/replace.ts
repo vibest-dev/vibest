@@ -21,7 +21,7 @@ import {
 } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 import { NoSuchSession } from "@vibest/schema/session"
-import { Cause, Console, Duration, Effect, Exit, Option, Path, Schedule, Schema } from "effect"
+import { Cause, Console, Duration, Effect, Exit, Option, Path, Predicate, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 
@@ -159,7 +159,8 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
       yield* Console.log(`No reply to Stop within ${Duration.format(timing.reply)}; watching vibestd instead.`)
     else if (Exit.isFailure(reply.value)) {
       const e = Option.getOrUndefined(Cause.findErrorOption(reply.value.cause))
-      if (e !== undefined && isRefusal(e)) return yield* fail(e._tag === "DaemonBusy" ? "busy" : "unchanged", e.message)
+      if (e !== undefined && isRefusal(e))
+        return yield* fail(Predicate.isTagged(e, "DaemonBusy") ? "busy" : "unchanged", e.message)
       yield* Console.log(
         `The reply to Stop was lost or could not be read (${e?._tag ?? "defect"}); watching vibestd instead.`,
       )

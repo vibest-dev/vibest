@@ -74,10 +74,7 @@ export const createProject = Effect.fn("Project.createProject")(function* (
   const target = resolveAgainst(path, base, directory)
   const existing = yield* fs.stat(target).pipe(
     Effect.map((info) => info.type),
-    Effect.catchIf(
-      (e) => e.reason._tag === "NotFound",
-      () => Effect.succeed(undefined),
-    ),
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
     Effect.mapError((e) => refuse(`${target}: ${e.message}`)),
   )
   if (existing !== undefined && existing !== "Directory")
@@ -136,12 +133,7 @@ export const listProjectRepositories = Effect.fn("Project.listProjectRepositorie
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const goneIsUndefined = <A>(read: Effect.Effect<A, PlatformError.PlatformError>) =>
-    read.pipe(
-      Effect.catchIf(
-        (e) => e.reason._tag === "NotFound",
-        () => Effect.succeed(undefined),
-      ),
-    )
+    read.pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
   const info = yield* goneIsUndefined(fs.stat(directory))
   if (info === undefined || info.type !== "Directory") return undefined
   const git = yield* Git.Service
@@ -152,12 +144,9 @@ export const listProjectRepositories = Effect.fn("Project.listProjectRepositorie
   for (const name of names.slice().sort()) {
     if (!safeRepositoryDirectory(name)) continue
     const child = path.join(directory, name)
-    const stat = yield* fs.stat(child).pipe(
-      Effect.catchIf(
-        (e) => e.reason._tag === "NotFound",
-        () => Effect.succeed(undefined),
-      ),
-    )
+    const stat = yield* fs
+      .stat(child)
+      .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
     if (stat === undefined || stat.type !== "Directory" || !(yield* ownGitCheckout(child))) continue
     const branch = yield* git.currentBranch(child).pipe(Effect.orElseSucceed(() => ""))
     found.push({ name, path: child, branch })

@@ -1,4 +1,4 @@
-import { type Claim, type VibestClient } from "@vibest/client/client"
+import { Claim, type VibestClient } from "@vibest/client/client"
 import { Forbidden } from "@vibest/protocol/rpc"
 import { Config, Console, Effect, Option, Path, Schema } from "effect"
 
@@ -8,7 +8,7 @@ export const caller = Effect.gen(function* () {
   const path = yield* Path.Path
   const repositoryRoot = path.resolve(".")
   const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID"))) || undefined
-  const claim: Claim = sessionId ? { _tag: "session", sessionId, repositoryRoot } : { _tag: "cli", repositoryRoot }
+  const claim: Claim = sessionId ? Claim.session({ sessionId, repositoryRoot }) : Claim.cli({ repositoryRoot })
   return { claim, agent: sessionId !== undefined, sessionId }
 })
 

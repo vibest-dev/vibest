@@ -1,4 +1,4 @@
-import { claimHeaders, hookCall, type VibestClient } from "@vibest/client/client"
+import { Claim, claimHeaders, hookCall, type VibestClient } from "@vibest/client/client"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
 import { Cause, Clock, Config, Effect, Exit, Option } from "effect"
@@ -19,7 +19,7 @@ export const notify = <A>(
 ) =>
   Effect.gen(function* () {
     const layout = yield* Layout
-    const headers = yield* claimHeaders({ _tag: "session", sessionId })
+    const headers = yield* claimHeaders(Claim.session({ sessionId }))
     const exit = yield* hookCall(layout.socket, headers, send)
     if (Exit.isSuccess(exit)) return exit.value
     const at = new Date(yield* Clock.currentTimeMillis).toISOString()

@@ -28,7 +28,7 @@ import { liveDaemon } from "@vibest/runtime-herdr/commands"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { Effect, Exit, FileSystem, Layer, Path, PlatformError, type Scope } from "effect"
+import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -69,8 +69,8 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
   Effect.gen(function* () {
     const exit = yield* Effect.exit(effect)
     if (Exit.isSuccess(exit)) return assert.fail("expected a failure")
-    const error = exit.cause.reasons.find((r) => r._tag === "Fail")
-    return error?._tag === "Fail" ? error.error.message : assert.fail(`not a failure: ${exit.cause}`)
+    const error = Cause.findErrorOption(exit.cause)
+    return Option.isSome(error) ? error.value.message : assert.fail(`not a failure: ${exit.cause}`)
   })
 
 describe("project create", () => {
@@ -157,15 +157,6 @@ describe("multi-repository project", () => {
       Effect.provide(
         FileSystem.layerNoop({
           stat: () => Effect.succeed({ type: "Directory" } as FileSystem.File.Info),
-          readDirectory: (path) =>
-            Effect.fail(
-              PlatformError.systemError({
-                _tag: "NotFound",
-                module: "FileSystem",
-                method: "readDirectory",
-                pathOrDescriptor: path,
-              }),
-            ),
         }),
       ),
       Effect.provide(Path.layer),

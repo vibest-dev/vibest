@@ -11,7 +11,7 @@ import { peerHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { type ListedMachine, MachineFailed } from "@vibest/schema/machine"
-import { Context, Effect, Layer } from "effect"
+import { Context, Data, Effect, Layer, Predicate } from "effect"
 
 import { Machines } from "./machines.ts"
 
@@ -21,11 +21,13 @@ type Address =
   | { readonly _tag: "Local"; readonly id: string }
   | { readonly _tag: "Remote"; readonly machine: string; readonly id: string }
 
+const Address = Data.taggedEnum<Address>()
+
 export const address = (input: string): Address => {
   const at = input.indexOf("/")
   return at <= 0
-    ? { _tag: "Local", id: input }
-    : { _tag: "Remote", machine: input.slice(0, at), id: input.slice(at + 1) }
+    ? Address.Local({ id: input })
+    : Address.Remote({ machine: input.slice(0, at), id: input.slice(at + 1) })
 }
 
 export type At = Extract<Address, { readonly _tag: "Remote" }>
@@ -35,6 +37,8 @@ export type ListScope =
   | { readonly _tag: "Project"; readonly id: string }
   | { readonly _tag: "Nothing" }
   | ({ readonly _tag: "Peer" } & PeerScope)
+
+export const ListScope = Data.taggedEnum<ListScope>()
 
 type Forwarded<A, E> = (
   client: PipeClient,
@@ -121,11 +125,11 @@ const make = Effect.gen(function* () {
     ),
 
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
-      if (scope._tag === "Peer") return { sessions: [], machines: [] }
+      if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }
       const each = yield* Effect.forEach(
         yield* machines.states,
         ({ info, link }): Effect.Effect<Away> =>
-          link === undefined || scope._tag !== "Project"
+          link === undefined || !Predicate.isTagged(scope, "Project")
             ? Effect.succeed({ machine: info, sessions: [] })
             : link
                 .call(

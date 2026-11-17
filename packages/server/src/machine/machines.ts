@@ -31,6 +31,7 @@ import {
   Exit,
   Fiber,
   Layer,
+  Match,
   Option,
   Predicate,
   Schedule,
@@ -295,19 +296,17 @@ const make = Effect.gen(function* () {
               Effect.flatMap(ended, (reason) => Effect.fail(new MachineDown({ message: reason }))),
             ),
             isLineError,
-            (e): Effect.Effect<never, MachineUnavailable | MachineIncompatible> => {
-              switch (e._tag) {
-                case "RpcClientError":
-                  return Effect.flatMap(down(e), (reason) => unavailable(lost(reason)))
-                case "MachineDown":
-                  return unavailable(lost(e.message))
-                case "ProtocolRejected":
-                  return Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` }))
-                case "DaemonStopping":
-                case "InvalidCaller":
-                  return unavailable(`${name}: ${e.message}`)
-              }
-            },
+            (e): Effect.Effect<never, MachineUnavailable | MachineIncompatible> =>
+              Match.value(e).pipe(
+                Match.tagsExhaustive({
+                  RpcClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+                  MachineDown: (e) => unavailable(lost(e.message)),
+                  ProtocolRejected: (e) =>
+                    Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` })),
+                  DaemonStopping: (e) => unavailable(`${name}: ${e.message}`),
+                  InvalidCaller: (e) => unavailable(`${name}: ${e.message}`),
+                }),
+              ),
           )
       const call = line(
         (reason) =>

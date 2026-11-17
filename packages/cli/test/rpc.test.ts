@@ -1,7 +1,7 @@
 import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, incompatibleDaemon, protocolHeaders } from "@vibest/client/client"
+import { Claim, cliHeaders, incompatibleDaemon, protocolHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf } from "@vibest/core/database/db-rows"
 import { projectRoot } from "@vibest/core/project/create"
@@ -24,7 +24,7 @@ import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
 import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, FileSystem, Path, Predicate, Ref, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -713,7 +713,7 @@ describe("vibest.sock", () => {
         })
       const legacy = yield* serve({ version: "0.0.0", runtimes: [] })
       const refused = yield* Effect.exit(
-        withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), { start: false }).pipe(
+        withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.die("must not call"), { start: false }).pipe(
           Effect.provideService(Layout, legacy.layout),
         ),
       )
@@ -731,14 +731,14 @@ describe("vibest.sock", () => {
       assert.include(said, "vibestd is older (0.0.0); run vibest update")
       const olderBuildWithoutRuntimes = yield* serve({ protocol: 2, version: VERSION, runtimeSessions: [] })
       const olderRefused = yield* Effect.exit(
-        withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), { start: false }).pipe(
+        withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.die("must not call"), { start: false }).pipe(
           Effect.provideService(Layout, olderBuildWithoutRuntimes.layout),
         ),
       )
       assert.strictEqual(failureTag(olderRefused), "IncompatibleDaemon")
       const newer = yield* serve({ protocol: PROTOCOL, version: "9.9.9", runtimes: [] })
       assert.strictEqual(
-        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("ok"), { start: false }).pipe(
+        yield* withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.succeed("ok"), { start: false }).pipe(
           Effect.provideService(Layout, newer.layout),
         ),
         "ok",
@@ -765,7 +765,7 @@ describe("vibest.sock", () => {
       const needs = { capability: "harnesses", method: "Harnesses.List" }
       const lacking = yield* serve({ protocol: PROTOCOL, version: "0.9.0", runtimes: [], capabilities: {} })
       const lackRefused = yield* Effect.exit(
-        withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), {
+        withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.die("must not call"), {
           start: false,
           needs,
         }).pipe(Effect.provideService(Layout, lacking.layout)),
@@ -776,7 +776,7 @@ describe("vibest.sock", () => {
       assert.include(lackSaid, "has no Harnesses.List")
       assert.include(lackSaid, "vibest daemon restart")
       assert.strictEqual(
-        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("no need"), {
+        yield* withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.succeed("no need"), {
           start: false,
         }).pipe(Effect.provideService(Layout, lacking.layout)),
         "no need",
@@ -788,7 +788,7 @@ describe("vibest.sock", () => {
         capabilities: { harnesses: true },
       })
       assert.strictEqual(
-        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("ok"), {
+        yield* withVibest(Claim.cli({ repositoryRoot: repo }), () => Effect.succeed("ok"), {
           start: false,
           needs,
         }).pipe(Effect.provideService(Layout, having.layout)),
@@ -944,7 +944,7 @@ describe("vibest.sock", () => {
           runtime: "herdr",
         }),
       )
-      assert.ok(failed._tag === "LaunchFailed" || failed._tag === "AgentRefused", failed._tag)
+      assert.ok(Predicate.isTagged(failed, "LaunchFailed") || Predicate.isTagged(failed, "AgentRefused"), failed._tag)
       assert.strictEqual((yield* db.session.entryOf(projectId))!.id, before)
     }),
     { missingBinary: ["cursor"] },

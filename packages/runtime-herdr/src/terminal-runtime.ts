@@ -3,7 +3,7 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { launchLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
-import { Cause, Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
+import { Cause, Config, Duration, Effect, Option, Predicate, PubSub, Schedule, type Scope, Stream } from "effect"
 import type { FileSystem } from "effect"
 import type { HerdrFailure, HerdrShape, PushFrame, results } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -388,7 +388,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
               Effect.ignore,
               Effect.andThen(h.call("agent.prompt", { target: found.target, text })),
               Effect.retry({
-                while: (e) => e._tag === "HerdrError" && e.code === "agent_not_ready",
+                while: (e) => Predicate.isTagged(e, "HerdrError") && e.code === "agent_not_ready",
                 times: READY_RETRIES,
                 schedule: TICK,
               }),

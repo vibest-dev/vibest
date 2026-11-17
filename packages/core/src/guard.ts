@@ -1,6 +1,6 @@
 import type { GuardCall } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Config, Effect, FileSystem, Option, Path, Predicate, Schema } from "effect"
 
 import { Agents } from "./agents.ts"
 import { Harnesses } from "./harnesses.ts"
@@ -278,7 +278,10 @@ const physical = (
         Effect.catchTag("PlatformError", (e) => {
           const code = (e.reason.cause as { code?: unknown } | undefined)?.code
           const notALink =
-            e.reason._tag === "NotFound" || code === "EINVAL" || code === "ENOTDIR" || code === "ENAMETOOLONG"
+            Predicate.isTagged(e.reason, "NotFound") ||
+            code === "EINVAL" ||
+            code === "ENOTDIR" ||
+            code === "ENAMETOOLONG"
           return notALink ? Effect.succeed(undefined) : Effect.succeed("refuse" as const)
         }),
       )

@@ -1,4 +1,4 @@
-import { Effect, Scope, Stream } from "effect"
+import { Effect, Exit, Scope, Stream } from "effect"
 import { expect, test, vi } from "vitest"
 
 import type { Context } from "../src/effect/index.ts"
@@ -27,7 +27,7 @@ test("an iterator the plugin closed is not returned again when the plugin unload
         },
       })(host).pipe(Scope.provide(scope)),
     )
-    await Effect.runPromise(Scope.close(scope, { _tag: "Success", value: undefined } as never))
+    await Effect.runPromise(Scope.close(scope, Exit.void))
     const iterators = vi
       .mocked(mocked.Stream.toAsyncIterableWith)
       .mock.results.map(

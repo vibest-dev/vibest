@@ -1,6 +1,6 @@
 import readline from "node:readline"
 
-import type { Claim, VibestClient, VibestClients } from "@vibest/client/client"
+import { Claim, type VibestClient, type VibestClients } from "@vibest/client/client"
 import { isLimited } from "@vibest/plugin/effect"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -190,7 +190,7 @@ export const perform = <E, R>(
   return go(verb)
 }
 
-const claim = (directory: string): Claim => ({ _tag: "cli", repositoryRoot: directory })
+const claim = (directory: string): Claim => Claim.cli({ repositoryRoot: directory })
 
 const callerEnvOf = (): Record<string, string> =>
   Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
