@@ -1,5 +1,5 @@
 import { Claim, cliHeaders, connect, type VibestClient, readPing } from "@vibest/client/client"
-import { UpdateError } from "@vibest/client/release"
+import { compareVersions, UpdateError } from "@vibest/client/release"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { type Ping } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -11,7 +11,7 @@ import { RpcClient } from "effect/rpc"
 
 import { askYesNo, interactive } from "./ask.ts"
 import { withVibest } from "./client.ts"
-import { type ReplaceFailed, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
+import { type ReplaceFailed, replaceDaemon, versionOf } from "./replace.ts"
 import { VERSION } from "./version.ts"
 
 export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }

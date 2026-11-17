@@ -10,9 +10,10 @@
 2. **The Release workflow** (`.github/workflows/release.yml`) is the only way to release, started by the owner on
    `main` from the Actions page or with `gh workflow run release.yml -R vibest-dev/vibest --ref main`. It releases a
    chosen known-good commit of `main` (`-f commit=<sha>`, which must be an ancestor of `main`; without it, the head of
-   `main`): every job builds, verifies, tags and publishes exactly that commit. `-f version=<x.y.z-beta.n>` names the
-   version, which must be newer than the newest release; without it, the next beta after the highest
-   `v<x.y.z>-beta.<n>` tag. It sets that version in every package.json of its own checkout only and fails when the
+   `main`): every job builds, verifies, tags and publishes exactly that commit. `-f version=<x.y.z-beta.n>` (a beta) or
+   `-f version=<x.y.z>` (stable) names the version, which must be newer than the newest release of either channel;
+   without it, the next beta after the highest `v<x.y.z>-beta.<n>` tag (refused once a stable is newer than that beta:
+   name the version then). It sets that version in every package.json of its own checkout only and fails when the
    version is already tagged or on npm. It runs the release gate on that tree: the whole of `pnpm verify --no-cache`,
    the single entry for all verification, whose stages run as parallel jobs on GitHub-hosted runners. `build` packs once
    (`--stage build,archive,pack`): the linux-x64 curl archive and every npm tarball, checks the tarballs, records the
@@ -39,13 +40,17 @@
    to finish a release: it builds new bytes, and it refuses a version that is already tagged or on npm. Changed code
    needs a new version. A dist-tag that does not point at the version is reported, not moved: move it by hand only when
    no newer release owns it.
-4. **Channels: beta only for now.** Every release is a beta, `x.y.z-beta.n` (the workflow refuses any other version),
-   published under npm's `beta`, and a regular GitHub Release marked Latest, not a prerelease, because `install.sh` and
-   `vibest update` follow GitHub's Latest release. The notes are the CHANGELOG.md section of the version when there is
-   one, otherwise GitHub's generated notes. A stable channel, added before the first stable release, will need: stable
-   versions published under npm's `latest` (betas keep `beta`); betas made GitHub prereleases, so Latest is the newest
-   stable; and `install.sh` and `vibest update` choosing a channel (stable by default, beta on request) instead of
-   following Latest. It stays in this same workflow file: npm trusted publishing binds each package to one workflow file
+4. **Channels: beta and stable.** The version decides the channel: `x.y.z-beta.n` is a beta, a plain `x.y.z` is
+   stable, and the workflow refuses any other shape. A stable release is published under npm's `latest` and is a
+   regular GitHub Release marked Latest; a beta is published under npm's `beta` (never moving `latest`) and is a GitHub
+   prerelease. GitHub's Latest is therefore always the newest stable. `install.sh` installs the newest stable (Latest)
+   and fails, naming `--beta`, when there is none; `install.sh --beta` installs the newest release of either channel,
+   read from the release list (`releases.atom`). `vibest update` follows the channel of the installed version: a stable
+   updates to the newest stable only, a beta (and a build from `main`, `0.0.1-dev`) to the newest release of either
+   channel, so a beta user moves to a stable once it is newer; `--stable` and `--beta` choose explicitly. An npm install
+   reads the same from `@vibest/cli`'s dist-tags (`latest` for stable, the newer of `latest` and `beta` for either
+   channel). The notes are the CHANGELOG.md section of the version when there is one, otherwise GitHub's generated
+   notes. Both channels stay in this same workflow file: npm trusted publishing binds each package to one workflow file
    name, `release.yml`, so the file is never renamed.
 5. **Bugs are fixed on `main` and rolled forward.** There are no release branches: a bug found in a release is fixed on
    `main` like any change, and a new release ships it, cut from a known-good commit of `main` that contains the fix. A
@@ -77,6 +82,10 @@ Settings the workflow needs and cannot set itself. Check them before the first r
       `npm trust github @vibest/cli --file release.yml --repo vibest-dev/vibest --env release --allow-publish`.
       Each package.json `repository.url` is `git+https://github.com/vibest-dev/vibest.git`, which provenance requires.
 - [ ] Once a release has published with OIDC: revoke any npm token that could publish these packages.
+- [ ] Before the first stable release: every published package's npm `latest` names a vibest release or nothing
+      stale. npm set `latest` on each package's first publish (`@vibest/cli` names the unrelated 2025 `0.0.1`), and an
+      npm beta user's `vibest update` reads `latest` too; point it at the current beta, for example
+      `npm dist-tag add @vibest/cli@0.0.1-beta.19 latest`, until the first stable release moves it.
 - [ ] npm 11.5.1 or later in the publish job (Node 26.13.0 ships 11.20.0; the job checks it), Node 22.14.0 or later.
 - [ ] No deploy key, no `RELEASE_PUSH_KEY` secret and no DeployKey bypass on "CI required on main": the workflow never
       pushes to `main`.

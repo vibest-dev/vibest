@@ -6,7 +6,10 @@ it is and when it counts as working.
 ## U1. Where the latest version comes from
 
 `vibest update` reads the latest version from where vibest was installed: npm's registry for an npm install, the GitHub
-release for an install.sh install. When that version is the running one, it says vibest is up to date and installs
+releases for an install.sh install. It follows the channel of the running version: a stable vibest (`x.y.z`) takes the
+newest stable release, a beta (any other version) the newest release of either channel, beta or stable; `--stable` and
+`--beta` choose the channel instead, and both together are refused. When the chosen version is not newer than the
+running one, it says vibest is up to date, names the newest release of that channel when it differs, and installs
 nothing. A build from source says it cannot update and installs nothing.
 
 ## U2. Handing over with a Pi entry session mid-execution
@@ -56,6 +59,12 @@ keeps answering. Once the database fits, a restart replaces it.
 One `vibest update` run by an older vibest on an older protocol ends with the agents on the old integration restarted
 by the vibest it installed: the old vibest exits 0, and the entry session and the subagent keep their session and
 conversation with a new harness process.
+
+## U13. Installing a channel
+
+`install.sh` installs the newest stable release; when there is none it installs nothing and its message names
+`--beta`. `install.sh --beta` installs the newest release of either channel, beta or stable. Checked by
+`packages/cli/test/install-sh.test.ts` against a release list on disk.
 
 ## U12. This vibest replaces an older-protocol daemon
 
