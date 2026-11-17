@@ -164,7 +164,7 @@ What the checks that drive real herdr panes rely on:
 - Claude refuses a standalone `sleep`: to keep an entry session busy, the check has its execution wait in a Bash call for a file
   the check creates.
 - herdr refuses `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S19).
-  vibest never uses `agent.start`: herdr finds a harness by the process its typed line execs, in that pane (S18).
+  vibest never uses `agent.start`: herdr finds a harness by the process its typed line execs, in that pane (S20).
 - With herdr's own Pi hook installed (`herdr integration install pi`), herdr reads Pi's state from the hook alone, and an
   idle Pi sends it nothing more (S19).
 - Pi can open more than one model stream for one execution: a check that holds the model releases every stream held at
