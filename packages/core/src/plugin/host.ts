@@ -22,7 +22,7 @@ type AgentRegistrations = {
 const factsFor =
   (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] =>
   <T extends FactType>(input?: { readonly types?: ReadonlyArray<T> }) => {
-    const asked: ReadonlyArray<string> = input?.types ?? []
+    const asked: ReadonlyArray<T> = input?.types ?? []
     const known = new Set(asked.filter((type) => Object.hasOwn(Catalog, type)))
     const unknown = asked.filter((type) => !known.has(type))
 
@@ -32,11 +32,21 @@ const factsFor =
         : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown fact types ${unknown.join(", ")}`)
 
     if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
-    const definitions = known.size === 0 ? Object.values(Catalog) : [...known].map((type) => Catalog[type as FactType])
+
+    const definitions: ReadonlyArray<{ readonly type: FactType }> =
+      known.size === 0 ? Object.values(Catalog) : [...known].map((type) => ({ type }))
+
+    const wanted: ReadonlySet<string> = new Set(definitions.map((definition) => definition.type))
+    const isWanted = (event: Bus.BusEvent): event is FactOf<T> => wanted.has(event.type)
 
     return Stream.unwrap(
-      Effect.andThen(warned, Effect.map(bus.subscribe(definitions), Stream.fromSubscription)),
-    ) as Stream.Stream<FactOf<T>>
+      Effect.andThen(
+        warned,
+        Effect.map(bus.subscribe(definitions), (subscription) =>
+          Stream.fromSubscription(subscription).pipe(Stream.filter(isWanted)),
+        ),
+      ),
+    )
   }
 
 export interface Input {

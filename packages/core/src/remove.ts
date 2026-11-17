@@ -292,7 +292,7 @@ export const make = Effect.gen(function* () {
           }
 
           if (notes.length > 0) return notes.join("; ")
-          const left = yield* fs.readDirectory(worktree).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
+          const left = yield* fs.readDirectory(worktree).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
 
           if (left.length === 0) yield* fs.remove(worktree, { recursive: true }).pipe(Effect.ignore)
 

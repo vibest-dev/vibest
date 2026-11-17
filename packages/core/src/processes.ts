@@ -15,7 +15,7 @@ export const livenessOf = (probe: () => void): Liveness => {
 
     return "alive"
   } catch (e) {
-    const code = (e as { readonly code?: unknown } | null)?.code
+    const code = Predicate.hasProperty(e, "code") ? e.code : undefined
 
     return Match.value(code).pipe(
       Match.when("ESRCH", (): Liveness => "exited"),
@@ -86,7 +86,7 @@ export const layer = Layer.effect(
 
             return "sent" as const
           } catch (e) {
-            return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
+            return Predicate.hasProperty(e, "code") && e.code === "ESRCH" ? ("sent" as const) : ("denied" as const)
           }
         }),
       ),

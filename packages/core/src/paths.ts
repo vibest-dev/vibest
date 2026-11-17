@@ -1,11 +1,17 @@
 import { ID } from "@vibest/schema/id"
-import { Effect, FileSystem, Path, Random } from "effect"
+import { Effect, FileSystem, Option, Path, Random, Schema } from "effect"
 
 const LEGACY_SESSION_DIRECTORY = /^[0-9a-f]{8}$/
 export const ALLOCATION_LEAF = /^[0-9a-f]{4}$/
 export const ALLOCATION_NAME_ATTEMPTS = 16
 
-export const hostPlatform = (globalThis as { readonly process?: { readonly platform?: string } }).process?.platform
+export const hostPlatform = Schema.decodeUnknownOption(
+  Schema.Struct({ process: Schema.Struct({ platform: Schema.String }) }),
+)(globalThis).pipe(
+  Option.map((host) => host.process.platform),
+  Option.getOrUndefined,
+)
+
 export const caseFoldedWorktrees = hostPlatform === "darwin" || hostPlatform === "win32"
 
 export const sameWorktreeBucket = (a: string, b: string) =>

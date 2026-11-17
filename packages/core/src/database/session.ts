@@ -124,7 +124,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
     return {
       sessionParents: Effect.fn("Db.session.sessionParents")((ids: ReadonlyArray<string>) =>
         (ids.length === 0
-          ? Effect.succeed([] as ReadonlyArray<{ id: string; parentSessionId: string | null }>)
+          ? Effect.succeed<ReadonlyArray<{ id: string; parentSessionId: string | null }>>([])
           : sql<{ id: string; parentSessionId: string | null }>`SELECT id, parent_session_id FROM session
               WHERE ${sql.in("id", ids)}`
         ).pipe(
@@ -564,30 +564,32 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ) =>
           tx(
             Effect.gen(function* () {
-              const ready = Predicate.isNumber(patch.ready)
+              const { ready, pid } = patch
 
-              if (!ready && !Predicate.isNumber(patch.pid)) return undefined
-              const current = yield* currentProcess(id)
+              if (!Predicate.isNumber(ready)) {
+                if (!Predicate.isNumber(pid)) return undefined
+                const current = yield* currentProcess(id)
 
-              if (current === undefined) return undefined
-
-              if (ready && !(yield* fromCurrentHarness(id, current.id, patch.reporter, patch.pid ?? undefined)))
-                return undefined
-              const integration = patch.integration ?? (yield* sessionLive.integration(id))
-
-              if (!ready) {
-                yield* publish(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
+                if (current === undefined) return undefined
+                yield* publish(ProcessPid, { sessionId: id, data: { process: current.id, pid } })
 
                 return current.id
               }
 
+              const current = yield* currentProcess(id)
+
+              if (current === undefined) return undefined
+
+              if (!(yield* fromCurrentHarness(id, current.id, patch.reporter, pid ?? undefined))) return undefined
+              const integration = patch.integration ?? (yield* sessionLive.integration(id))
+
               if (integration !== undefined) yield* afterCommitLive(sessionLive.setIntegration(id, integration))
               yield* publish(ProcessReady, {
                 sessionId: id,
-                at: patch.ready as number,
+                at: ready,
                 data: {
                   process: current.id,
-                  ...(Predicate.isNumber(patch.pid) && { pid: patch.pid }),
+                  ...(Predicate.isNumber(pid) && { pid }),
                   ...(integration !== undefined && { integration }),
                 },
               })
