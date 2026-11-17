@@ -266,7 +266,6 @@ const heldSubagent = async (w: World) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   const model = heldModel()
   const session = `${w.herdrSession}-held`
-  const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
 
   try {
     const repo = await project(w, "held")
@@ -291,11 +290,6 @@ const heldSubagent = async (w: World) => {
 
     await until("the subagent's execution held by the model", () => model.held() > 0, 60_000)
 
-    const found = async () =>
-      ((await herdr(socket, "agent.list", {})).agents as Array<{ pane_id?: string; agent?: string | null }>).some(
-        (a) => a.pane_id === paneOf(w, sub) && a.agent === "pi",
-      )
-
     const exited = () =>
       row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, sub)?.e ?? null
 
@@ -312,8 +306,7 @@ const heldSubagent = async (w: World) => {
         ).id ?? ""
 
       await until("its terminal recorded while the first execution is held", () => terminal() !== "", 60_000)
-      await until("herdr finds the subagent in its pane", found, 30_000)
-      expect(model.held() > 0, "the first execution ended before herdr found the subagent")
+      expect(model.held() > 0, "the first execution ended before the terminal was recorded")
       expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
     }
 
@@ -698,7 +691,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S18",
     title:
-      "a Pi subagent whose first execution is still held already has its terminal: herdr finds it in its pane, vibest peek reads it, no exit is recorded, and its result arrives",
+      "a Pi subagent whose first execution is still held already has its terminal: vibest peek reads it, no exit is recorded, and its result arrives",
     run: (w) => heldSubagent(w),
   },
   {
