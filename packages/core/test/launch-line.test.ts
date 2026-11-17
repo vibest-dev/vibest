@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import { launchLine } from "@vibest/core/launch"
-import { systemPromptFile } from "@vibest/core/system-prompt"
 import { Effect, FileSystem, Path } from "effect"
 
 import { tempDirectory } from "./lib/directory.ts"
@@ -21,7 +20,6 @@ describe("launchLine", () => {
         harness: "test",
         argv: [script, "--", message],
         prompt: message,
-        system: "system\nwith $HOME and 'quotes'",
         env: { VIBEST_SESSION_ID: id, VIBEST_PROCESS: "4", VIBEST_HOME: dir },
       }
       const line = yield* launchLine(launch)
@@ -39,7 +37,6 @@ describe("launchLine", () => {
       )
       assert.strictEqual(code, 0, stderr)
       assert.deepStrictEqual(JSON.parse(stdout), launch.argv)
-      assert.include(yield* fs.readFileString(yield* systemPromptFile(id)), "system\nwith $HOME and 'quotes'")
     }).pipe(Effect.provide(Platform.services)),
   )
 })

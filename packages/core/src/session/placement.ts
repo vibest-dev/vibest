@@ -45,7 +45,7 @@ import {
 } from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
-import { projectText, removeSystemPrompt, systemPrompt, systemPromptFile, withTask } from "../system-prompt.ts"
+import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
 
@@ -158,7 +158,7 @@ export const make = Effect.gen(function* () {
         {
           worktree: yield* worktreeOf(session),
           projectDir: layout.project(session.projectId),
-          systemPromptFile: yield* systemPromptFile(session.id),
+          systemPromptFile: yield* writeSystemPrompt(session.id, system),
           provider: session.process?.provider ?? null,
           model: session.process?.model ?? null,
           sessionId: id,

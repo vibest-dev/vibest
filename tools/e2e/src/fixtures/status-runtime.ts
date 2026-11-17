@@ -18,40 +18,26 @@ const hc = (...argv: Array<string>) =>
     catch: (e) => new Runtime.RuntimeError({ code: "failed", message: String(e) }),
   })
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
-const wrote = (launch: Runtime.Launch) =>
-  launch.prompt === undefined && launch.system === undefined
-    ? Effect.void
-    : launchLine(launch).pipe(
-        Effect.asVoid,
-        Effect.mapError((e) => new Runtime.RuntimeError({ code: "failed", message: e.message })),
-        Effect.provide(NodeFileSystem.layer),
-        Effect.provide(NodePath.layer),
-      )
 const runtime: Runtime.RuntimeDefinition = {
   id: "status-fixture",
   status: () => Effect.succeed({ status: "online" }),
   open: (input) =>
-    wrote(input.launch).pipe(
-      Effect.andThen(
-        hc(
-          "run",
-          "--bg",
-          "--no-parent",
-          "--no-notify",
-          "--cwd",
-          input.cwd,
-          "--",
-          "env",
-          ...Object.entries(input.launch.env).map(([k, v]) => k + "=" + v),
-          "python3",
-          "-I",
-          path.join(root, "status-pty.py"),
-          path.join(root, "status-output", crypto.randomUUID()),
-          ...input.launch.argv,
-        ),
-      ),
-      Effect.map((raw) => ({ id: prefix + "/" + JSON.parse(raw).address })),
-    ),
+    hc(
+      "run",
+      "--bg",
+      "--no-parent",
+      "--no-notify",
+      "--cwd",
+      input.cwd,
+      "--",
+      "env",
+      ...Object.entries(input.launch.env).map(([k, v]) => k + "=" + v),
+      "python3",
+      "-I",
+      path.join(root, "status-pty.py"),
+      path.join(root, "status-output", crypto.randomUUID()),
+      ...input.launch.argv,
+    ).pipe(Effect.map((raw) => ({ id: prefix + "/" + JSON.parse(raw).address }))),
   send: (terminal, input) =>
     hc(
       ...(input.text !== undefined

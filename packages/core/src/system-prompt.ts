@@ -5,11 +5,20 @@ import {
   systemPromptRoot,
   SystemPromptDirUnsafe,
   UserPlatform,
+  writeSystemPrompt,
 } from "@vibest/plugin/effect/launch"
 import { shellQuote } from "@vibest/schema/layout"
 import { Effect, FileSystem, Path } from "effect"
 
-export { privateTmp, removeSystemPrompt, systemPromptFile, systemPromptRoot, SystemPromptDirUnsafe, UserPlatform }
+export {
+  privateTmp,
+  removeSystemPrompt,
+  systemPromptFile,
+  systemPromptRoot,
+  SystemPromptDirUnsafe,
+  UserPlatform,
+  writeSystemPrompt,
+}
 
 export const withTask = (system: string, task: string) => `${system}\n\n# Task\n\n${task}`
 

@@ -1,5 +1,4 @@
-import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
-import { launchLine, type Launch, Runtime as R } from "@vibest/plugin/effect"
+import { type Launch, Runtime as R } from "@vibest/plugin/effect"
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
 
 type Runtime = R.RuntimeDefinition
@@ -11,16 +10,6 @@ type AgentState = R.AgentState
 export const KIND = "herdr"
 
 const envPairs = (env: Readonly<Record<string, string>>) => Object.entries(env).map(([key, value]) => `${key}=${value}`)
-
-const wrote = (launch: Launch) =>
-  launch.prompt === undefined && launch.system === undefined
-    ? Effect.void
-    : launchLine(launch).pipe(
-        Effect.asVoid,
-        Effect.mapError((e) => new R.RuntimeError({ code: "failed", message: e.message })),
-        Effect.provide(NodeFileSystem.layer),
-        Effect.provide(NodePath.layer),
-      )
 
 export interface FakeAgent {
   readonly vibestSession?: string
@@ -301,7 +290,6 @@ export class FakeRuntime extends Context.Service<
           terminal.id,
           Effect.gen(function* () {
             if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
-            yield* wrote(launch)
             const record = HashMap.get(yield* Ref.get(agents), terminal.id)
             if (Option.isNone(record)) return
             const working = yield* registers(launch)
@@ -363,7 +351,6 @@ export class FakeRuntime extends Context.Service<
                 taken = HashMap.has(yield* Ref.get(panes), paneId)
               }
               yield* addPane(paneId, workspaceId, input.cwd)
-              yield* wrote(input.launch)
               const session = input.launch.env.VIBEST_SESSION_ID
               const prior =
                 session === undefined

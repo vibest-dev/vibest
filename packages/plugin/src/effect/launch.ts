@@ -67,7 +67,7 @@ const promptFile = (id: string, name: string) =>
 
 export const systemPromptFile = (id: string) => promptFile(id, "system-prompt.md")
 
-const writeSystemPrompt = (id: string, text: string) =>
+export const writeSystemPrompt = (id: string, text: string) =>
   Effect.gen(function* () {
     const file = yield* systemPromptFile(id)
     yield* writeAtomic(file, text)
@@ -119,9 +119,8 @@ const messageFromFile = (argv: ReadonlyArray<string>, file: string) => ["sh", "-
 
 export const launchLine = Effect.fn("launchLine")(function* (launch: Launch) {
   const id = launch.env.VIBEST_SESSION_ID
-  if ((launch.prompt !== undefined || launch.system !== undefined) && id === undefined)
-    return yield* Effect.die("a launch with text has no session id")
-  if (launch.system !== undefined && id !== undefined) yield* writeSystemPrompt(id, launch.system)
+  if (launch.prompt !== undefined && id === undefined)
+    return yield* Effect.die("a launch with a prompt has no session id")
   const argv =
     launch.prompt === undefined || id === undefined
       ? [...launch.argv]

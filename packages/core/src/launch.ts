@@ -13,8 +13,8 @@ import {
   projectText,
   SystemPromptDirUnsafe,
   systemPrompt,
-  systemPromptFile,
   systemPromptRoot,
+  writeSystemPrompt,
   withTask,
 } from "./system-prompt.ts"
 
@@ -78,7 +78,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     vibest,
     ...(yield* projectText(layout.project(saved.projectId))),
   })
-  const promptPath = yield* unsafeOnly(systemPromptFile(saved.sessionId))
+  const promptPath = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, promptText))
   yield* (yield* FileSystem.FileSystem)
     .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
     .pipe(Effect.ignore)
