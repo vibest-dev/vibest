@@ -521,7 +521,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I9",
     covers: ["R7"],
     title:
-      "Claude with no --settings (fake model): the plugin's tool.call guard refuses a session's herdr call and its Read, find, grep and Grep of another project, still lets it read its own project folder, and no refused file's text reaches the model",
+      "Claude whose --settings only grants its project folder (fake model): the plugin's tool.call guard refuses a session's herdr call and its Read, find, grep and Grep of another project, still lets it read its own project folder, and no refused file's text reaches the model",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       type Info = { directory: string; preferences: string; memories: string; artifacts: string }
@@ -601,7 +601,12 @@ const checks: ReadonlyArray<Check> = [
               /claude/.test(`${p.name} ${p.argv?.[0] ?? ""}`),
             )?.argv
             expect(argv !== undefined && argv !== null, `no claude in the session's pane: ${JSON.stringify(info)}`)
-            expect(!argv!.includes("--settings"), `claude started with --settings: ${argv!.join(" ")}`)
+            const settings = argv![argv!.indexOf("--settings") + 1] ?? "{}"
+            expect(
+              Object.keys(JSON.parse(settings)).join() === "permissions" &&
+                Object.keys(JSON.parse(settings).permissions).join() === "additionalDirectories",
+              `claude's --settings grants more than its project folder: ${argv!.join(" ")}`,
+            )
             const pluginDir = argv![argv!.indexOf("--plugin-dir") + 1] ?? ""
             expect(
               argv!.includes("--plugin-dir") && path.basename(pluginDir) === "claude",

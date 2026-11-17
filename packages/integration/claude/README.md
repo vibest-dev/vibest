@@ -75,7 +75,8 @@ nothing into `~/.claude`. Plain `claude` sessions never load it, and in a Claude
 **Mods are not sandboxed.** The module is code that Claude Code runs in its own process with your permissions. What it
 does is narrow: POST to the fixed vibestd socket and submit the inbox line as a prompt. Its `tool.call` listener only
 refuses; it registers no `tool.check` approval and changes no permission or policy setting. A module that does not
-load guards nothing: with no `--settings`, the guard rules hold only while this module runs.
+load guards nothing: vibest's `--settings` only grants the project folder, so the guard rules hold only while this
+module runs.
 
 **`/clear`.** Claude Code 2.1.316 changes `$.session.id()` on `/clear`, fires `session.end` for the old id and no new
 `session.start`; the poll timer keeps running. The plugin therefore has no `session.end` handler and sends the
