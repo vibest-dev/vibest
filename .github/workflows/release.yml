@@ -1,7 +1,7 @@
 name: Release
 
 # The only way to release (.agents/rules/release.md, which also lists the GitHub and npm settings it needs). Trunk-based:
-# main never carries a release version; its package.json files hold the development version 0.0.1-dev, and the tag
+# main never carries a release version; its package.json files hold the development version 0.0.2-dev, and the tag
 # v<version> is the only record of a release. The owner starts this workflow on main from the Actions page, or
 #   gh workflow run release.yml -R vibest-dev/vibest --ref main [-f commit=<sha>] [-f bump=beta|patch|minor|major]
 #     [-f version=<exact version>] [-f release_notes=<markdown>]

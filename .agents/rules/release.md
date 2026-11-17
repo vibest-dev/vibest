@@ -1,12 +1,12 @@
 # Release
 
 1. **Trunk-based: `main` never carries a release version.** Every workspace package.json on `main` holds the development
-   version `0.0.1-dev`; there is no version bump commit or pull request, and the tag `v<version>` is the only record of a
-   release. `0.0.1-dev` sorts after every `0.0.1-beta.N` release, so a build from `main` is never offered an update to
-   an older beta and `vibest update` installs nothing on it; E2E's older versions (digits zeroed: `0.0.0-dev`, and
-   `0.0.0-old`) sort before it. Builds from different commits of `main` share it: like any two builds of one version,
-   they do not tell each other apart. When the release line moves past it (a `0.0.2` beta, or `0.0.1` itself), raise
-   it on `main` in an ordinary pull request (`0.0.2-dev`); that is not a release.
+   version `0.0.2-dev`; there is no version bump commit or pull request, and the tag `v<version>` is the only record of a
+   release. `0.0.2-dev` sorts after every `0.0.2-beta.N` and `0.0.1` release, so a build from `main` is never
+   offered an update to an older beta and `vibest update` installs nothing on it; E2E's older versions (digits zeroed:
+   `0.0.0-dev`, and `0.0.0-old`) sort before it. Builds from different commits of `main` share it: like any two builds
+   of one version, they do not tell each other apart. When the release line moves past it (a `0.0.3` beta, or the
+   stable `0.0.2` itself), raise it on `main` in an ordinary pull request (`0.0.3-dev`); that is not a release.
 2. **The Release workflow** (`.github/workflows/release.yml`) is the only way to release, started by the owner on
    `main` from the Actions page or with `gh workflow run release.yml -R vibest-dev/vibest --ref main`. It releases a
    chosen known-good commit of `main` (`-f commit=<sha>`, which must be an ancestor of `main`; without it, the head of
@@ -53,7 +53,7 @@
    prerelease. GitHub's Latest is therefore always the newest stable. `install.sh` installs the newest stable (Latest)
    and fails, naming `--beta`, when there is none; `install.sh --beta` installs the newest release of either channel,
    read from the release list (`releases.atom`). `vibest update` follows the channel of the installed version: a stable
-   updates to the newest stable only, a beta (and a build from `main`, `0.0.1-dev`) to the newest release of either
+   updates to the newest stable only, a beta (and a build from `main`, `0.0.2-dev`) to the newest release of either
    channel, so a beta user moves to a stable once it is newer; `--stable` and `--beta` choose explicitly. An npm install
    reads the same from `@vibest/cli`'s dist-tags (`latest` for stable, the newer of `latest` and `beta` for either
    channel). Both channels stay in this same workflow file: npm trusted publishing binds each package to one workflow
@@ -68,7 +68,7 @@
 7. Only the owner's runs do anything: every job checks that the owner started the run and the attempt; anyone else's
    run is skipped. A run that is not a dry run must be on `main`.
 8. The workflow's `VERSIONED` list names every workspace package.json that carries the version, the files bumpp writes;
-   a new package goes into it, and every file in it holds `0.0.1-dev` on `main`. bumpp gets the files, not `-r`: `-r`
+   a new package goes into it, and every file in it holds `0.0.2-dev` on `main`. bumpp gets the files, not `-r`: `-r`
    would also rewrite the unreleased `tools/bench` and `tools/e2e`.
 9. The gate is `pnpm verify` as it is: the workflow runs its stages (`--stage`, `--leg`, `--shard`) in parallel jobs and
    replaces no part of it with other commands. Every stage, every leg and every shard must run: a new shard goes into

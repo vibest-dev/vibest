@@ -1,6 +1,6 @@
 {
   "name": "@vibest/schema",
-  "version": "0.0.1-dev",
+  "version": "0.0.2-dev",
   "description": "The schemas of vibest's facts and wire types, shared by vibestd and the plugin API.",
   "license": "MIT",
   "repository": {

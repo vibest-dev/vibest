@@ -1,6 +1,6 @@
 {
   "name": "@vibest/pi",
-  "version": "0.0.1-dev",
+  "version": "0.0.2-dev",
   "private": true,
   "description": "vibest's Pi integration: a session's execution-end report, the entry session's inbox delivery and TUI, and both agents' guard.",
   "keywords": [

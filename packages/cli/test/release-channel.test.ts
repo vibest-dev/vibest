@@ -9,5 +9,5 @@ it("a stable vibest follows the newest stable release; a beta follows the newest
   assert.isUndefined(newestIn("stable", ["0.0.1-beta.19"]))
   assert.strictEqual(channelOf("0.1.0"), "stable")
   assert.strictEqual(channelOf("0.1.0-beta.3"), "beta")
-  assert.strictEqual(channelOf("0.0.1-dev"), "beta")
+  assert.strictEqual(channelOf("0.0.2-dev"), "beta")
 })
