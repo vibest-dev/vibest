@@ -507,10 +507,11 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   `(deleted)` cwd, counts as a holder of anything in the worktree it could stand for.
 - An entry session stopped so it can start in another terminal (`Project.StopEntry`): its row leaves its place
   first, so the harness's exit drops nothing, and from there to the answer the stop is uninterruptible, so a Ctrl-C
-  cannot leave the row detached while the harness runs. It is signalled only while the runtime sees an agent in that
-  terminal, and a harness still there after 10 s gets its row back. Ceiling: local machine only (a pid names a
-  process on vibestd's machine; a remote one needs a runtime operation), and a pid reused by another program while
-  the runtime still sees an agent there would get the signal.
+  cannot leave the row detached while the harness runs. It is signalled while the runtime sees an agent in that
+  terminal or, when the runtime does not know, while its process is still open in vibest and the pid its harness
+  reported is alive; a harness still there after 10 s gets its row back. Ceiling: local machine only (a pid names a
+  process on vibestd's machine; a remote one needs a runtime operation), and a pid reused by another program before
+  vibest saw the harness exit would get the signal.
 
 Rows are never deleted. `vibest ls` lists Agents that have not exited; `vibest ls --all` and `vibest result <id>` still show an exited one.
 

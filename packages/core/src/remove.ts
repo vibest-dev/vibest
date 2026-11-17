@@ -42,11 +42,15 @@ export const stopAgent = (
       return unsupported("it was started by an older vibest, which recorded no process to stop")
     const detached = Effect.map(input.detach, (ok) => ({ result: ok ? ("stopped" as const) : ("moved" as const) }))
 
-    if ((yield* processes.liveness(pid)) === "exited") return yield* detached
+    const liveness = yield* processes.liveness(pid)
+
+    if (liveness === "exited") return yield* detached
     const seen = yield* agentState(h, terminal).pipe(Effect.orElseSucceed(() => "unknown" as const))
 
-    if (seen === "absent" || seen === "unknown")
-      return unsupported("vibest does not see its harness in that terminal, so its process may be another program now")
+    if ((seen === "absent" || seen === "unknown") && liveness !== "alive")
+      return unsupported(
+        "vibest cannot tell whether its harness still runs there, so its process may be another program now",
+      )
 
     return yield* Effect.uninterruptible(
       Effect.scoped(
