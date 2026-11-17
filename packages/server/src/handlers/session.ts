@@ -233,7 +233,7 @@ export const make = Effect.gen(function* () {
               seq,
               at,
               type,
-              data: JSON.parse(data) as unknown,
+              data: JSON.parse(data),
             })),
           )
         }),
