@@ -76,7 +76,7 @@ export const make = Effect.gen(function* () {
       const specs = yield* runtimes.callers
       const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
 
-      return { id: "local", ...(target !== undefined ? { target } : {}) }
+      return { id: "local", ...(target !== undefined && { target }) }
     })
 
   const cliOnly = (method: MethodOf<"cli">) =>

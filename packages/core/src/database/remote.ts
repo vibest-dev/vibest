@@ -83,7 +83,7 @@ export const statements = Effect.gen(function* () {
 
       if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
       yield* publish(OutboxQueued, {
-        ...(row.at === undefined ? {} : { at: row.at }),
+        ...(row.at !== undefined && { at: row.at }),
         data: {
           id,
           peer,

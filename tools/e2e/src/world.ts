@@ -318,7 +318,7 @@ export class World {
   async entry(options: Omit<Parameters<World["startEntry"]>[0], "harness" | "env" | "timeoutMs"> = {}) {
     if ((await this.entryOf(options.cwd ?? this.repository)) !== undefined) return
     await this.ok(["daemon"], {
-      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.cwd !== undefined && { cwd: options.cwd }),
       env: options.processEnv ?? {},
     })
     const model = entryModel()

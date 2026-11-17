@@ -120,7 +120,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
           findings.push({
             mark: c.ok ? "ok" : "problem",
             text: c.subject ? `${c.subject.padEnd(width)}  ${c.text}` : c.text,
-            ...(c.fix ? { fix: c.fix } : {}),
+            ...(c.fix && { fix: c.fix }),
           })
 
         if (findings.length === 0) findings.push({ mark: "ok", text: "online" })

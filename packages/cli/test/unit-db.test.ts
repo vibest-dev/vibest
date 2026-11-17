@@ -123,7 +123,7 @@ describe("Db", () => {
               data: {
                 kind,
                 recipient: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                ...(senderId === null ? {} : { sender: senderId }),
+                ...(senderId !== null && { sender: senderId }),
                 content,
                 status,
               },
@@ -175,7 +175,7 @@ describe("Db", () => {
               data: {
                 kind,
                 recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-                ...(senderId === null ? {} : { sender: senderId }),
+                ...(senderId !== null && { sender: senderId }),
                 content,
                 status,
               },
@@ -529,7 +529,7 @@ describe("Db", () => {
           yield* fact("execution.ended", {
             sessionId: id,
             at: end.at,
-            data: { execution: start, outcome: end.outcome, ...(end.reply === undefined ? {} : { reply: end.reply }) },
+            data: { execution: start, outcome: end.outcome, ...(end.reply !== undefined && { reply: end.reply }) },
           })
         })
 

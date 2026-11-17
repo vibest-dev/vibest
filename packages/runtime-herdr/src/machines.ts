@@ -109,9 +109,9 @@ export const locate = (
       missing: false,
       terminals,
       as: profile.label,
-      ...(terminals.size < sessions.size
-        ? { note: `herdr here has no enabled saved machine for that agent's herdr session on ${peer.id}` }
-        : {}),
+      ...(terminals.size < sessions.size && {
+        note: `herdr here has no enabled saved machine for that agent's herdr session on ${peer.id}`,
+      }),
     }
   }).pipe(Effect.catch((note) => Effect.succeed({ missing: false, terminals: NONE, note })))
 
@@ -126,7 +126,7 @@ export const link = (pool: HerdrPool["Service"]) =>
 
     return {
       session,
-      ...(pong === undefined ? {} : { version: pong.version }),
-      ...(pong?.capabilities?.detached_server_daemon === false ? { detached: "no" } : {}),
+      ...(pong !== undefined && { version: pong.version }),
+      ...(pong?.capabilities?.detached_server_daemon === false && { detached: "no" }),
     }
   })

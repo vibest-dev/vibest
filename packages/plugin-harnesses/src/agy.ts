@@ -20,7 +20,7 @@ export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.R
     const m = record(model)
 
     return typeof m?.id === "string"
-      ? [{ model: m.id, ...(typeof m.label === "string" ? { name: m.label } : {}), default: false }]
+      ? [{ model: m.id, ...(typeof m.label === "string" && { name: m.label }), default: false }]
       : []
   })
 }
@@ -32,7 +32,7 @@ export const agyExecutionEnd = (event: Readonly<Record<string, unknown>>) => {
   if (event.hookEventName !== "Stop" || event.continuationActive === true) return undefined
   const error = typeof event.error === "string" ? event.error : ""
 
-  return { end: { text: "", conversation_id: agyConversation(event), ...(error !== "" ? { error } : {}) } }
+  return { end: { text: "", conversation_id: agyConversation(event), ...(error !== "" && { error }) } }
 }
 
 const GUARDED_TOOLS: Readonly<Record<string, string>> = {
@@ -63,7 +63,7 @@ export const agyGuardCall = (event: Readonly<Record<string, unknown>>) => {
   if (name === "run_command") {
     const cwd = text(input.Cwd)
 
-    return { ...at, tool_name: "Bash", tool_input: { command: input.CommandLine, ...(cwd ? { cwd } : {}) } }
+    return { ...at, tool_name: "Bash", tool_input: { command: input.CommandLine, ...(cwd && { cwd }) } }
   }
 
   const tool = typeof name === "string" ? GUARDED_TOOLS[name] : undefined

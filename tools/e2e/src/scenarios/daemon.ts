@@ -183,7 +183,7 @@ const checks: ReadonlyArray<Check> = [
           id: "1",
           method: "List",
           params: {},
-          ...(headers ? { headers } : {}),
+          ...(headers && { headers }),
         })
 
         expect(JSON.stringify(reply).includes("ProtocolRejected"), `not refused: ${JSON.stringify(reply)}`)

@@ -58,12 +58,12 @@ const currentOf = (row: ProcessColumns): Current => ({
   id: row.id,
   start: {
     harness: row.harness,
-    ...(row.provider === null ? {} : { provider: row.provider }),
-    ...(row.model === null ? {} : { model: row.model }),
-    ...(row.routing === null ? {} : { routing: JSON.parse(row.routing) as unknown }),
+    ...(row.provider !== null && { provider: row.provider }),
+    ...(row.model !== null && { model: row.model }),
+    ...(row.routing !== null && { routing: JSON.parse(row.routing) as unknown }),
     runtime: row.runtime,
     terminal: row.terminal ?? "",
-    ...(row.pid === null ? {} : { pid: row.pid }),
+    ...(row.pid !== null && { pid: row.pid }),
   },
   ended: row.endedAt,
   terminal: row.terminal,
@@ -160,7 +160,7 @@ export const statements = Effect.gen(function* () {
       return yield* publish(ExecutionStarted, {
         sessionId,
         at,
-        data: { ...(process === undefined ? {} : { process }), ...(typed ? { typed } : {}) },
+        data: { ...(process !== undefined && { process }), ...(typed && { typed }) },
       })
     })
 
@@ -196,7 +196,7 @@ export const statements = Effect.gen(function* () {
       if (current === undefined || current.ended !== null) return false
       yield* publish(ProcessEnded, {
         sessionId: id,
-        ...(at === undefined ? {} : { at }),
+        ...(at !== undefined && { at }),
         data: { process: current.id, reason },
       })
       yield* afterCommitLive(sessionLive.dropIntegration(id))
@@ -218,8 +218,8 @@ export const statements = Effect.gen(function* () {
       if (live === undefined || live.terminal !== null) return undefined
       yield* publish(ProcessPlaced, {
         sessionId: id,
-        ...(at === undefined ? {} : { at }),
-        data: { process: live.id, terminal, ...(pid === undefined ? {} : { pid }) },
+        ...(at !== undefined && { at }),
+        data: { process: live.id, terminal, ...(pid !== undefined && { pid }) },
       })
 
       return live.id
@@ -251,13 +251,13 @@ export const statements = Effect.gen(function* () {
         ...stamp,
         data: {
           harness: start.harness,
-          ...(start.provider ? { provider: start.provider } : {}),
-          ...(start.model ? { model: start.model } : {}),
-          ...(start.routing === undefined || start.routing === null ? {} : { routing: start.routing as Routing }),
-          ...(start.resume ? { resume: start.resume } : {}),
+          ...(start.provider && { provider: start.provider }),
+          ...(start.model && { model: start.model }),
+          ...(start.routing !== undefined && start.routing !== null && { routing: start.routing as Routing }),
+          ...(start.resume && { resume: start.resume }),
           runtime: start.runtime,
-          ...(start.terminal === "" ? {} : { terminal: start.terminal }),
-          ...(start.pid === undefined ? {} : { pid: start.pid }),
+          ...(start.terminal !== "" && { terminal: start.terminal }),
+          ...(start.pid !== undefined && { pid: start.pid }),
         },
       })
 
@@ -323,9 +323,9 @@ export const statements = Effect.gen(function* () {
         data: {
           execution,
           outcome: end.outcome,
-          ...(end.failure === undefined ? {} : { failure: end.failure }),
-          ...(end.conversation === undefined ? {} : { conversation: end.conversation }),
-          ...(end.reply === undefined ? {} : { reply: end.reply }),
+          ...(end.failure !== undefined && { failure: end.failure }),
+          ...(end.conversation !== undefined && { conversation: end.conversation }),
+          ...(end.reply !== undefined && { reply: end.reply }),
         },
       })
 

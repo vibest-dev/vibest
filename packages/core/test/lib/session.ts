@@ -347,11 +347,11 @@ export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCal
   })
 
 const harnessStandIn = (options: TestOptions) => ({
-  ...(options.hooked === undefined ? {} : { hooked: options.hooked }),
-  ...(options.unusable === undefined ? {} : { unusable: options.unusable }),
-  ...(options.models === undefined ? {} : { models: options.models }),
-  ...(options.missingBinary === undefined ? {} : { missingBinary: options.missingBinary }),
-  ...(options.harnesses === undefined ? {} : { harnesses: options.harnesses }),
+  ...(options.hooked !== undefined && { hooked: options.hooked }),
+  ...(options.unusable !== undefined && { unusable: options.unusable }),
+  ...(options.models !== undefined && { models: options.models }),
+  ...(options.missingBinary !== undefined && { missingBinary: options.missingBinary }),
+  ...(options.harnesses !== undefined && { harnesses: options.harnesses }),
 })
 
 export const sessionFrom = (options: TestOptions = {}) =>
@@ -374,8 +374,8 @@ export const sessionFrom = (options: TestOptions = {}) =>
         : [DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, options.identity))]),
     ],
     pluginsHost(options.plugins ?? [], {
-      ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),
-      ...(options.activateLate === undefined ? {} : { activateLate: options.activateLate }),
+      ...(options.pluginTimeout !== undefined && { timeout: options.pluginTimeout }),
+      ...(options.activateLate !== undefined && { activateLate: options.activateLate }),
     }),
   )
 

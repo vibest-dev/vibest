@@ -41,7 +41,7 @@ const peerScope = (method: string) =>
     return Effect.succeed({
       peer: c.peerId,
       project: c.projectId,
-      ...(c.session === undefined ? {} : { session: c.session }),
+      ...(c.session !== undefined && { session: c.session }),
     })
   })
 

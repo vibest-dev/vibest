@@ -79,7 +79,7 @@ const event = (link?: Record<string, string>, extra: Partial<Noted> = {}): Noted
   name: "racknerd",
   target: "b-host",
   vibestd: "v",
-  runtimes: [{ kind: "herdr", status: "online", ...(link === undefined ? {} : { link }) }],
+  runtimes: [{ kind: "herdr", status: "online", ...(link !== undefined && { link }) }],
   notes: [],
   ...extra,
 })
@@ -101,9 +101,7 @@ const pinging = (version: string, detached?: boolean) => {
               type: "pong",
               version,
               protocol: 1,
-              ...(detached === undefined
-                ? {}
-                : { capabilities: { live_handoff: true, detached_server_daemon: detached } }),
+              ...(detached !== undefined && { capabilities: { live_handoff: true, detached_server_daemon: detached } }),
             }),
         } as unknown as Effect.Success<ReturnType<HerdrPool["Service"]["client"]>>
       }),

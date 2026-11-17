@@ -16,7 +16,7 @@ const document = (schema: Schema.Top) => {
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     ...root,
-    ...(Object.keys(definitions).length === 0 ? {} : { $defs: definitions }),
+    ...(Object.keys(definitions).length !== 0 && { $defs: definitions }),
   }
 }
 

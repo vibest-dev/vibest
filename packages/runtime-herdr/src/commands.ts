@@ -277,7 +277,7 @@ const daemonOn = ({ withVibest }: VibestClients) => {
               percent: limit.percent,
               status: limit.status,
               resetTime: limit.resetTime,
-              ...(row.error ? { error: row.error } : {}),
+              ...(row.error && { error: row.error }),
             })),
           ),
         ),

@@ -117,12 +117,12 @@ export const startOf = (row: Pick<SessionRow, "process">): ProcessStart => {
 
   return {
     harness: process?.harness ?? "",
-    ...(process?.provider ? { provider: process.provider } : {}),
-    ...(process?.model ? { model: process.model } : {}),
-    ...(process?.routing ? { routing: process.routing } : {}),
+    ...(process?.provider && { provider: process.provider }),
+    ...(process?.model && { model: process.model }),
+    ...(process?.routing && { routing: process.routing }),
     runtime: process?.runtime ?? "",
     terminal: "",
-    ...(process?.conversation ? { resume: process.conversation } : {}),
+    ...(process?.conversation && { resume: process.conversation }),
   }
 }
 
@@ -179,7 +179,7 @@ export const attemptsOf = (raw: string | null) => {
     const provider = a.provider ?? undefined
 
     if (seen.some((s) => s.harness === a.harness && s.provider === provider)) continue
-    seen.push({ harness: a.harness, ...(provider === undefined ? {} : { provider }), outcome: "limited", at: a.at })
+    seen.push({ harness: a.harness, ...(provider !== undefined && { provider }), outcome: "limited", at: a.at })
   }
 
   return seen

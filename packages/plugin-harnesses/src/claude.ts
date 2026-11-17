@@ -150,7 +150,7 @@ export const claude: Harness.HarnessDefinition = {
 
     if (event.origin === "vibest")
       return typeof event.execution === "number"
-        ? { execution: event.execution, ...(event.refused === true ? { refused: true as const } : {}) }
+        ? { execution: event.execution, ...(event.refused === true && { refused: true as const }) }
         : undefined
 
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined

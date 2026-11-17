@@ -168,7 +168,7 @@ export const piShadow = async (
   const settings = profile === "user" ? pick(await readJson(user.piSettings), PI_SETTINGS) : {}
   await writeJson(path.join(dir, "settings.json"), {
     ...settings,
-    ...(defaults ? { defaultProvider: defaults.provider, defaultModel: defaults.model } : {}),
+    ...(defaults && { defaultProvider: defaults.provider, defaultModel: defaults.model }),
   })
 
   if (Object.keys(providers).length > 0)

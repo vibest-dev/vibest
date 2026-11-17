@@ -127,7 +127,7 @@ export const make = Effect.gen(function* () {
           harnessSessionId:
             savedId !== null && (yield* db.session.canResumeConversation(entry.id, savedId)) ? savedId : null,
           projectId: entry.projectId,
-          ...(place === undefined ? {} : { runtime: runtimeEnv(place.runtime, place.address) }),
+          ...(place !== undefined && { runtime: runtimeEnv(place.runtime, place.address) }),
         }),
         message: continuing(interrupted),
       })

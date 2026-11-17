@@ -52,7 +52,7 @@ import { Executions } from "./executions.ts"
 export * as Placement from "./placement.ts"
 
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
-  JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
+  JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" && { terminal: address.id }) })
 
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
 
@@ -124,7 +124,7 @@ export const make = Effect.gen(function* () {
   )
 
   const vibestEnv = (session: SessionRow, process?: number) => ({
-    ...(process === undefined ? {} : { VIBEST_PROCESS: String(process) }),
+    ...(process !== undefined && { VIBEST_PROCESS: String(process) }),
     VIBEST_SESSION_ID: session.id,
     VIBEST_PROJECT_ID: session.projectId,
     VIBEST_PROJECT_DIR: layout.project(session.projectId),
@@ -173,7 +173,7 @@ export const make = Effect.gen(function* () {
         },
         first,
       ),
-      ...(first === undefined ? {} : { prompt: first }),
+      ...(first !== undefined && { prompt: first }),
       system,
       env,
     } satisfies Launch
@@ -304,10 +304,10 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         launch: { ...launch, env: { ...input.env, ...launch.env } },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
-        ...(near !== undefined ? { near } : {}),
-        ...(input.split === true ? { split: true } : {}),
-        ...(remote ? { remote: true } : {}),
-        ...(target !== undefined ? { target } : {}),
+        ...(near !== undefined && { near }),
+        ...(input.split === true && { split: true }),
+        ...(remote && { remote: true }),
+        ...(target !== undefined && { target }),
       })
       .pipe(
         Effect.onError(() => (input.endedByCaller ? Effect.void : db.session.endProcess(session.id, "launch_failed"))),
@@ -399,8 +399,8 @@ export const make = Effect.gen(function* () {
           beforeStart: plan.beforeStart,
           env,
           endedByCaller: true,
-          ...(near !== undefined ? { near } : {}),
-          ...(sharedFrom !== undefined ? { split: true } : {}),
+          ...(near !== undefined && { near }),
+          ...(sharedFrom !== undefined && { split: true }),
         }),
       ),
     )

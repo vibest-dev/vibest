@@ -438,7 +438,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
                 exitedAt: null,
                 executionState: "none",
                 executionPromptedAt: 0,
-                ...(routing === undefined ? {} : { routing }),
+                ...(routing !== undefined && { routing }),
                 createdAt: now,
                 lastActive: now,
               }

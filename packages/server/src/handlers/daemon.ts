@@ -53,7 +53,7 @@ export const make = Effect.gen(function* () {
             machine.runtimes.map((r) => ({
               kind: r.kind,
               status: r.status,
-              ...(r.reason !== undefined ? { reason: r.reason } : {}),
+              ...(r.reason !== undefined && { reason: r.reason }),
             })),
           ),
         ),
@@ -77,7 +77,7 @@ export const make = Effect.gen(function* () {
             Effect.map((report) => ({
               kind: runtime.id,
               status: status.status,
-              ...("reason" in status ? { reason: status.reason } : {}),
+              ...("reason" in status && { reason: status.reason }),
               name: report.name,
               checks: report.checks,
             })),

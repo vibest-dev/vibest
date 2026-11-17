@@ -36,7 +36,7 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           })
 
         return yield* client.Spawn({
-          ...(request === undefined ? {} : { request }),
+          ...(request !== undefined && { request }),
           harness,
           agent: o.agent,
           prompt,
@@ -49,8 +49,8 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           runtime: Option.getOrUndefined(o.runtime),
           machine: Option.getOrUndefined(o.machine),
           callerEnv: callerEnvOf(),
-          ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
-          ...(files.length === 0 ? {} : { files }),
+          ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+          ...(files.length !== 0 && { files }),
         })
       }),
     )

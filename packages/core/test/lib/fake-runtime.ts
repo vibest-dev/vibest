@@ -336,7 +336,7 @@ export class FakeRuntime extends Context.Service<
 
       const runtime: Runtime = {
         id: KIND,
-        ...(options.noRun ? {} : { run }),
+        ...(!options.noRun && { run }),
         status: () =>
           Effect.succeed(
             options.offline === undefined
@@ -355,8 +355,8 @@ export class FakeRuntime extends Context.Service<
               near: input.near?.id,
               split: input.split,
               focus: input.focus,
-              ...(input.remote === true ? { remote: true } : {}),
-              ...(input.target !== undefined ? { target: input.target } : {}),
+              ...(input.remote === true && { remote: true }),
+              ...(input.target !== undefined && { target: input.target }),
             },
             input.launch.env.VIBEST_SESSION_ID,
             Effect.gen(function* () {
@@ -398,7 +398,7 @@ export class FakeRuntime extends Context.Service<
 
               const started: FakeAgent = {
                 ...prior,
-                ...(session !== undefined ? { vibestSession: session } : {}),
+                ...(session !== undefined && { vibestSession: session }),
                 status: coordinator || working ? "working" : "idle",
                 seq: working ? 1 : 0,
                 alive: true,
@@ -425,8 +425,8 @@ export class FakeRuntime extends Context.Service<
             "send",
             {
               terminal: terminal.id,
-              ...("text" in input && input.text !== undefined ? { text: input.text } : {}),
-              ...("keys" in input && input.keys !== undefined ? { keys: [...input.keys] } : {}),
+              ...("text" in input && input.text !== undefined && { text: input.text }),
+              ...("keys" in input && input.keys !== undefined && { keys: [...input.keys] }),
             },
             terminal.id,
             Effect.gen(function* () {
@@ -543,12 +543,10 @@ export class FakeRuntime extends Context.Service<
             mark(terminal.id, (now) => ({ ...now, seen: finished })),
           ),
         attach: () => ["fake", "attach"],
-        ...(options.noFocus
-          ? {}
-          : {
-              focus: (terminal: { readonly id: string }) =>
-                call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
-            }),
+        ...(!options.noFocus && {
+          focus: (terminal: { readonly id: string }) =>
+            call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
+        }),
       }
 
       return FakeRuntime.of({

@@ -109,13 +109,11 @@ const info = (slot: Slot): PluginInfo => {
     revision: shown.revision,
     loadedAt: slot.loadedAt,
     status: running ? "active" : "failed",
-    ...(failure === undefined
-      ? {}
-      : {
-          error: running
-            ? `revision ${failedRevision} failed, still running ${shown.revision}: ${failure}`
-            : [failure, slot.rollback].filter(Boolean).join("; "),
-        }),
+    ...(failure !== undefined && {
+      error: running
+        ? `revision ${failedRevision} failed, still running ${shown.revision}: ${failure}`
+        : [failure, slot.rollback].filter(Boolean).join("; "),
+    }),
     ...slot.stats,
   }
 }
@@ -141,9 +139,9 @@ const decide = (
 ): typeof Change.Type => {
   const change = {
     field,
-    ...(from !== undefined ? { from } : {}),
-    ...(to !== undefined ? { to } : {}),
-    ...(decidedBy[field] ? { overwrote: decidedBy[field] } : {}),
+    ...(from !== undefined && { from }),
+    ...(to !== undefined && { to }),
+    ...(decidedBy[field] && { overwrote: decidedBy[field] }),
   }
 
   decidedBy[field] = plugin

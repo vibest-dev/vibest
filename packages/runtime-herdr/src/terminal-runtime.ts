@@ -655,7 +655,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
               source: "vibest",
               display_agent: cut([agent, harness].filter(Boolean).join(" · "))!,
               state_labels: { blocked: "waiting for you" },
-              ...(title === undefined ? {} : { title }),
+              ...(title !== undefined && { title }),
               tokens,
               seq,
             }),

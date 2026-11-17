@@ -133,7 +133,7 @@ export const claimHeaders = (claim: Claim) =>
           repositoryRoot: claim.repositoryRoot,
           harnessSessionId: claim.harnessSessionId,
           pluginVersion: claim.pluginVersion,
-          ...(claim.process === undefined ? {} : { process: claim.process }),
+          ...(claim.process !== undefined && { process: claim.process }),
         }),
       )
 
@@ -246,7 +246,7 @@ export const incompatibleDaemon = (
         daemonProtocol: ping.protocol ?? null,
         daemon: { pid: ping.pid, instance: ping.instance, command: ping.command, startedAt: ping.startedAt },
         client,
-        ...(ping.protocol === PROTOCOL && needs !== undefined ? { missing: needs.method } : {}),
+        ...(ping.protocol === PROTOCOL && needs !== undefined && { missing: needs.method }),
       })
 }
 

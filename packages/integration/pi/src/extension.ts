@@ -76,7 +76,7 @@ const piHeaders = (sessionId: string, ctx: ExtensionContext, current?: string) =
       sessionId,
       harnessSessionId: ctx.sessionManager.getSessionId(),
       pluginVersion: VERSION,
-      ...(current === undefined ? {} : { process: current }),
+      ...(current !== undefined && { process: current }),
     }),
   )
 
@@ -190,7 +190,7 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
             sessionId,
             harnessSessionId: ctx.sessionManager.getSessionId(),
             pluginVersion: VERSION,
-            ...(current === undefined ? {} : { process: current }),
+            ...(current !== undefined && { process: current }),
           }),
         )
 
@@ -259,7 +259,7 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
                   Claim.session({
                     sessionId,
                     pluginVersion: VERSION,
-                    ...(current === undefined ? {} : { process: current }),
+                    ...(current !== undefined && { process: current }),
                   }),
                   (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
                   { start: false },

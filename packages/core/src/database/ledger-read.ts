@@ -130,7 +130,7 @@ const lastExecutionOf = (row: SessionColumns) =>
         failure:
           row.lFailure === null
             ? null
-            : { message: row.lFailure, ...(row.lFailureKind === null ? {} : { kind: row.lFailureKind }) },
+            : { message: row.lFailure, ...(row.lFailureKind !== null && { kind: row.lFailureKind }) },
       }
 
 export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({

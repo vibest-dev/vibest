@@ -170,8 +170,8 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
 
       return Callers.Peer({
         peerId: peer,
-        ...(project === undefined ? {} : { projectId: project }),
-        ...(by === undefined || by === PEER_BY_USER ? {} : { session: by }),
+        ...(project !== undefined && { projectId: project }),
+        ...(by !== undefined && by !== PEER_BY_USER && { session: by }),
       })
     }
 
@@ -206,7 +206,7 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
       return Callers.Session({
         sessionId: who.row.id,
         projectId: who.row.projectId,
-        ...(Option.isSome(repository) ? { repositoryRoot: repository.value } : {}),
+        ...(Option.isSome(repository) && { repositoryRoot: repository.value }),
       })
     }
 

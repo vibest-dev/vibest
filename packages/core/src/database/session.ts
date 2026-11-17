@@ -248,16 +248,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   agent: row.agent,
                   name: row.name,
                   directory: cwd,
-                  ...(parentSessionId === undefined ? {} : { parent: parentSessionId }),
-                  ...(origin === undefined
-                    ? {}
-                    : {
-                        origin: {
-                          peer: origin.peer,
-                          project: origin.project,
-                          ...(origin.reportTo === undefined ? {} : { session: origin.reportTo }),
-                        },
-                      }),
+                  ...(parentSessionId !== undefined && { parent: parentSessionId }),
+                  ...(origin !== undefined && {
+                    origin: {
+                      peer: origin.peer,
+                      project: origin.project,
+                      ...(origin.reportTo !== undefined && { session: origin.reportTo }),
+                    },
+                  }),
                 },
               })
 
@@ -268,12 +266,12 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 row.id,
                 {
                   harness: row.harnessId,
-                  ...(row.provider ? { provider: row.provider } : {}),
-                  ...(row.model ? { model: row.model } : {}),
-                  ...(row.routing === undefined ? {} : { routing: row.routing }),
+                  ...(row.provider && { provider: row.provider }),
+                  ...(row.model && { model: row.model }),
+                  ...(row.routing !== undefined && { routing: row.routing }),
                   runtime: row.runtime,
                   terminal: row.address.id,
-                  ...(row.harnessSessionId ? { resume: row.harnessSessionId } : {}),
+                  ...(row.harnessSessionId && { resume: row.harnessSessionId }),
                 },
                 processAt,
               )
@@ -472,13 +470,13 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   entryId,
                   {
                     harness,
-                    ...(start.provider ? { provider: start.provider } : {}),
-                    ...(start.model ? { model: start.model } : {}),
-                    ...(start.routing ? { routing: start.routing } : {}),
+                    ...(start.provider && { provider: start.provider }),
+                    ...(start.model && { model: start.model }),
+                    ...(Boolean(start.routing) && { routing: start.routing }),
                     runtime: location.runtime,
                     terminal: location.address.id,
-                    ...(resume === undefined ? {} : { resume }),
-                    ...(start.pid === undefined ? {} : { pid: start.pid }),
+                    ...(resume !== undefined && { resume }),
+                    ...(start.pid !== undefined && { pid: start.pid }),
                   },
                   at,
                 )
@@ -588,8 +586,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 at: patch.ready as number,
                 data: {
                   process: current.id,
-                  ...(typeof patch.pid === "number" ? { pid: patch.pid } : {}),
-                  ...(integration === undefined ? {} : { integration }),
+                  ...(typeof patch.pid === "number" && { pid: patch.pid }),
+                  ...(integration !== undefined && { integration }),
                 },
               })
 
@@ -614,7 +612,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             yield* endProcess(id, "restart")
             const { resume: _, pid: __, ...start } = current.start
 
-            return yield* startProcess(id, { ...start, ...(conversation ? { resume: conversation } : {}) })
+            return yield* startProcess(id, { ...start, ...(conversation && { resume: conversation }) })
           }),
         ).pipe(Effect.orDie),
       ),
@@ -723,7 +721,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             Effect.gen(function* () {
               if ((yield* openExecution(id)) !== execution) return false
               const failure = failureOf(options.failure)
-              yield* endExecution(id, { outcome: status, ...(failure === undefined ? {} : { failure }) })
+              yield* endExecution(id, { outcome: status, ...(failure !== undefined && { failure }) })
 
               if (options.notice !== undefined && !(yield* isEntry(id)))
                 yield* insertInboxRow({ sessionId: id, message: options.notice })
@@ -811,10 +809,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               id,
               {
                 outcome: end.status,
-                ...(failure === undefined ? {} : { failure }),
-                ...(end.conversation === undefined || end.conversation === current.conversation
-                  ? {}
-                  : { conversation: end.conversation }),
+                ...(failure !== undefined && { failure }),
+                ...(end.conversation !== undefined &&
+                  end.conversation !== current.conversation && { conversation: end.conversation }),
                 reply: end.reply,
               },
               end.at,

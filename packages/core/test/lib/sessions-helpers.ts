@@ -76,7 +76,7 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { r
 
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
-      ...(extra.archive ? { archive: true } : {}),
+      ...(extra.archive && { archive: true }),
     })
 
     yield* until(

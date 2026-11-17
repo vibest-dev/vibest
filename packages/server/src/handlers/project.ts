@@ -76,7 +76,7 @@ export const make = Effect.gen(function* () {
             path: folder.path,
             branch: folder.branch,
             uncommitted: [...folder.uncommitted],
-            ...(folder.origin === undefined ? {} : { origin: folder.origin }),
+            ...(folder.origin !== undefined && { origin: folder.origin }),
           })),
         }
       }),

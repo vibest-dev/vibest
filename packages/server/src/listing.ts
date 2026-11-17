@@ -41,7 +41,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   worktree: session.worktree,
   repositoryRoot: session.repositoryRoot ?? null,
   git: session.git ?? null,
-  ...(session.process?.routing ? { routing: session.process.routing } : {}),
+  ...(session.process?.routing && { routing: session.process.routing }),
   createdAt: session.createdAt,
   lastActive: session.lastActive,
   task: brief?.task ?? null,
@@ -71,7 +71,7 @@ export const sessionListing = (deps: {
       if (Predicate.isTagged(scope, "Peer")) return yield* listedRows(yield* sessions.list({ peer: scope, stopped }))
       const projectId = Predicate.isTagged(scope, "Project") ? scope.id : undefined
 
-      return yield* listedRows(yield* sessions.list({ ...(projectId === undefined ? {} : { projectId }), stopped }))
+      return yield* listedRows(yield* sessions.list({ ...(projectId !== undefined && { projectId }), stopped }))
     })
 
   const seenAt = (runtime: string, address: RuntimeAddress) =>

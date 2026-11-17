@@ -127,8 +127,8 @@ export class FakeGit extends Context.Service<
             yield* checkOut(found.repository, dest, ["clone"])
             yield* register(dest, {
               branch,
-              ...(origin === undefined ? {} : { origin }),
-              ...(found.repository.facts.files === undefined ? {} : { files: found.repository.facts.files }),
+              ...(origin !== undefined && { origin }),
+              ...(found.repository.facts.files !== undefined && { files: found.repository.facts.files }),
             })
           }),
         addWorktree: (root, path, commit) =>

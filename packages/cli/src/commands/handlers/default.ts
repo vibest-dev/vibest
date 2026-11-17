@@ -76,7 +76,7 @@ export default Runtime.handler(Commands, (o) =>
     const placed = yield* withVibest(claim, (client) =>
       client["Project.EntryPlace"]({
         callerEnv: callerEnvOf(),
-        ...(runtimeKind === undefined ? {} : { runtime: runtimeKind }),
+        ...(runtimeKind !== undefined && { runtime: runtimeKind }),
       }),
     )
 
@@ -96,7 +96,7 @@ export default Runtime.handler(Commands, (o) =>
           focus: !o.headless,
           runtime: placed.place.runtime,
           callerEnv: callerEnvOf(),
-          ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
+          ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
         }),
       )
 

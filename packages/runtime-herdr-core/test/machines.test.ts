@@ -88,7 +88,7 @@ const event = (link?: Record<string, string>, extra: Partial<Noted> = {}): Noted
   name: "mb",
   target: "b-host",
   vibestd: "b-id",
-  runtimes: [{ kind: "hc", status: "online", ...(link === undefined ? {} : { link }) }],
+  runtimes: [{ kind: "hc", status: "online", ...(link !== undefined && { link }) }],
   notes: [],
   ...extra,
 })

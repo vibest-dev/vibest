@@ -94,7 +94,7 @@ const make = Effect.gen(function* () {
           id: addressed(name, row.id),
           machine: name,
           address: terminal === undefined ? { machine: name, id: "" } : { machine: "local", id: terminal.id },
-          ...(terminal === undefined && found?.note !== undefined ? { view: found.note } : {}),
+          ...(terminal === undefined && found?.note !== undefined && { view: found.note }),
         }
       })
     })
@@ -176,8 +176,8 @@ const make = Effect.gen(function* () {
 
       return {
         text,
-        ...(row === undefined || row.address.id === "" ? {} : { terminal: row.address.id }),
-        ...(row?.view === undefined ? {} : { view: row.view }),
+        ...(row !== undefined && row.address.id !== "" && { terminal: row.address.id }),
+        ...(row?.view !== undefined && { view: row.view }),
       }
     }),
 
@@ -235,17 +235,17 @@ const make = Effect.gen(function* () {
         client["Peer.Spawn"](
           {
             repository: remote,
-            ...(identity === undefined ? {} : { identity }),
+            ...(identity !== undefined && { identity }),
             commit,
             agent: input.agent,
             prompt: input.prompt,
-            ...(input.harness === undefined ? {} : { harness: input.harness }),
-            ...(input.provider === undefined ? {} : { provider: input.provider }),
-            ...(input.model === undefined ? {} : { model: input.model }),
-            ...(input.name === undefined ? {} : { title: input.name }),
-            ...(runtime === undefined ? {} : { runtime }),
+            ...(input.harness !== undefined && { harness: input.harness }),
+            ...(input.provider !== undefined && { provider: input.provider }),
+            ...(input.model !== undefined && { model: input.model }),
+            ...(input.name !== undefined && { title: input.name }),
+            ...(runtime !== undefined && { runtime }),
             request: input.request ?? randomId(),
-            ...(input.files === undefined ? {} : { files: input.files }),
+            ...(input.files !== undefined && { files: input.files }),
           },
           { headers },
         ),
@@ -254,11 +254,11 @@ const make = Effect.gen(function* () {
       return {
         id: addressed(machine, spawned.session),
         harness: spawned.harness,
-        ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
-        ...(spawned.model === undefined ? {} : { model: spawned.model }),
+        ...(spawned.provider !== undefined && { provider: spawned.provider }),
+        ...(spawned.model !== undefined && { model: spawned.model }),
         decidedBy: spawned.decidedBy,
         trace: spawned.trace,
-        ...(ready?.note === undefined ? {} : { notes: [{ message: ready.note }] }),
+        ...(ready?.note !== undefined && { notes: [{ message: ready.note }] }),
       }
     }),
   }

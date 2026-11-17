@@ -17,7 +17,7 @@ const failed = (e: HcFailure) => `${offline(e)}${Predicate.isTagged(e, "HcError"
 
 const stateNote = (name: string, row: api.MachineView): VibestPlugin.MachineNote => ({
   message: `hc here reaches ${name} as ${row.name}: ${row.state}${row.why ? ` (${row.why})` : ""}`,
-  ...(row.state === "needs_login" ? { fix: `hc machine login ${row.name}` } : {}),
+  ...(row.state === "needs_login" && { fix: `hc machine login ${row.name}` }),
 })
 
 const addCommand = (event: Event, session: string) =>
@@ -212,9 +212,9 @@ export const locate = (
       missing: false,
       terminals,
       as: row.name,
-      ...(terminals.size < wanted.size
-        ? { note: `hc here has no terminal of that session under ${row.name}/ (it may have exited there)` }
-        : {}),
+      ...(terminals.size < wanted.size && {
+        note: `hc here has no terminal of that session under ${row.name}/ (it may have exited there)`,
+      }),
     }
   }).pipe(
     Effect.catch((e) =>

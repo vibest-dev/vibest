@@ -173,7 +173,7 @@ describe.concurrent("after a vibestd stop", () => {
           harness: "claude",
           runtime: runtimeOf(row),
           terminal: terminalOf(row).id,
-          ...(row.process?.routing ? { routing: row.process.routing } : {}),
+          ...(row.process?.routing && { routing: row.process.routing }),
         })
         const successor = yield* db.session.currentProcessId(id)
         yield* (yield* Integration.Service).ready(id, undefined)

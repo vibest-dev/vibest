@@ -255,7 +255,7 @@ const make = Effect.gen(function* () {
                     projectDirectory: root,
                     agent,
                     firstInput: firstInputOf(chosen),
-                    ...(existing === undefined || fresh ? { sessionId } : {}),
+                    ...((existing === undefined || fresh) && { sessionId }),
                   },
                 )
                 .pipe(
@@ -295,7 +295,7 @@ const make = Effect.gen(function* () {
         terminal: pane.id,
         place: placeOf(rt, pane),
         attach: rt.attach?.(at.target) ?? null,
-        ...(routing === undefined ? {} : { routing }),
+        ...(routing !== undefined && { routing }),
       }
     }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeLaunched)))
   })

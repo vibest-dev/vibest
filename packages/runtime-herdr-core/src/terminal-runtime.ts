@@ -342,9 +342,9 @@ export const make = (deps: {
               labels: {
                 [LABEL.runtime]: KIND,
                 [LABEL.seen]: "0",
-                ...(project !== undefined ? { [LABEL.project]: project } : {}),
-                ...(session !== undefined ? { [LABEL.session]: session } : {}),
-                ...(input.launch.argv.length > 0 ? { [LABEL.typed]: String(Date.now()) } : {}),
+                ...(project !== undefined && { [LABEL.project]: project }),
+                ...(session !== undefined && { [LABEL.session]: session }),
+                ...(input.launch.argv.length > 0 && { [LABEL.typed]: String(Date.now()) }),
               },
               keep: true,
               no_notify: true,

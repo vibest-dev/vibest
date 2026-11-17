@@ -16,7 +16,7 @@ export const make = Effect.gen(function* () {
     )
 
   const repositoriesOf = (repositories: ReadonlyArray<RepositoryRow>) =>
-    repositories.map((r) => ({ path: r.path, ...(r.remote ? { remote: r.remote } : {}) }))
+    repositories.map((r) => ({ path: r.path, ...(r.remote && { remote: r.remote }) }))
 
   const changedRepositories = (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
     Effect.gen(function* () {
@@ -57,7 +57,7 @@ export const make = Effect.gen(function* () {
               const id = yield* newId(projectPrefixTaken)
               yield* publish(ProjectCreated, {
                 projectId: id,
-                data: { ...(directory ? { directory } : {}), repositories: repositoriesOf(repositories) },
+                data: { ...(directory && { directory }), repositories: repositoriesOf(repositories) },
               })
             }
 

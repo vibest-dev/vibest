@@ -68,7 +68,7 @@ export const specHits = (
 
     return matches.map((hit): CallerHit => ({
       id: hit.id,
-      ...(hit.name === undefined ? {} : { name: hit.name }),
+      ...(hit.name !== undefined && { name: hit.name }),
       terminal: hit === chosen ? terminal : undefined,
     }))
   })

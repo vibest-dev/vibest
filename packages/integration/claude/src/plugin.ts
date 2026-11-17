@@ -294,7 +294,7 @@ export function register(on: On, _options?: unknown) {
           session_id: await host.conversation().catch(() => ""),
           reason: event.reason,
           last_assistant_message: event.answer,
-          ...(event.reason === "refusal" ? { refusal: event.refusal } : {}),
+          ...(event.reason === "refusal" && { refusal: event.refusal }),
         })
     }
 

@@ -60,7 +60,7 @@ export const layer = Layer.effect(
     const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: ReadonlyArray<number> = [0]) =>
       capture("git", ["--no-optional-locks", ...args], {
         cwd,
-        ...(input === undefined ? {} : { stdin: Stream.make(new TextEncoder().encode(input)) }),
+        ...(input !== undefined && { stdin: Stream.make(new TextEncoder().encode(input)) }),
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.flatMap((run) =>

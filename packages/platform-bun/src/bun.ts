@@ -106,10 +106,10 @@ const inspectFile = (filename: string) =>
         ? new SchemaMismatch({
             version: e.version,
             applicationId: e.applicationId,
-            ...(e.detail === undefined ? {} : { detail: e.detail }),
-            ...(e.older === undefined ? {} : { older: e.older }),
-            ...(e.catalog === undefined ? {} : { catalog: e.catalog }),
-            ...(e.oldEvents === undefined ? {} : { oldEvents: e.oldEvents }),
+            ...(e.detail !== undefined && { detail: e.detail }),
+            ...(e.older !== undefined && { older: e.older }),
+            ...(e.catalog !== undefined && { catalog: e.catalog }),
+            ...(e.oldEvents !== undefined && { oldEvents: e.oldEvents }),
             file: filename,
           })
         : new DatabaseOpenFailed({ file: filename, message: e.message }),

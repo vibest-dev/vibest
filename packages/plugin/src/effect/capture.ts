@@ -22,11 +22,11 @@ const collected = (command: string, args: ReadonlyArray<string>, options: Captur
 
     const handle = yield* spawner.spawn(
       ChildProcess.make(command, args, {
-        ...(options?.stdin === undefined ? {} : { stdin: options.stdin }),
-        ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
-        ...(options?.env === undefined ? {} : { env: options.env }),
-        ...(options?.extendEnv === undefined ? {} : { extendEnv: options.extendEnv }),
-        ...(options?.forceKillAfter === undefined ? {} : { forceKillAfter: options.forceKillAfter }),
+        ...(options?.stdin !== undefined && { stdin: options.stdin }),
+        ...(options?.cwd !== undefined && { cwd: options.cwd }),
+        ...(options?.env !== undefined && { env: options.env }),
+        ...(options?.extendEnv !== undefined && { extendEnv: options.extendEnv }),
+        ...(options?.forceKillAfter !== undefined && { forceKillAfter: options.forceKillAfter }),
       }),
     )
 

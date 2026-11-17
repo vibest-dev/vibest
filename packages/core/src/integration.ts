@@ -99,8 +99,8 @@ const make = Effect.gen(function* () {
     return yield* db.session.patchLive(id, {
       ready: yield* Clock.currentTimeMillis,
       reporter,
-      ...(pid === undefined ? {} : { pid }),
-      ...(reported === undefined ? {} : { integration: reported }),
+      ...(pid !== undefined && { pid }),
+      ...(reported !== undefined && { integration: reported }),
     })
   })
 

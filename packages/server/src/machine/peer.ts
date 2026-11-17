@@ -105,8 +105,8 @@ const make = Effect.gen(function* () {
       return {
         session: spawned.id,
         harness: spawned.harness,
-        ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
-        ...(spawned.model === undefined ? {} : { model: spawned.model }),
+        ...(spawned.provider !== undefined && { provider: spawned.provider }),
+        ...(spawned.model !== undefined && { model: spawned.model }),
         directory: target.directory,
         decidedBy: spawned.decidedBy,
         trace: spawned.trace,

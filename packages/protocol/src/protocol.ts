@@ -46,8 +46,8 @@ export const peerHeaders = (peer: string, project?: string, by?: string): Record
   [PROTOCOL_HEADER]: String(PROTOCOL),
   [CALLER_HEADER]: "peer",
   [PEER_HEADER]: peer,
-  ...(project === undefined ? {} : { [PEER_PROJECT_HEADER]: project }),
-  ...(by === undefined ? {} : { [PEER_BY_HEADER]: by }),
+  ...(project !== undefined && { [PEER_PROJECT_HEADER]: project }),
+  ...(by !== undefined && { [PEER_BY_HEADER]: by }),
 })
 
 export const TAKE_ROUTE = "/inbox/take"

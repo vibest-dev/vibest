@@ -250,5 +250,5 @@ export const definitions = <D extends Keyed>(name: string, notify?: (list: Reado
     name,
     initial: () => [],
     editor: listEditor,
-    ...(notify === undefined ? {} : { notify }),
+    ...(notify !== undefined && { notify }),
   })

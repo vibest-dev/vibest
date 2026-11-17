@@ -257,7 +257,7 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
     startedAt: startedAt.toISOString(),
     ms: Date.now() - startedAt.getTime(),
     root: world.root,
-    ...(detail ? { detail } : {}),
+    ...(detail && { detail }),
   }
 }
 

@@ -11,7 +11,7 @@ export default Runtime.handler(Commands.commands.send, (o) =>
     const message = yield* input(o.message, "message")
 
     const sent = yield* requested((client, request) =>
-      client.Send({ id: o.id, message, ...(request === undefined ? {} : { request }) }),
+      client.Send({ id: o.id, message, ...(request !== undefined && { request }) }),
     )
 
     yield* json({ id: sent.id, queued: true })

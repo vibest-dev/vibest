@@ -162,7 +162,7 @@ export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | HostEnv | 
               {
                 ...runtime.caller,
                 id: runtime.id,
-                ...(runtime.name === undefined ? {} : { name: runtime.name }),
+                ...(runtime.name !== undefined && { name: runtime.name }),
               },
             ],
       ),
@@ -233,8 +233,8 @@ export const runtimesHere = Effect.fn("Runtimes.runtimesHere")((runtimes: Runtim
           Effect.map((link) => ({
             kind: runtime.id,
             status: status.status,
-            ...("reason" in status ? { reason: status.reason } : {}),
-            ...(link === undefined ? {} : { link }),
+            ...("reason" in status && { reason: status.reason }),
+            ...(link !== undefined && { link }),
           })),
         ),
       { concurrency: "unbounded" },
@@ -254,7 +254,7 @@ export const machinesListing = Effect.fn("Runtimes.machinesListing")(
           runtimes: rows.map(({ runtime, status }) => ({
             kind: runtime.id,
             status: status.status,
-            ...("reason" in status ? { reason: status.reason } : {}),
+            ...("reason" in status && { reason: status.reason }),
           })),
           harnesses,
         },

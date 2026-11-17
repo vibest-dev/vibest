@@ -48,7 +48,7 @@ const wrote = (
   const limits = usage && "limits" in usage ? usage.limits : (prev?.limits ?? [])
   const error = usage && "error" in usage ? usage.error : undefined
 
-  return { harness, provider, machine: MACHINE, account, limits, updatedAt: now, ...(error ? { error } : {}) }
+  return { harness, provider, machine: MACHINE, account, limits, updatedAt: now, ...(error && { error }) }
 }
 
 export type Interface = SubscriptionsDomain
@@ -119,7 +119,7 @@ export const make = Effect.gen(function* () {
                 row.provider,
                 row.account,
                 row.limits !== undefined
-                  ? { limits: row.limits, ...(row.error ? { error: row.error } : {}) }
+                  ? { limits: row.limits, ...(row.error && { error: row.error }) }
                   : row.error
                     ? { error: row.error }
                     : undefined,

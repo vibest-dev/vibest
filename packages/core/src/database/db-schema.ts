@@ -64,7 +64,7 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
 }
 
 export const mismatch = (version: number, applicationId: number, detail?: string) =>
-  new SchemaMismatch({ version, applicationId, ...(detail === undefined ? {} : { detail }) })
+  new SchemaMismatch({ version, applicationId, ...(detail !== undefined && { detail }) })
 
 const metaOf = (sql: SqlClient.SqlClient, key: "catalog" | "projection") =>
   sql<{ value: string }>`SELECT value FROM meta WHERE key = ${key}`.pipe(

@@ -54,7 +54,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
             yield* publish(InboxMoved, {
               sessionId: r.session,
               at,
-              data: { inbox: r.id, to, ...(execution === undefined ? {} : { execution }) },
+              data: { inbox: r.id, to, ...(execution !== undefined && { execution }) },
             })
           }
 
@@ -74,15 +74,15 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     }) =>
       publish(InboxQueued, {
         sessionId: row.recipient,
-        ...(row.at === undefined ? {} : { at: row.at }),
+        ...(row.at !== undefined && { at: row.at }),
         data: {
           kind: row.kind,
           recipient: row.recipient,
-          ...(row.sender === null ? {} : { sender: row.sender }),
+          ...(row.sender !== null && { sender: row.sender }),
           content: row.content,
           status: row.status,
-          ...(row.request === undefined ? {} : { request: row.request }),
-          ...(row.peerItem === undefined ? {} : { peerItem: row.peerItem }),
+          ...(row.request !== undefined && { request: row.request }),
+          ...(row.peerItem !== undefined && { peerItem: row.peerItem }),
         },
       })
 
@@ -169,7 +169,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
             sessionId: row.sessionId,
             content: row.message,
             kind: "notice",
-            ...(at === undefined ? {} : { at }),
+            ...(at !== undefined && { at }),
           })
 
           return queued!

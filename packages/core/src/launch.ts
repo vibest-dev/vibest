@@ -95,8 +95,8 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     VIBEST_SESSION_ID: saved.sessionId,
     VIBEST_PROJECT_ID: saved.projectId,
     VIBEST_PROJECT_DIR: layout.project(saved.projectId),
-    ...(saved.process !== undefined ? { VIBEST_PROCESS: String(saved.process) } : {}),
-    ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
+    ...(saved.process !== undefined && { VIBEST_PROCESS: String(saved.process) }),
+    ...(saved.runtime !== undefined && { VIBEST_RUNTIME: saved.runtime }),
   }
 
   const message = input.message ?? (saved.firstInput === undefined ? undefined : withTask(promptText, saved.firstInput))
@@ -119,7 +119,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
       },
       message,
     ),
-    ...(message === undefined ? {} : { prompt: message }),
+    ...(message !== undefined && { prompt: message }),
     system: promptText,
     env: commandEnv,
   }
@@ -151,8 +151,8 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
         env: { ...input.env, VIBEST_HOME: input.home },
       },
       label: input.label,
-      ...(input.focus === true ? { focus: true } : {}),
-      ...(target !== undefined ? { target } : {}),
+      ...(input.focus === true && { focus: true }),
+      ...(target !== undefined && { target }),
     })
     .pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message })))
 

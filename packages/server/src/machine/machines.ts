@@ -523,10 +523,10 @@ const make = Effect.gen(function* () {
         id: row.vibestdId,
         state: entry.state,
         since: entry.since,
-        ...(entry.reason === undefined || connected ? {} : { reason: entry.reason }),
+        ...(entry.reason !== undefined && !connected && { reason: entry.reason }),
         connectedAt: row.connectedAt,
-        ...(connected && entry.vibestd !== undefined ? { vibestd: entry.vibestd } : {}),
-        ...(connected && entry.version !== undefined ? { version: entry.version } : {}),
+        ...(connected && entry.vibestd !== undefined && { vibestd: entry.vibestd }),
+        ...(connected && entry.version !== undefined && { version: entry.version }),
       }
 
       return { info, link: connected ? entry.link : undefined }
@@ -600,11 +600,11 @@ const make = Effect.gen(function* () {
                   Effect.map((view): RuntimeView => ({
                     kind: r.kind,
                     status: r.status,
-                    ...(r.reason === undefined ? {} : { reason: r.reason }),
+                    ...(r.reason !== undefined && { reason: r.reason }),
                     here: {
                       visible: view.note === undefined,
-                      ...(view.as === undefined ? {} : { as: view.as }),
-                      ...(view.note === undefined ? {} : { note: view.note }),
+                      ...(view.as !== undefined && { as: view.as }),
+                      ...(view.note !== undefined && { note: view.note }),
                     },
                   })),
                 ),
@@ -618,7 +618,7 @@ const make = Effect.gen(function* () {
             return {
               ...info,
               runtimes: views,
-              ...(seen === undefined ? {} : { runtimesAt: seen.at }),
+              ...(seen !== undefined && { runtimesAt: seen.at }),
               notes,
             } satisfies MachineInfo
           }),

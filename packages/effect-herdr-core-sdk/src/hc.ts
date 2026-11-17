@@ -144,7 +144,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
       method,
       kind: error.data?.kind ?? String(error.code),
       message: error.message,
-      ...(error.data?.hint !== undefined ? { hint: error.data.hint } : {}),
+      ...(error.data?.hint !== undefined && { hint: error.data.hint }),
     })
 
   const open = (method: string, params: unknown) =>
