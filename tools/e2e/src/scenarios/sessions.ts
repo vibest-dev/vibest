@@ -121,7 +121,7 @@ export default Plugin.define({
   id: "see-files",
   effect: (ctx) =>
     ctx.agent.hook("start.before", (event) =>
-      Effect.sync(() => fs.appendFileSync(${JSON.stringify(out)}, JSON.stringify({ prompt: event.prompt, files: event.files }) + "\\n")),
+      Effect.sync(() => fs.appendFileSync(${JSON.stringify(out)}, JSON.stringify({ prompt: event.prompt, files: event.files, contents: event.files.map((file) => fs.readFileSync(file, "utf8")) }) + "\\n")),
     ),
 })
 `
@@ -515,7 +515,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S57",
     title:
-      "vibest run --file copies the file into the session's files folder in the project folder and ends the task with a line naming the copy; a plugin sees that path in agent.start.before files; the Pi subagent reads the copy and answers with a word from it; archive removes the session's folder",
+      "vibest run --file copies the file into the session's files folder in the project folder and ends the task with a line naming the copy; a plugin sees that path in agent.start.before files and reads the copy during the hook; the Pi subagent reads the copy and answers with a word from it; archive removes the session's folder",
     run: async (w) => {
       const p = await piProject(w, "s57")
       const model = fileReadingModel()
@@ -555,13 +555,14 @@ const checks: ReadonlyArray<Check> = [
         const seen = (await fs.readFile(seenFile, "utf8"))
           .split("\n")
           .filter(Boolean)
-          .map((line) => JSON.parse(line) as { prompt: string; files: Array<string> })
+          .map((line) => JSON.parse(line) as { prompt: string; files: Array<string>; contents: Array<string> })
           .find((event) => event.files.length > 0)
         const copy = seen?.files[0] ?? ""
         const folder = path.dirname(path.dirname(copy))
         expect(
           seen !== undefined &&
             seen.files.length === 1 &&
+            seen.contents[0] === "the answer is s57-word-hazel\n" &&
             path.basename(copy) === "s57-notes.md" &&
             folder.endsWith(`/sessions/${id}`) &&
             path.dirname(path.dirname(path.dirname(folder))).endsWith("/projects") &&
