@@ -1,6 +1,6 @@
 import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
-import { shortId } from "@vibest/schema/id"
+import { sessionLabel, shortId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { NoSuchSession, type HarnessUnavailable } from "@vibest/schema/session"
 import {
@@ -427,8 +427,10 @@ export const make = Effect.gen(function* () {
 
     if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "failed")
     yield* db.session.endProcess(session.id, "launch_failed")
-    yield* db.session.setStatus(session.id, "unknown")
-    yield* notice(session, `${session.id} failed to start ${harnessIdOf(session)}: ${messageOf(Cause.squash(cause))}`)
+    yield* notice(
+      session,
+      `${sessionLabel(session)} failed to start ${harnessIdOf(session)}: ${messageOf(Cause.squash(cause))}`,
+    )
   })
 
   const launch = Effect.fn("Placement.launch")(

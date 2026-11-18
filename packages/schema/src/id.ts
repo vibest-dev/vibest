@@ -6,6 +6,9 @@ export const RequestId = Schema.String.check(Schema.isUUID(4))
 
 export const shortId = (id: string) => id.slice(0, 8)
 
+export const sessionLabel = (session: { readonly id: string; readonly name: string }) =>
+  session.name === "" ? shortId(session.id) : `${shortId(session.id)} (${session.name})`
+
 declare const crypto: { readonly randomUUID: () => string }
 
 export const randomId = (): string => crypto.randomUUID()

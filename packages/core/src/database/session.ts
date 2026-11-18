@@ -836,7 +836,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             if (end.status === "failed" && !end.limited && !(yield* isEntry(id)))
               yield* insertInboxRow(
-                { sessionId: id, message: `${id}'s execution ended with an error: ${end.failure}` },
+                {
+                  sessionId: id,
+                  message: `${yield* session.labelOf(id)} ended its execution with an error: ${end.failure}`,
+                },
                 end.at,
               )
 

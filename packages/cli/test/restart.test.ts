@@ -136,6 +136,31 @@ describe("restart in place", () => {
   )
 
   test(
+    "a restart after the old process went idle without its execution end: the new process, of which its runtime knows no state yet, keeps the execution it continues past the hook grace",
+    Effect.gen(function* () {
+      const { db, sessions, id } = yield* busyPiSubagent
+      const herdr = yield* FakeRuntime
+      yield* herdr.endExecution(id)
+      yield* sessions.check(id)
+      const ran = yield* herdr.hold("run")
+      const restarted = yield* Effect.forkChild(sessions.restart([id]))
+      yield* ran.reached
+      const looked = yield* herdr.hold("state")
+      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* ran.release()
+      const [outcome] = yield* Fiber.join(restarted)
+      assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
+      yield* looked.reached
+      yield* (yield* FakeProcesses).set(pidOf((yield* db.session.getSession(id))!)!, "alive")
+      yield* herdr.updateAgent(id, (a) => ({ ...a, status: "unknown" }))
+      yield* looked.release()
+      yield* TestClock.adjust("11 seconds")
+      yield* sessions.check(id)
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
+    }),
+  )
+
+  test(
     "a second restart of an agent already being restarted joins it: one signal, one run, one continue notice, both callers get the result",
     Effect.gen(function* () {
       const { db, sessions, id, pid } = yield* busyPiSubagent

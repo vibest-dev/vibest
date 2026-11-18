@@ -10,7 +10,7 @@ import {
   SessionEnded,
   SessionRenamed,
 } from "@vibest/schema/event"
-import { newId } from "@vibest/schema/id"
+import { newId, sessionLabel } from "@vibest/schema/id"
 import { Routing } from "@vibest/schema/plugin"
 import { type AgentStatus, RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Effect, Schema } from "effect"
@@ -202,7 +202,7 @@ export const statements = Effect.gen(function* () {
         ...(at !== undefined && { at }),
         data: { process: current.id, reason },
       })
-      yield* afterCommitLive(sessionLive.dropIntegration(id))
+      yield* afterCommitLive(sessionLive.forgetProcess(id))
 
       return true
     })
@@ -264,7 +264,7 @@ export const statements = Effect.gen(function* () {
         },
       })
 
-      yield* afterCommitLive(sessionLive.dropIntegration(id))
+      yield* afterCommitLive(sessionLive.forgetProcess(id))
 
       return seq
     })
@@ -292,6 +292,11 @@ export const statements = Effect.gen(function* () {
 
       return true
     })
+
+  const labelOf = (id: string) =>
+    sql<{ name: string }>`SELECT name FROM session WHERE id = ${id}`.pipe(
+      Effect.map(([row]) => sessionLabel({ id, name: row?.name ?? "" })),
+    )
 
   const archive = (id: string) =>
     Effect.gen(function* () {
@@ -430,6 +435,7 @@ export const statements = Effect.gen(function* () {
     startProcess,
     ensureProcess,
     rename,
+    labelOf,
     archive,
     noteConversation,
     endExecution,

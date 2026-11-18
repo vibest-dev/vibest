@@ -322,7 +322,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const { id, sessions, db, herdr, worktree } = yield* workingSession
       const out = (yield* sessions.remove(id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed", worktree: "removed" })
-      assert.deepStrictEqual(out.reasons, [`${id} was working: interrupted, then its terminal closed`])
+      assert.deepStrictEqual(out.reasons, ["it was working: interrupted, then its terminal closed"])
       assert.lengthOf(
         (yield* herdr.callsTo("send")).filter((c: { keys?: ReadonlyArray<string> }) => c.keys),
         1,
@@ -344,7 +344,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.deepInclude(out, { processes: "exited", pane: "closed" })
       assert.include(
         out.reasons.join("\n"),
-        `${id} did not stop within 10s of the interrupt key; its terminal closed anyway`,
+        "it did not stop within 10s of the interrupt key; its terminal closed anyway",
       )
       assert.isFalse(HashMap.has(yield* herdr.panes, pane))
       assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))

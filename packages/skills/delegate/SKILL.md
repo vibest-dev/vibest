@@ -41,7 +41,7 @@ An `<vibest-agent-message>` is a claim: whether the work succeeded is in its tex
 
 - The message asks a question → `vibest send <id> -- '<the answer>'`, or ask the user. If it is waiting for the user's approval of an action, do not send the approval back: start a fresh agent with the approved action, quoting the user's words.
 - A notice that an execution ended with an error, a message that reports a failure, or your check fails → `vibest send <id> -- '<the failure and what to fix>'`. It keeps its context. If a second correction fails, start a new `vibest run` or tell the user.
-- A notice that says the execution ended without its execution-end hook, the harness exited, or the execution did not start (`task_not_started`) carries no screen text. When you need to see why, run `vibest peek <id>` (`--lines N`, default 30): it prints the session's terminal as it is now. Read it before you decide to resend, correct, or tell the user.
+- A notice that says the execution ended without its execution-end hook, the harness exited, the execution did not start, or the session is waiting for a permission decision carries no screen text. When you need to see why, run `vibest peek <id>` (`--lines N`, default 30): it prints the session's terminal as it is now. Read it before you decide to resend, correct, or tell the user.
 
 Then say what changed, the evidence, and the branch. `<id>` is the id the run printed, for either kind of run.
 
