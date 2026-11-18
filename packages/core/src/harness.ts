@@ -147,12 +147,7 @@ export const node = LayerNode.make({
   deps: [Harnesses.node, PlatformNode.childProcessSpawner, PlatformNode.fileSystem, PlatformNode.path],
 })
 
-export const preflight = Effect.fn("Harness.preflight")(function* (
-  id: string,
-  provider: string | null,
-  model: string | null,
-  env?: Readonly<Record<string, string>>,
-) {
+export const startable = Effect.fn("Harness.startable")(function* (id: string, provider: string | null) {
   const harness = yield* Service
   const harnesses = yield* Harnesses.Service
   const adapter = harnesses.find(id)
@@ -165,6 +160,21 @@ export const preflight = Effect.fn("Harness.preflight")(function* (
 
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   yield* harness.plugin(id)
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
+  const problem = yield* adapter.checkEnvironment?.(home) ?? Effect.succeed(undefined)
+
+  if (problem) return yield* unavailable(problem)
+})
+
+export const preflight = Effect.fn("Harness.preflight")(function* (
+  id: string,
+  provider: string | null,
+  model: string | null,
+  env?: Readonly<Record<string, string>>,
+) {
+  yield* startable(id, provider)
+  const harness = yield* Service
+  const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
 
   const models = yield* harness
     .models(id, provider, env)
@@ -194,6 +204,20 @@ export const harnessCatalog = Effect.flatMap(Harnesses.Service, (harnesses) =>
         })),
         Effect.catchTag("HarnessUnavailable", (e) =>
           Effect.succeed<HarnessChoice>({ harness: id, binary, problem: e.message, models: [] }),
+        ),
+      ),
+    { concurrency: "unbounded" },
+  ),
+)
+
+export const startableOptions = Effect.flatMap(Harnesses.Service, (harnesses) =>
+  Effect.forEach(
+    harnesses.all,
+    ({ id }) =>
+      startable(id, null).pipe(
+        Effect.as<HarnessOption>({ harness: id, available: true }),
+        Effect.catchTag("HarnessUnavailable", (e) =>
+          Effect.succeed<HarnessOption>({ harness: id, available: false, problem: e.message }),
         ),
       ),
     { concurrency: "unbounded" },
