@@ -136,6 +136,42 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "an entry session's exit, recorded while a newer process of it started, leaves the messages queued for the newer process",
+    Effect.gen(function* () {
+      const runtime = yield* FakeRuntime
+      const { id, sessions, db, entryId, row } = yield* spawnWorking(yield* makeRepository)
+      const address = { machine: "local", id: "test/coord" }
+      yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, alive: false }))
+      const held = yield* runtime.hold("present", id)
+      const checking = yield* Effect.forkChild(sessions.check(entryId))
+      yield* held.reached
+      assert.isNotNull((yield* db.session.getSession(entryId))!.process!.endedAt)
+
+      const next = yield* db.session.startEntry(
+        row.projectId,
+        "pi",
+        false,
+        { runtime: RUNTIME, address },
+        {
+          agent: "coordinator",
+        },
+      )
+
+      yield* runtime.seedAgent("test/coord")
+      const message = (yield* db.inbox.insertSend(entryId, "for the new process"))!
+      yield* held.release()
+      yield* Fiber.join(checking)
+      const now = (yield* db.session.getSession(entryId))!
+      assert.strictEqual(now.process!.id, next.process)
+      assert.isNull(now.process!.endedAt)
+      assert.notInclude(
+        (yield* db.inbox.inboxWithStatus(entryId, "dropped")).map((m) => m.id),
+        message.id,
+      )
+    }),
+  )
+
+  test(
     "a delivery waiting on the exit does not resume once that exit has failed the queued send",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

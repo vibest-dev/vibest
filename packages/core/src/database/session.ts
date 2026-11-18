@@ -85,7 +85,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       Effect.gen(function* () {
         for (const entry of yield* entrySessionsAt(runtime, address, except)) {
           yield* endProcess(entry.id, "exited")
-          yield* dropWaiting(entry.project)
+          yield* dropWaiting(entry.id)
         }
       })
 
@@ -491,7 +491,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
                 yield* afterCommit(() => void moving.delete(project))
 
-                if (!movingHere || fresh) yield* dropWaiting(project)
+                if (!movingHere || fresh) yield* dropWaiting(entryId)
 
                 return {
                   sessionId: entryId,
@@ -622,6 +622,19 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       endProcess: Effect.fn("Db.session.endProcess")((id: string, reason: ProcessEndReason, process?: number) =>
         tx(endProcess(id, reason, undefined, process)).pipe(Effect.orDie),
+      ),
+
+      endExited: Effect.fn("Db.session.endExited")(
+        (id: string, reason: "exited" | "launch_failed", process: number | undefined) =>
+          tx(
+            Effect.gen(function* () {
+              if (!(yield* endProcess(id, reason, undefined, process))) return false
+
+              if (yield* isEntry(id)) yield* dropWaiting(id)
+
+              return true
+            }),
+          ).pipe(Effect.orDie),
       ),
 
       detachEntry: Effect.fn("Db.session.detachEntry")(

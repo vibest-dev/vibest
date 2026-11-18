@@ -638,7 +638,7 @@ describe("Db", () => {
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             message: "n",
           })
-          yield* db.inbox.dropWaiting(yield* projectOf("r"))
+          yield* db.session.endExited(entry.sessionId, "exited", undefined)
           assert.strictEqual(yield* noticeStatus("n"), "dropped")
         }),
       ),
