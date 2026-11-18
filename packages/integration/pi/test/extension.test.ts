@@ -265,7 +265,11 @@ describe("pi-vibest", () => {
         assert.deepInclude(s.messages[0]?.message, {
           customType: "vibest",
           content: noticeEnvelope("survives the gap"),
-          display: false,
+          display: true,
+          details: {
+            execution: executionOf(s.messages[0]!.message),
+            display: [{ sender: "vibest", preview: "survives the gap" }],
+          },
         })
         assert.deepStrictEqual(notes, [])
       }).pipe(Effect.scoped, Effect.provide(pulling())),
@@ -516,8 +520,8 @@ describe("pi-vibest", () => {
           m.options,
         ]),
         [
-          [noticeEnvelope("<agent-result>one</agent-result>"), false, { triggerTurn: true }],
-          [noticeEnvelope("<agent-message>two</agent-message>"), false, { triggerTurn: true }],
+          [noticeEnvelope("<agent-result>one</agent-result>"), true, { triggerTurn: true }],
+          [noticeEnvelope("<agent-message>two</agent-message>"), true, { triggerTurn: true }],
         ],
       )
       assert.notStrictEqual(executionOf(s.messages[0]!.message), executionOf(s.messages[1]!.message))

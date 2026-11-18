@@ -1,4 +1,4 @@
-import type { HarnessId } from "@vibest/schema/session"
+import type { DisplayEntry, HarnessId } from "@vibest/schema/session"
 import { Option, Predicate, Schema } from "effect"
 
 import type { HarnessDefinition } from "./plugin/domains.ts"
@@ -64,6 +64,46 @@ const ENVELOPED =
   /^<(agent-message|vibest-notice)>\n(?:<[a-z-]+>[^\n]*<\/[a-z-]+>\n)*<message>\n([\s\S]*)\n<\/message>\n<\/\1>$/
 
 export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? rendered
+
+const PREVIEW = 120
+
+const clip = (s: string, max: number) => {
+  const cps = [...s]
+
+  return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
+}
+
+const firstLine = (message: string) => unwrapped(message).trim().split("\n")[0] ?? ""
+
+export const displayOf = (
+  batch: ReadonlyArray<{ readonly kind: string; readonly sender?: string | null; readonly message: string }>,
+  who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
+): ReadonlyArray<DisplayEntry> => {
+  const entries: Array<DisplayEntry> = []
+  const seen = new Set<string>()
+
+  for (const row of batch) {
+    const key = row.kind === "notice" ? "vibest" : (row.sender ?? "")
+
+    if (seen.has(key)) continue
+    seen.add(key)
+    const preview = clip(firstLine(row.message), PREVIEW)
+
+    if (row.kind === "notice") {
+      entries.push({ sender: "vibest", preview })
+      continue
+    }
+
+    const session = who(row.sender ?? "")
+
+    entries.push({
+      sender: { agent: session?.agent ?? "", title: session?.title ?? "", session: row.sender ?? "" },
+      preview,
+    })
+  }
+
+  return entries
+}
 
 export type ObservedEnd = {
   readonly harness: HarnessId

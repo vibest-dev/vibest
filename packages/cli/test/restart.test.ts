@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, pidOf } from "@vibest/core/database/db-rows"
-import { line } from "@vibest/core/inbox"
+import { displayOf } from "@vibest/core/replies"
 import { noticeEnvelope } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
@@ -160,11 +160,15 @@ describe("restart in place", () => {
     }),
   )
 
-  it("an entry session's continue notice shows as a message from vibest, and a long version is trimmed out of the line", () => {
+  it("an entry session's continue notice preview carries the instruction, even on a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
-    const shown = line([{ kind: "notice", message: noticeEnvelope(continueText(version)) } as never], () => undefined)
-    assert.isTrue(shown.startsWith(`Message from @vibest: ${CONTINUE.slice(0, 40)}`))
-    assert.isFalse(shown.includes(version))
+
+    const preview = displayOf([{ kind: "notice", message: noticeEnvelope(continueText(version)) }], () => undefined)[0]!
+      .preview
+
+    assert.isTrue(preview.startsWith(CONTINUE))
+
+    assert.isFalse(preview.includes(version))
   })
 
   const workingEntry = (harness: "cursor" | "pi") =>

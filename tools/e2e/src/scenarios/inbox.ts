@@ -44,8 +44,8 @@ import {
 interface Taken {
   execution: number
   ids: Array<number>
-  line: string
-  text: string
+  content: string
+  display: Array<unknown>
 }
 
 type Entry = { id: string; agent: string }
@@ -176,7 +176,7 @@ const claudeEntry = async (
   const result = async (sub: string, title: string, marker: string, before: number) => {
     await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
 
-    return shown(`Message from @${title}: done-${marker}`, marker)
+    return shown(`Message from @General · ${title} (${sub.slice(0, 8)})\ndone-${marker}`, marker)
   }
 
   const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
@@ -359,7 +359,7 @@ const checks: ReadonlyArray<Check> = [
           [a, "Answer probe alpha", "cmalpha"],
           [b, "Answer probe beta", "cmbeta"],
         ] as const) {
-          const line = `Message from @${title}: done-${marker}`
+          const line = `Message from @General · ${title} (${sub.slice(0, 8)})\ndone-${marker}`
           const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
@@ -448,8 +448,8 @@ const checks: ReadonlyArray<Check> = [
         let taken: Taken = {
           execution: 0,
           ids: [],
-          line: "",
-          text: "",
+          content: "",
+          display: [],
         }
 
         await until(
@@ -464,7 +464,7 @@ const checks: ReadonlyArray<Check> = [
           },
           180_000,
         )
-        expect(taken.text.includes("done-cmcurl"), `the taken text: ${taken.text}`)
+        expect(taken.content.includes("done-cmcurl"), `the taken text: ${taken.content}`)
         const id = taken.ids[0]!
         expect(status(id) === "delivered", `after the take the row is ${status(id)}`)
         const again = await curl(w, "/inbox/take", who)
@@ -657,7 +657,7 @@ const checks: ReadonlyArray<Check> = [
             ) === 1,
           `the send ${sent()[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
         )
-        const line = `Message from @Send probe: hello-claude`
+        const line = `Message from @General · Send probe (${sub.slice(0, 8)})\nhello-claude`
         await until(
           "the line and the <agent-message> in the entry session's conversation",
           async () => {

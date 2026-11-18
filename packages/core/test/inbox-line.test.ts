@@ -1,49 +1,42 @@
 import { assert, describe, it } from "@effect/vitest"
-import { line } from "@vibest/core/inbox"
-import { noticeEnvelope, sessionEnvelope } from "@vibest/core/replies"
-import type { InboxRow } from "@vibest/schema/session"
+import { displayOf, noticeEnvelope, sessionEnvelope } from "@vibest/core/replies"
 
-const row = (message: string, sender: string | null, kind: InboxRow["kind"] = "send"): InboxRow => ({
-  id: 1,
-  sender,
-  recipient: "r",
-  kind,
-  message,
-  status: "delivered",
-})
+const titles = { a: { agent: "general", title: "Alpha" }, b: { agent: "coordinator", title: "Beta" } }
+const who = (id: string) => (id === "a" || id === "b" ? titles[id] : undefined)
 
-const titles = { a: "Alpha", b: "Beta" }
-const titleOf = (id: string) => (id === "a" || id === "b" ? titles[id] : undefined)
+const row = (message: string, sender: string | null, kind = "send") => ({ kind, sender, message })
 
-describe("delivery line", () => {
-  it("names the sender and the first line of the message", () => {
-    assert.strictEqual(
-      line([row(sessionEnvelope({ id: "a", title: "Alpha" }, "hello\nrest"), "a")], titleOf),
-      "Message from @Alpha: hello",
-    )
+describe("delivery display", () => {
+  it("an agent message names that sender and previews its first line", () => {
+    assert.deepStrictEqual(displayOf([row(sessionEnvelope({ id: "a", title: "Alpha" }, "hello\nrest"), "a")], who), [
+      { sender: { agent: "general", title: "Alpha", session: "a" }, preview: "hello" },
+    ])
   })
 
   it("a notice is from vibest", () => {
-    assert.strictEqual(
-      line([row(noticeEnvelope("gone\nmore"), "a", "notice")], () => "nope"),
-      "Message from @vibest: gone",
+    assert.deepStrictEqual(
+      displayOf([row(noticeEnvelope("gone\nmore"), "a", "notice")], () => undefined),
+      [{ sender: "vibest", preview: "gone" }],
     )
   })
 
-  it("lists each sender once and keeps the first message's first line", () => {
-    assert.strictEqual(
-      line(
+  it("lists each sender once and previews that sender's first message", () => {
+    assert.deepStrictEqual(
+      displayOf(
         [row("first", "a"), row("second", "a"), row("third", "b"), row(noticeEnvelope("n"), null, "notice")],
-        titleOf,
+        who,
       ),
-      "Message from @Alpha, @Beta, @vibest: first",
+      [
+        { sender: { agent: "general", title: "Alpha", session: "a" }, preview: "first" },
+        { sender: { agent: "coordinator", title: "Beta", session: "b" }, preview: "third" },
+        { sender: "vibest", preview: "n" },
+      ],
     )
   })
 
-  it("trims the first line to about 80 characters", () => {
-    const shown = line([row("x".repeat(200), "a")], titleOf)
-    const preview = shown.slice("Message from @Alpha: ".length)
-    assert.strictEqual([...preview].length, 80)
+  it("trims a preview to about 120 characters", () => {
+    const preview = displayOf([row("x".repeat(200), "a")], who)[0]!.preview
+    assert.strictEqual([...preview].length, 120)
     assert.ok(preview.endsWith("…"))
   })
 })

@@ -14,6 +14,17 @@ export const REPORT_TRY_MS = 10_000
 export const UNREACHABLE = "vibestd unreachable; the tool call is refused."
 export const FULL_MAX = 100
 
+const titled = (agent: string) => (agent === "" ? "" : `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`)
+
+export const shown = (display: Taken["display"]) =>
+  display
+    .map((entry) =>
+      entry.sender === "vibest"
+        ? `Message from Vibest\n${entry.preview}`
+        : `Message from @${titled(entry.sender.agent)} · ${entry.sender.title} (${entry.sender.session.slice(0, 8)})\n${entry.preview}`,
+    )
+    .join("\n\n")
+
 type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
 type Reply = { readonly status: number; readonly body: Json | undefined }
@@ -108,7 +119,7 @@ const errorOf = (body: Json | undefined) => {
 
 export function register(on: On) {
   const queue: Array<Taken> = []
-  const full = new Map<string, Array<{ readonly text: string; readonly execution: number }>>()
+  const full = new Map<string, Array<{ readonly content: string; readonly execution: number }>>()
   let idle = false
   let polling = false
   let draining = false
@@ -208,7 +219,7 @@ export function register(on: On) {
     }
   }
 
-  const keep = (line: string, taken: { readonly text: string; readonly execution: number }) => {
+  const keep = (line: string, taken: { readonly content: string; readonly execution: number }) => {
     const list = full.get(line)
 
     if (list) list.push(taken)
@@ -255,13 +266,14 @@ export function register(on: On) {
       const host = nativeHost($)
       draining = true
       queue.shift()
-      keep(batch.line, batch)
-      await host.submit(batch.line).then(
+      const line = shown(batch.display)
+      keep(line, batch)
+      await host.submit(line).then(
         (r) => {
           draining = false
 
           if (r.drop !== undefined) {
-            forget(batch.line, batch.execution)
+            forget(line, batch.execution)
             void report(host, hookRoute("claude", "prompt"), {
               hook_event_name: "PromptSubmit",
               origin: "vibest",
@@ -274,7 +286,7 @@ export function register(on: On) {
         },
         () => {
           draining = false
-          forget(batch.line, batch.execution)
+          forget(line, batch.execution)
           queue.unshift(batch)
           host.redraw()
         },
@@ -320,9 +332,9 @@ export function register(on: On) {
         execution: taken.execution,
       })
 
-      if (event.text.trimEnd().endsWith(taken.text.trim())) return next(event)
+      if (event.text.trimEnd().endsWith(taken.content.trim())) return next(event)
 
-      return next({ ...event, context: [...(event.context ?? []), taken.text] })
+      return next({ ...event, context: [...(event.context ?? []), taken.content] })
     }
 
     const who = await identity(host).catch(() => undefined)

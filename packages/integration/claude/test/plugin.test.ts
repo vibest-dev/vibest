@@ -157,9 +157,13 @@ const host = (env: Record<string, string> = SESSION) => {
   }
 }
 
-const batch = (execution: number, line: string, text: string) => ({
+const batch = (
+  execution: number,
+  display: ReadonlyArray<{ readonly sender: unknown; readonly preview: string }>,
+  content: string,
+) => ({
   status: 200,
-  body: { execution, ids: [execution], line, text },
+  body: { execution, ids: [execution], content, display },
 })
 
 const ownSubmit = { kind: "plugin", name: "vibest" }
@@ -215,9 +219,19 @@ describe("Claude plugin inbox", () => {
     const h = host()
 
     const takes = [
-      batch(1, "Message from @A: hello", "full A"),
-      batch(2, "Message from @vibest: x", "full B"),
-      batch(3, "Message from @vibest: w1 exited.", "w1 exited."),
+      batch(
+        1,
+        [
+          {
+            sender: { agent: "general", title: "Upgrade", session: "6b8b00e4-1111-4111-8111-111111111111" },
+            preview: "hello",
+          },
+          { sender: "vibest", preview: "gone" },
+        ],
+        "full A",
+      ),
+      batch(2, [{ sender: "vibest", preview: "x" }], "full B"),
+      batch(3, [{ sender: "vibest", preview: "w1 exited." }], "w1 exited."),
     ]
 
     h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
@@ -231,8 +245,9 @@ describe("Claude plugin inbox", () => {
       "no second take while a batch waits",
     )
     assert.strictEqual(await h.draw(), "drawn", "draws nothing of its own")
-    assert.deepStrictEqual(h.submitted, ["Message from @A: hello"])
-    const own = await h.prompt("Message from @A: hello", ownSubmit)
+    const first = ["Message from @General · Upgrade (6b8b00e4)", "hello", "", "Message from Vibest", "gone"].join("\n")
+    assert.deepStrictEqual(h.submitted, [first])
+    const own = await h.prompt(first, ownSubmit)
     assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
     assert.deepStrictEqual(h.requests.at(-1)!.body, { hook_event_name: "PromptSubmit", origin: "vibest", execution: 1 })
     await h.tick()
@@ -244,17 +259,17 @@ describe("Claude plugin inbox", () => {
     await h.executionComplete({ reason: "answer", answer: "done" })
     await h.tick()
     await h.draw()
-    assert.deepStrictEqual(h.submitted.at(-1), "Message from @vibest: x")
-    assert.notProperty(await h.prompt("Message from @vibest: x", { kind: "composer" }), "context")
-    assert.deepStrictEqual(((await h.prompt("Message from @vibest: x", ownSubmit)) as { context: string[] }).context, [
+    assert.deepStrictEqual(h.submitted.at(-1), "Message from Vibest\nx")
+    assert.notProperty(await h.prompt("Message from Vibest\nx", { kind: "composer" }), "context")
+    assert.deepStrictEqual(((await h.prompt("Message from Vibest\nx", ownSubmit)) as { context: string[] }).context, [
       "full B",
     ])
     await h.executionComplete({ reason: "answer", answer: "done" })
     await h.tick()
     await h.draw()
-    assert.deepStrictEqual(h.submitted.at(-1), "Message from @vibest: w1 exited.")
+    assert.deepStrictEqual(h.submitted.at(-1), "Message from Vibest\nw1 exited.")
     assert.notProperty(
-      await h.prompt("Message from @vibest: w1 exited.", ownSubmit),
+      await h.prompt("Message from Vibest\nw1 exited.", ownSubmit),
       "context",
       "a line that already ends with the full text gets no context",
     )
@@ -262,7 +277,7 @@ describe("Claude plugin inbox", () => {
 
   it("a submit Claude refuses is reported once for its execution and not submitted again", async () => {
     const h = host()
-    const takes = [batch(1, "same", "first")]
+    const takes = [batch(1, [{ sender: "vibest", preview: "same" }], "first")]
     h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
     await h.start()
     await h.tick()
@@ -270,7 +285,7 @@ describe("Claude plugin inbox", () => {
     await h.draw()
     await h.draw()
     await settle()
-    assert.deepStrictEqual(h.submitted, ["same"])
+    assert.deepStrictEqual(h.submitted, ["Message from Vibest\nsame"])
     const refusals = h.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt"))
     assert.deepStrictEqual(
       refusals.map((r) => r.body),

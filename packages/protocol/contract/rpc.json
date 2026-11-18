@@ -1,5 +1,5 @@
 {
-  "protocol": 11,
+  "protocol": 12,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -7,7 +7,9 @@
     "watch": true,
     "events": true,
     "projects": true,
-    "spawnRuntime": true
+    "spawnRuntime": true,
+    "spawnFiles": true,
+    "peerSpawnFiles": true
   },
   "methods": {
     "Agents.Outdated": {
@@ -2761,18 +2763,61 @@
                   ]
                 }
               },
-              "line": {
+              "content": {
                 "type": "string"
               },
-              "text": {
-                "type": "string"
+              "display": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sender": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "agent": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "session": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "agent",
+                            "title",
+                            "session"
+                          ],
+                          "additionalProperties": true
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "vibest"
+                          ]
+                        }
+                      ]
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sender",
+                    "preview"
+                  ],
+                  "additionalProperties": true
+                }
               }
             },
             "required": [
               "execution",
               "ids",
-              "line",
-              "text"
+              "content",
+              "display"
             ],
             "additionalProperties": true
           },
@@ -6836,6 +6881,34 @@
           },
           "request": {
             "type": "string"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string",
+                      "format": "byte",
+                      "contentEncoding": "base64"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "content"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -13438,6 +13511,34 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "files": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string",
+                      "format": "byte",
+                      "contentEncoding": "base64"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "content"
+                  ],
+                  "additionalProperties": true
+                }
               },
               {
                 "type": "null"

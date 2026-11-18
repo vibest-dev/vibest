@@ -30,7 +30,7 @@ import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harnesses } from "../harnesses.ts"
-import { Inbox, text as inboxText } from "../inbox.ts"
+import { Inbox, content as inboxContent } from "../inbox.ts"
 import { errorMessage } from "../plugin.ts"
 import * as Reactor from "../reactor.ts"
 import {
@@ -423,7 +423,7 @@ export const make = Effect.gen(function* () {
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
         const h = yield* runtimes.route(runtimeOf(session))
         yield* Ref.set(r.prompting, true).pipe(
-          Effect.andThen(h.send(terminalOf(session), { text: inboxText(rows) })),
+          Effect.andThen(h.send(terminalOf(session), { text: inboxContent(rows) })),
           Effect.ensuring(Ref.set(r.prompting, false)),
           Effect.ignore,
         )

@@ -66,7 +66,7 @@ describe.concurrent("an idle session takes its next batch", () => {
     Effect.gen(function* () {
       const { db, inbox, entryId } = yield* entryAsked
       const taken = yield* inbox.take(entryId, undefined)
-      assert.include(taken!.text, "a question")
+      assert.include(taken!.content, "a question")
       assert.deepStrictEqual(yield* db.session.openExecution(entryId), taken!.execution)
       assert.isUndefined(yield* inbox.take(entryId, undefined))
     }),

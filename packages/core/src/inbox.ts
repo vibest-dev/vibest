@@ -9,7 +9,7 @@ import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { Harnesses } from "./harnesses.ts"
 import * as Reactor from "./reactor.ts"
-import { unwrapped } from "./replies.ts"
+import { displayOf } from "./replies.ts"
 import { agentState, alive, RuntimeError, type Runtime } from "./runtimes.ts"
 
 export * as Inbox from "./inbox.ts"
@@ -27,35 +27,7 @@ export const entryIdle = Effect.fn("Inbox.entryIdle")(function* (
   return seen === "idle" ? "idle" : "busy"
 })
 
-export const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
-
-const PREVIEW = 80
-
-const clip = (s: string, max: number) => {
-  const cps = [...s]
-
-  return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
-}
-
-const firstLine = (message: string) => unwrapped(message).trim().split("\n")[0] ?? ""
-
-export const line = (batch: ReadonlyArray<InboxRow>, titleOf: (sessionId: string) => string | undefined) => {
-  const first = batch[0]
-
-  if (first === undefined) return ""
-  const names: Array<string> = []
-  const seen = new Set<string>()
-
-  for (const row of batch) {
-    const key = row.kind === "notice" ? "vibest" : (row.sender ?? "")
-
-    if (seen.has(key)) continue
-    seen.add(key)
-    names.push(row.kind === "notice" ? "vibest" : (titleOf(row.sender ?? "") ?? ""))
-  }
-
-  return `Message from ${names.map((name) => `@${name}`).join(", ")}: ${clip(firstLine(first.message), PREVIEW)}`
-}
+export const content = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
 
 export type Undelivered = ReadonlyArray<{
   readonly id: number
@@ -138,20 +110,20 @@ export const layer = Layer.effect(
 
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
-      const titles = new Map<string, string>()
+      const who = new Map<string, { readonly agent: string; readonly title: string }>()
 
       for (const row of taken.rows) {
-        if (row.kind === "notice" || row.sender === null || titles.has(row.sender)) continue
+        if (row.kind === "notice" || row.sender === null || who.has(row.sender)) continue
         const found = yield* db.session.getSession(row.sender)
 
-        if (found !== undefined) titles.set(row.sender, found.name)
+        if (found !== undefined) who.set(row.sender, { agent: found.agent, title: found.name })
       }
 
       return {
         execution: taken.execution,
         ids: taken.rows.map((r) => r.id),
-        line: line(taken.rows, (id) => titles.get(id)),
-        text: text(taken.rows),
+        content: content(taken.rows),
+        display: displayOf(taken.rows, (id) => who.get(id)),
       } satisfies Taken
     })
 

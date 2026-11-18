@@ -54,12 +54,29 @@ export const InboxRow = Schema.Struct({
 
 export type InboxRow = typeof InboxRow.Type
 
-export type Taken = {
-  readonly execution: number
-  readonly ids: ReadonlyArray<number>
-  readonly line: string
-  readonly text: string
-}
+export const DisplayAgent = Schema.Struct({
+  agent: Schema.String,
+  title: Schema.String,
+  session: Schema.String,
+})
+
+export type DisplayAgent = typeof DisplayAgent.Type
+
+export const DisplayEntry = Schema.Struct({
+  sender: Schema.Union([DisplayAgent, Schema.Literal("vibest")]),
+  preview: Schema.String,
+})
+
+export type DisplayEntry = typeof DisplayEntry.Type
+
+export const Taken = Schema.Struct({
+  execution: Schema.Number,
+  ids: Schema.Array(Schema.Number),
+  content: Schema.String,
+  display: Schema.Array(DisplayEntry),
+})
+
+export type Taken = typeof Taken.Type
 
 export type HarnessId = string
 
