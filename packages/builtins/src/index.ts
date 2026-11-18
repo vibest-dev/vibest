@@ -1,4 +1,4 @@
-import { claudePlugin, piPlugin } from "@vibest/plugin-harnesses"
+import { agyPlugin, claudePlugin, cursorPlugin, piPlugin } from "@vibest/plugin-harnesses"
 import type { Plugin } from "@vibest/plugin/effect"
 import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
@@ -27,12 +27,16 @@ const builtin = (plugin: Plugin.Plugin): Builtin => ({
 export const pre = Effect.gen(function* () {
   const pi = yield* piPlugin
   const claude = yield* claudePlugin
+  const cursor = yield* cursorPlugin
+  const agy = yield* agyPlugin
   const archiveOnIdle = yield* archiveOnIdlePlugin
 
   return [
     builtin(agentPlugin),
     builtin(pi),
     builtin(claude),
+    builtin(cursor),
+    builtin(agy),
     builtin(runtimeHerdrCore),
     builtin(runtimeHerdr),
     builtin(choicePlugin()),

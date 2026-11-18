@@ -2,10 +2,9 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { expect, harnesses, Skip, until, type World } from "../world.ts"
-import { addCursorPlugin } from "../world/plugins.ts"
+import { expect, Skip, until, type World } from "../world.ts"
 
-const HARNESSES = ["claude", "pi"] as const
+const HARNESSES = ["claude", "pi", "cursor", "agy"] as const
 
 type Listed = { harness: string; binary: string; available: boolean; error: string | null }
 
@@ -49,7 +48,6 @@ const checks: ReadonlyArray<Check> = [
 
       expect(ssh.code === 0, "temporary HOME inherited SSH session variables")
       await w.stopDaemon()
-      await addCursorPlugin(w, harnesses)
 
       try {
         await until(
@@ -86,21 +84,36 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H8",
     title:
-      "Cursor is not built in: `vibest run cursor` from the entry session is refused saying no plugin provides it and how to add one; adding the shipped harnesses/cursor folder to vibest.json makes `cursor` appear in `harness list`",
+      "Cursor and agy are loaded by default: with no plugin configured, `harness list` lists cursor and agy; on a PATH without their binaries vibestd starts, their plugins are active, and both are listed unavailable saying they are not on PATH",
     run: async (w) => {
-      await w.entry()
-      const before = await w.viaEntry(["run", "cursor", "--", "hello"], { timeoutMs: 60_000 })
+      const all = await listed(w)
       expect(
-        before.code !== 0 && /no plugin provides harness cursor/.test(before.stderr + before.stdout),
-        `${before.code} ${before.stderr}${before.stdout}`,
+        ["cursor", "agy"].every((h) => all.some((e) => e.harness === h)),
+        `entries: ${JSON.stringify(all)}`,
       )
-      expect(
-        /plugins.*vibest\.json/.test(before.stderr + before.stdout),
-        "the refusal does not say how to add a plugin",
-      )
-      expect(!(await listed(w)).some((e) => e.harness === "cursor"), "cursor listed without its plugin")
-      await addCursorPlugin(w, harnesses)
-      await until("cursor listed", async () => (await listed(w)).some((e) => e.harness === "cursor"), 60_000)
+      await w.stopDaemon()
+      const bin = path.join(w.root, "no-harness-bin")
+      await fs.mkdir(bin, { recursive: true })
+      const env = { PATH: bin + ":/usr/bin:/bin" }
+
+      try {
+        const plugins = await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })
+        expect(
+          ["harness-cursor", "harness-agy"].every((id) => plugins.some((p) => p.id === id && p.status === "active")),
+          `plugins: ${JSON.stringify(plugins)}`,
+        )
+        const missing = await w.json<Array<Listed>>(["harness", "list"], { env, timeoutMs: 120_000 })
+
+        for (const id of ["cursor", "agy"]) {
+          const entry = missing.find((e) => e.harness === id)
+          expect(
+            entry !== undefined && !entry.available && !!entry.error?.includes("not on PATH"),
+            `${id}: ${JSON.stringify(entry)}`,
+          )
+        }
+      } finally {
+        await w.stopDaemon()
+      }
     },
   },
   {

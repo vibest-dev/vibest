@@ -3,7 +3,6 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { expect, harnesses, herdr, row, rows, SESSIONS, Skip, until, type World } from "../world.ts"
-import { addCursorPlugin } from "../world/plugins.ts"
 import { isolatedCore } from "./hc.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
@@ -83,7 +82,6 @@ export const hcKey = (c: string) =>
 export const cursorWorld = async (w: World, runtime: Runtime, name: string, entry: "pi" | "cursor" = "pi") => {
   await requireCursor(w, runtime)
   const logged = await loggingHarnesses(w)
-  await addCursorPlugin(w, logged)
   const repo = await project(w, name)
   const daemonEnv = { CLAUDE_CONFIG_DIR: undefined, VIBEST_HARNESSES: logged }
   const session = `${w.herdrSession}-${name}`

@@ -130,8 +130,14 @@ export const make = Effect.gen(function* () {
   const poll = Effect.gen(function* () {
     const home = yield* homeDir
 
-    for (const definition of harnesses.all)
-      if (definition.subscription && (yield* harness.available(definition.id))) yield* read(definition, home)
+    yield* Effect.forEach(
+      harnesses.all,
+      (definition) =>
+        definition.subscription
+          ? Effect.flatMap(harness.available(definition.id), (found) => (found ? read(definition, home) : Effect.void))
+          : Effect.void,
+      { concurrency: "unbounded", discard: true },
+    )
   })
 
   return Service.of({ list, report, poll })

@@ -1,11 +1,11 @@
 # Harnesses and models
 
-The coding agents (harnesses) vibest runs: Claude and Pi come with vibest, Cursor is a plugin you add. Each capability below says what it is and when it
+The coding agents (harnesses) vibest runs: Claude, Pi, Cursor and Antigravity (agy) all come with vibest. Each capability below says what it is and when it
 counts as working.
 
 ## H1. Listing harnesses
 
-`vibest harness list` shows one entry per loaded harness (Claude and Pi, and Cursor once its plugin is added) with its binary, whether it can start, and its
+`vibest harness list` shows one entry per loaded harness (Claude, Pi, Cursor and agy) with its binary, whether it can start, and its
 default model. A harness whose CLI is missing says so. `--machine <name>` lists another machine's harnesses (see
 [machines.md](machines.md) M9). The list is the whole machine's; the default model is the harness's global default, which a repository's
 own harness settings may change in its project, and vibest does not read them.
@@ -22,7 +22,7 @@ problem under it, and ends with a verdict: one line per harness, and a herdr lin
 
 ## H4. Cursor probes on a home without a login keychain
 
-With the Cursor plugin added, on macOS, vibest never starts Cursor to discover models or read its usage when the home has no login keychain, and it
+On macOS, vibest never starts Cursor to discover models or read its usage when the home has no login keychain, and it
 does not carry SSH session settings into a home it switches to.
 
 ## H5. A run inherits the caller's harness
@@ -38,22 +38,26 @@ inherit; otherwise the default applies (H7).
 `--harness` runs on Claude when Claude is available, and fails asking for `--harness` when it is not or when
 `"-harness-default"` is in `vibest.json`'s `plugins`.
 
+Entering a project checks only that a harness can start there (its binary on `PATH`, vibest's plugin folder for it) and
+lists no models, so it waits on no harness CLI; a harness that is installed but cannot answer (for example signed out)
+is offered and fails when it starts.
+
 ## H7. The default harness is Claude
 
 A project's first bare `vibest` without `--harness` starts its entry session on Claude when Claude is available. A user
 plugin that picks another harness wins over the default. When Claude cannot start the start fails saying there is no
 harness to inherit.
 
-## H8. Cursor is a plugin
+## H8. Every shipped harness is loaded
 
-Cursor is not built in. `vibest run cursor` is refused saying no plugin provides it and where plugins are added; after
-the shipped `harnesses/cursor` folder of the install directory is added to `plugins` in `~/.vibest/vibest.json`,
-`cursor` appears in `vibest harness list`.
+Claude, Pi, Cursor and agy are loaded without any line in `~/.vibest/vibest.json`, and `vibest harness list` lists
+each. Whether this machine can start one is checked only when it is asked for: a harness whose binary is not on
+`PATH` is listed as unavailable saying so, and vibestd starts as usual. `"-harness-cursor"` (or another
+`-harness-<id>`) in `plugins` removes one.
 
-## H9. Antigravity (agy) is a plugin
+## H9. Antigravity (agy)
 
-With the shipped `harnesses/agy` folder of the install directory added to `plugins` in `~/.vibest/vibest.json`, `agy` appears
-in `vibest harness list` and its models in `vibest models`, read from the agy CLI without a model turn, and
+`agy` appears in `vibest harness list` and its models in `vibest models`, read from the agy CLI without a model turn, and
 `vibest subscriptions` shows its usage windows (used percent, reset time) from `agy -p /usage`. vibest never reads agy's own
 config or credential files and never signs in; a CLI that is not signed in is listed as unavailable with its own message.
 The definition's `binary` can be pointed at a wrapper such as `agyx` by a plugin of the user's own; nothing assumes it is

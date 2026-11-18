@@ -41,6 +41,6 @@ Outside a vibest agent (no `VIBEST_SESSION_ID`) the hooks report nothing.
 ## Use
 
 Nothing to install. The plugin ships inside `@vibest/cli` (`harnesses/agy`, written by its build from `src/plugin.ts`).
-`harnesses/agy/index.js` provides the harness; add the folder to `plugins` in `~/.vibest/vibest.json`, like Cursor's.
+vibest loads the agy harness by default.
 To start agy through a wrapper such as agyx, add a plugin of your own that sets the definition's `binary` to the wrapper;
 vibest does not assume the binary is named `agy`.
