@@ -265,8 +265,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       senderOf: Effect.fn("Db.remote.senderOf")((sessionId: string) => remote.senderOf(sessionId).pipe(Effect.orDie)),
 
-      peerName: Effect.fn("Db.remote.peerName")((id: string) =>
-        sql<{ name: string }>`SELECT name FROM peer WHERE id = ${id}`.pipe(
+      nameForPeer: Effect.fn("Db.remote.nameForPeer")((id: string) =>
+        sql<{ name: string }>`SELECT name FROM machine WHERE vibestd_id = ${id}
+          UNION ALL SELECT name FROM peer WHERE id = ${id}`.pipe(
           Effect.map((rows) => rows[0]?.name),
           Effect.orDie,
         ),

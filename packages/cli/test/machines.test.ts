@@ -591,6 +591,7 @@ describe("another machine's vibestd runs agents here", () => {
           b.raw.Remove({ id: session }),
         ] as ReadonlyArray<Effect.Effect<unknown, unknown>>)
           assert.strictEqual(failureTag(yield* Effect.exit(z(call))), "NoSuchSession")
+        yield* b.db.remote.addMachine({ name: "my-workstation", target: "a-host", vibestdId: a })
         const from = { session: A_ENTRY, agent: "coordinator", title: "Plan" }
         yield* x(b.raw.Send({ id: session, message: "from x", from }))
         yield* user(b.raw.Send({ id: session, message: "from the user" }))
@@ -613,7 +614,7 @@ describe("another machine's vibestd runs agents here", () => {
         assert.include(sent[0]!.content, `<agent-id>${A_ENTRY}</agent-id>`)
         assert.strictEqual(sent[1]!.content, "from the user")
         assert.deepStrictEqual(yield* b.run(sendersTo(session)), [
-          { ...from, machine: `a-${a.slice(0, 4)}` },
+          { ...from, machine: "my-workstation" },
           { session: null, agent: null, title: null, machine: null },
         ])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -819,7 +820,7 @@ describe("vibest run --machine and remote sessions", () => {
         })
         const entry = (yield* a.db.session.getSession(entryId))!
         assert.deepStrictEqual(yield* b.run(sendersTo(onB(spawned.id))), [
-          { session: entryId, agent: entry.agent, title: entry.name, machine: (yield* b.db.remote.peerName(a.id))! },
+          { session: entryId, agent: entry.agent, title: entry.name, machine: (yield* b.db.remote.nameForPeer(a.id))! },
         ])
         const listed = yield* asEntry(a.raw.List({}))
         assert.deepInclude(

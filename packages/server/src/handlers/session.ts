@@ -36,7 +36,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (caller.session === undefined) return undefined
 
-      const machine = yield* db.remote.peerName(caller.peerId)
+      const machine = yield* db.remote.nameForPeer(caller.peerId)
       const record: Sender = from?.session === caller.session ? from : { session: caller.session }
 
       return { ...(machine !== undefined && { machine }), ...record } satisfies Sender

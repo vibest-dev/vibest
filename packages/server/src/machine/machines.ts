@@ -367,8 +367,9 @@ const make = Effect.gen(function* () {
       }
     })
 
-  const receive = (name: string, link: Link, item: OutboxItem) =>
+  const receive = (row: MachineRow, link: Link, item: OutboxItem) =>
     Effect.gen(function* () {
+      const name = (yield* db.remote.nameForPeer(row.vibestdId)) ?? row.name
       const address = `${name}/${shortId(item.session)}`
 
       const outcome = yield* db.remote.receivePeerItem({
@@ -418,7 +419,7 @@ const make = Effect.gen(function* () {
       const link = opened.link
 
       const outbox = link.client["Peer.Outbox"](undefined, { headers: peerHeaders(self.id) }).pipe(
-        Stream.runForEach((item) => receive(row.name, link, item)),
+        Stream.runForEach((item) => receive(row, link, item)),
         Effect.matchCause({
           onSuccess: () => `${row.name} closed the connection`,
           onFailure: () => `${row.name} stopped answering`,
