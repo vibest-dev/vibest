@@ -8,7 +8,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { Harnesses, unprovided } from "./harnesses.ts"
-import { checkSignedIn, listModels, type Model } from "./models.ts"
+import { listModels, type Model } from "./models.ts"
 
 export * as Harness from "./harness.ts"
 
@@ -37,7 +37,10 @@ const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Recor
 export interface Interface {
   readonly available: (id: string) => Effect.Effect<boolean>
   readonly plugin: (id: string) => Effect.Effect<string, HarnessUnavailable>
-  readonly signedIn: (id: string, env: Readonly<Record<string, string>>) => Effect.Effect<void, HarnessUnavailable>
+  readonly checkEnvironment: (
+    id: string,
+    env: Readonly<Record<string, string>>,
+  ) => Effect.Effect<void, HarnessUnavailable>
   readonly models: (
     id: string,
     provider: string | null,
@@ -74,6 +77,7 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.map((found) => Option.getOrElse(found, () => path.join(pkg, "harnesses"))))
 
   const plugins = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))) || beside
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""))
   const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
 
   const listOf = (key: string) => {
@@ -146,15 +150,13 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
-    signedIn: Effect.fn("Harness.signedIn")(function* (id, env) {
+    checkEnvironment: Effect.fn("Harness.checkEnvironment")(function* (id, env) {
       const definition = harnesses.find(id)
 
-      if (definition === undefined || (yield* checkSignedIn(definition, env).pipe(Effect.provide(pinned))) !== false)
-        return
-      yield* new HarnessUnavailable({
-        harness: id,
-        message: `${definition.binary} is not signed in; sign in with ${definition.binary}, then run vibest again`,
-      })
+      if (definition?.checkEnvironment === undefined) return
+      const problem = yield* definition.checkEnvironment(env.HOME ?? home, definition.binary, env)
+
+      if (problem) yield* new HarnessUnavailable({ harness: id, message: problem })
     }),
     models: Effect.fn("Harness.models")(function* (id, provider, env) {
       const key = modelCacheKey(id, provider, env)
@@ -192,10 +194,6 @@ export const startable = Effect.fn("Harness.startable")(function* (id: string, p
 
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   yield* harness.plugin(id)
-  const home = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
-  const problem = yield* adapter.checkEnvironment?.(home) ?? Effect.succeed(undefined)
-
-  if (problem) return yield* unavailable(problem)
 })
 
 export const preflight = Effect.fn("Harness.preflight")(function* (

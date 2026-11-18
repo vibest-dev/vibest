@@ -5,7 +5,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { noProvider, opt } from "./models.ts"
 import { nodePlatform } from "./node-platform.ts"
 import { cursorSubscription } from "./subscriptions/cursor.ts"
-import { parseJson, record } from "./subscriptions/index.ts"
+import { parseJson, record, signInProblem } from "./subscriptions/index.ts"
 
 export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   if (!lines.some((l) => l.startsWith("Available models"))) return undefined
@@ -44,10 +44,15 @@ export const keychainProblem = (home: string) =>
 
 const cursorEnvironment = (home: string) => keychainProblem(home).pipe(Effect.provide(nodePlatform))
 
+const cursorSignIn = signInProblem(["status", "--format", "json"], cursorSignedIn)
+
 export const cursor: Harness.HarnessDefinition = {
   id: "cursor",
   binary: "cursor-agent",
-  checkEnvironment: cursorEnvironment,
+  checkEnvironment: (home, binary, env) =>
+    Effect.flatMap(cursorEnvironment(home), (problem) =>
+      problem === undefined ? cursorSignIn(home, binary, env) : Effect.succeed(problem),
+    ),
   delivery: "typed",
   ownSessionId: false,
   systemPromptInPrompt: true,
@@ -68,7 +73,6 @@ export const cursor: Harness.HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => ["models"], answer: cursorModels },
-  signedIn: { args: () => ["status", "--format", "json"], answer: cursorSignedIn },
   subscription: (home) =>
     Effect.gen(function* () {
       const spawner = yield* Effect.service(ChildProcessSpawner.ChildProcessSpawner)

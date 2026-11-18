@@ -165,7 +165,7 @@ export interface HarnessStandIn {
 export const harnessLayer = (options: HarnessStandIn = {}) =>
   Layer.succeed(Harness.Service, {
     available: (id) => Effect.succeed(!(options.missingBinary ?? []).includes(id)),
-    signedIn: (id) =>
+    checkEnvironment: (id) =>
       (options.signedOut ?? []).includes(id)
         ? Effect.fail(
             new HarnessUnavailable({

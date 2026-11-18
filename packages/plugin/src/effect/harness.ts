@@ -35,11 +35,6 @@ export interface ModelLister {
   readonly answer: (lines: ReadonlyArray<string>) => ReadonlyArray<RawModel> | undefined
 }
 
-export interface SignInCheck {
-  readonly args: () => ReadonlyArray<string>
-  readonly answer: (lines: ReadonlyArray<string>) => boolean | undefined
-}
-
 export interface SubscriptionRead {
   readonly provider: string
   readonly account?: SubscriptionAccount
@@ -65,8 +60,11 @@ export interface HarnessDefinition {
   readonly checkProvider?: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
   readonly models: ModelLister
-  readonly signedIn?: SignInCheck
-  readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
+  readonly checkEnvironment?: (
+    home: string,
+    binary: string,
+    env: Readonly<Record<string, string>>,
+  ) => Effect.Effect<string | undefined>
   readonly subscription?: (home: string, binary: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => Schema.Json
   readonly guardCall?: (event: HarnessEvent) => HarnessEvent | undefined

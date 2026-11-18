@@ -68,7 +68,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   const pluginDir = yield* harness.plugin(input.harness)
 
-  if (input.callerEnv !== undefined) yield* harness.signedIn(input.harness, input.callerEnv)
+  if (input.callerEnv !== undefined) yield* harness.checkEnvironment(input.harness, input.callerEnv)
   yield* unsafeOnly(systemPromptRoot)
 
   const env = {

@@ -51,7 +51,7 @@ export const listModels = Effect.fn("listModels")(function* (
   if (providerError) return yield* unavailable(providerError)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cwd = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
-  const problem = yield* adapter.checkEnvironment?.(cwd) ?? Effect.succeed(undefined)
+  const problem = yield* adapter.checkEnvironment?.(cwd, binary, env ?? {}) ?? Effect.succeed(undefined)
 
   if (problem) return yield* unavailable(problem)
 
@@ -98,26 +98,6 @@ export const listModels = Effect.fn("listModels")(function* (
     return yield* unavailable(`${binary} lists no models${provider ? ` for provider "${provider}"` : ""}`)
 
   return models
-})
-
-export const checkSignedIn = Effect.fn("checkSignedIn")(function* (
-  adapter: HarnessDefinition,
-  env: Readonly<Record<string, string>>,
-) {
-  const check = adapter.signedIn
-
-  if (check === undefined) return undefined
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const home = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
-
-  const lines = yield* spawner
-    .streamLines(
-      ChildProcess.make(adapter.binary, check.args(), { stdin: "ignore", cwd: env.HOME ?? home, env, extendEnv: true }),
-      { includeStderr: true },
-    )
-    .pipe(Stream.runCollect, Effect.timeout("10 seconds"), Effect.option)
-
-  return Option.match(lines, { onNone: () => undefined, onSome: (seen) => check.answer([...seen]) })
 })
 
 export const forProvider = (

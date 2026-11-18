@@ -1,12 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/plugin/effect"
-import { Effect, Fiber, Sink, Stream, type Schema } from "effect"
+import { Effect, Fiber, FileSystem, Path, Sink, Stream, type Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
+import { nodePlatform } from "../src/node-platform.ts"
 import { pi, piModels } from "../src/pi.ts"
 import { agyLimits, agySubscription } from "../src/subscriptions/agy.ts"
 
@@ -426,4 +427,29 @@ describe("harness output", () => {
       assert.deepStrictEqual(ran, ["--output-format json models"])
     })
   })
+
+  it.effect(
+    "a signed-out agy is an environment problem naming its binary; a CLI that fails without saying so is not",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-agy-" })
+        const signedOut = path.join(dir, "signed-out")
+        const broken = path.join(dir, "broken")
+        yield* fs.writeFileString(
+          signedOut,
+          "#!/bin/sh\necho 'Error: Please sign in to view available models.' >&2\nexit 1\n",
+        )
+        yield* fs.writeFileString(broken, "#!/bin/sh\nexit 1\n")
+        yield* fs.chmod(signedOut, 0o755)
+        yield* fs.chmod(broken, 0o755)
+
+        assert.strictEqual(
+          yield* agy.checkEnvironment!(dir, signedOut, {}),
+          `${signedOut} is not signed in; sign in with ${signedOut}, then run vibest again`,
+        )
+        assert.strictEqual(yield* agy.checkEnvironment!(dir, broken, {}), undefined)
+      }).pipe(Effect.provide(nodePlatform)),
+  )
 })

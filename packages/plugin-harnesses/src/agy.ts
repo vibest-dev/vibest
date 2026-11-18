@@ -2,6 +2,7 @@ import type { Harness } from "@vibest/plugin/effect"
 import { Effect, Predicate, type Schema } from "effect"
 
 import { noProvider, opt } from "./models.ts"
+import { signInProblem } from "./subscriptions/index.ts"
 import { parseJson, record } from "./subscriptions/index.ts"
 
 export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
@@ -120,7 +121,7 @@ export const agy: Harness.HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => ["--output-format", "json", "models"], answer: agyModels },
-  signedIn: { args: () => ["--output-format", "json", "models"], answer: agySignedIn },
+  checkEnvironment: signInProblem(["--output-format", "json", "models"], agySignedIn),
   conversationOf: agyConversation,
   userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { text: "" } : undefined),
   executionEnd: agyExecutionEnd,

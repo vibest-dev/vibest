@@ -343,7 +343,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
           Effect.andThen(
             input.callerEnv === undefined
               ? Effect.void
-              : harness.signedIn(harnessId, { ...input.callerEnv, ...input.env }),
+              : harness.checkEnvironment(harnessId, { ...input.callerEnv, ...input.env }),
           ),
           Effect.provideService(Harness.Service, harness),
           Effect.provideService(Harnesses.Service, harnesses),
