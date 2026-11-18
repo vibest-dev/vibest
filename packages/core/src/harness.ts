@@ -2,7 +2,7 @@ import type { HarnessOption } from "@vibest/plugin/effect"
 import { VibestCommand } from "@vibest/schema/layout"
 import type { HarnessChoice } from "@vibest/schema/session"
 import { HarnessUnavailable } from "@vibest/schema/session"
-import { Cache, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { Cache, Clock, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -73,25 +73,34 @@ export const make = Effect.gen(function* () {
   const plugins = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))) || beside
   const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
 
-  const cached = yield* Cache.makeWith(
-    (key: string) => {
-      const [id, providerName, entries] = decodeModelCacheKey(key)
-      const definition = harnesses.find(id)
+  const listOf = (key: string) => {
+    const [id, providerName, entries] = decodeModelCacheKey(key)
+    const definition = harnesses.find(id)
 
-      return definition === undefined
-        ? Effect.fail(unprovided(id, harnesses.all))
-        : listModels(definition, providerName === "" ? null : providerName, Object.fromEntries(entries)).pipe(
-            Effect.provide(pinned),
-          )
-    },
-    {
-      capacity: MODEL_CACHE_CAPACITY,
-      timeToLive: (exit) => (Exit.isSuccess(exit) ? MODELS_TTL : Duration.zero),
-    },
-  )
+    return definition === undefined
+      ? Effect.fail(unprovided(id, harnesses.all))
+      : listModels(definition, providerName === "" ? null : providerName, Object.fromEntries(entries)).pipe(
+          Effect.provide(pinned),
+          Effect.flatMap((models) => Effect.map(Clock.currentTimeMillis, (listedAt) => ({ models, listedAt }))),
+        )
+  }
 
-  const lastListed = new Map<string, ReadonlyArray<Model>>()
+  const cached = yield* Cache.makeWith(listOf, {
+    capacity: MODEL_CACHE_CAPACITY,
+    timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
+  })
+
+  const refreshing = new Set<string>()
   const scope = yield* Effect.scope
+
+  const refresh = (key: string) =>
+    listOf(key).pipe(
+      Effect.matchEffect({
+        onSuccess: (listed) => Cache.set(cached, key, listed),
+        onFailure: () => Cache.invalidate(cached, key),
+      }),
+      Effect.ensuring(Effect.sync(() => refreshing.delete(key))),
+    )
 
   return Service.of({
     available: Effect.fn("Harness.available")((id) =>
@@ -125,16 +134,17 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
-    models: Effect.fn("Harness.models")((id, provider, env) => {
+    models: Effect.fn("Harness.models")(function* (id, provider, env) {
       const key = modelCacheKey(id, provider, env)
-      const last = lastListed.get(key)
+      const listed = yield* Cache.get(cached, key)
+      const stale = (yield* Clock.currentTimeMillis) - listed.listedAt >= Duration.toMillis(MODELS_TTL)
 
-      const lookup = Cache.get(cached, key).pipe(
-        Effect.tap((models) => Effect.sync(() => lastListed.set(key, models))),
-        Effect.tapError(() => Effect.sync(() => lastListed.delete(key))),
-      )
+      if (stale && !refreshing.has(key)) {
+        refreshing.add(key)
+        yield* Effect.forkIn(refresh(key), scope)
+      }
 
-      return last === undefined ? lookup : Effect.as(Effect.forkIn(Effect.ignore(lookup), scope), last)
+      return listed.models
     }),
   })
 })
