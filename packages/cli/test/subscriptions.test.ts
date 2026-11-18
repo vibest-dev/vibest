@@ -438,7 +438,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
     }),
   )
 
-  it.effect("a read a minute after the last poll refreshes once, shared by two readers at once", () =>
+  it.effect("a read a minute after the last poll refreshes once in the background, shared by two readers at once", () =>
     Effect.gen(function* () {
       const fake = loggedOut(yield* home)
       yield* fake.provide(
@@ -450,6 +450,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           assert.strictEqual(fake.spawned.length, 1)
           yield* TestClock.adjust("1 second")
           const [one, two] = yield* Effect.all([subs.list, subs.list], { concurrency: "unbounded" })
+          yield* TestClock.adjust("1 second")
           assert.strictEqual(fake.spawned.length, 2)
           assert.deepStrictEqual(one, two)
           assert.strictEqual(one[0]?.account.kind, "none")

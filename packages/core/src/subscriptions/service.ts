@@ -162,12 +162,12 @@ export const layer = Layer.effect(
       }),
     )
 
-    yield* refresh
+    const first = yield* refresh
 
     return Service.of({
       ...service,
       list: refresh.pipe(
-        Effect.flatMap((fiber) => (fiber === undefined ? Effect.void : Fiber.await(fiber))),
+        Effect.flatMap((fiber) => (fiber === undefined || fiber !== first ? Effect.void : Fiber.await(fiber))),
         Effect.timeoutOption(CLI_TIMEOUT),
         Effect.andThen(service.list),
       ),
