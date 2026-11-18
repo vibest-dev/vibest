@@ -102,10 +102,8 @@ export const make = Effect.gen(function* () {
     if (
       exitedAt(session) === null &&
       (yield* db.session.endExited(session.id, cutOff ? "launch_failed" : "exited", session.process?.id))
-    ) {
-      yield* db.session.setStatus(session.id, "unknown")
+    )
       yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
-    }
 
     if (cutOff) yield* undoCutOffStart(h, session)
 

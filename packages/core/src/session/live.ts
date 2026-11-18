@@ -106,11 +106,13 @@ export const make = Effect.gen(function* () {
     }),
   )
 
-  const dropIntegration = Effect.fn("SessionLive.dropIntegration")((id: string) =>
-    Effect.sync(() => {
-      integrations.delete(id)
-    }),
-  )
+  const forgetProcess = Effect.fn("SessionLive.forgetProcess")(function* (id: string) {
+    integrations.delete(id)
+    statuses.delete(id)
+    const r = Option.getOrUndefined(HashMap.get(yield* SynchronizedRef.get(tracked), id))
+
+    if (r !== undefined) yield* Ref.set(r.endedAt, undefined)
+  })
 
   const archiveWhenIdle = Effect.fn("SessionLive.archiveWhenIdle")((id: string) =>
     Effect.sync(() => {
@@ -184,7 +186,7 @@ export const make = Effect.gen(function* () {
     setStatus,
     integration,
     setIntegration,
-    dropIntegration,
+    forgetProcess,
     archivesOnIdle,
     archiveWhenIdle,
     ended,

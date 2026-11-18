@@ -427,7 +427,6 @@ export const make = Effect.gen(function* () {
 
     if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "failed")
     yield* db.session.endProcess(session.id, "launch_failed")
-    yield* db.session.setStatus(session.id, "unknown")
     yield* notice(
       session,
       `${sessionLabel(session)} failed to start ${harnessIdOf(session)}: ${messageOf(Cause.squash(cause))}`,

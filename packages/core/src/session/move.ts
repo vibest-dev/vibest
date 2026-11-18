@@ -63,8 +63,7 @@ export const make = Effect.gen(function* () {
   const { finish } = yield* Executions.Service
   const { openTerminal, show, locate, launching, taskInput } = yield* Placement.Service
 
-  const exited = (id: string, reason: ProcessEndReason) =>
-    Effect.andThen(db.session.setStatus(id, "unknown"), db.session.endProcess(id, reason))
+  const exited = (id: string, reason: ProcessEndReason) => db.session.endProcess(id, reason)
 
   const rerunBody = Effect.fn("Move.rerun")(function* (
     h: Runtime,
