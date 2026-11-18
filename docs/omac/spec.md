@@ -491,7 +491,7 @@ Full text of last reply
 </agent-result>
 ```
 
-One element per field, as Claude Code's task notifications; `branch` / `pushed` are left out off a branch. `summary` is omac's one-line outcome (`finished`, `failed: {error}`, `reported a failure`, `is waiting for an answer`, `finished without a status line`). `omac report` arrives as `<agent-message>` with `agent-id`, `summary` and the text in `<message>`.
+One element per field, as Claude Code's task notifications; `branch` / `pushed` are left out off a branch. `summary` is omac's one-line outcome (`finished`, `failed: {error}`, `reported a failure`, `is waiting for an answer`, `finished without a status line`). `omac report` arrives as `<vibest-agent-message>` with `agent-id`, `summary` and the text in `<message>`.
 
 `details` carries structured version plus `summary` / `remember` / `error`. Handed off to Inbox for delivery. For a session started with `--archive-on-completion`, that delivery succeeding is what starts 8.6b.
 

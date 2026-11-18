@@ -87,9 +87,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   and session facts arrive in its first input), and the Pi extension serves every vibest session.
 - **Messages carry who they are from; notices, ownership and sends fall back to the nearest living creator, not
   automatically to the entry session** (agents, users reading `vibest.db`, plugin authors): a message from a session
-  reaches its reader wrapped in `<agent-message>` with the sender's id and title (this includes the task the session that started it gave it, and
+  reaches its reader wrapped in `<vibest-agent-message>` with the sender's id and title (this includes the task the session that started it gave it, and
   `vibest send` from a session); a notice from vibestd, and the instruction to continue after a restart, are wrapped in
-  `<vibest-notice>`; text with no wrapper is the user's. The system prompt holds the definition's text, then the session
+  `<vibest-message>`; text with no wrapper is the user's. The system prompt holds the definition's text, then the session
   facts (who started it, which working directory it has, what the wrappers mean), then a snapshot of `preferences.md`
   and the memory index. A session may interrupt, peek at or remove only sessions for which it is the nearest living
   creator. When a session's direct creator has ended, its notices, its sends to that creator and the right to manage it
@@ -148,7 +148,7 @@ release. Each release lists what broke, who is affected and how to migrate under
   other machine, and what a session sends is signed with its id. `Peer.Spawn` is run only by a session (`parent` and
   `reportTo` are no longer fields; the session in `vibest-peer-by` is the creator), so `vibest run --machine` outside a
   session is refused. What a session
-  on the other machine sends to its creator arrives as a message (`<agent-message>` naming `<machine>/<id>`), not as a
+  on the other machine sends to its creator arrives as a message (`<vibest-agent-message>` naming `<machine>/<id>`), not as a
   notice; `Peer.Outbox` items and the read model's `outbox.kind` distinguish `send` from `notice` (instead of `result`
   or `notice`).
 - **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
