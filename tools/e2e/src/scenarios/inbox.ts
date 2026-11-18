@@ -45,7 +45,7 @@ interface Taken {
   execution: number
   ids: Array<number>
   content: string
-  display: Array<unknown>
+  detail: Array<unknown>
 }
 
 type Entry = { id: string; agent: string }
@@ -449,7 +449,7 @@ const checks: ReadonlyArray<Check> = [
           execution: 0,
           ids: [],
           content: "",
-          display: [],
+          detail: [],
         }
 
         await until(

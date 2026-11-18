@@ -54,26 +54,26 @@ export const InboxRow = Schema.Struct({
 
 export type InboxRow = typeof InboxRow.Type
 
-export const DisplayAgent = Schema.Struct({
-  agent: Schema.String,
-  title: Schema.String,
-  session: Schema.String,
+export const Detail = Schema.Struct({
+  sender: Schema.Union([
+    Schema.Struct({
+      agent: Schema.String,
+      title: Schema.String,
+      session: Schema.String,
+    }),
+    Schema.Literal("vibest"),
+    Schema.Literal("user"),
+  ]),
+  message: Schema.String,
 })
 
-export type DisplayAgent = typeof DisplayAgent.Type
-
-export const DisplayEntry = Schema.Struct({
-  sender: Schema.Union([DisplayAgent, Schema.Literal("vibest")]),
-  preview: Schema.String,
-})
-
-export type DisplayEntry = typeof DisplayEntry.Type
+export type Detail = typeof Detail.Type
 
 export const Taken = Schema.Struct({
   execution: Schema.Number,
   ids: Schema.Array(Schema.Number),
   content: Schema.String,
-  display: Schema.Array(DisplayEntry),
+  detail: Schema.Array(Detail),
 })
 
 export type Taken = typeof Taken.Type

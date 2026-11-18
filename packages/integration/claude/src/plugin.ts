@@ -14,16 +14,26 @@ export const REPORT_TRY_MS = 10_000
 export const UNREACHABLE = "vibestd unreachable; the tool call is refused."
 export const FULL_MAX = 100
 
+const PREVIEW = 120
+
 const titled = (agent: string) => (agent === "" ? "" : `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`)
 
-export const shown = (display: Taken["display"]) =>
-  display
-    .map((entry) =>
-      entry.sender === "vibest"
-        ? `Message from Vibest\n${entry.preview}`
-        : `Message from @${titled(entry.sender.agent)} · ${entry.sender.title} (${entry.sender.session.slice(0, 8)})\n${entry.preview}`,
-    )
-    .join("\n\n")
+const clip = (s: string) => {
+  const cps = [...s]
+
+  return cps.length <= PREVIEW ? s : `${cps.slice(0, PREVIEW - 1).join("")}…`
+}
+
+const head = (sender: Taken["detail"][number]["sender"]) => {
+  if (sender === "vibest") return "Message from Vibest"
+
+  if (sender === "user") return "Message from You"
+
+  return `Message from @${titled(sender.agent)} · ${sender.title} (${sender.session.slice(0, 8)})`
+}
+
+export const shown = (detail: Taken["detail"]) =>
+  detail.map((entry) => `${head(entry.sender)}\n${clip(entry.message.trim().split("\n")[0] ?? "")}`).join("\n\n")
 
 type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
@@ -266,7 +276,7 @@ export function register(on: On) {
       const host = nativeHost($)
       draining = true
       queue.shift()
-      const line = shown(batch.display)
+      const line = shown(batch.detail)
       keep(line, batch)
       await host.submit(line).then(
         (r) => {

@@ -1,4 +1,4 @@
-import type { DisplayEntry, HarnessId } from "@vibest/schema/session"
+import type { Detail, HarnessId } from "@vibest/schema/session"
 import { Option, Predicate, Schema } from "effect"
 
 import type { HarnessDefinition } from "./plugin/domains.ts"
@@ -65,45 +65,21 @@ const ENVELOPED =
 
 export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? rendered
 
-const PREVIEW = 120
-
-const clip = (s: string, max: number) => {
-  const cps = [...s]
-
-  return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
-}
-
-const firstLine = (message: string) => unwrapped(message).trim().split("\n")[0] ?? ""
-
-export const displayOf = (
+export const detailOf = (
   batch: ReadonlyArray<{ readonly kind: string; readonly sender?: string | null; readonly message: string }>,
   who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
-): ReadonlyArray<DisplayEntry> => {
-  const entries: Array<DisplayEntry> = []
-  const seen = new Set<string>()
+): ReadonlyArray<Detail> =>
+  batch.map((row) => {
+    const message = unwrapped(row.message)
 
-  for (const row of batch) {
-    const key = row.kind === "notice" ? "vibest" : (row.sender ?? "")
+    if (row.kind === "notice") return { sender: "vibest", message }
 
-    if (seen.has(key)) continue
-    seen.add(key)
-    const preview = clip(firstLine(row.message), PREVIEW)
+    if (row.sender == null || row.sender === "") return { sender: "user", message }
 
-    if (row.kind === "notice") {
-      entries.push({ sender: "vibest", preview })
-      continue
-    }
+    const session = who(row.sender)
 
-    const session = who(row.sender ?? "")
-
-    entries.push({
-      sender: { agent: session?.agent ?? "", title: session?.title ?? "", session: row.sender ?? "" },
-      preview,
-    })
-  }
-
-  return entries
-}
+    return { sender: { agent: session?.agent ?? "", title: session?.title ?? "", session: row.sender }, message }
+  })
 
 export type ObservedEnd = {
   readonly harness: HarnessId

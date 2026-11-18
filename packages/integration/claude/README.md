@@ -14,7 +14,7 @@ vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibe
   refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is refused.
 - The **inbox**: from `session.start`, a session asks `/inbox/take` every second while it is idle (after `session.start`
   and `turn.complete`, never while an execution runs). A batch comes with its execution id,
-  the two-line form (`Message from @General · <title> (<id>)` then the preview; a notice is `Message from Vibest`) and its full text. The line is submitted with
+  the two-line form (`Message from @General · <title> (<id>)` then the first line; a notice is `Message from Vibest`, a user send is `Message from You`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`
   hook attaches the full text as context. This module's own `prompt.submit` hook reports the batch's execution as accepted
   (`PromptSubmit` with `origin: "vibest"` and the execution id) before the prompt goes on; a

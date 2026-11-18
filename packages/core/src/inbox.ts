@@ -9,7 +9,7 @@ import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { Harnesses } from "./harnesses.ts"
 import * as Reactor from "./reactor.ts"
-import { displayOf } from "./replies.ts"
+import { detailOf } from "./replies.ts"
 import { agentState, alive, RuntimeError, type Runtime } from "./runtimes.ts"
 
 export * as Inbox from "./inbox.ts"
@@ -123,7 +123,7 @@ export const layer = Layer.effect(
         execution: taken.execution,
         ids: taken.rows.map((r) => r.id),
         content: content(taken.rows),
-        display: displayOf(taken.rows, (id) => who.get(id)),
+        detail: detailOf(taken.rows, (id) => who.get(id)),
       } satisfies Taken
     })
 

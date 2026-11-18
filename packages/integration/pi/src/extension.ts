@@ -212,7 +212,7 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
               customType: "vibest",
               content: taken.content,
               display: true,
-              details: { execution: taken.execution, display: taken.display },
+              details: { execution: taken.execution, detail: taken.detail },
             },
             { triggerTurn: true },
           )

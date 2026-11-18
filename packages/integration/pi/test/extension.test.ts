@@ -268,7 +268,7 @@ describe("pi-vibest", () => {
           display: true,
           details: {
             execution: executionOf(s.messages[0]!.message),
-            display: [{ sender: "vibest", preview: "survives the gap" }],
+            detail: [{ sender: "vibest", message: "survives the gap" }],
           },
         })
         assert.deepStrictEqual(notes, [])

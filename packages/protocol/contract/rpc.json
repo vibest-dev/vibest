@@ -2766,7 +2766,7 @@
               "content": {
                 "type": "string"
               },
-              "display": {
+              "detail": {
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -2798,16 +2798,22 @@
                           "enum": [
                             "vibest"
                           ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "user"
+                          ]
                         }
                       ]
                     },
-                    "preview": {
+                    "message": {
                       "type": "string"
                     }
                   },
                   "required": [
                     "sender",
-                    "preview"
+                    "message"
                   ],
                   "additionalProperties": true
                 }
@@ -2817,7 +2823,7 @@
               "execution",
               "ids",
               "content",
-              "display"
+              "detail"
             ],
             "additionalProperties": true
           },
