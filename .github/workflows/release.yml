@@ -1,13 +1,19 @@
 name: Release
 
 # The only way to release (.agents/rules/release.md, which also lists the GitHub and npm settings it needs). Trunk-based:
-# main never carries a release version; its package.json files hold the development version 0.0.1-dev, and the tag
+# main never carries a release version; its package.json files hold the development version 0.0.2-dev, and the tag
 # v<version> is the only record of a release. The owner starts this workflow on main from the Actions page, or
-#   gh workflow run release.yml -R vibest-dev/vibest --ref main [-f commit=<sha>] [-f version=<exact version>]
+#   gh workflow run release.yml -R vibest-dev/vibest --ref main [-f commit=<sha>] [-f bump=beta|patch|minor|major]
+#     [-f version=<exact version>] [-f release_notes=<markdown>]
 # commit: the known-good commit of main to release, empty for main's head; it must be an ancestor of main. Every job
-# builds, verifies, tags and publishes exactly that commit. version: empty for the next beta after the highest
-# v<x.y.z>-beta.<n> tag, or an exact beta version. The run sets it in every package.json of its own checkout only. A
-# CHANGELOG.md section for it is optional. Beta only for now (.agents/rules/release.md says what stable will need).
+# builds, verifies, tags and publishes exactly that commit. The version comes from the tags only: bump beta (the
+# default) is the next x.y.z-beta.n after the highest tag; patch, minor and major bump the highest stable tag (with no
+# stable yet, the base of the highest beta: 0.0.1-beta.20 with patch is 0.0.1). version overrides the bump with an exact
+# version. Either way it must be newer than every release: x.y.z-beta.n is a beta, x.y.z is stable. bumpp sets it in
+# every package.json of VERSIONED, in each job's own checkout only. A stable release needs notes (release_notes, or a
+# CHANGELOG.md section for the version); a beta's are optional. A stable release goes to npm's `latest` and is GitHub's
+# Latest release; a beta goes to npm's `beta` and is a GitHub prerelease, so Latest is always the newest stable
+# (.agents/rules/release.md section 4).
 # Started by hand, not by a push to main: the owner chooses when. The file name stays release.yml: npm trusted
 # publishing binds each package to it.
 # It never pushes to main. plan decides the commit and the version. The release gate is pnpm verify, whose stages run as
@@ -19,7 +25,7 @@ name: Release
 # the same tarballs; it records the SHA-256 of the archive. publish waits for every job and for the owner's approval
 # (environment `release`), checks those hashes, tags that commit v<version> (GITHUB_TOKEN; no ruleset covers tags),
 # publishes exactly those npm tarballs and makes the GitHub Release from exactly those archives (notes from
-# CHANGELOG.md when it has this version, else GitHub's). Nothing is rebuilt after verify checked it.
+# release_notes, else CHANGELOG.md when it has this version, else GitHub's). Nothing is rebuilt after verify checked it.
 # Recovery: a release that stopped partway is finished by re-running the failed publish job of the same run (its
 # artifacts are kept 90 days). It keeps what is already done when it is exactly what this run would do, and fails on
 # anything else. A new run builds new bytes: it refuses a version that is already tagged.
@@ -35,8 +41,19 @@ on:
         required: false
         default: ""
         type: string
+      bump:
+        description: "beta: the next x.y.z-beta.n after the highest tag; patch, minor, major: a stable x.y.z from the highest stable tag"
+        required: true
+        default: beta
+        type: choice
+        options: [beta, patch, minor, major]
       version:
-        description: "An exact beta version (0.0.1-beta.20); empty: the next beta after the highest v*-beta.N tag"
+        description: "An exact version instead of the bump, beta (0.1.0-beta.2) or stable (0.1.0)"
+        required: false
+        default: ""
+        type: string
+      release_notes:
+        description: "The release notes (markdown); a stable release needs these or a CHANGELOG.md section for its version"
         required: false
         default: ""
         type: string
@@ -85,6 +102,7 @@ jobs:
       sha: ${{ steps.commit.outputs.sha }}
       version: ${{ steps.version.outputs.version }}
       dist_tag: ${{ steps.version.outputs.dist_tag }}
+      channel: ${{ steps.version.outputs.channel }}
     steps:
       - name: Release only from main
         if: ${{ !inputs.dry_run && github.ref != 'refs/heads/main' }}
@@ -115,7 +133,9 @@ jobs:
         id: version
         env:
           DRY_RUN: ${{ inputs.dry_run }}
+          BUMP: ${{ inputs.bump }}
           INPUT: ${{ inputs.version }}
+          NOTES: ${{ inputs.release_notes }}
         run: |
           repo="https://github.com/$GITHUB_REPOSITORY.git"
           same() {
@@ -125,25 +145,58 @@ jobs:
             done
           }
           same "$(node -p 'require("./packages/cli/package.json").version')"
-          # The newest release: a new one follows it, so Latest and the beta dist-tag never move backwards.
-          last=$(git ls-remote --tags "$repo" 'v*-beta.*' \
-            | sed -n 's#^[0-9a-f]*\trefs/tags/v\([0-9]*\.[0-9]*\.[0-9]*-beta\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
+          # The newest of the release versions on stdin (x.y.z and x.y.z-beta.n; a release sorts after its betas).
+          newest() {
+            sed -n -e 's/^\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\)$/\1 \2 \3 1 0 &/p' \
+              -e 's/^\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\)-beta\.\([0-9][0-9]*\)$/\1 \2 \3 0 \4 &/p' \
+              | sort -n -k1,1 -k2,2 -k3,3 -k4,4 -k5,5 | tail -n 1 | cut -d' ' -f6
+          }
+          tags=$(git ls-remote --tags "$repo" 'v*' | sed -n 's#^[0-9a-f]*\trefs/tags/v\([^^]*\)$#\1#p')
+          # The newest release of either channel: a new one follows it, so Latest and the dist-tags never move backwards.
+          last=$(newest <<<"$tags")
           if [ -n "$INPUT" ]; then
             version=$INPUT
-            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
-              echo "::error::$version is not a beta version (x.y.z-beta.n); stable releases are not supported yet"; exit 1
-            fi
-            if [ -n "$last" ] && [ "$version" != "$last" ] \
-              && [ "$(printf '%s\n%s\n' "$last" "$version" | sort -V | tail -n 1)" != "$version" ]; then
-              echo "::error::$version is older than the newest release, $last"; exit 1
-            fi
+          elif [ "$BUMP" = beta ]; then
+            if [ -z "$last" ]; then echo "::error::no release tag to follow; pass -f version=<version>"; exit 1; fi
+            case "$last" in
+              *-beta.*) version="${last%.*}.$((${last##*.} + 1))" ;;
+              *) version="${last%.*}.$((${last##*.} + 1))-beta.0" ;;
+            esac
           else
-            if [ -z "$last" ]; then echo "::error::no v<x.y.z>-beta.<n> tag to follow; pass -f version=<version>"; exit 1; fi
-            version="${last%.*}.$((${last##*.} + 1))"
+            from=$(grep -v -e '-' <<<"$tags" | newest || true)
+            if [ -z "$from" ]; then
+              base=${last%-beta.*}
+              if [ -z "$base" ]; then echo "::error::no release tag to bump; pass -f version=<version>"; exit 1; fi
+              IFS=. read -r major minor patch <<<"$base"
+              case "$BUMP" in
+                major) [ "$minor.$patch" = 0.0 ] || major=$((major + 1)); minor=0 patch=0 ;;
+                minor) [ "$patch" = 0 ] || minor=$((minor + 1)); patch=0 ;;
+              esac
+            else
+              IFS=. read -r major minor patch <<<"$from"
+              case "$BUMP" in
+                major) major=$((major + 1)) minor=0 patch=0 ;;
+                minor) minor=$((minor + 1)) patch=0 ;;
+                patch) patch=$((patch + 1)) ;;
+              esac
+            fi
+            version="$major.$minor.$patch"
           fi
-          # Beta only for now: under npm's `beta`, and as GitHub's Latest release (the installer and `vibest update`
-          # follow Latest).
-          dist_tag=beta
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+            channel=beta dist_tag=beta
+          elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            channel=stable dist_tag=latest
+          else
+            echo "::error::$version is neither a beta (x.y.z-beta.n) nor a stable version (x.y.z)"; exit 1
+          fi
+          if [ -n "$last" ] && [ "$version" != "$last" ] && [ "$(printf '%s\n%s\n' "$last" "$version" | newest)" != "$version" ]; then
+            echo "::error::$version is older than the newest release, $last; pass a newer -f version"; exit 1
+          fi
+          # A stable release says what changed: the release_notes input, or the CHANGELOG.md section headed with it.
+          section=$(awk -v v="$version" '/^## /{ h = $2; sub(/^v/, "", h); on = (h == v); next } on' CHANGELOG.md 2>/dev/null || true)
+          if [ "$channel" = stable ] && [ -z "${NOTES//[[:space:]]/}" ] && [ -z "${section//[[:space:]]/}" ]; then
+            echo "::error::the stable release $version needs notes: pass -f release_notes=<markdown>, or add a '## $version' section to CHANGELOG.md"; exit 1
+          fi
           # Released already: a dry run only warns, so it can run the gates on any branch. A release that stopped
           # partway is finished by re-running its publish job, not by a new run, which would build new bytes.
           level=error
@@ -161,9 +214,8 @@ jobs:
             echo "::$level::$version is released already (tag: ${tagged:-none}, npm: ${on_npm:-none}); choose another version, or re-run the failed publish job of the run that started this release"
             [ "$level" = warning ] || exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
-          echo "Release $version of $(git rev-parse HEAD) under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
+          { echo "version=$version"; echo "dist_tag=$dist_tag"; echo "channel=$channel"; } >> "$GITHUB_OUTPUT"
+          echo "Release $version ($channel) of $(git rev-parse HEAD) under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
 
   # The release gate is pnpm verify (tools/verify/src/verify.ts), whose stages run as parallel jobs on the same tree:
   # this job builds once (build, archive, pack) and keeps the bytes that ship; typecheck and test are jobs of their own;
@@ -327,14 +379,14 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
-      - uses: ./.github/actions/set-version
-        with:
-          version: ${{ env.VERSION }}
       - uses: actions/download-artifact@v4
         with:
           name: release
           path: ${{ runner.temp }}/release
       - uses: ./.github/actions/setup
+      - uses: ./.github/actions/set-version
+        with:
+          version: ${{ env.VERSION }}
       - run: pnpm run verify --no-cache H4 --keep-archive "$RUNNER_TEMP/darwin/github" --packs "$RUNNER_TEMP/release/npm"
       - name: Check the tarballs
         run: node tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
@@ -371,6 +423,7 @@ jobs:
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       DIST_TAG: ${{ needs.plan.outputs.dist_tag }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
       SHA: ${{ needs.plan.outputs.sha }}
     # Every step is safe to re-run after a release that stopped partway: it keeps what is already done when it is exactly
     # what this run would do, and fails on anything else.
@@ -441,28 +494,37 @@ jobs:
             npm publish "$npm_dir/$file" --provenance --tag "$DIST_TAG" --access public </dev/null
           done < "$npm_dir/publish-order"
 
-      # Marked latest, so the download URLs move to it: the beta is GitHub's Latest release, since the installer and
-      # `vibest update` follow Latest. Created as a draft with every asset, then published; a draft an earlier attempt
+      # A stable release is marked Latest, so releases/latest/download moves to it; a beta is a prerelease and leaves
+      # Latest alone, so Latest is always the newest stable (install.sh and `vibest update` read it for the stable
+      # channel). Created as a draft with every asset, then published; a draft an earlier attempt
       # left gets its missing assets. Every asset is downloaded and compared with the checked file before the release
       # is published or accepted; a published release is never changed.
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.plan.outputs.channel == 'beta' }}
+          NOTES: ${{ inputs.release_notes }}
         run: |
           files="$RUNNER_TEMP/release/github"
           if ! state=$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>"$RUNNER_TEMP/gh.err"); then
             grep -q 'release not found' "$RUNNER_TEMP/gh.err" || { cat "$RUNNER_TEMP/gh.err" >&2; exit 1; }
-            # The notes: the CHANGELOG.md section headed with this version when there is one, otherwise GitHub's
-            # generated notes. No section is required.
-            awk -v v="$VERSION" '/^## /{ h = $2; sub(/^v/, "", h); on = (h == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+            # The notes: release_notes, else the CHANGELOG.md section headed with this version, else GitHub's generated
+            # notes (plan refused a stable release without the first two).
+            if [ -n "${NOTES//[[:space:]]/}" ]; then
+              printf '%s\n' "$NOTES" > "$RUNNER_TEMP/notes.md"
+            else
+              awk -v v="$VERSION" '/^## /{ h = $2; sub(/^v/, "", h); on = (h == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+            fi
             if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then notes=(--notes-file "$RUNNER_TEMP/notes.md"); else notes=(--generate-notes); fi
-            gh release create "v$VERSION" "$files"/* -R "$GITHUB_REPOSITORY" --draft \
+            gh release create "v$VERSION" "$files"/* -R "$GITHUB_REPOSITORY" --draft --prerelease="$PRERELEASE" \
               --title "vibest $VERSION" --verify-tag "${notes[@]}"
             state=true
           fi
           info=$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets)
           test "$(jq -r .tagName <<<"$info")" = "v$VERSION"
-          if [ "$(jq -r .isPrerelease <<<"$info")" = true ]; then echo "::error::v$VERSION is a prerelease; the beta is released as Latest"; exit 1; fi
+          if [ "$(jq -r .isPrerelease <<<"$info")" != "$PRERELEASE" ]; then
+            echo "::error::v$VERSION has prerelease $(jq -r .isPrerelease <<<"$info"); a $CHANNEL release has prerelease $PRERELEASE"; exit 1
+          fi
           have=$(jq -r '.assets[].name' <<<"$info" | LC_ALL=C sort)
           want=$(find "$files" -type f -exec basename {} \; | LC_ALL=C sort)
           extra=$(comm -23 <(echo "$have") <(echo "$want"))
@@ -476,7 +538,7 @@ jobs:
           gh release download "v$VERSION" -R "$GITHUB_REPOSITORY" -D "$got" --clobber
           for f in $want; do cmp "$files/$f" "$got/$f" || { echo "::error::the $f of v$VERSION is not the checked file"; exit 1; }; done
           if [ "$state" = true ]; then
-            gh release edit "v$VERSION" -R "$GITHUB_REPOSITORY" --draft=false --latest
+            gh release edit "v$VERSION" -R "$GITHUB_REPOSITORY" --draft=false --latest="$([ "$CHANNEL" = stable ] && echo true || echo false)"
           else
             echo "v$VERSION is published with exactly the checked assets; kept"
           fi

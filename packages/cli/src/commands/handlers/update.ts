@@ -1,11 +1,11 @@
 import { described, importCheck, readPing, runCaptured } from "@vibest/client/client"
-import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/client/release"
+import { channelOf, compareVersions, installMethod, latestOf, UpdateError } from "@vibest/client/release"
 import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
 import { Config, Console, Duration, Effect, FileSystem, Match, Option } from "effect"
 
 import { userOnly } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
-import { compareVersions, replaceAnyway, type Target, versionOf } from "../../replace.ts"
+import { replaceAnyway, type Target, versionOf } from "../../replace.ts"
 import {
   daemonPlan,
   extraVibests,
@@ -19,9 +19,12 @@ import {
 import { VERSION } from "../../version.ts"
 import { Commands } from "../commands.ts"
 
-export default Runtime.handler(Commands.commands.update, ({ yes, restartAgentsAfter }) =>
+export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, restartAgentsAfter }) =>
   Effect.gen(function* () {
     yield* userOnly("update")
+
+    if (beta && stable)
+      return yield* new UpdateError({ message: "--beta and --stable choose opposite channels; pass one" })
 
     if (Option.isSome(restartAgentsAfter))
       return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
@@ -39,16 +42,20 @@ export default Runtime.handler(Commands.commands.update, ({ yes, restartAgentsAf
     if (method === undefined)
       yield* Console.log(`this vibest (${self.join(" ")}) was not installed by npm or install.sh; nothing to install.`)
     else {
-      const releases = yield* releasesUrl
-      const latest = yield* latestOf(method)
+      const channel = beta ? "beta" : stable ? "stable" : channelOf(VERSION)
+      const found = yield* latestOf(method, channel)
+      const latest = found.version
 
-      if (compareVersions(VERSION, latest) >= 0) yield* Console.log(`vibest is already up to date (v${VERSION}).`)
+      if (compareVersions(VERSION, latest) >= 0)
+        yield* Console.log(
+          `vibest is already up to date (v${VERSION}).${latest === VERSION ? "" : ` The newest ${channel === "stable" ? "stable release" : "release"} is ${latest}.`}`,
+        )
       else {
         yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
         const fs = yield* FileSystem.FileSystem
         const real = yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!))
 
-        const installSh = (env: Record<string, string>) =>
+        const installSh = (releases: string, env: Record<string, string>) =>
           [
             ["sh", "-c", 'script=$(curl -fsSL "$0/install.sh") && printf \'%s\\n\' "$script" | sh', releases],
             { VIBEST_DOWNLOAD_URL: releases, ...env },
@@ -59,9 +66,9 @@ export default Runtime.handler(Commands.commands.update, ({ yes, restartAgentsAf
             const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-update-" })
 
             const [argv, env] =
-              method.kind === "npm"
-                ? [stageCommand(real, dir, latest), {}]
-                : installSh({ VIBEST_INSTALL: `${dir}/share`, VIBEST_BIN: `${dir}/bin` })
+              found.kind === "curl"
+                ? installSh(found.releases, { VIBEST_INSTALL: `${dir}/share`, VIBEST_BIN: `${dir}/bin` })
+                : [stageCommand(real, dir, latest), {}]
 
             const staged = [method.kind === "npm" ? `${dir}/node_modules/.bin/vibest` : `${dir}/bin/vibest`]
             const fetched = yield* runCaptured(argv, Duration.minutes(5), env)
@@ -88,7 +95,9 @@ export default Runtime.handler(Commands.commands.update, ({ yes, restartAgentsAf
         }
 
         const [installArgv, installEnv] =
-          method.kind === "npm" ? [upgradeCommand(real, latest), {}] : installSh({ VIBEST_INSTALL: method.share })
+          method.kind === "curl" && found.kind === "curl"
+            ? installSh(found.releases, { VIBEST_INSTALL: method.share })
+            : [upgradeCommand(real, latest), {}]
 
         yield* runInherit(installArgv, installEnv).pipe(
           Effect.mapError((e) => new UpdateError({ message: `${e.message}; vibestd not attempted` })),

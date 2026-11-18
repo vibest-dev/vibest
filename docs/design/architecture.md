@@ -312,7 +312,7 @@ optional `## Remember`. The recipient gets it as:
 
 ```
 <agent-message>
-<agent-id>agt_…</agent-id> <title>…</title>
+<agent-id>agt_…</agent-id>
 <message>what the agent sent</message>
 </agent-message>
 ```

@@ -113,21 +113,13 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         return found !== undefined && !archived(found)
       })
 
-    const renderedSend = (sender: string | undefined, message: string) =>
-      Effect.gen(function* () {
-        if (sender === undefined) return message
-        const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sender}`
-
-        return sessionEnvelope({ id: sender, title: from?.name }, message)
-      })
-
     const queueSend = (recipient: string, sender: string | undefined, message: string, request?: string) =>
       Effect.gen(function* () {
         const id = yield* queueInbox({
           recipient,
           kind: "send",
           sender: sender ?? null,
-          content: yield* renderedSend(sender, message),
+          content: sender === undefined ? message : sessionEnvelope(sender, message),
           status: "pending",
           request,
         })

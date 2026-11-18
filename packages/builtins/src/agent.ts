@@ -30,7 +30,6 @@ Format:
 \`\`\`xml
 <agent-message>
 <agent-id>{id}</agent-id>
-<title>{the agent's name}</title>
 <message>
 {what the agent sent}
 </message>
