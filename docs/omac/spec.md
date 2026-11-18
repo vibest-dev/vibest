@@ -453,7 +453,7 @@ Cursor lacks system prompt parameter; prepends full rules text to first prompt.
 - Session `idle` and `turn_state` not `open`: dispatches `prompt` directly; otherwise stays in inbox, delivered when session becomes idle.
 - Session exited (`agent.get` missing) but worktree intact: reopens workspace via `worktree.open`, creates new pane via `tab.create` with env, closes root pane, starts agent via HarnessAdapter resume args, then prompts.
   Codex / Cursor exiting without session id cannot be resumed (Cursor has one once it has produced a result: `conversation_id` from the hook input, accepted only if it matches `\w[\w.:-]{0,127}`, so it cannot look like a flag).
-- An accepted message is either delivered or finalized (`failed`) with a `notice` to the session's owner (`A message to <id> was not delivered: <reason>` + original text, details carry `messageIds`), notified only once per message; the owner decides whether to resend. Before delivery the batch is set to `sending`:
+- An accepted message is either delivered or finalized (`failed`) with a `notice` to the session's owner (`A message to <short id> (<title>) was not delivered: <reason>` + original text, details carry `messageIds`), notified only once per message; the owner decides whether to resend. Before delivery the batch is set to `sending`:
   - herdr rejects, session not ready, prompt not registered: finalize the batch; when herdr rejects, the turn this prompt opened is withdrawn (`not_started`, session back to idle), later messages delivered as usual;
   - herdr unreachable before handoff (`HerdrTransportError` / `HerdrUnreachable`): stays `pending`, retried on next `check`, messages arriving meanwhile delivered together;
   - connection drops after handoff, or omacd stops mid-handoff (sees `sending` rows after restart): unknown whether it arrived, finalize noting "may have been delivered", **no blind re-send** (owner is informed). "No re-send" here only means omacd will not deliver the same row again on a later check or after restart; the confirmation inside a single prompt (8.3) presses Enter and re-pastes once when events lag, so the session may still receive it twice; this is not global at-most-once;
@@ -468,7 +468,7 @@ For each session with `turn_state=open`, evaluated upon herdr event, `ResultRead
 
 1. Result file `mtime > t0` → read text, execute `finish` (completed; failed if hook reported error).
 2. `agent.get` reports missing → execute `finish('', error='agent exited')` (failed), with bottom 30 lines.
-3. `agent_status == blocked` → update status to blocked, deliver one-time `notice` to owner ("<id> (<harness>) has been waiting for a permission decision since <HH:MM>. Run vibest peek <id> to see the request."), without answering automatically.
+3. `agent_status == blocked` → update status to blocked, deliver one-time `notice` to owner ("<short id> (<title>) (<harness>) is waiting for a permission decision since <HH:MM>; vibest peek <short id> shows the request"), without answering automatically.
 4. `agent_status ∈ {idle, done}` and `state_change_seq > seq0` → record `endedAt`;
    if `now - endedAt > 10s` without result file: execute `finish('', error='the turn ended without a report …')` (lost), naming `vibest peek <id>`, never the screen (usually harness errors without hooks, e.g. Codex quota / wrong model). No screen scraping for results.
 5. `unknown` does not count as completed.

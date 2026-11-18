@@ -139,7 +139,7 @@ export const make = Effect.gen(function* () {
 
         const all = reported.length === 0 ? "" : ` (${reported.join(", ")} limited)`
 
-        return `no harness left for ${row.id}: ${mine.join(", ")} hit a usage limit${other} and no other candidate is available${all}`
+        return `no harness left: ${mine.join(", ")} hit a usage limit${other} and no other candidate is available${all}`
       })
 
     const giveUp = (why: string) =>
@@ -167,7 +167,7 @@ export const make = Effect.gen(function* () {
           yield* finish(
             fresh,
             "failed",
-            `${fresh.id} stopped after a usage limit, but closing its terminal failed (${errorMessage(closed.cause)})`,
+            `stopped after a usage limit, but closing its terminal failed (${errorMessage(closed.cause)})`,
           )
 
           return false
@@ -300,7 +300,7 @@ export const make = Effect.gen(function* () {
 
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
-          yield* finish(row, "failed", `${row.id} stayed on ${harnessIdOf(row)}: SIGTERM to its harness was refused`)
+          yield* finish(row, "failed", `stayed on ${harnessIdOf(row)}: SIGTERM to its harness was refused`)
 
           return false
         }
@@ -311,7 +311,7 @@ export const make = Effect.gen(function* () {
           yield* finish(
             row,
             "failed",
-            `${row.id} stayed on ${harnessIdOf(row)}: closing its terminal failed (${errorMessage(closed.cause)})`,
+            `stayed on ${harnessIdOf(row)}: closing its terminal failed (${errorMessage(closed.cause)})`,
           )
 
           return false
@@ -372,7 +372,7 @@ export const make = Effect.gen(function* () {
           yield* finish(
             row,
             "failed",
-            `${row.id} stopped after a usage limit, but placing the next pane failed (${errorMessage(placed.cause)})`,
+            `stopped after a usage limit, but placing the next pane failed (${errorMessage(placed.cause)})`,
           )
 
           if (gone || inPlace) yield* exited(row.id, "move")

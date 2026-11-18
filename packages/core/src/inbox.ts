@@ -1,4 +1,5 @@
 import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued } from "@vibest/schema/event"
+import { sessionLabel } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
@@ -128,7 +129,7 @@ export const layer = Layer.effect(
             Effect.forEach(
               [...Map.groupBy(rows, (r) => (r.kind === "send" ? (r.sender ?? null) : null))],
               ([sender, group]) => {
-                const message = `A message to ${session.id} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
+                const message = `A message to ${sessionLabel(session)} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
 
                 return sender === null
                   ? db.inbox.insertInbox({ sessionId: session.id, message })

@@ -1,3 +1,4 @@
+import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
 import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
 
@@ -12,7 +13,6 @@ import {
   sessionState,
   type AgentState,
   paneTail,
-  peekHint,
   type Runtime,
   stateOf,
   type Terminal,
@@ -81,7 +81,7 @@ export const make = Effect.gen(function* () {
                   Effect.fail(
                     new NotReady({
                       id,
-                      message: `${id} did not become ready in ${Duration.format(READY_TIMEOUT)} (a startup dialog vibest could not answer? open ${adapter.id} once in the repository and accept it)`,
+                      message: `did not become ready in ${Duration.format(READY_TIMEOUT)} (a startup dialog vibest could not answer? open ${adapter.id} once in the repository and accept it)`,
                     }),
                   ),
                 ),
@@ -261,7 +261,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed
 
-    return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
+    return `${sessionLabel(session)} did not start working on the message`
   }, Effect.scoped)
 
   const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
@@ -307,14 +307,14 @@ export const make = Effect.gen(function* () {
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* db.session.closeExecution(session.id, execution, "not_started")
 
-    return `task_not_started: ${session.id} did not start working on the message it was started with; ${peekHint(session.id)}`
+    return `${sessionLabel(session)} did not start working on its first message`
   })
 
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
     yield* db.session.endExecution(
       session.id,
       { outcome: end, failure: { message: error } },
-      `${session.id}'s execution ended with an error: ${error}`,
+      `${sessionLabel(session)} ended its execution with an error: ${error}`,
     )
   })
 

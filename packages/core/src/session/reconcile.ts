@@ -1,5 +1,5 @@
 import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
-import { shortId } from "@vibest/schema/id"
+import { sessionLabel } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
@@ -20,7 +20,7 @@ import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
-import { agentState, alive, paneTail, peekHint, reportedWhenUnknown, Runtimes, stateOf } from "../runtimes.ts"
+import { agentState, alive, paneTail, reportedWhenUnknown, Runtimes, stateOf } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
 import { CONFIRM_TIMEOUT } from "./executions.ts"
@@ -140,12 +140,12 @@ export const make = Effect.gen(function* () {
     const unstarted = !worked && (idle || inbox.pulls(harnessIdOf(session)))
 
     if (unstarted && unconfirmed <= 0) {
-      const reason = `vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected)`
+      const reason = "its start was not confirmed; it may still run, but a late reply is not collected"
 
       const closed =
         execution !== undefined &&
         (yield* db.session.closeExecution(id, execution, "not_started", {
-          notice: `task_not_started: ${reason}; it is idle and takes queued messages again.`,
+          notice: `${sessionLabel(session)} did not start the execution it was sent; it is idle and takes queued messages again (if it starts late, that reply is not collected)`,
         }))
 
       if (closed && execution !== undefined)
@@ -164,7 +164,7 @@ export const make = Effect.gen(function* () {
         const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
         yield* notice(
           session,
-          `${shortId(id)} (${harnessIdOf(session)}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${shortId(id)} to see the request.`,
+          `${sessionLabel(session)} (${harnessIdOf(session)}) is waiting for a permission decision since ${hhmm}`,
         )
       }
 
@@ -181,10 +181,10 @@ export const make = Effect.gen(function* () {
 
     if (execution === undefined) return
     yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
-    const failure = `the execution ended without a reply: the harness stopped without firing its execution-end hook (an error it has no hook for, such as a usage limit?); ${peekHint(id)}`
+    const failure = `the harness stopped without its end hook (a usage limit?)`
     yield* db.session.closeExecution(id, execution, "lost", {
       failure,
-      notice: `${id}'s execution ended with an error: ${failure}`,
+      notice: `${sessionLabel(session)} ended its execution with an error: ${failure}`,
     })
   })
 
