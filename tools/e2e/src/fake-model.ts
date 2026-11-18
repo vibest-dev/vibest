@@ -134,7 +134,7 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
       return reply("ok")
     }
 
-    if (body.includes("<agent-")) {
+    if (body.includes("<vibest-agent-message>")) {
       if (body.includes("done-zero")) return bash(`vibest run ${sub} -- '${ask("one")}'`)
 
       if (body.includes("done-one")) return bash(`vibest send ${sessionId} -- '${ask("two")}'`)
@@ -162,7 +162,7 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
         await Bun.sleep(options.heldMs)
         const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
 
-        if (marker !== undefined && (creatorIn(system) !== undefined || !text(last).includes("<agent-")))
+        if (marker !== undefined && (creatorIn(system) !== undefined || !text(last).includes("<vibest-agent-message>")))
           answered.push({ marker, from, to: Date.now() })
       }
 
@@ -196,7 +196,9 @@ export const heldModel = () => {
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const last = text(messages.at(-1))
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
-      const task = creatorIn(system) === undefined && last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
+
+      const task =
+        creatorIn(system) === undefined && last.includes("<vibest-agent-message>") ? null : /done-(\w+)/.exec(last)
 
       if (!task) return new Response(reply("ok"), { headers: sseHeaders })
       requestsPerTask.set(task[1]!, (requestsPerTask.get(task[1]!) ?? 0) + 1)
@@ -259,7 +261,7 @@ export const holdsSlowMessageModel = () => {
       const last = text(messages.at(-1))
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
 
-      if (creatorIn(system) === undefined && last.includes("<agent-") && last.includes("done-slow"))
+      if (creatorIn(system) === undefined && last.includes("<vibest-agent-message>") && last.includes("done-slow"))
         return new Response(
           new ReadableStream({
             start: (c) =>
@@ -347,7 +349,7 @@ export const fakeOpenAI = (
       const last = messages.at(-1)
 
       const mainExecutionNotStartedBySubagentMessage =
-        who === "main" && tools.length === 0 && !text(last).includes("<agent-")
+        who === "main" && tools.length === 0 && !text(last).includes("<vibest-agent-message>")
 
       if (who === undefined || mainExecutionNotStartedBySubagentMessage)
         return new Response(answer("ok"), { headers: sseHeaders })

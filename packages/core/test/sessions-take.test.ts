@@ -241,7 +241,7 @@ describe.concurrent("an idle session takes its next batch", () => {
           message: "report from afar",
         },
       ])
-      assert.isTrue(taken?.content.includes("<agent-message>") === true)
+      assert.isTrue(taken?.content.includes("<vibest-agent-message>") === true)
       assert.isTrue(taken?.content.includes("report from afar") === true)
     }),
   )

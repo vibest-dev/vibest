@@ -7,7 +7,6 @@ import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { EXECUTIONS, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { session, place } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Catalog, type FactType } from "@vibest/schema/event"
 import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -639,7 +638,7 @@ describe("Db", () => {
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             message: "n",
           })
-          yield* db.session.clearEntry(yield* db.session.processesAt(RUNTIME, place.address))
+          yield* db.session.endExited(entry.sessionId, "exited", undefined)
           assert.strictEqual(yield* noticeStatus("n"), "dropped")
         }),
       ),
@@ -660,25 +659,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a terminal exit bound to the entry session's earlier process leaves the process started since running",
-    () =>
-      memory(
-        Effect.gen(function* () {
-          const db = yield* Db.Service
-          const project = yield* projectOf("r")
-          yield* db.session.startEntry(project, "claude", false, place, ENTRY)
-          const exited = yield* db.session.processesAt(RUNTIME, place.address)
-          yield* db.session.startEntry(project, "claude", false, place, ENTRY)
-          yield* db.session.clearEntry(exited)
-          assert.strictEqual(yield* db.session.entryAt(RUNTIME, place.address), project)
-          yield* db.session.clearEntry(yield* db.session.processesAt(RUNTIME, place.address))
-          assert.isUndefined(yield* db.session.entryAt(RUNTIME, place.address))
-        }),
-      ),
-  )
-
-  it.effect(
-    "a subagent resumes only after its execution ends; the entry session resumes a conversation the harness reported",
+    "a subagent resumes once the harness has taken an input or an execution of it has ended; the entry session resumes a conversation the harness reported",
     () =>
       memory(
         Effect.gen(function* () {
@@ -688,10 +669,18 @@ describe("Db", () => {
             session(id, { harnessId: "claude", harnessSessionId: "pre" }),
             yield* projectOf("r"),
           )
+          const { execution } = yield* db.session.startExecution(id, 1)
           assert.isFalse(yield* db.session.canResumeConversation(id, "pre"))
-          yield* db.session.startExecution(id, 1)
-          yield* complete(db, id)
+          yield* db.session.acceptExecution(id, execution)
           assert.isTrue(yield* db.session.canResumeConversation(id, "pre"))
+          const ended = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+          yield* db.session.insertSession(
+            session(ended, { harnessId: "claude", harnessSessionId: "old" }),
+            yield* projectOf("r"),
+          )
+          yield* db.session.startExecution(ended, 1)
+          yield* complete(db, ended)
+          assert.isTrue(yield* db.session.canResumeConversation(ended, "old"))
           const entry = yield* db.session.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)
           assert.isFalse(yield* db.session.canResumeConversation(entry.sessionId, "c1"))
           yield* db.session.noteConversation(entry.sessionId, "c1")

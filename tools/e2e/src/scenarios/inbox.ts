@@ -553,11 +553,13 @@ const checks: ReadonlyArray<Check> = [
         await until("the entry session in vibest ls", async () => (await entryRows()).length === 1, 30_000)
 
         const reached = (what: string, marker: string) =>
-          until(what, () => model.seen.some((m) => m.includes("<agent-") && m.includes(marker)), 180_000).catch(
-            (e: Error) => {
-              throw new Error(`${e.message}; the entry session's model saw: ${JSON.stringify(model.seen, null, 1)}`)
-            },
-          )
+          until(
+            what,
+            () => model.seen.some((m) => m.includes("<vibest-agent-message>") && m.includes(marker)),
+            180_000,
+          ).catch((e: Error) => {
+            throw new Error(`${e.message}; the entry session's model saw: ${JSON.stringify(model.seen, null, 1)}`)
+          })
 
         await w.okViaEntry(["run", "pi", "--env", env, ask("zero")], { cwd: repo, timeoutMs: 60_000 })
         await reached("the entry session's execution on the first result", "done-zero")
@@ -592,7 +594,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S49",
     covers: ["S45"],
     title:
-      "a Pi subagent's vibest send to a Claude entry session (which polls) is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered; the entry session's conversation holds a line naming the subagent and an <agent-message> with its id and text",
+      "a Pi subagent's vibest send to a Claude entry session (which polls) is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered; the entry session's conversation holds a line naming the subagent and an <vibest-agent-message> with its id and text",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -659,7 +661,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const line = `Message from @General · Send probe (${sub.slice(0, 8)})\nhello-claude`
         await until(
-          "the line and the <agent-message> in the entry session's conversation",
+          "the line and the <vibest-agent-message> in the entry session's conversation",
           async () => {
             const entries = await transcript(w, c!.repo, c!.config)
 
@@ -669,7 +671,7 @@ const checks: ReadonlyArray<Check> = [
                 (e) =>
                   e.type === "attachment" &&
                   e.raw.includes("hook_additional_context") &&
-                  e.raw.includes("<agent-message>") &&
+                  e.raw.includes("<vibest-agent-message>") &&
                   e.raw.includes(sub) &&
                   e.raw.includes("hello-claude"),
               )

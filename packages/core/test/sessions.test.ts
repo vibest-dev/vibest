@@ -1,10 +1,14 @@
 import { assert, describe } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
+import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, startOf } from "@vibest/core/database/db-rows"
 import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
@@ -82,6 +86,88 @@ describe.concurrent("Session", () => {
       const now = (yield* db.session.getSession(id))!.process!
       assert.notStrictEqual(now.id, old.process!.id)
       assert.isNull(now.endedAt)
+    }),
+  )
+
+  test(
+    "an entry session whose harness the runtime no longer shows is ended by its check, which drops the messages waiting on it; while it moves, a check leaves it",
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      const entryId = yield* entryOfProject(repo)
+      const project = yield* projectOf(repo)
+      const address = { machine: "local", id: "test/coord" }
+      const waiting = (yield* db.inbox.insertSend(entryId, "waiting"))!
+      assert.isTrue(yield* db.session.detachEntry(project, RUNTIME, address))
+      const ended = () => Effect.map(db.session.getSession(entryId), (row) => row!.process!.endedAt)
+      yield* sessions.check(entryId)
+      assert.isNull(yield* ended())
+      yield* db.session.reattachEntry(project, RUNTIME, address)
+      yield* sessions.check(entryId)
+      assert.isNotNull(yield* ended())
+      assert.deepStrictEqual(
+        (yield* db.inbox.inboxWithStatus(entryId, "dropped")).map((row) => row.id),
+        [waiting.id],
+      )
+    }),
+  )
+
+  test(
+    "a terminal exit bound to an entry session's new process after an in-place restart leaves it running while the runtime shows its harness",
+    Effect.gen(function* () {
+      const bus = yield* Bus.Service
+      const db = yield* Db.Service
+      const entryId = yield* entryOfProject(yield* makeRepository)
+      yield* (yield* FakeRuntime).seedAgent("test/coord")
+      const address = { machine: "local", id: "test/coord" }
+      const next = yield* db.session.restartProcess(entryId)
+      const processes = yield* db.session.processesAt(RUNTIME, address)
+      assert.deepStrictEqual(processes, [{ sessionId: entryId, process: next! }])
+      yield* bus.observe({ type: "terminal.exited", runtime: RUNTIME, terminal: address, processes })
+      yield* settled
+
+      for (let i = 0; i < 30; i++) yield* Effect.yieldNow
+      const row = (yield* db.session.getSession(entryId))!
+      assert.strictEqual(row.process!.id, next)
+      assert.isNull(row.process!.endedAt)
+      assert.isDefined(yield* db.inbox.insertSend(entryId, "after the exit"))
+    }),
+  )
+
+  test(
+    "an entry session's exit, recorded while a newer process of it started, leaves the messages queued for the newer process",
+    Effect.gen(function* () {
+      const runtime = yield* FakeRuntime
+      const { id, sessions, db, entryId, row } = yield* spawnWorking(yield* makeRepository)
+      const address = { machine: "local", id: "test/coord" }
+      yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, alive: false }))
+      const held = yield* runtime.hold("present", id)
+      const checking = yield* Effect.forkChild(sessions.check(entryId))
+      yield* held.reached
+      assert.isNotNull((yield* db.session.getSession(entryId))!.process!.endedAt)
+
+      const next = yield* db.session.startEntry(
+        row.projectId,
+        "pi",
+        false,
+        { runtime: RUNTIME, address },
+        {
+          agent: "coordinator",
+        },
+      )
+
+      yield* runtime.seedAgent("test/coord")
+      const message = (yield* db.inbox.insertSend(entryId, "for the new process"))!
+      yield* held.release()
+      yield* Fiber.join(checking)
+      const now = (yield* db.session.getSession(entryId))!
+      assert.strictEqual(now.process!.id, next.process)
+      assert.isNull(now.process!.endedAt)
+      assert.notInclude(
+        (yield* db.inbox.inboxWithStatus(entryId, "dropped")).map((m) => m.id),
+        message.id,
+      )
     }),
   )
 

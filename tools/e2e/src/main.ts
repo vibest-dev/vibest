@@ -22,6 +22,7 @@ import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machines from "./scenarios/machines.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
+import restartHc from "./scenarios/restart-hc.ts"
 import restart from "./scenarios/restart.ts"
 import routing from "./scenarios/routing.ts"
 import sessions from "./scenarios/sessions.ts"
@@ -54,7 +55,7 @@ const areas = {
   start,
   inbox,
   exits,
-  restart,
+  restart: [...restart, ...restartHc],
   hc,
   sessions,
   delivery,

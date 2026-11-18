@@ -508,7 +508,7 @@ describe("pi-vibest", () => {
         (n) => n === 1,
       )
       yield* finishExecution(s, executionOf(s.messages[0]!.message))
-      yield* db.inbox.insertNoticeTo(coord.sessionId, "<agent-message>two</agent-message>")
+      yield* db.inbox.insertNoticeTo(coord.sessionId, "<vibest-agent-message>two</vibest-agent-message>")
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 2,
@@ -521,7 +521,7 @@ describe("pi-vibest", () => {
         ]),
         [
           [noticeEnvelope("<agent-result>one</agent-result>"), true, { triggerTurn: true }],
-          [noticeEnvelope("<agent-message>two</agent-message>"), true, { triggerTurn: true }],
+          [noticeEnvelope("<vibest-agent-message>two</vibest-agent-message>"), true, { triggerTurn: true }],
         ],
       )
       assert.notStrictEqual(executionOf(s.messages[0]!.message), executionOf(s.messages[1]!.message))
