@@ -264,8 +264,7 @@ export const make = Effect.gen(function* () {
     republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine }))),
   )
 
-  yield* republish()
-  yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)
+  yield* Effect.forkIn(republish().pipe(Effect.andThen(reconcile("all")), logged("reconcile")), scope)
 
   return { check: checkLocked, reconciles: Effect.sync(() => reconciles) }
 })
