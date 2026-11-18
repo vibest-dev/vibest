@@ -179,7 +179,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               const content =
                 item.kind === "send"
-                  ? sessionEnvelope({ id: item.sender }, item.content)
+                  ? sessionEnvelope(item.sender, item.content)
                   : noticeEnvelope(`${item.sender}: ${item.content}`)
 
               if (heir !== undefined && "peer" in heir) {

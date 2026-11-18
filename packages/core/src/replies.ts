@@ -45,18 +45,8 @@ export const envelope = (
     `</${tag}>`,
   ].join("\n")
 
-export const sessionEnvelope = (
-  sender: { readonly id: string; readonly title?: string | undefined },
-  message: string,
-) =>
-  envelope(
-    "agent-message",
-    [
-      ["agent-id", sender.id],
-      ["title", sender.title ?? ""],
-    ],
-    ["message", message],
-  )
+export const sessionEnvelope = (id: string, message: string) =>
+  envelope("agent-message", [["agent-id", id]], ["message", message])
 
 export const noticeEnvelope = (message: string) => envelope("vibest-notice", [], ["message", message])
 
