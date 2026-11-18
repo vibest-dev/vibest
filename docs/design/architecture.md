@@ -406,10 +406,14 @@ How these modules keep the rules:
   keeps saying so after the process was killed. A terminal the runtime cannot
   find is. A terminal's exit and state events are bound, as vibestd receives them from the runtime, to the
   processes vibestd had recorded at that terminal (`terminal.exited` and `terminal.state` carry them). Ending a process
-  names the process it means (`endProcess` does nothing once another process is the session's current one): clearing an
-  entry session passes the bound process, a check woken by a bound event checks only that process, and an exit a check
-  records passes the process its session snapshot read. The event or the check is handled later, and by then `vibest`
-  typed in the same pane may have started the entry session again, whose new process must keep running. An execution counts
+  names the process it means (`endProcess` does nothing once another process is the session's current one): a terminal
+  event only wakes a check, a check woken by a bound event checks only that process, and an exit a check records passes
+  the process its session snapshot read. An entry session's exit goes the same way, through the check, which ends its
+  process only on the runtime's current state or the harness-reported pid and, in the same transaction, drops the
+  messages queued for that session (`Db.session.endExited`), never ones queued after a newer process started; the
+  check leaves an entry session alone while it moves. The event or the check is handled later, and by then `vibest`
+  typed in the same pane may have started the entry session again, whose new process must keep running. A late exit bound to a
+  process an in-place restart or move just started there only wakes that check, which finds the new harness running. An execution counts
   as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
 - A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start

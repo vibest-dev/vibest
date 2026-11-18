@@ -3,7 +3,7 @@ import { shortId } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
-import { Bus, TerminalExited } from "./bus.ts"
+import { Bus } from "./bus.ts"
 import { type NewInboxRow, type SessionRow, harnessIdOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { Drain } from "./drain.ts"
@@ -110,9 +110,6 @@ export const layer = Layer.effect(
     )
     yield* reactor.on([InboxQueued], (event) => wake(event.sessionId))
     yield* reactor.on([InboxMoved], (event) => (event.data.to === "pending" ? wake(event.sessionId) : Effect.void))
-    yield* reactor.on([TerminalExited], (event) =>
-      drain.work("entry session exited", db.session.clearEntry(event.processes), true),
-    )
 
     const stream = (sessionId: string) =>
       Stream.unwrap(

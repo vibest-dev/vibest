@@ -34,7 +34,7 @@ import {
 import { piShadow } from "../world/shadow.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
-type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
+export type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
 
 const OLD = "0.0.0-old"
 
@@ -49,7 +49,7 @@ const ensureRuntime = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
   return args
 }
 
-const oldInstall = async (w: World, name: string) => {
+export const oldInstall = async (w: World, name: string) => {
   const old = path.join(w.root, `${name}-old`)
   await fs.mkdir(path.join(old, "bin"), { recursive: true })
   await fs.copyFile(compiled, path.join(old, "bin", "vibest"))

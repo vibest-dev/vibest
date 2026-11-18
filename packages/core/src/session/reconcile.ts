@@ -69,6 +69,8 @@ export const make = Effect.gen(function* () {
     const session = yield* db.session.getSession(id)
 
     if (!session || archived(session) || (bound !== undefined && session.process?.id !== bound)) return
+
+    if (session.entry && (yield* db.session.entryMoving(session.projectId))) return
     const open = executionStateOf(session) === "open"
     const limited = yield* exits.limitOf(session)
 

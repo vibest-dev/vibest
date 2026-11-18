@@ -30,9 +30,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const findSend = (sessionId: string, status: InboxStatus) =>
       inbox(sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${status}`)
 
-    const entryIdOf = (projectIdValue: string) =>
-      sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
-
     const moveInbox = (
       where: Statement.Fragment,
       to: "pending" | "delivering" | "delivered" | "failed" | "dropped",
@@ -207,12 +204,9 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         }
       })
 
-    const dropWaiting = (projectIdValue: string) =>
+    const dropWaiting = (entry: string) =>
       Effect.gen(function* () {
-        const dropped = yield* moveInbox(
-          sql`status = 'pending' AND session_id = ${entryIdOf(projectIdValue)}`,
-          "dropped",
-        )
+        const dropped = yield* moveInbox(sql`status = 'pending' AND session_id = ${entry}`, "dropped")
 
         yield* tellSendersOf(dropped, "the entry session is not running")
       })

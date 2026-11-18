@@ -21,7 +21,7 @@ import {
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { type BoundProcess, Bus } from "../bus.ts"
+import { Bus } from "../bus.ts"
 import { type ObservedEnd } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
@@ -85,7 +85,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       Effect.gen(function* () {
         for (const entry of yield* entrySessionsAt(runtime, address, except)) {
           yield* endProcess(entry.id, "exited")
-          yield* dropWaiting(entry.project)
+          yield* dropWaiting(entry.id)
         }
       })
 
@@ -491,7 +491,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
                 yield* afterCommit(() => void moving.delete(project))
 
-                if (!movingHere || fresh) yield* dropWaiting(project)
+                if (!movingHere || fresh) yield* dropWaiting(entryId)
 
                 return {
                   sessionId: entryId,
@@ -624,6 +624,19 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(endProcess(id, reason, undefined, process)).pipe(Effect.orDie),
       ),
 
+      endExited: Effect.fn("Db.session.endExited")(
+        (id: string, reason: "exited" | "launch_failed", process: number | undefined) =>
+          tx(
+            Effect.gen(function* () {
+              if (!(yield* endProcess(id, reason, undefined, process))) return false
+
+              if (yield* isEntry(id)) yield* dropWaiting(id)
+
+              return true
+            }),
+          ).pipe(Effect.orDie),
+      ),
+
       detachEntry: Effect.fn("Db.session.detachEntry")(
         (projectIdValue: string, runtime: string, address: RuntimeAddress) =>
           Effect.gen(function* () {
@@ -646,19 +659,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         session.processesAt(runtime, address).pipe(Effect.orDie),
       ),
 
-      clearEntry: Effect.fn("Db.session.clearEntry")((exited: ReadonlyArray<BoundProcess>) =>
-        tx(
-          Effect.forEach(exited, ({ sessionId, process }) =>
-            Effect.gen(function* () {
-              const [entry] = yield* sql<{ project: string }>`SELECT id AS project FROM project
-                WHERE entry_session_id = ${sessionId}`
-
-              if (entry === undefined || moving.has(entry.project)) return
-
-              if (yield* endProcess(sessionId, "exited", undefined, process)) yield* dropWaiting(entry.project)
-            }),
-          ),
-        ).pipe(Effect.asVoid, Effect.orDie),
+      entryMoving: Effect.fn("Db.session.entryMoving")((projectIdValue: string) =>
+        Effect.sync(() => moving.has(projectIdValue)),
       ),
 
       canResumeConversation,
