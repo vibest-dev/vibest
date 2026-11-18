@@ -87,10 +87,9 @@ describe.concurrent("after a vibestd stop", () => {
         assert.isFalse(yield* fs.exists(worktree))
         const notices = yield* sqlNotices(id)
         assert.strictEqual(notices.length, 1)
-        assert.include(notices[0], `${id.slice(0, 8)} `)
         assert.include(
           notices[0],
-          "never finished starting (vibestd stopped while it started); its worktree was removed.",
+          `${id.slice(0, 8)} (task) never finished starting (vibestd stopped while it started); its worktree was removed.`,
         )
         const row = (yield* db.session.getSession(id))!
         assert.isNull(row.process?.placedAt ?? null)

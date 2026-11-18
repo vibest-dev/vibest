@@ -140,7 +140,7 @@ export const make = Effect.gen(function* () {
     const unstarted = !worked && (idle || inbox.pulls(harnessIdOf(session)))
 
     if (unstarted && unconfirmed <= 0) {
-      const reason = "it did not start working on it"
+      const reason = "its start was not confirmed; it may still run, but a late reply is not collected"
 
       const closed =
         execution !== undefined &&
