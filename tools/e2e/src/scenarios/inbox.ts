@@ -175,9 +175,8 @@ const claudeEntry = async (
 
   const result = async (sub: string, title: string, marker: string, before: number) => {
     await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
-    const shortId = sub.slice(0, 8)
 
-    return shown(`General Agent "${title}" sent a message (${shortId})`, marker)
+    return shown(`Message from @${title}: done-${marker}`, marker)
   }
 
   const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
@@ -356,11 +355,11 @@ const checks: ReadonlyArray<Check> = [
             `a context with done-${own} also holds done-${other}`,
           )
 
-        for (const [sub, title] of [
-          [a, "Answer probe alpha"],
-          [b, "Answer probe beta"],
+        for (const [sub, title, marker] of [
+          [a, "Answer probe alpha", "cmalpha"],
+          [b, "Answer probe beta", "cmbeta"],
         ] as const) {
-          const line = `General Agent "${title}" sent a message (${sub.slice(0, 8)})`
+          const line = `Message from @${title}: done-${marker}`
           const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
@@ -658,7 +657,7 @@ const checks: ReadonlyArray<Check> = [
             ) === 1,
           `the send ${sent()[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
         )
-        const line = `General Agent "Send probe"`
+        const line = `Message from @Send probe: hello-claude`
         await until(
           "the line and the <agent-message> in the entry session's conversation",
           async () => {

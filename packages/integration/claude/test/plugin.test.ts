@@ -215,9 +215,9 @@ describe("Claude plugin inbox", () => {
     const h = host()
 
     const takes = [
-      batch(1, 'General Agent "A" completed (w1)', "full A"),
-      batch(2, "Notice: x", "full B"),
-      batch(3, "Notice: w1 exited.", "w1 exited."),
+      batch(1, "Message from @A: hello", "full A"),
+      batch(2, "Message from @vibest: x", "full B"),
+      batch(3, "Message from @vibest: w1 exited.", "w1 exited."),
     ]
 
     h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
@@ -231,8 +231,8 @@ describe("Claude plugin inbox", () => {
       "no second take while a batch waits",
     )
     assert.strictEqual(await h.draw(), "drawn", "draws nothing of its own")
-    assert.deepStrictEqual(h.submitted, ['General Agent "A" completed (w1)'])
-    const own = await h.prompt('General Agent "A" completed (w1)', ownSubmit)
+    assert.deepStrictEqual(h.submitted, ["Message from @A: hello"])
+    const own = await h.prompt("Message from @A: hello", ownSubmit)
     assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
     assert.deepStrictEqual(h.requests.at(-1)!.body, { hook_event_name: "PromptSubmit", origin: "vibest", execution: 1 })
     await h.tick()
@@ -244,15 +244,17 @@ describe("Claude plugin inbox", () => {
     await h.executionComplete({ reason: "answer", answer: "done" })
     await h.tick()
     await h.draw()
-    assert.deepStrictEqual(h.submitted.at(-1), "Notice: x")
-    assert.notProperty(await h.prompt("Notice: x", { kind: "composer" }), "context")
-    assert.deepStrictEqual(((await h.prompt("Notice: x", ownSubmit)) as { context: string[] }).context, ["full B"])
+    assert.deepStrictEqual(h.submitted.at(-1), "Message from @vibest: x")
+    assert.notProperty(await h.prompt("Message from @vibest: x", { kind: "composer" }), "context")
+    assert.deepStrictEqual(((await h.prompt("Message from @vibest: x", ownSubmit)) as { context: string[] }).context, [
+      "full B",
+    ])
     await h.executionComplete({ reason: "answer", answer: "done" })
     await h.tick()
     await h.draw()
-    assert.deepStrictEqual(h.submitted.at(-1), "Notice: w1 exited.")
+    assert.deepStrictEqual(h.submitted.at(-1), "Message from @vibest: w1 exited.")
     assert.notProperty(
-      await h.prompt("Notice: w1 exited.", ownSubmit),
+      await h.prompt("Message from @vibest: w1 exited.", ownSubmit),
       "context",
       "a line that already ends with the full text gets no context",
     )

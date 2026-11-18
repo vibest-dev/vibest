@@ -160,10 +160,11 @@ describe("restart in place", () => {
     }),
   )
 
-  it("an entry session's continue notice: the line its delivery shows carries the instruction, even on a long version", () => {
+  it("an entry session's continue notice shows as a message from vibest, and a long version is trimmed out of the line", () => {
     const version = "10.20.300-beta.4000+build.5"
     const shown = line([{ kind: "notice", message: noticeEnvelope(continueText(version)) } as never], () => undefined)
-    assert.isTrue(shown.startsWith(`Notice: ${CONTINUE}`))
+    assert.isTrue(shown.startsWith(`Message from @vibest: ${CONTINUE.slice(0, 40)}`))
+    assert.isFalse(shown.includes(version))
   })
 
   const workingEntry = (harness: "cursor" | "pi") =>

@@ -1,5 +1,4 @@
 import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued } from "@vibest/schema/event"
-import { shortId } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
@@ -30,9 +29,7 @@ export const entryIdle = Effect.fn("Inbox.entryIdle")(function* (
 
 export const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
 
-export const LINE_MAX = 120
-
-const codePoints = (s: string) => [...s].length
+const PREVIEW = 80
 
 const clip = (s: string, max: number) => {
   const cps = [...s]
@@ -40,26 +37,24 @@ const clip = (s: string, max: number) => {
   return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
 }
 
-export const line = (
-  batch: ReadonlyArray<InboxRow>,
-  who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
-) => {
-  const last = batch.at(-1)
+const firstLine = (message: string) => unwrapped(message).trim().split("\n")[0] ?? ""
 
-  if (!last) return ""
-  const more = batch.length > 1 ? ` · +${batch.length - 1} more` : ""
+export const line = (batch: ReadonlyArray<InboxRow>, titleOf: (sessionId: string) => string | undefined) => {
+  const first = batch[0]
 
-  const fit = (prefix: string, middle: string, suffix: string) =>
-    `${prefix}${clip(middle, LINE_MAX - codePoints(prefix) - codePoints(suffix))}${suffix}`
+  if (first === undefined) return ""
+  const names: Array<string> = []
+  const seen = new Set<string>()
 
-  if (last.kind === "notice") return fit("Notice: ", unwrapped(last.message).trim().split("\n")[0] ?? "", more)
-  const sender = last.sender ?? ""
-  const session = who(sender)
+  for (const row of batch) {
+    const key = row.kind === "notice" ? "vibest" : (row.sender ?? "")
 
-  const type =
-    session === undefined ? "Agent" : `${session.agent.charAt(0).toUpperCase()}${session.agent.slice(1)} Agent`
+    if (seen.has(key)) continue
+    seen.add(key)
+    names.push(row.kind === "notice" ? "vibest" : (titleOf(row.sender ?? "") ?? ""))
+  }
 
-  return fit(`${type} "`, session?.title ?? "", `" sent a message (${shortId(sender)})${more}`)
+  return `Message from ${names.map((name) => `@${name}`).join(", ")}: ${clip(firstLine(first.message), PREVIEW)}`
 }
 
 export type Undelivered = ReadonlyArray<{
@@ -143,15 +138,19 @@ export const layer = Layer.effect(
 
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
-      const last = taken.rows.at(-1)!
+      const titles = new Map<string, string>()
 
-      const sender =
-        last.kind === "notice" || last.sender === null ? undefined : yield* db.session.getSession(last.sender)
+      for (const row of taken.rows) {
+        if (row.kind === "notice" || row.sender === null || titles.has(row.sender)) continue
+        const found = yield* db.session.getSession(row.sender)
+
+        if (found !== undefined) titles.set(row.sender, found.name)
+      }
 
       return {
         execution: taken.execution,
         ids: taken.rows.map((r) => r.id),
-        line: line(taken.rows, () => sender && { agent: sender.agent, title: sender.name }),
+        line: line(taken.rows, (id) => titles.get(id)),
         text: text(taken.rows),
       } satisfies Taken
     })
