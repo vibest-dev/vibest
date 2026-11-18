@@ -1,12 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/plugin/effect"
-import type { Schema } from "effect"
+import { Effect, Sink, Stream, type Schema } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
 import { pi, piModels } from "../src/pi.ts"
-import { agyLimits } from "../src/subscriptions/agy.ts"
+import { agyLimits, agySubscription } from "../src/subscriptions/agy.ts"
 
 const ADAPTERS = { pi, claude, cursor }
 
@@ -375,4 +376,44 @@ describe("harness output", () => {
     ])
     assert.isUndefined(cursorModels(["Not logged in"]))
   })
+
+  it.effect(
+    "agy signed out: its subscription reads only the model list and never runs print mode, which opens a browser login",
+    () => {
+      const ran: Array<string> = []
+
+      const spawner = ChildProcessSpawner.make((command) => {
+        if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
+        ran.push(command.args.join(" "))
+
+        const out = Stream.make(
+          new TextEncoder().encode(
+            "Error: Please sign in to view available models. Launch the CLI without arguments to sign in.\n",
+          ),
+        )
+
+        return Effect.succeed(
+          ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            unref: Effect.succeed(Effect.void),
+            stdin: Sink.drain,
+            stdout: out,
+            stderr: Stream.empty,
+            all: out,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+          }),
+        )
+      })
+
+      return Effect.gen(function* () {
+        const rows = yield* agySubscription(spawner)("/nowhere", "agy")
+        assert.deepStrictEqual(rows, [{ provider: "", account: { kind: "none" }, limits: [] }])
+        assert.deepStrictEqual(ran, ["--output-format json models"])
+      })
+    },
+  )
 })

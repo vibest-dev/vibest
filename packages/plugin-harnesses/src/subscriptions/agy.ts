@@ -1,6 +1,7 @@
 import type { SubscriptionLimit } from "@vibest/schema/subscription"
 import { Effect, Predicate, Schema } from "effect"
 
+import { agyModels } from "../agy.ts"
 import { parseJson, record, runCli, type Spawner } from "./index.ts"
 
 const windowName = (group: string, window: string) => `${group} ${window}`
@@ -41,8 +42,16 @@ export const agyLimits = (usage: Schema.Json | undefined): ReadonlyArray<Subscri
   }))
 }
 
+const signedIn = (spawner: Spawner, home: string, binary: string) =>
+  runCli(spawner, binary, ["--output-format", "json", "models"], home).pipe(
+    Effect.map((listed) => agyModels((listed ?? "").split("\n")) !== undefined),
+  )
+
 export const agySubscription = (spawner: Spawner) => (home: string, binary: string) =>
   Effect.gen(function* () {
+    if (!(yield* signedIn(spawner, home, binary)))
+      return [{ provider: "", account: { kind: "none" as const }, limits: [] }]
+
     const usage = parseJson(yield* runCli(spawner, binary, ["-p", "/usage", "--output-format", "json"], home))
     const limits = agyLimits(usage)
 

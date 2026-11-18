@@ -59,7 +59,9 @@ each. Whether this machine can start one is checked only when it is asked for: a
 
 `agy` appears in `vibest harness list` and its models in `vibest models`, read from the agy CLI without a model turn, and
 `vibest subscriptions` shows its usage windows (used percent, reset time) from `agy -p /usage`. vibest never reads agy's own
-config or credential files and never signs in; a CLI that is not signed in is listed as unavailable with its own message.
+config or credential files and never signs in; a CLI that is not signed in is listed as unavailable with its own message. vibest never makes agy open a browser sign-in:
+it reads the usage windows only after `agy models` answers with a model list, because agy's print mode starts an
+interactive OAuth in the browser when it is signed out.
 The definition's `binary` can be pointed at a wrapper such as `agyx` by a plugin of the user's own; nothing assumes it is
 named `agy`.
 
