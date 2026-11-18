@@ -61,7 +61,7 @@ export const make = Effect.gen(function* () {
   const harnesses = yield* Harnesses.Service
   const processes = yield* Processes.Service
   const { finish } = yield* Executions.Service
-  const { openTerminal, runInTerminal, show, locate, launching, taskInput } = yield* Placement.Service
+  const { openTerminal, show, locate, launching, taskInput } = yield* Placement.Service
 
   const exited = (id: string, reason: ProcessEndReason) =>
     Effect.andThen(db.session.setStatus(id, "unknown"), db.session.endProcess(id, reason))
@@ -341,7 +341,7 @@ export const make = Effect.gen(function* () {
 
       const plan = yield* launching(nextRow, false, yield* taskInput(nextRow, next.prompt))
 
-      if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: "" })
+      if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
 
       const placed = inPlace
         ? yield* plan
@@ -349,7 +349,7 @@ export const make = Effect.gen(function* () {
               Effect.andThen(
                 plan.beforeStart,
                 Effect.flatMap(db.session.currentProcessId(row.id), (process) =>
-                  runInTerminal(h, row.id, process, terminal!, plan.launch(process)),
+                  h.run!(terminal!, plan.launch(process)),
                 ),
               ),
             )

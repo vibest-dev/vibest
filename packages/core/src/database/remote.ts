@@ -204,7 +204,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               const here =
                 target !== undefined &&
-                (target !== route.entry || session.entryRunning(route.project, yield* session.currentProcess(target)))
+                (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
 
               yield* inbox.queueInbox({
                 recipient: target ?? item.recipient,

@@ -17,7 +17,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const sql = yield* SqlClient.SqlClient
     const { publish, transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, currentProcess, entryRunning, findSession, nearestAlive } = session
+    const { reads, openExecution, currentProcess, placed, findSession, nearestAlive } = session
 
     const inbox = reads.inboxWhere
 
@@ -105,7 +105,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
         if (route === undefined) return false
 
-        if (route.entry === id) return entryRunning(route.project, yield* currentProcess(id))
+        if (route.entry === id) return placed(route.project, yield* currentProcess(id))
         const found = yield* findSession(id)
 
         return found !== undefined && !archived(found)
@@ -179,7 +179,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
             s.project_id AS project, p.entry_session_id AS entry
           FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${heir.local}`
 
-        const present = route?.entry !== heir.local || entryRunning(route.project, yield* currentProcess(heir.local))
+        const present = route?.entry !== heir.local || placed(route.project, yield* currentProcess(heir.local))
         const [queued] = yield* insert(heir.local, present ? "pending" : "dropped")
 
         return queued!

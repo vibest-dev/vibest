@@ -100,7 +100,7 @@ export const make = Effect.gen(function* () {
   const { locked } = yield* SessionLocks.Service
   const version = (yield* App.Service).version
   const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
-  const { launching, runInTerminal } = yield* Placement.Service
+  const { launching } = yield* Placement.Service
   const reconcile = yield* Reconcile.Service
   const vibestCommand = yield* VibestCommand
 
@@ -226,7 +226,7 @@ export const make = Effect.gen(function* () {
       )
 
       if (signalled.sent === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
-      const ran = yield* runInTerminal(h, id, signalled.process, t.terminal, argv(signalled.process)).pipe(Effect.exit)
+      const ran = yield* h.run!(t.terminal, argv(signalled.process)).pipe(Effect.exit)
       const back = Exit.isSuccess(ran) && (yield* startedAgain(id, t.liveNow))
       yield* restarting.clear(id)
 

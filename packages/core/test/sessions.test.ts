@@ -1,4 +1,5 @@
 import { assert, describe } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, startOf } from "@vibest/core/database/db-rows"
 import { Session } from "@vibest/core/session"
@@ -113,20 +114,24 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "an entry session restarted in place whose new process vibestd never placed is ended launch_failed by its check, back on the process the restart replaced",
+    "a terminal exit bound to an entry session's new process after an in-place restart leaves it running while the runtime shows its harness",
     Effect.gen(function* () {
-      const sessions = yield* Session.Service
+      const bus = yield* Bus.Service
       const db = yield* Db.Service
       const entryId = yield* entryOfProject(yield* makeRepository)
-      const replaced = (yield* db.session.currentProcessId(entryId))!
-      yield* db.session.restartProcess(entryId)
-      assert.isDefined(yield* db.inbox.insertSend(entryId, "while it restarts"))
-      yield* sessions.check(entryId)
+      yield* (yield* FakeRuntime).seedAgent("test/coord")
+      const address = { machine: "local", id: "test/coord" }
+      const next = yield* db.session.restartProcess(entryId)
+      const processes = yield* db.session.processesAt(RUNTIME, address)
+      assert.deepStrictEqual(processes, [{ sessionId: entryId, process: next! }])
+      yield* bus.observe({ type: "terminal.exited", runtime: RUNTIME, terminal: address, processes })
+      yield* settled
+
+      for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       const row = (yield* db.session.getSession(entryId))!
-      assert.strictEqual(row.process!.id, replaced)
-      assert.isNotNull(row.process!.endedAt)
-      assert.isUndefined(yield* db.inbox.insertSend(entryId, "after it ended"))
-      assert.lengthOf(yield* db.inbox.inboxWithStatus(entryId, "dropped"), 1)
+      assert.strictEqual(row.process!.id, next)
+      assert.isNull(row.process!.endedAt)
+      assert.isDefined(yield* db.inbox.insertSend(entryId, "after the exit"))
     }),
   )
 

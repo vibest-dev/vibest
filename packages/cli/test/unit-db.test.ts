@@ -7,7 +7,6 @@ import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { EXECUTIONS, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { session, place } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Catalog, type FactType } from "@vibest/schema/event"
 import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -657,23 +656,6 @@ describe("Db", () => {
         assert.isNull((yield* db.session.getSession(first.sessionId))!.process!.endedAt)
       }),
     ),
-  )
-
-  it.effect(
-    "the entry session takes messages while an in-place restart runs, and no terminal event binds to its new process until it is placed",
-    () =>
-      memory(
-        Effect.gen(function* () {
-          const db = yield* Db.Service
-          const project = yield* projectOf("r")
-          const entry = yield* db.session.startEntry(project, "claude", false, place, ENTRY)
-          const next = yield* db.session.restartProcess(entry.sessionId)
-          assert.isDefined(yield* db.inbox.insertSend(entry.sessionId, "sent while it restarts"))
-          assert.deepStrictEqual(yield* db.session.processesAt(RUNTIME, place.address), [])
-          assert.strictEqual(yield* db.session.placeProcess(entry.sessionId, place.address.id), next)
-          assert.strictEqual(yield* db.session.entryAt(RUNTIME, place.address), project)
-        }),
-      ),
   )
 
   it.effect(

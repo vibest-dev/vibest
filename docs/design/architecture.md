@@ -411,13 +411,8 @@ How these modules keep the rules:
   the process its session snapshot read. An entry session's exit goes the same way, through the check, which ends its
   process only on the runtime's current state or the harness-reported pid and then drops the messages waiting on it; the
   check leaves an entry session alone while it moves. The event or the check is handled later, and by then `vibest`
-  typed in the same pane may have started the entry session again, whose new process must keep running. A restart or a
-  usage-limit move in place records the new process at no terminal and runs it in the existing terminal
-  (`Placement.runInTerminal`): placed there once the runtime ran it, as an opened terminal is placed once opened, or ended
-  `launch_failed` when the run fails. The replaced harness's exit, received in between, binds to no process. A new
-  process left at no terminal (vibestd stopped mid-restart) is ended `launch_failed` by the next check, as a cut-off
-  start is.
-  An entry session takes messages while its current process has not ended, placed or not, as a subagent being launched does. An execution counts
+  typed in the same pane may have started the entry session again, whose new process must keep running. A late exit bound to a
+  process an in-place restart or move just started there only wakes that check, which finds the new harness running. An execution counts
   as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
 - A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
