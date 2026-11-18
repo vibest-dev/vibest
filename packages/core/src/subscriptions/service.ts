@@ -140,7 +140,7 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  return Service.of({ list, report, poll })
+  return Service.of({ list, read: list, report, poll })
 })
 
 export const testLayer = Layer.effect(Service, make)
@@ -154,6 +154,7 @@ export const layer = Layer.effect(
     const lock = yield* Semaphore.make(1)
     let polledAt = Number.NEGATIVE_INFINITY
     let running: Fiber.Fiber<void> | undefined
+    let first: Fiber.Fiber<void> | undefined
 
     const refresh = lock.withPermit(
       Effect.gen(function* () {
@@ -163,17 +164,19 @@ export const layer = Layer.effect(
         if (now - polledAt < Duration.toMillis(MINUTE) || harnesses.all.length === 0) return undefined
         polledAt = now
         running = yield* Effect.forkIn(service.poll, scope)
+        first ??= running
 
         return running
       }),
     )
 
-    const first = yield* refresh
+    yield* refresh
 
     return Service.of({
       ...service,
-      list: refresh.pipe(
-        Effect.flatMap((fiber) => (fiber === undefined || fiber !== first ? Effect.void : Fiber.await(fiber))),
+      list: Effect.andThen(refresh, service.list),
+      read: refresh.pipe(
+        Effect.andThen(Effect.suspend(() => (first === undefined ? Effect.void : Fiber.await(first)))),
         Effect.timeoutOption(CLI_TIMEOUT),
         Effect.andThen(service.list),
       ),

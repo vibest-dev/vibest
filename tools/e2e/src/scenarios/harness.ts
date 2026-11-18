@@ -63,13 +63,10 @@ const checks: ReadonlyArray<Check> = [
           models.models.length === 0 && !!models.errors?.[0]?.includes("Library/Keychains"),
           JSON.stringify(models),
         )
-        await until(
-          "cursor's subscription row names the keychain",
-          async () =>
-            (await w.json<Array<{ harness: string; error?: string }>>(["subscriptions"], { env })).some(
-              (s) => s.harness === "cursor" && s.error?.includes("Library/Keychains"),
-            ),
-          60_000,
+        const subscriptions = await w.json<Array<{ harness: string; error?: string }>>(["subscriptions"], { env })
+        expect(
+          subscriptions.some((s) => s.harness === "cursor" && s.error?.includes("Library/Keychains")),
+          JSON.stringify(subscriptions),
         )
 
         const refused = await w.run(w.repository, [path.join(bin, "cursor-agent"), "--version"], { env }).then(
