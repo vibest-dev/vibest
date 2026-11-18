@@ -17,7 +17,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const sql = yield* SqlClient.SqlClient
     const { publish, transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, currentProcess, placed, findSession, nearestAlive } = session
+    const { reads, openExecution, currentProcess, placed, findSession, nearestAlive, labelOf } = session
 
     const inbox = reads.inboxWhere
 
@@ -208,7 +208,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           const { sender, recipient } = group[0]!
           yield* tellSender(
             sender,
-            `A message to ${recipient} was not delivered: ${reason}\n\n${group.map((s) => s.content).join("\n\n")}`,
+            `A message to ${yield* labelOf(recipient)} was not delivered: ${reason}\n\n${group.map((s) => s.content).join("\n\n")}`,
           )
         }
       })
@@ -249,7 +249,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
     const sql = yield* SqlClient.SqlClient
     const { transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, acceptedAt, observable, fromOldProcess, startExecution, creatorOf } = session
+    const { reads, openExecution, acceptedAt, observable, fromOldProcess, startExecution, creatorOf, labelOf } = session
 
     const {
       inbox: inboxWhere,
@@ -343,7 +343,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       recoverDelivering: Effect.fn("Db.inbox.recoverDelivering")(
-        (notice: (sessionId: string, messages: ReadonlyArray<string>) => string) =>
+        (notice: (label: string, messages: ReadonlyArray<string>) => string) =>
           tx(
             Effect.gen(function* () {
               const cut = yield* sql<{
@@ -373,7 +373,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
                 )
 
                 const message = notice(
-                  recipient,
+                  yield* labelOf(recipient),
                   rows.map((r) => r.content),
                 )
 

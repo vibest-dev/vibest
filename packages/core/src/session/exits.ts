@@ -1,3 +1,4 @@
+import { sessionLabel, shortId } from "@vibest/schema/id"
 import { Context, Effect, Layer } from "effect"
 
 import { type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf } from "../database/db-rows.ts"
@@ -59,7 +60,7 @@ export const make = Effect.gen(function* () {
       const signed = queued.filter((r) => r.kind === "send" && r.sender)
       const unsigned = queued.filter((r) => !signed.includes(r))
 
-      if (signed.length > 0) yield* inbox.undelivered(session, signed, `${session.id} exited before it was delivered`)
+      if (signed.length > 0) yield* inbox.undelivered(session, signed, "it exited")
       yield* db.inbox.setInboxStatus(
         session.id,
         unsigned.map((r) => r.id),
@@ -68,7 +69,7 @@ export const make = Effect.gen(function* () {
       const lost = unsigned.map((r) => r.message).join("\n\n")
 
       const text = (how: string) =>
-        `${session.id} (${harnessIdOf(session)}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${how}; vibest peek ${shortId(session.id)}; vibest send ${shortId(session.id)} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
 
       if (
         execution !== undefined &&
@@ -108,11 +109,7 @@ export const make = Effect.gen(function* () {
 
     if (cutOff) yield* undoCutOffStart(h, session)
 
-    if (!announce)
-      yield* inbox.dropQueue(
-        session,
-        `${session.id} exited before it was delivered; send it again to resume the session`,
-      )
+    if (!announce) yield* inbox.dropQueue(session, "it exited; send it again to resume it")
   })
 
   const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string, process: number | undefined) {

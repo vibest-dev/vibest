@@ -173,7 +173,7 @@ describe.concurrent("Session", () => {
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.include(yield* replyOf(id), "landed")
-      assert.strictEqual((yield* sqlNotices(id)).filter((message) => message.includes("task_not_started")).length, 1)
+      assert.strictEqual((yield* sqlNotices(id)).filter((message) => message.includes("did not start")).length, 1)
     }),
     { promptsIgnored: true, hooked: ["pi"] },
   )
@@ -206,9 +206,7 @@ describe.concurrent("Session", () => {
       )
       assert.include(yield* replyOf(id), "landed")
       assert.isUndefined(
-        (yield* sqlNotices(id)).find(
-          (message) => message.includes("task_not_started") || message.includes("send: busy"),
-        ),
+        (yield* sqlNotices(id)).find((message) => message.includes("did not start") || message.includes("send: busy")),
       )
     }),
     { hooked: ["pi"] },
@@ -266,7 +264,7 @@ describe.concurrent("Session", () => {
       )
       yield* held.release("failed")
       const notices = yield* until(sqlNotices(id), (rows) => rows.some((message) => message.includes("send: failed")))
-      assert.match(notices.at(-1)!, new RegExp(`^A message to ${id} was not delivered: .*send: failed`))
+      assert.match(notices.at(-1)!, /^A message to .* was not delivered: .*send: failed/)
       assert.match(notices.at(-1)!, /\n\nfirst$/)
       assert.notMatch(notices.at(-1)!, /second/)
       const rows = yield* until(all(id), (list) => list[1]?.status === "delivered")
@@ -323,9 +321,9 @@ describe.concurrent("Session", () => {
         ["first", "second"],
       )
       assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
-      assert.deepStrictEqual((yield* notices).slice(1), [
-        `task_not_started: vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected); it is idle and takes queued messages again.`,
-      ])
+      const later = (yield* notices).slice(1)
+      assert.strictEqual(later.length, 1)
+      assert.include(later[0], "did not start the execution it was sent; it is idle and takes queued messages again")
     }),
     { hooked: ["pi"] },
   )
@@ -576,10 +574,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* Effect.flip(harnesses.get("leaving-pi")))._tag, "HarnessUnavailable")
       yield* sessions.send(id, "hello")
       const [notice] = yield* until(sqlNotices(id), (rows) => rows.length === 1)
-      assert.match(
-        notice!,
-        new RegExp(`^A message to ${id} was not delivered: no plugin provides harness leaving-pi; loaded: `),
-      )
+      assert.match(notice!, /^A message to .* was not delivered: no plugin provides harness leaving-pi; loaded: /)
       assert.strictEqual(notice!.split("\n\n").at(-1), "hello")
       yield* sessions.check(id)
     }),
@@ -667,11 +662,7 @@ describe.concurrent("Session", () => {
         ["first", "second"],
       )
 
-      for (const message of notices)
-        assert.include(
-          message,
-          `A message to ${id} was not delivered: ${id} exited before the runtime reported its session id`,
-        )
+      for (const message of notices) assert.include(message, "exited before the runtime reported its session id")
       assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
     }),
   )

@@ -95,10 +95,9 @@ describe.concurrent("Session", () => {
       yield* sessions.check(id)
       assert.deepStrictEqual(yield* counts, before)
       const notices = yield* sqlNotices(id)
-      assert.deepStrictEqual(
-        notices.filter((m) => m.endsWith("\n\nlate")),
-        [`A message to ${id} was not delivered: ${id} was archived before it was delivered\n\nlate`],
-      )
+      const late = notices.filter((m) => m.endsWith("\n\nlate"))
+      assert.strictEqual(late.length, 1)
+      assert.include(late[0], "was not delivered: it was archived")
       assert.deepInclude(yield* sessions.remove(id), { worktree: "removed" })
     }),
   )

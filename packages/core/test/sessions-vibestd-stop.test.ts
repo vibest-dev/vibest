@@ -85,9 +85,13 @@ describe.concurrent("after a vibestd stop", () => {
         yield* nextVibestd(Effect.map(sqlNotices(id), (n) => n.length > 0))
         assert.deepStrictEqual(yield* processEnds(id), ["launch_failed"])
         assert.isFalse(yield* fs.exists(worktree))
-        assert.deepStrictEqual(yield* sqlNotices(id), [
-          `${id} never finished starting (vibestd stopped while it started); its worktree was removed.`,
-        ])
+        const notices = yield* sqlNotices(id)
+        assert.strictEqual(notices.length, 1)
+        assert.include(notices[0], `${id.slice(0, 8)} `)
+        assert.include(
+          notices[0],
+          "never finished starting (vibestd stopped while it started); its worktree was removed.",
+        )
         const row = (yield* db.session.getSession(id))!
         assert.isNull(row.process?.placedAt ?? null)
         assert.strictEqual(row.status, "unknown")
@@ -134,9 +138,9 @@ describe.concurrent("after a vibestd stop", () => {
             [terminalOf(before), before.process?.placedAt ?? null],
           )
           assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
-          assert.strictEqual(
-            cutOff(yield* sqlNotices(id)),
-            `${id} never finished starting (vibestd stopped while it started).`,
+          assert.match(
+            cutOff(yield* sqlNotices(id))!,
+            /never finished starting \(vibestd stopped while it started\)\.$/,
           )
         }),
       )

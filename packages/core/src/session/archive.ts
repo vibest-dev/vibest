@@ -1,3 +1,4 @@
+import { sessionLabel, shortId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
@@ -57,7 +58,7 @@ export const make = Effect.gen(function* () {
       )
 
   const undoCutOffStart = Effect.fn("Archive.undoCutOffStart")(function* (h: Runtime, session: SessionRow) {
-    const what = `${session.id} never finished starting (vibestd stopped while it started)`
+    const what = `${sessionLabel(session)} never finished starting (vibestd stopped while it started)`
 
     if (yield* db.session.hadTerminal(session.id)) return yield* notice(session, `${what}.`)
     const ended = yield* getRow(session.id)
@@ -110,8 +111,8 @@ export const make = Effect.gen(function* () {
           const stopped = yield* interruptAgent(h, session, terminal)
           reasons.push(
             stopped
-              ? `${id} was working: interrupted, then its terminal closed`
-              : `${id} did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
+              ? "it was working: interrupted, then its terminal closed"
+              : `it did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
           )
         }
 
@@ -124,7 +125,7 @@ export const make = Effect.gen(function* () {
           if (!(yield* db.session.archiveIfNoPending(id))) return undefined
         } else {
           yield* db.session.archive(id)
-          yield* dropQueue(session, `${id} was archived before it was delivered`)
+          yield* dropQueue(session, "it was archived")
         }
 
         session = yield* getRow(id)
@@ -186,7 +187,7 @@ export const make = Effect.gen(function* () {
                 Effect.flatMap((told) => (told ? Effect.void : notice(session, message))),
               )
 
-            const skip = (why: string) => tell(`${id} not archived (vibest run --archive-on-idle): ${why}`)
+            const skip = (why: string) => tell(`${sessionLabel(session)} not archived (--archive-on-idle): ${why}`)
 
             if (executionStateOf(session) !== "completed") return yield* Ref.set(r.archiveTold, false)
             const h = yield* live(session)
@@ -197,19 +198,21 @@ export const make = Effect.gen(function* () {
               const settled = yield* settleAfterInterrupt(h, session, terminal)
 
               if (!settled)
-                return yield* skip(`it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`)
+                return yield* skip(
+                  `it did not go idle within ${Duration.format(STOP_WAIT)}; vibest archive ${shortId(id)}`,
+                )
             }
 
             const out = yield* removeLocked(id, { unlessPending: true })
 
             if (!out) return
             const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
-            const again = out.processes === "exited" ? "" : ` Run vibest archive ${id} again to check.`
+            const again = out.processes === "exited" ? "" : ` Run vibest archive ${shortId(id)} again to check.`
 
             if (kept || again)
               yield* notice(
                 session,
-                `${id} archived (vibest run --archive-on-idle): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
+                `${sessionLabel(session)} archived (--archive-on-idle): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
               )
           }).pipe(
             Effect.catchCause((cause) =>
@@ -223,7 +226,7 @@ export const make = Effect.gen(function* () {
                             ? Effect.void
                             : notice(
                                 session,
-                                `${id} auto-archive failed: ${errorMessage(cause)}; run vibest archive ${id}`,
+                                `${sessionLabel(session)} auto-archive failed: ${errorMessage(cause)}; vibest archive ${shortId(id)}`,
                               ),
                         ),
                       ),
@@ -253,7 +256,7 @@ export const make = Effect.gen(function* () {
         if (out.processes !== "exited")
           yield* notice(
             session,
-            `${id} is archived, but ${out.pane === "kept" ? "its terminal could not be closed" : "its processes are not confirmed gone"}; run vibest archive ${id} again to check.`,
+            `${sessionLabel(session)} is archived, but ${out.pane === "kept" ? "its terminal could not be closed" : "its processes are not confirmed gone"}; run vibest archive ${shortId(id)} again to check`,
           )
       }),
     ).pipe(logged(`archive ${id}`)),

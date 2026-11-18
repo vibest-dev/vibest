@@ -446,8 +446,8 @@ export const make = Effect.gen(function* () {
   )
 
   yield* db.inbox.recoverDelivering(
-    (sessionId, messages) =>
-      `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
+    (label, messages) =>
+      `A message to ${label} was not delivered: vibestd stopped while handing it over; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
   return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }

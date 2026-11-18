@@ -193,7 +193,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* entryTakes(b)
       const row = yield* b.db.inbox.latestInbox(b.id, "notice")
       assert.strictEqual(row!.status, "delivered")
-      assert.include(row!.message, "execution ended with an error: model_error")
+      assert.include(row!.message, "ended its execution with an error: model_error")
       yield* letForkedArchiveRun
       assert.isFalse(yield* archivedRow(b.db, b.id))
       yield* b.sessions.send(b.id, "the first one")
