@@ -70,6 +70,7 @@ export const shardWeights = {
   U4: 14,
   U5: 18,
   U6: 14,
+  "U6-claude": 16,
   U8: 18,
   U9: 4,
   U10: 4,

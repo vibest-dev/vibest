@@ -678,7 +678,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a subagent resumes only after its execution ends; the entry session resumes a conversation the harness reported",
+    "a subagent resumes once the harness has taken an input or an execution of it has ended; the entry session resumes a conversation the harness reported",
     () =>
       memory(
         Effect.gen(function* () {
@@ -688,10 +688,18 @@ describe("Db", () => {
             session(id, { harnessId: "claude", harnessSessionId: "pre" }),
             yield* projectOf("r"),
           )
+          const { execution } = yield* db.session.startExecution(id, 1)
           assert.isFalse(yield* db.session.canResumeConversation(id, "pre"))
-          yield* db.session.startExecution(id, 1)
-          yield* complete(db, id)
+          yield* db.session.acceptExecution(id, execution)
           assert.isTrue(yield* db.session.canResumeConversation(id, "pre"))
+          const ended = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+          yield* db.session.insertSession(
+            session(ended, { harnessId: "claude", harnessSessionId: "old" }),
+            yield* projectOf("r"),
+          )
+          yield* db.session.startExecution(ended, 1)
+          yield* complete(db, ended)
+          assert.isTrue(yield* db.session.canResumeConversation(ended, "old"))
           const entry = yield* db.session.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)
           assert.isFalse(yield* db.session.canResumeConversation(entry.sessionId, "c1"))
           yield* db.session.noteConversation(entry.sessionId, "c1")

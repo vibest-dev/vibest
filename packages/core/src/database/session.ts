@@ -109,7 +109,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       sql<{ ok: number }>`SELECT (
         EXISTS (
           SELECT 1 FROM execution t JOIN process p ON p.session_id = t.session_id AND p.id = t.process_id
-          WHERE t.session_id = ${sessionId} AND t.outcome IS NOT NULL
+          WHERE t.session_id = ${sessionId} AND (t.accepted_at IS NOT NULL OR t.outcome IS NOT NULL)
             AND p.conversation = ${harnessSessionId}
         )
         OR (
