@@ -52,6 +52,7 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
         )
       else {
         yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
+        yield* Console.log(`Downloading vibest ${latest} to try it before it replaces this one; this can take minutes.`)
         const fs = yield* FileSystem.FileSystem
         const real = yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!))
 
