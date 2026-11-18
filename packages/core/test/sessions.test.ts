@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
+import { executionStateOf, exitedAt, startOf } from "@vibest/core/database/db-rows"
 import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Fiber } from "effect"
@@ -46,6 +46,43 @@ describe.concurrent("Session", () => {
       yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
     }),
     { hooked: ["pi"] },
+  )
+
+  test(
+    "a check woken for a process that is not the session's current one leaves the session alone",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const current = (yield* db.session.getSession(id))!.process!.id
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id, current - 1)
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
+      yield* sessions.check(id, current)
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
+    }),
+  )
+
+  test(
+    "a check that read the session before it started a new process does not end the new one",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const stateHeld = yield* herdr.hold("state", id)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      const checking = yield* Effect.forkChild(sessions.check(id))
+      yield* stateHeld.reached
+      const processHeld = yield* herdr.hold("process", id)
+      yield* stateHeld.release()
+      yield* processHeld.reached
+      const old = (yield* db.session.getSession(id))!
+      yield* db.session.endProcess(id, "restart")
+      yield* db.session.startProcess(id, startOf(old))
+      yield* processHeld.release()
+      yield* Fiber.join(checking)
+      const now = (yield* db.session.getSession(id))!.process!
+      assert.notStrictEqual(now.id, old.process!.id)
+      assert.isNull(now.endedAt)
+    }),
   )
 
   test(

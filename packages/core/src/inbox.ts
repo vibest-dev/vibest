@@ -111,7 +111,7 @@ export const layer = Layer.effect(
     yield* reactor.on([InboxQueued], (event) => wake(event.sessionId))
     yield* reactor.on([InboxMoved], (event) => (event.data.to === "pending" ? wake(event.sessionId) : Effect.void))
     yield* reactor.on([TerminalExited], (event) =>
-      drain.work("entry session exited", db.session.clearEntry(event.runtime, event.terminal), true),
+      drain.work("entry session exited", db.session.clearEntry(event.processes), true),
     )
 
     const stream = (sessionId: string) =>

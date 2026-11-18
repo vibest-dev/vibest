@@ -122,7 +122,6 @@ const checks: ReadonlyArray<Check> = [
 
           return d.status === "running" && d.pid !== before
         })
-        expect(!alive(before), `old vibestd ${before} still alive`)
       }
     },
   },

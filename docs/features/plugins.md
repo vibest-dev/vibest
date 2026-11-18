@@ -42,8 +42,7 @@ builtin harness.
 
 ## G7. A plugin adds a runtime
 
-A user plugin can add a terminal runtime and route an agent to it; the agent starts there and reports its status from
-it.
+A user plugin can add a terminal runtime and route an agent to it; the agent starts there and its result arrives.
 
 ## G8. A broken edit keeps the running plugin
 
@@ -85,15 +84,10 @@ plugin into the `setup` form reloads it like any edit (G2).
 ## G14. A builtin plugin can be removed
 
 `"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-harness-default"`); `"-*"` and
-`"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts. While slow user
-plugins are still importing, a start is refused with `PluginsNotActive` and does not run on a partial set; once they
-are active, `vibest plugins` shows the builtin gone, and deleting the line brings it back without restarting vibestd.
-
-## G15. A start waits for plugins to finish activating
-
-While user plugins are still setting up, `vibest run` is refused with `PluginsNotActive` and the names of the plugins
-still loading, and no session starts. Once they are active, the same run starts, and a routing plugin's decision is
-what `vibest ls` records.
+`"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts. While user plugins
+are still importing, a start is refused with `PluginsNotActive`, naming the plugins still loading, and does not run on
+a partial set. Once they are active, `vibest plugins` shows the builtin gone, and deleting the line brings it back
+without restarting vibestd.
 
 ## G16. Moving a plugin keeps it running
 

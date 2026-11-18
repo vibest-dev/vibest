@@ -87,7 +87,7 @@ const runtimes = LayerNode.make({
     Runtimes.Service,
     Effect.flatMap(FakeRuntime, (fake) => runtimesFrom([fake.runtime])),
   ),
-  deps: [runtimeNode, Bus.node, Runtimes.hostEnvNode],
+  deps: [runtimeNode, Bus.node, Runtimes.hostEnvNode, Runtimes.terminalProcessesNode],
 })
 
 const subscriptions = LayerNode.make({

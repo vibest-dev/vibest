@@ -2,7 +2,7 @@ import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
 import { shortId } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
-import { Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
+import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
 import {
   type SessionRow,
   sessionEnded,
@@ -20,16 +20,7 @@ import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
-import {
-  agentState,
-  alive,
-  paneTail,
-  peekHint,
-  reportedWhenUnknown,
-  Runtimes,
-  stateOf,
-  type Terminal,
-} from "../runtimes.ts"
+import { agentState, alive, paneTail, peekHint, reportedWhenUnknown, Runtimes, stateOf } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
 import { CONFIRM_TIMEOUT } from "./executions.ts"
@@ -74,10 +65,10 @@ export const make = Effect.gen(function* () {
       }),
     )
 
-  const check = Effect.fn("Reconcile.check")(function* (id: string) {
+  const check = Effect.fn("Reconcile.check")(function* (id: string, bound?: number) {
     const session = yield* db.session.getSession(id)
 
-    if (!session || archived(session)) return
+    if (!session || archived(session) || (bound !== undefined && session.process?.id !== bound)) return
     const open = executionStateOf(session) === "open"
     const limited = yield* exits.limitOf(session)
 
@@ -195,25 +186,34 @@ export const make = Effect.gen(function* () {
     })
   })
 
-  const checkSession = (id: string): Effect.Effect<unknown, unknown> => locked(id)(check(id))
+  const checkSession = (id: string, bound?: number): Effect.Effect<unknown, unknown> => locked(id)(check(id, bound))
 
-  const checkLocked = Effect.fn("Reconcile.check")((id: string): Effect.Effect<void> =>
-    logged(`check ${id}`)(checkSession(id)),
+  const checkLocked = Effect.fn("Reconcile.check")((id: string, bound?: number): Effect.Effect<void> =>
+    logged(`check ${id}`)(checkSession(id, bound)),
   )
 
-  const wakes = yield* RunCoordinator.make<string, void>({ drain: checkLocked, merge: () => undefined })
+  const wakes = yield* RunCoordinator.make<string, number | undefined>({
+    drain: checkLocked,
+    merge: (pending, next) => (pending === undefined || next === undefined ? undefined : Math.max(pending, next)),
+  })
 
-  const onTerminal = (runtime: string, terminal: Terminal, working: boolean) =>
-    Effect.gen(function* () {
-      const id = yield* db.session.sessionAt(runtime, terminal)
+  const onTerminal = (processes: ReadonlyArray<BoundProcess>, working: boolean) =>
+    Effect.forEach(
+      processes,
+      ({ sessionId, process }) =>
+        Effect.gen(function* () {
+          const session = working ? yield* db.session.getSession(sessionId) : undefined
 
-      if (id === undefined) return
-      const session = working ? yield* db.session.getSession(id) : undefined
-      const execution = session && !inbox.pulls(harnessIdOf(session)) ? yield* db.session.openExecution(id) : undefined
+          const execution =
+            session && session.process?.id === process && !inbox.pulls(harnessIdOf(session))
+              ? yield* db.session.openExecution(sessionId)
+              : undefined
 
-      if (execution !== undefined) yield* db.session.acceptExecution(id, execution)
-      yield* wakes.wake(id, undefined)
-    })
+          if (execution !== undefined) yield* db.session.acceptExecution(sessionId, execution)
+          yield* wakes.wake(sessionId, process)
+        }),
+      { discard: true },
+    )
 
   let reconciles = 0
 
@@ -237,7 +237,7 @@ export const make = Effect.gen(function* () {
       yield* Effect.log(
         `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
       )
-      yield* Effect.forEach([...rows.map((row) => row.id), ...ended], checkLocked, {
+      yield* Effect.forEach([...rows.map((row) => row.id), ...ended], (id) => checkLocked(id), {
         concurrency: 8,
         discard: true,
       })
@@ -255,8 +255,8 @@ export const make = Effect.gen(function* () {
       ? reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
       : Effect.void,
   )
-  yield* reactor.on([TerminalState], (event) => onTerminal(event.runtime, event.terminal, event.state === "working"))
-  yield* reactor.on([TerminalExited], (event) => onTerminal(event.runtime, event.terminal, false))
+  yield* reactor.on([TerminalState], (event) => onTerminal(event.processes, event.state === "working"))
+  yield* reactor.on([TerminalExited], (event) => onTerminal(event.processes, false))
   yield* reactor.on([ProcessEnded], (event) => forgetIfDone(event.sessionId!))
   yield* reactor.on([RuntimeReset], (event) =>
     republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine }))),

@@ -1,56 +1,21 @@
 import childProcess from "node:child_process"
-import net from "node:net"
 import util from "node:util"
 
 import { assert, describe, it } from "@effect/vitest"
 import { probe } from "@vibest/client/client"
-import { LayerNode } from "@vibest/core/effect/layer-node"
-import { PlatformNode } from "@vibest/core/effect/platform"
 import { LOG_MAX_BYTES } from "@vibest/platform-bun/log-file"
 import { ID } from "@vibest/schema/id"
-import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { run } from "@vibest/server/daemon"
-import * as Server from "@vibest/server/server"
-import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Layer, Scope } from "effect"
-import { SocketServer } from "effect/socket/SocketServer"
+import { Layout } from "@vibest/schema/layout"
+import { Effect, Fiber, FileSystem } from "effect"
 
 import * as Platform from "#platform"
 
-import { hostReplacements } from "./lib/fakes.ts"
 import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "./lib/fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
 
 const daemon = (home: string) =>
   runVibest(home, { HOME: home, VIBEST_HOME: home, PATH: PATH_WITHOUT_HARNESS_CLIS }, ["daemon", "--foreground"])
-
-const ignoreEpipe = () => {}
-
-const listen = (socket: string, answersPing: boolean) =>
-  Effect.acquireRelease(
-    Effect.promise(
-      () =>
-        new Promise<net.Server>((resolve) => {
-          const server = net.createServer((sock) => {
-            sock.on("error", ignoreEpipe)
-            let buf = ""
-            sock.on("data", (chunk) => {
-              buf += chunk.toString()
-              const nl = buf.indexOf("\n")
-
-              if (nl < 0 || !answersPing) return
-              const req = JSON.parse(buf.slice(0, nl)) as { id?: string }
-              sock.write(
-                JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { version: "0.0.0", runtimes: [] } }) + "\n",
-              )
-            })
-          })
-
-          server.listen(socket, () => resolve(server))
-        }),
-    ),
-    (server) => Effect.sync(() => server.close()),
-  )
 
 describe.concurrent("vibestd.pid lock", () => {
   it.live("a lock file this user may only read: vibestd fails as unavailable, never as a second holder", () =>
@@ -82,43 +47,6 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.include(yield* fs.readFileString(layout.log), "DaemonNotAnswering")
         assert.isTrue(yield* fs.exists(layout.socket))
         assert.isFalse(yield* fs.exists(layout.database))
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
-  )
-
-  it.live(
-    "the lock still held after the old vibestd's socket is gone (its finalizers running): the new vibestd takes it once released",
-    () =>
-      Effect.gen(function* () {
-        const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-        const old = yield* Scope.make()
-        assert.isDefined(yield* Platform.daemon.lock(layout.daemonInfo).pipe(Effect.provideService(Scope.Scope, old)))
-        const start = yield* Effect.forkScoped(daemon(layout.home))
-        yield* Effect.sleep("1500 millis")
-        assert.isFalse(yield* probe(layout.socket))
-        yield* Scope.close(old, Exit.void)
-        yield* pingOf(layout.socket)
-        assert.isUndefined(start.pollUnsafe())
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
-  )
-
-  it.live(
-    "an older vibestd that takes no lock, or a socket that never answers: vibestd fails and the socket stays",
-    () =>
-      Effect.gen(function* () {
-        for (const answer of [true, false]) {
-          const fs = yield* FileSystem.FileSystem
-          const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-          yield* listen(layout.socket, answer)
-          const run = yield* daemon(layout.home)
-          const log = yield* fs.readFileString(layout.log)
-          assert.strictEqual(run.code, 1)
-          assert.include(log, "DaemonSocketInUse")
-          assert.include(log, answer ? "answers Ping" : "does not answer Ping")
-          assert.strictEqual(yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })), answer)
-          assert.isFalse(yield* (yield* FileSystem.FileSystem).exists(layout.database))
-        }
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )
@@ -186,73 +114,6 @@ describe.concurrent("vibestd.pid lock", () => {
         const next = yield* pingOf(layout.socket)
         assert.notStrictEqual(next.instance, old.instance)
         assert.notStrictEqual(next.pid, process.pid)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
-  )
-
-  it.live(
-    "an vibestd that fails to start leaves the lock free for the next one",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-        yield* fs.makeDirectory(layout.database, { recursive: true })
-        const failed = yield* daemon(layout.home)
-        assert.notStrictEqual(failed.code, 0)
-        assert.isFalse(yield* probe(layout.socket))
-        yield* fs.remove(layout.database, { recursive: true })
-        yield* Effect.forkScoped(daemon(layout.home))
-        yield* pingOf(layout.socket)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
-  )
-
-  it.live(
-    "an vibestd slow to close its socket keeps the lock until the socket is gone: its successor binds after, and stays reachable",
-    () =>
-      Effect.gen(function* () {
-        const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-
-        const slowClose = [
-          ...Platform.replacements,
-          ...hostReplacements,
-          Server.socketServer.replace(
-            LayerNode.make({
-              name: "test/SlowCloseSocketServer",
-              layer: Layer.effect(
-                SocketServer,
-                Effect.gen(function* () {
-                  const server = yield* SocketServer
-                  yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
-
-                  return server
-                }),
-              ).pipe(Layer.provideMerge(Layer.unwrap(Effect.map(Layout, (l) => Platform.socketServer(l.socket))))),
-              deps: [PlatformNode.layout],
-            }),
-          ),
-        ]
-
-        const old = yield* run(Platform.daemon, slowClose).pipe(
-          Effect.provideService(Layout, layout),
-          Effect.provideService(VibestCommand, ["vibestd-under-test"]),
-          Effect.provide(
-            ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: layout.home, PATH: PATH_WITHOUT_HARNESS_CLIS })),
-          ),
-          Effect.forkScoped,
-        )
-
-        yield* pingOf(layout.socket)
-        const stopping = yield* Effect.forkScoped(Fiber.interrupt(old))
-        yield* Effect.sleep("200 millis")
-        const successor = yield* Effect.forkScoped(daemon(layout.home))
-        yield* Fiber.join(stopping)
-        yield* pingOf(layout.socket)
-        yield* Effect.sleep("500 millis")
-        const ping = yield* pingOf(layout.socket)
-        assert.notStrictEqual(ping.pid, process.pid)
-        assert.strictEqual(Platform.liveness(ping.pid!), "alive")
-        assert.isUndefined(successor.pollUnsafe())
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )

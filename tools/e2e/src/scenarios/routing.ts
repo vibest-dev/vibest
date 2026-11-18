@@ -371,35 +371,25 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G14",
     title:
-      "`-<id>` in vibest.json removes a builtin plugin by exact id and `-*` does not; a first start while slow user plugins are still importing is refused instead of running without them; deleting the line brings the builtin back without restarting vibestd",
+      "`-<id>` in vibest.json removes a builtin plugin by exact id and `-*` does not; deleting the line brings the builtin back without restarting vibestd",
     run: async (w) => {
       needs("herdr")
-      const slow = [1, 2, 3, 4, 5, 6, 7].map((n) => path.join(w.vibestHome, "slow", `slow-${n}`))
+      const users = [1, 2].map((n) => path.join(w.vibestHome, "users", `user-${n}`))
 
-      for (const [n, folder] of slow.entries()) {
+      for (const [n, folder] of users.entries()) {
         await fs.mkdir(folder, { recursive: true })
         await fs.writeFile(
           path.join(folder, "index.ts"),
           `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
-await new Promise((resolve) => setTimeout(resolve, 4800))
-export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
+export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
 `,
         )
       }
 
-      await configurePlugins(w, () => ["-*", "-harness-default", ...slow])
+      await configurePlugins(w, () => ["-*", "-harness-default", ...users])
       await w.daemon()
       const pid = await w.daemonPid()
-      const started = await w.vibest(["--headless"], { timeoutMs: 60_000 })
-      const out = started.stderr + started.stdout
-      expect(
-        started.code !== 0 &&
-          /PluginsNotActive/.test(out) &&
-          !/no harness to inherit/.test(out) &&
-          ["slow-5", "slow-6", "slow-7"].every((name) => out.includes(name)),
-        `first start while plugins import: ${started.code} ${out}`,
-      )
 
       const active = async () =>
         (await w.json<Array<{ id: string; status: string }>>(["plugins"], { timeoutMs: 60_000 })).filter(
@@ -407,8 +397,8 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
         )
 
       await until(
-        "the slow plugins active",
-        async () => (await active()).filter((p) => p.id.startsWith("slow-")).length === 7,
+        "the user plugins active",
+        async () => (await active()).filter((p) => p.id.startsWith("user-")).length === 2,
         60_000,
       )
       const ids = (await active()).map((p) => p.id)
@@ -416,7 +406,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
         !ids.includes("harness-default") && ids.includes("runtime-choice"),
         `after -* and -harness-default: ${ids}`,
       )
-      await configurePlugins(w, () => ["-*", ...slow])
+      await configurePlugins(w, () => ["-*", ...users])
       await until("harness-default back", async () => (await active()).some((p) => p.id === "harness-default"), 60_000)
       expect((await w.daemonPid()) === pid, "vibestd restarted")
     },
@@ -538,96 +528,6 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
           (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "promised"),
         )
         await until("its cleanup ran", async () => (await factLines(cleanup)).join() === "cleanup", 30_000)
-      } finally {
-        model.stop()
-      }
-    },
-  },
-  {
-    id: "G15",
-    title:
-      "three user plugins whose setup each sleeps 4 s are together over the activation wait: vibest run right after they are written is refused with PluginsNotActive and the plugins still loading, and the same run succeeds once they are active, with the routing plugin as the decider",
-    run: async (w) => {
-      needs("pi", "herdr")
-      const { model, dir } = await fakePi(w, "gate")
-      const ids = ["gate-a", "gate-b", "gate-router"]
-
-      const install = async (id: string, effect: string) => {
-        const file = path.join(w.vibestHome, "plugins", `${id}.ts`)
-        await fs.mkdir(path.dirname(file), { recursive: true })
-        await fs.writeFile(
-          `${file}.tmp`,
-          `import fs from "node:fs"
-import { Plugin } from "@vibest/plugin"
-import { Effect } from "effect"
-export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${effect} })
-`,
-        )
-        await fs.rename(`${file}.tmp`, file)
-      }
-
-      try {
-        await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
-        await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
-        const session = await w.entryOf(w.repository)
-        const mine = (await sessions(w)).find((row) => row.id === session)
-        expect(session !== undefined && mine !== undefined, "the entry session")
-        const marker = path.join(w.root, "gate-a-started")
-        const sleep = `Effect.sleep("4 seconds")`
-        await install(
-          "gate-a",
-          `Effect.sync(() => fs.writeFileSync(${JSON.stringify(marker)}, "in")).pipe(Effect.andThen(${sleep}))`,
-        )
-        await install("gate-b", sleep)
-        await install(
-          "gate-router",
-          `${sleep}.pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-gated")) e.provider = "second" }))))`,
-        )
-        await until(
-          "the first setup",
-          () =>
-            fs.access(marker).then(
-              () => true,
-              () => false,
-            ),
-          30_000,
-        )
-
-        const refused = await w.vibest(["run", "--", ask("gated")], {
-          env: {
-            VIBEST_SESSION_ID: session,
-            VIBEST_PROJECT_ID: mine?.projectId,
-            PI_CODING_AGENT_DIR: dir,
-          },
-          timeoutMs: 30_000,
-        })
-
-        const out = refused.stderr + refused.stdout
-        const named = ids.filter((id) => out.includes(id))
-        expect(
-          refused.code !== 0 && /PluginsNotActive/.test(out) && named.length > 0,
-          `run while plugins set up: ${refused.code} ${out}`,
-        )
-        await until(
-          "the slow plugins active",
-          async () => {
-            const active = new Set(
-              (await w.json<Array<{ id: string; status: string }>>(["plugins"], { timeoutMs: 60_000 }))
-                .filter((p) => p.status === "active")
-                .map((p) => p.id),
-            )
-
-            return ids.every((id) => active.has(id))
-          },
-          30_000,
-        )
-        const id = await runId(w, ["--", ask("gated")])
-        const started = await entry(w, id)
-        expect(
-          started?.harness === "pi" && started.routing?.decidedBy.provider === "gate-router",
-          `routed once active: ${JSON.stringify(started)}`,
-        )
-        await resultOf(w, id, "gated")
       } finally {
         model.stop()
       }

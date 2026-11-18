@@ -34,13 +34,24 @@ export type Signal =
       readonly runtime: string
       readonly terminal: RuntimeAddress
       readonly state: Runtime.AgentState
+      readonly processes: ReadonlyArray<BoundProcess>
     }
-  | { readonly type: "terminal.exited"; readonly runtime: string; readonly terminal: RuntimeAddress }
+  | {
+      readonly type: "terminal.exited"
+      readonly runtime: string
+      readonly terminal: RuntimeAddress
+      readonly processes: ReadonlyArray<BoundProcess>
+    }
   | { readonly type: "terminal.seen"; readonly runtime: string; readonly terminal: RuntimeAddress }
   | { readonly type: "runtime.reset"; readonly runtime: string; readonly machine: string }
   | { readonly type: "drain.released" }
   | { readonly type: "session.changed"; readonly sessionId: string }
   | { readonly type: "project.changed"; readonly projectId: string }
+
+export interface BoundProcess {
+  readonly sessionId: string
+  readonly process: number
+}
 
 export type BusEvent = Fact | Signal
 

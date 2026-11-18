@@ -256,10 +256,12 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
+      const terminal = { machine: "local", id: s.paneId }
       yield* (yield* Bus.Service).observe({
         type: "terminal.exited",
         runtime: s.origin.runtime,
-        terminal: { machine: "local", id: s.paneId },
+        terminal,
+        processes: yield* (yield* Db.Service).session.processesAt(s.origin.runtime, terminal),
       })
       assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "stopped" })
     }),
@@ -302,7 +304,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   )
 
   test(
-    "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen but a live (reused) PID; an exited PID moves without a signal",
+    "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen and a PID of unknown liveness; no agent seen but a live PID still stops it; an exited PID moves without a signal",
     Effect.gen(function* () {
       const s = yield* workingPiEntry
 
@@ -332,14 +334,19 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       yield* s.processes.setSignalDenied(false)
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       yield* s.herdr.addPane(s.paneId, "test", "/")
+      yield* s.processes.set(HARNESS, "unknown")
       const unseen = yield* s.stop
       assert.strictEqual(unseen.result, "unsupported")
-      assert.include(unseen.reason, "does not see its harness")
+      assert.include(unseen.reason, "cannot tell whether its harness still runs")
       assert.deepStrictEqual(yield* s.processes.signaled, [])
       assert.strictEqual(terminalOf((yield* s.db.session.entryOf(s.projectId))!)?.id, s.paneId)
       yield* s.processes.set(HARNESS, "exited")
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
       assert.deepStrictEqual(yield* s.processes.signaled, [])
+      yield* restore
+      yield* s.processes.set(HARNESS, "alive")
+      assert.strictEqual((yield* s.stop).result, "stopped")
+      assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
     }),
   )
 

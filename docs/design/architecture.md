@@ -404,7 +404,12 @@ How these modules keep the rules:
   A harness whose reported
   pid has died is an exit even when that report still says the terminal is running: a launch herdr has not finished
   keeps saying so after the process was killed. A terminal the runtime cannot
-  find is. An execution counts
+  find is. A terminal's exit and state events are bound, as vibestd receives them from the runtime, to the
+  processes vibestd had recorded at that terminal (`terminal.exited` and `terminal.state` carry them). Ending a process
+  names the process it means (`endProcess` does nothing once another process is the session's current one): clearing an
+  entry session passes the bound process, a check woken by a bound event checks only that process, and an exit a check
+  records passes the process its session snapshot read. The event or the check is handled later, and by then `vibest`
+  typed in the same pane may have started the entry session again, whose new process must keep running. An execution counts
   as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
 - A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
@@ -502,10 +507,11 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   `(deleted)` cwd, counts as a holder of anything in the worktree it could stand for.
 - An entry session stopped so it can start in another terminal (`Project.StopEntry`): its row leaves its place
   first, so the harness's exit drops nothing, and from there to the answer the stop is uninterruptible, so a Ctrl-C
-  cannot leave the row detached while the harness runs. It is signalled only while the runtime sees an agent in that
-  terminal, and a harness still there after 10 s gets its row back. Ceiling: local machine only (a pid names a
-  process on vibestd's machine; a remote one needs a runtime operation), and a pid reused by another program while
-  the runtime still sees an agent there would get the signal.
+  cannot leave the row detached while the harness runs. It is signalled while the runtime sees an agent in that
+  terminal or, when the runtime does not know, while its process is still open in vibest and the pid its harness
+  reported is alive; a harness still there after 10 s gets its row back. Ceiling: local machine only (a pid names a
+  process on vibestd's machine; a remote one needs a runtime operation), and a pid reused by another program before
+  vibest saw the harness exit would get the signal.
 
 Rows are never deleted. `vibest ls` lists Agents that have not exited; `vibest ls --all` and `vibest result <id>` still show an exited one.
 

@@ -29,7 +29,7 @@ it.effect("a session row's open execution is the newest one and its last executi
   }).pipe(Effect.provide(database(":memory:"))),
 )
 
-it.effect("sessionAt finds the one live session at that runtime and terminal", () =>
+it.effect("processesAt binds the live processes at that runtime and terminal", () =>
   Effect.gen(function* () {
     const db = yield* Db.Service
     const project = yield* projectOf("r")
@@ -51,7 +51,12 @@ it.effect("sessionAt finds the one live session at that runtime and terminal", (
       project,
     )
     yield* db.session.insertSession(session(here, { address: terminal, createdAt: 1 }), project)
-    assert.strictEqual(yield* db.session.sessionAt(RUNTIME, terminal), here)
-    assert.isUndefined(yield* db.session.sessionAt(RUNTIME, { machine: "local", id: "missing" }))
+    const bound = yield* db.session.processesAt(RUNTIME, terminal)
+    assert.deepStrictEqual(
+      bound.map((p) => p.sessionId),
+      [here],
+    )
+    assert.strictEqual(bound[0]!.process, (yield* db.session.getSession(here))!.process!.id)
+    assert.deepStrictEqual(yield* db.session.processesAt(RUNTIME, { machine: "local", id: "missing" }), [])
   }).pipe(Effect.provide(database(":memory:"))),
 )

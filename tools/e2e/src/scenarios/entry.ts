@@ -3,12 +3,8 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, entryRun, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { replyOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { replyOf, expect, fail, herdr, paneOf, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
-
-type Proc = { name: string; argv0?: string | null; argv?: Array<string> | null }
-
-type Pane = { pane_id: string; agent?: string | null }
 
 type EntryRow = { id: string; directory: string; conversation: string | null; runtime: string | null }
 
@@ -18,36 +14,12 @@ const needs = (...bins: Array<string>) => {
 
 const socketOf = (w: World, session: string) => path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
 
-const panes = async (socket: string) =>
-  ((await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as { panes: Array<Pane> }).panes
-
-const runsPi = async (socket: string, pane: Pane) => {
-  if (pane.agent === "pi") return true
-
-  const info = (await herdr(socket, "pane.process_info", { pane_id: pane.pane_id }).catch(() => ({}))) as {
-    process_info?: { foreground_processes?: Array<Proc> }
-  }
-
-  return (info.process_info?.foreground_processes ?? []).some((p) =>
-    [p.name, p.argv0, ...(p.argv ?? []).slice(0, 2)].some((n) => n != null && path.basename(n) === "pi"),
-  )
-}
-
-const piPane = async (socket: string) => {
-  for (const p of await panes(socket)) if (await runsPi(socket, p)) return p.pane_id
-
-  return undefined
-}
-
 const screen = async (socket: string, pane: string) =>
   (
     (await herdr(socket, "pane.read", { pane_id: pane, source: "visible", strip_ansi: true })) as {
       read: { text: string }
     }
   ).read.text
-
-const status = async (socket: string, pane: string) =>
-  ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
 
 const liveEntry = (w: World) =>
   row<EntryRow>(
@@ -69,20 +41,19 @@ const latestProcess = (w: World) =>
      WHERE s.agent = 'coordinator' ORDER BY p.started_at DESC, p.id DESC LIMIT 1`,
   )
 
-const piReady = async (socket: string, what: string) => {
-  let pane: string | undefined
-  await until(
-    `${what}: pi running`,
-    async () => {
-      pane = await piPane(socket)
+const piReady = async (w: World, what: string) => {
+  await until(`${what}: pi ready`, () => latestProcess(w)?.ready != null && liveEntry(w) !== undefined, 60_000)
 
-      return pane !== undefined
-    },
-    60_000,
-  )
-  await until(`${what}: pi idle`, async () => ["idle", "done"].includes(await status(socket, pane!)), 60_000)
+  return { pane: paneOf(w, liveEntry(w)!.id)! }
+}
 
-  return { pane: pane! }
+const completed = (w: World, id: string) =>
+  row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome = 'completed'", id)?.n ??
+  0
+
+const typePrompt = async (socket: string, pane: string, text: string) => {
+  await herdr(socket, "pane.send_text", { pane_id: pane, text })
+  await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
 }
 
 const readyConversation = async (w: World, what: string) => {
@@ -100,14 +71,12 @@ const readyConversation = async (w: World, what: string) => {
 }
 
 const execution = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
-  await herdr(socket, "agent.prompt", { target: pane, text: prompt })
+  const id = liveEntry(w)!.id
+  const before = completed(w, id)
+  await typePrompt(socket, pane, prompt)
   await until(`the answer ${answer} on screen`, async () => (await screen(socket, pane)).includes(answer), 60_000)
   await until("the entry session's conversation", () => (liveEntry(w)?.conversation ?? null) !== null, 30_000)
-  await until(
-    "the entry session idle after its execution",
-    async () => ["idle", "done"].includes(await status(socket, pane)),
-    60_000,
-  )
+  await until("the entry session's execution completed", () => completed(w, id) > before, 60_000)
 }
 
 const exitEntry = async (w: World, socket: string, pane: string, id: string) => {
@@ -166,7 +135,7 @@ const checks: ReadonlyArray<Check> = [
         const out = await w.ok(["--harness", "pi", "--headless"], { cwd: sub, env, timeoutMs: 60_000 })
         expect(out.includes("the entry session is starting in"), `vibest printed: ${out}`)
         const socket = socketOf(w, w.herdrSession)
-        const { pane } = await piReady(socket, "the launched entry session")
+        const { pane } = await piReady(w, "the launched entry session")
         await until("the entry session's row", () => liveEntry(w) !== undefined, 30_000)
         const entry = liveEntry(w)!
         const root = await fs.realpath(w.repository)
@@ -206,7 +175,7 @@ const checks: ReadonlyArray<Check> = [
           await w.startEntry({ harness: "pi", session, env, extra, timeoutMs: 60_000 })
           await until(`${what}: a new process`, () => processStarts(w) > before, 60_000)
 
-          return piReady(socket, what)
+          return piReady(w, what)
         }
 
         const first = await start([], "the first entry session")
@@ -277,8 +246,8 @@ const checks: ReadonlyArray<Check> = [
         const env = { PI_CODING_AGENT_DIR: await piDir(w, "pi-tools", model.url) }
         await w.daemon({ env })
         await w.startEntry({ harness: "pi", session, env, timeoutMs: 60_000 })
-        const { pane } = await piReady(socket, "the entry session")
-        await herdr(socket, "agent.prompt", { target: pane, text: "group-tools" })
+        const { pane } = await piReady(w, "the entry session")
+        await typePrompt(socket, pane, "group-tools")
         await until("the execution's reply", async () => (await screen(socket, pane)).includes("tools-done"), 60_000)
         await until(
           "one tool group line",

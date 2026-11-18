@@ -435,7 +435,7 @@ const checks: ReadonlyArray<Check> = [
           await until("the held execution at the model", () => held === 1, 60_000)
           await until("the held execution open", settled("open"), 60_000)
 
-          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", paneOf(w, id)!, "esc"], {
+          const esc = await w.run(w.root, ["herdr", "pane", "send-keys", paneOf(w, id)!, "esc"], {
             env: { HERDR_SOCKET_PATH: socket },
           })
 

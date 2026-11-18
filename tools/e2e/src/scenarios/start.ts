@@ -7,7 +7,8 @@ import type { Schema } from "effect"
 import type { Check } from "../check.ts"
 import { answerFolderTrust } from "../drivers/claude.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
-import { expect, fail, row, SESSIONS, Skip, until } from "../world.ts"
+import { expect, fail, herdrPane, row, Skip, until } from "../world.ts"
+import { alive } from "../world/alive.ts"
 
 const herdr = (socket: string, method: string, params: Schema.JsonObject) =>
   new Promise<any>((resolve, reject) => {
@@ -28,35 +29,8 @@ const herdr = (socket: string, method: string, params: Schema.JsonObject) =>
     conn.on("error", reject)
   })
 
-type Proc = { pid: number; name: string; argv0?: string; argv?: Array<string> | null }
-
-const foreground = async (socket: string, pane: string): Promise<Array<Proc>> =>
-  (
-    (await herdr(socket, "pane.process_info", { pane_id: pane })) as {
-      process_info: { foreground_processes?: Array<Proc> }
-    }
-  ).process_info.foreground_processes ?? []
-
 const screen = async (socket: string, pane: string): Promise<string> =>
   ((await herdr(socket, "pane.read", { pane_id: pane, source: "visible" })) as { read: { text: string } }).read.text
-
-const harnessArgv = async (socket: string, pane: string, harness: "claude" | "pi") => {
-  for (const p of await foreground(socket, pane)) {
-    const argv = p.argv ?? []
-    const programNames = [p.name, p.argv0 ?? "", ...argv.slice(0, harness === "pi" ? 2 : 1)]
-
-    if (programNames.some((n) => (harness === "claude" ? /claude/.test(n) : path.basename(n) === "pi"))) return argv
-  }
-
-  return undefined
-}
-
-const harnessFlag = async (socket: string, pane: string, harness: "claude" | "pi", flag: string) => {
-  const argv = (await harnessArgv(socket, pane, harness)) ?? []
-  const i = argv.indexOf(flag)
-
-  return i === -1 ? undefined : argv[i + 1]
-}
 
 const type = async (socket: string, pane: string, text: string) => {
   await herdr(socket, "pane.send_text", { pane_id: pane, text })
@@ -101,66 +75,40 @@ const move = (harness: "claude" | "pi"): Check => ({
         processEnv: env,
         timeoutMs: 60_000,
       })
-      let a = ""
-      await until(
-        `${harness} in terminal A`,
-        async () => {
-          const panes = (
-            (await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as {
-              panes: Array<{ pane_id: string }>
-            }
-          ).panes
 
-          for (const p of panes)
-            if (await harnessArgv(socket, p.pane_id, harness)) {
-              a = p.pane_id
-
-              return true
-            }
-
-          return false
-        },
-        60_000,
-      ).catch(async (e: Error) => {
-        const panes = (
-          (await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as { panes: Array<{ pane_id: string }> }
-        ).panes
-
-        const seen = await Promise.all(
-          panes.map(
-            async (p) =>
-              `${p.pane_id}: ${JSON.stringify(await foreground(socket, p.pane_id))}\n${await screen(socket, p.pane_id)}`,
-          ),
+      const entryProcess = () =>
+        row<{
+          session: string
+          pid: number | null
+          ready: number | null
+          conversation: string | null
+          terminal: string
+        }>(
+          w,
+          `SELECT p.session_id AS session, p.pid, p.ready_at AS ready, p.conversation, p.terminal FROM process p
+            JOIN project q ON q.entry_session_id = p.session_id
+            WHERE p.ended_at IS NULL ORDER BY p.id DESC LIMIT 1`,
         )
 
-        fail(`${e.message}; panes:\n${seen.join("\n")}`)
-      })
-
-      const status = async (pane: string) =>
-        ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
+      await until(`${harness} placed in terminal A`, () => entryProcess() !== undefined, 60_000)
+      const a = herdrPane(entryProcess()!.terminal)!
 
       if (harness === "claude")
         await answerFolderTrust(
           () => screen(socket, a),
           (key) => herdr(socket, "pane.send_keys", { pane_id: a, keys: [key] }),
         )
-      await until(`${harness} ready in A`, async () => (await status(a)) === "idle", 60_000)
+      await until(`${harness} ready in A`, () => entryProcess()?.ready != null, 60_000)
+      const first = entryProcess()!
       const prompt = "Do not use any tools. Reply with exactly: ok"
-      await herdr(socket, "agent.prompt", { target: a, text: prompt })
+      await type(socket, a, prompt)
       let conversation: string | undefined
       const projects = path.join(claudeConfigOf(claudeVars), "projects")
-      const realRepository = await fs.realpath(w.repository)
       await until(
         "A's conversation written",
         async () => {
           if (harness === "pi") return await piWrote(piAgentDir, w.repository)
-          conversation =
-            row<{ c: string | null }>(
-              w,
-              `SELECT s.harness_session_id AS c FROM ${SESSIONS} s
-               WHERE s.agent_type = 'coordinator' AND s.directory = ? AND s.ended_at IS NULL`,
-              realRepository,
-            )?.c ?? undefined
+          conversation = entryProcess()?.conversation ?? undefined
 
           if (conversation === undefined) return false
 
@@ -171,10 +119,14 @@ const move = (harness: "claude" | "pi"): Check => ({
         },
         120_000,
       )
-      const idleOrUnseenExecutionDone = ["idle", "done"]
       await until(
-        "A idle after its execution",
-        async () => idleOrUnseenExecutionDone.includes(await status(a)),
+        "A's execution completed",
+        () =>
+          row<{ n: number }>(
+            w,
+            "SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome = 'completed'",
+            first.session,
+          )!.n > 0,
         120_000,
       )
 
@@ -201,36 +153,23 @@ const move = (harness: "claude" | "pi"): Check => ({
       await type(socket, b, "y")
 
       if (harness === "claude") {
-        await until(
-          "Claude resumed in B",
-          async () => (await harnessFlag(socket, b, "claude", "--resume")) !== undefined,
-          60_000,
-        ).catch(async (e: Error) =>
-          fail(
-            `${e.message}; B runs ${JSON.stringify(await foreground(socket, b))}; its screen:\n${await screen(socket, b)}`,
-          ),
-        )
-        const resumed = await harnessFlag(socket, b, "claude", "--resume")
+        await until("Claude resumed in B", () => herdrPane(entryProcess()?.terminal) === b, 60_000)
+        await until("B reports its conversation", () => entryProcess()?.conversation != null, 60_000)
+        const resumed = entryProcess()?.conversation
         expect(resumed === conversation, `B resumed ${resumed}, not ${conversation}`)
       } else {
-        await until("Pi in B shows A's conversation", async () => (await screen(socket, b)).includes(prompt), 60_000)
+        await until(
+          "Pi in B shows A's conversation",
+          async () => (await screen(socket, b)).includes(prompt),
+          60_000,
+        ).catch(async (e: Error) => fail(`${e.message}; B's screen:\n${await screen(socket, b)}`))
       }
 
-      await until("A's harness gone", async () => (await harnessArgv(socket, a, harness)) === undefined, 20_000)
+      await until("A's harness gone", () => !alive(first.pid!), 20_000)
       const kept = ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes
       expect(
         kept.some((p) => p.pane_id === a),
         `pane ${a} closed`,
-      )
-
-      const shellOnly = async () => {
-        const procs = await foreground(socket, a)
-
-        return procs.length > 0 && procs.every((p) => /^-?(zsh|bash|sh|fish)$/.test(path.basename(p.name)))
-      }
-
-      await until("only a shell in A", shellOnly, 30_000).catch(async () =>
-        fail(`A runs ${JSON.stringify(await foreground(socket, a))}`),
       )
 
       const entryRows = (

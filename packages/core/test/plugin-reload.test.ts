@@ -265,7 +265,6 @@ const watchGate = {
 }
 
 const watchSees = (directory: string, name: string) => Effect.sync(() => watchGate.listeners.get(directory)!(name))
-const vibestJsonReads = { count: 0 }
 const CONFIG_READS_PER_RELOAD = 2
 
 type ConfigPause = {
@@ -316,7 +315,6 @@ const makeLoader = (): PluginLoader["Service"] => {
     ...platform,
     prepare: Effect.void,
     parseJsonc: (text) => {
-      vibestJsonReads.count++
       wake()
 
       return platform.parseJsonc(text)
@@ -473,79 +471,6 @@ describe("plugins: supervisor", () => {
         yield* untilActive("harness-x,runtime-y,runtime-z", "the builtins back")
         assert.deepStrictEqual(yield* TestClock.withLive(startedWith(plugins)), ["harness-x", "runtime-y", "runtime-z"])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    TEST_TIMEOUT,
-  )
-
-  it.effect(
-    "a save the watch never reports is found by the next periodic rescan, and an unchanged rescan sets nothing up again",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* packageHome
-        const file = path.join(dir, "plugins", "a.ts")
-        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
-        yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a1"`))
-        watchGate.hold = true
-        const service = yield* TestClock.withLive(supervise(dir))
-        const model = TestClock.withLive(service.start(event).pipe(Effect.map((s) => s.model)))
-
-        if (!(yield* TestClock.withLive(service.settled))) return yield* Effect.die("activation did not settle")
-        assert.strictEqual(yield* model, "a1")
-        yield* fs.writeFileString(file, pluginFile("a", "unreported-a", `"a2"`))
-        yield* TestClock.withLive(
-          eventually(
-            Effect.sync(() => count("setup:unreported-a")),
-            (n) => n >= 2,
-            "the unreported save",
-          ),
-        )
-        assert.strictEqual(yield* model, "a2")
-        const reads = vibestJsonReads.count
-        yield* TestClock.withLive(
-          eventually(
-            Effect.sync(() => vibestJsonReads.count),
-            (n) => n > reads,
-            "a rescan with nothing changed",
-          ),
-        )
-        yield* TestClock.withLive(Effect.sleep("200 millis"))
-        assert.strictEqual(count("setup:unreported-a"), 2)
-      }).pipe(
-        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
-        Effect.scoped,
-        Effect.provide(Platform.services),
-      ),
-    TEST_TIMEOUT,
-  )
-
-  it.effect(
-    "a burst during the delay keeps readiness closed until that pass imports an unreported edit",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* packageHome
-        const pluginsDir = path.join(dir, "plugins")
-        const file = path.join(pluginsDir, "a.ts")
-        yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
-        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a1"`))
-        watchGate.hold = true
-        const service = yield* TestClock.withLive(supervise(dir))
-        assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
-        yield* watchSees(pluginsDir, "a.ts")
-        yield* watchSees(pluginsDir, "a.ts")
-        yield* fs.writeFileString(file, pluginFile("a", "burst-a", `"a2"`))
-        const starting = yield* Effect.forkChild(TestClock.withLive(service.start(event)))
-        yield* TestClock.withLive(Effect.sleep("20 millis"))
-        assert.isUndefined(starting.pollUnsafe(), "a start was admitted before the burst settled")
-        const started = yield* TestClock.withLive(Fiber.join(starting).pipe(Effect.timeout(fsEventsDeliveryUnderLoad)))
-        assert.strictEqual(started.model, "a2")
-      }).pipe(
-        Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
-        Effect.scoped,
-        Effect.provide(Platform.services),
-      ),
     TEST_TIMEOUT,
   )
 

@@ -14,7 +14,7 @@ import {
   subagentFolder,
   type Step,
 } from "../fake-model.ts"
-import { replyOf, binary, expect, herdr, row, Skip, until } from "../world.ts"
+import { replyOf, binary, expect, herdr, paneOf, row, Skip, until } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
@@ -311,28 +311,18 @@ const checks: ReadonlyArray<Check> = [
       const panes = async () =>
         ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes.map((p) => p.pane_id)
 
-      let entryPane = ""
+      const entry = (await w.entryOf(w.repository))!
       await until(
-        "the entry session's pane",
-        async () => {
-          for (const id of await panes()) {
-            const info = (await herdr(socket, "pane.process_info", { pane_id: id })) as {
-              process_info?: { foreground_processes?: Array<{ name?: string; argv0?: string | null }> }
-            }
-
-            const fg = info.process_info?.foreground_processes ?? []
-
-            if (fg.some((proc) => (proc.argv0 ?? proc.name ?? "").includes("pi"))) {
-              entryPane = id
-
-              return true
-            }
-          }
-
-          return false
-        },
+        "the entry session ready",
+        () =>
+          row<{ ready: number | null }>(
+            w,
+            "SELECT ready_at AS ready FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+            entry,
+          )?.ready != null,
         30_000,
       )
+      const entryPane = paneOf(w, entry)!
       const before = new Set(await panes())
       await herdr(socket, "pane.close", { pane_id: entryPane })
       await until("the entry session pane closed", async () => !(await panes()).includes(entryPane), 15_000)

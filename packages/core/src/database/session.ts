@@ -21,7 +21,7 @@ import {
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { Bus } from "../bus.ts"
+import { type BoundProcess, Bus } from "../bus.ts"
 import { type ObservedEnd } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
@@ -392,10 +392,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ),
       ),
 
-      sessionAt: Effect.fn("Db.session.sessionAt")((runtime: string, address: RuntimeAddress) =>
-        session.sessionAt(runtime, address).pipe(Effect.orDie),
-      ),
-
       startEntry: Effect.fn("Db.session.startEntry")(
         (
           project: string,
@@ -624,8 +620,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(ensureProcess(id, start)).pipe(Effect.orDie),
       ),
 
-      endProcess: Effect.fn("Db.session.endProcess")((id: string, reason: ProcessEndReason) =>
-        tx(endProcess(id, reason)).pipe(Effect.orDie),
+      endProcess: Effect.fn("Db.session.endProcess")((id: string, reason: ProcessEndReason, process?: number) =>
+        tx(endProcess(id, reason, undefined, process)).pipe(Effect.orDie),
       ),
 
       detachEntry: Effect.fn("Db.session.detachEntry")(
@@ -646,8 +642,23 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           }),
       ),
 
-      clearEntry: Effect.fn("Db.session.clearEntry")((runtime: string, address: RuntimeAddress) =>
-        tx(clearEntryAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
+      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, address: RuntimeAddress) =>
+        session.processesAt(runtime, address).pipe(Effect.orDie),
+      ),
+
+      clearEntry: Effect.fn("Db.session.clearEntry")((exited: ReadonlyArray<BoundProcess>) =>
+        tx(
+          Effect.forEach(exited, ({ sessionId, process }) =>
+            Effect.gen(function* () {
+              const [entry] = yield* sql<{ project: string }>`SELECT id AS project FROM project
+                WHERE entry_session_id = ${sessionId}`
+
+              if (entry === undefined || moving.has(entry.project)) return
+
+              if (yield* endProcess(sessionId, "exited", undefined, process)) yield* dropWaiting(entry.project)
+            }),
+          ),
+        ).pipe(Effect.asVoid, Effect.orDie),
       ),
 
       canResumeConversation,
@@ -797,7 +808,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             if (current === undefined || current.start.harness !== end.harness) return undefined
 
-            if (end.needsReady && current.readyAt === null) return undefined
+            if (end.needsReady && current.readyAt === null && process !== current.id) return undefined
             const open = yield* openExecution(id)
 
             if (open === undefined && end.status === "interrupted") return undefined

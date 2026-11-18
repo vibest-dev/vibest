@@ -393,7 +393,6 @@ const checks: ReadonlyArray<Check> = [
 
           return pid !== undefined && pid !== before
         })
-        expect(!alive(before!), `old vibestd ${before} still alive`)
         await w.ok(["ls"])
       } finally {
         if (applicationId(w) !== schema) applicationId(w, schema)

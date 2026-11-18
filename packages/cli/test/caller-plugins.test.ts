@@ -94,6 +94,7 @@ describe("the runtime registry", () => {
 
         const runtimes = yield* makeRuntimes.pipe(
           Effect.provideService(Runtimes.HostEnv, { drop: (names) => void dropped.push(...names) }),
+          Effect.provideService(Runtimes.TerminalProcesses, () => Effect.succeed([])),
         )
 
         const queue = yield* Queue.unbounded<RuntimeEvent>()

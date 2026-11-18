@@ -4,7 +4,8 @@ import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
 
-import { Bus, type Signal } from "./bus.ts"
+import { type BoundProcess, Bus, type Signal } from "./bus.ts"
+import { Db } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as PluginHostEnv, RuntimesDomain } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
@@ -27,18 +28,38 @@ export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 
 export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
 
-const live = (runtime: string, event: RuntimeEvent): Signal => {
+const bound = (processesAt: ProcessesAt, runtime: string, terminal: Terminal, state?: AgentState) =>
+  Effect.map(processesAt(runtime, terminal), (processes): Signal =>
+    state === undefined
+      ? { type: "terminal.exited", runtime, terminal, processes }
+      : { type: "terminal.state", runtime, terminal, state, processes },
+  )
+
+const live = (processesAt: ProcessesAt, runtime: string, event: RuntimeEvent): Effect.Effect<Signal> => {
   switch (event.type) {
     case "state":
-      return { type: "terminal.state", runtime, terminal: addressOf(event.terminal), state: event.state }
+      return bound(processesAt, runtime, addressOf(event.terminal), event.state)
     case "exited":
-      return { type: "terminal.exited", runtime, terminal: addressOf(event.terminal) }
+      return bound(processesAt, runtime, addressOf(event.terminal))
     case "seen":
-      return { type: "terminal.seen", runtime, terminal: addressOf(event.terminal) }
+      return Effect.succeed({ type: "terminal.seen", runtime, terminal: addressOf(event.terminal) })
     case "reset":
-      return { type: "runtime.reset", runtime, machine: "local" }
+      return Effect.succeed({ type: "runtime.reset", runtime, machine: "local" })
   }
 }
+
+type ProcessesAt = (runtime: string, terminal: Terminal) => Effect.Effect<ReadonlyArray<BoundProcess>>
+
+export class TerminalProcesses extends Context.Service<TerminalProcesses, ProcessesAt>()("vibest/TerminalProcesses") {}
+
+export const terminalProcessesNode = LayerNode.make({
+  service: TerminalProcesses,
+  layer: Layer.effect(
+    TerminalProcesses,
+    Effect.map(Db.Service, (db) => db.session.processesAt),
+  ),
+  deps: [Db.node],
+})
 
 export class HostEnv extends Context.Service<HostEnv, PluginHostEnv>()("vibest/HostEnv") {}
 
@@ -58,118 +79,120 @@ const sameMembers = (a: Runtime, b: Runtime) => {
 
 const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
 
-export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | HostEnv | Scope.Scope> = Effect.gen(function* () {
-  const bus = yield* Bus.Service
-  const env = yield* HostEnv
-  const followers = yield* FiberMap.make<string>()
-  const defined = new Map<string, Runtime>()
-  const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
+export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | TerminalProcesses | HostEnv | Scope.Scope> =
+  Effect.gen(function* () {
+    const bus = yield* Bus.Service
+    const processesAt = yield* TerminalProcesses
+    const env = yield* HostEnv
+    const followers = yield* FiberMap.make<string>()
+    const defined = new Map<string, Runtime>()
+    const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
 
-  const follow = (runtime: Runtime) =>
-    runtime.events.pipe(
-      Stream.tap((event) => bus.observe(live(runtime.id, event))),
-      Stream.filter((event) => event.type === "reset"),
-      Stream.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Stream.failCause(cause)
-          : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended`, cause)).pipe(
-              Stream.drain,
-              Stream.concat(Stream.fail("reconnect")),
-            ),
-      ),
-      Stream.retry(RESUBSCRIBE_BACKOFF),
-      Stream.runDrain,
-      Effect.orDie,
-    )
+    const follow = (runtime: Runtime) =>
+      runtime.events.pipe(
+        Stream.tap((event) => Effect.flatMap(live(processesAt, runtime.id, event), bus.observe)),
+        Stream.filter((event) => event.type === "reset"),
+        Stream.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Stream.failCause(cause)
+            : Stream.fromEffect(Effect.logError(`runtime ${runtime.id} events ended`, cause)).pipe(
+                Stream.drain,
+                Stream.concat(Stream.fail("reconnect")),
+              ),
+        ),
+        Stream.retry(RESUBSCRIBE_BACKOFF),
+        Stream.runDrain,
+        Effect.orDie,
+      )
 
-  const reconcile = (list: ReadonlyArray<Runtime>) =>
-    Effect.gen(function* () {
-      for (const [id, runtime] of defined) {
-        const next = list.find((candidate) => candidate.id === id)
+    const reconcile = (list: ReadonlyArray<Runtime>) =>
+      Effect.gen(function* () {
+        for (const [id, runtime] of defined) {
+          const next = list.find((candidate) => candidate.id === id)
 
-        if (next !== undefined && sameMembers(next, runtime)) continue
-        defined.delete(id)
-        yield* FiberMap.remove(followers, id)
-      }
-
-      const fresh: Array<string> = []
-
-      for (const runtime of list) {
-        if (defined.has(runtime.id)) {
-          defined.set(runtime.id, runtime)
-          continue
+          if (next !== undefined && sameMembers(next, runtime)) continue
+          defined.delete(id)
+          yield* FiberMap.remove(followers, id)
         }
 
-        fresh.push(runtime.id)
-        defined.set(runtime.id, runtime)
-        yield* FiberMap.run(followers, runtime.id, follow(runtime))
-      }
+        const fresh: Array<string> = []
 
-      env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
+        for (const runtime of list) {
+          if (defined.has(runtime.id)) {
+            defined.set(runtime.id, runtime)
+            continue
+          }
 
-      if (fresh.length > 0) yield* PubSub.publish(added, fresh)
-    })
+          fresh.push(runtime.id)
+          defined.set(runtime.id, runtime)
+          yield* FiberMap.run(followers, runtime.id, follow(runtime))
+        }
 
-  const registry = Registry.definitions<Runtime>("runtime", reconcile)
-  const all = Effect.sync(() => registry.get())
+        env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
 
-  return {
-    transform: registry.transform,
-    all,
-    find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
-    route: Effect.fn("Runtimes.route")((id) =>
-      Effect.suspend(() => {
-        const loaded = registry.get()
-        const found = loaded.find((runtime) => runtime.id === id)
+        if (fresh.length > 0) yield* PubSub.publish(added, fresh)
+      })
 
-        return found === undefined ? Effect.fail(notLoaded(id, loaded)) : Effect.succeed(found)
-      }),
-    ),
-    statuses: Effect.suspend(() =>
-      Effect.forEach(
-        registry.get(),
-        (runtime) => runtime.status().pipe(Effect.map((status) => ({ runtime, status }))),
-        { concurrency: "unbounded" },
+    const registry = Registry.definitions<Runtime>("runtime", reconcile)
+    const all = Effect.sync(() => registry.get())
+
+    return {
+      transform: registry.transform,
+      all,
+      find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
+      route: Effect.fn("Runtimes.route")((id) =>
+        Effect.suspend(() => {
+          const loaded = registry.get()
+          const found = loaded.find((runtime) => runtime.id === id)
+
+          return found === undefined ? Effect.fail(notLoaded(id, loaded)) : Effect.succeed(found)
+        }),
       ),
-    ),
-    online: Effect.fn("Runtimes.online")((runtime) =>
-      runtime.status().pipe(
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.failCause(cause)
-            : Effect.fail(
-                new NoRuntime({
-                  message: `the runtime ${runtime.id}'s status could not be read: ${messageOf(Cause.squash(cause))}`,
-                }),
-              ),
-        ),
-        Effect.flatMap((status) =>
-          status.status === "online"
-            ? Effect.void
-            : Effect.fail(
-                new NoRuntime({
-                  message: `the runtime ${runtime.id} is ${status.status}${"reason" in status ? ` (${status.reason})` : ""}`,
-                }),
-              ),
+      statuses: Effect.suspend(() =>
+        Effect.forEach(
+          registry.get(),
+          (runtime) => runtime.status().pipe(Effect.map((status) => ({ runtime, status }))),
+          { concurrency: "unbounded" },
         ),
       ),
-    ),
-    added: Stream.fromPubSub(added),
-    callers: Effect.sync(() =>
-      registry.get().flatMap((runtime) =>
-        runtime.caller === undefined
-          ? []
-          : [
-              {
-                ...runtime.caller,
-                id: runtime.id,
-                ...(runtime.name !== undefined && { name: runtime.name }),
-              },
-            ],
+      online: Effect.fn("Runtimes.online")((runtime) =>
+        runtime.status().pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.fail(
+                  new NoRuntime({
+                    message: `the runtime ${runtime.id}'s status could not be read: ${messageOf(Cause.squash(cause))}`,
+                  }),
+                ),
+          ),
+          Effect.flatMap((status) =>
+            status.status === "online"
+              ? Effect.void
+              : Effect.fail(
+                  new NoRuntime({
+                    message: `the runtime ${runtime.id} is ${status.status}${"reason" in status ? ` (${status.reason})` : ""}`,
+                  }),
+                ),
+          ),
+        ),
       ),
-    ),
-  }
-})
+      added: Stream.fromPubSub(added),
+      callers: Effect.sync(() =>
+        registry.get().flatMap((runtime) =>
+          runtime.caller === undefined
+            ? []
+            : [
+                {
+                  ...runtime.caller,
+                  id: runtime.id,
+                  ...(runtime.name !== undefined && { name: runtime.name }),
+                },
+              ],
+        ),
+      ),
+    }
+  })
 
 export type Interface = RuntimesDomain
 
@@ -177,7 +200,7 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Runti
 
 export const layer = Layer.effect(Service, make)
 
-export const node = LayerNode.make({ service: Service, layer, deps: [Bus.node, hostEnvNode] })
+export const node = LayerNode.make({ service: Service, layer, deps: [Bus.node, terminalProcessesNode, hostEnvNode] })
 
 export type AgentSeen = AgentState | "absent"
 

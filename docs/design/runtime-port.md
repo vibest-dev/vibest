@@ -222,22 +222,14 @@ and `error`. Successful `done` is intentionally not normalized to `idle`: both a
 the distinction for its unseen mark. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` disables this native reporting too.
 Live-checked on Claude Code 2.1.318 and 2.1.319; older versions have no guaranteed coverage or fallback writer.
 
-`pnpm e2e T1` launches the built integrations in real Claude and Pi with held fake models, through a test-only
-runtime plugin into its own herdr-core. Its HOME,
-HC_SESSION, HC_SOCKET and XDG directories are under the test root. The fixture is not a shipped runtime adapter:
-it tests terminal reports, not exit-event recovery. Raw output and timestamped input/output captures stay in
-evidence files, never the runner terminal. Claude ignores keys at its first dialog draw; the check waits for
-visible dialog text, pauses, reads it again, then answers only the scratch action.
+Native statuses (Pi's and Claude's OSC 7501 reports to herdr-core) are the harness's and herdr-core's protocol, not
+vibest's, and no E2E check asserts them. `pnpm e2e G7` runs a real Pi subagent through a test-only runtime plugin into
+its own herdr-core (HOME, HC_SESSION, HC_SOCKET and XDG directories under the test root) and checks only that the
+subagent starts there and its result arrives. The fixture is not a shipped runtime adapter.
 
-Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: launch a real
-Claude and Pi entry session with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
-and assert native working, complete it and assert native done, then start another execution and interrupt it to assert
-idle, with the loaded vibest integration and no competing OSC writer. This is independent of worker result coverage.
-In the same follow-up, remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle
-there; terminal status must not inherit the coordinator exclusion used for result reporting.
-
-The fake HTTP 401 authentication_error check records Claude's actual retry/working classification; it does not
-claim that every provider 401 opens an auth dialog.
+Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: remove Cursor's
+coordinator exclusion from terminal status reporting; terminal status must not inherit the coordinator exclusion used
+for result reporting.
 
 ## 6. Machines
 
