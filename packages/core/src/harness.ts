@@ -90,6 +90,9 @@ export const make = Effect.gen(function* () {
     },
   )
 
+  const lastListed = new Map<string, ReadonlyArray<Model>>()
+  const scope = yield* Effect.scope
+
   return Service.of({
     available: Effect.fn("Harness.available")((id) =>
       Effect.suspend(() => {
@@ -122,7 +125,17 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
-    models: Effect.fn("Harness.models")((id, provider, env) => Cache.get(cached, modelCacheKey(id, provider, env))),
+    models: Effect.fn("Harness.models")((id, provider, env) => {
+      const key = modelCacheKey(id, provider, env)
+      const last = lastListed.get(key)
+
+      const lookup = Cache.get(cached, key).pipe(
+        Effect.tap((models) => Effect.sync(() => lastListed.set(key, models))),
+        Effect.tapError(() => Effect.sync(() => lastListed.delete(key))),
+      )
+
+      return last === undefined ? lookup : Effect.as(Effect.forkIn(Effect.ignore(lookup), scope), last)
+    }),
   })
 })
 
