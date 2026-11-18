@@ -8,13 +8,16 @@ A CLI agent orchestrator: a coordinator directing Pi, Claude Code and Cursor ses
 curl -fsSL https://github.com/vibest-dev/vibest/releases/latest/download/install.sh | sh
 ```
 
-This installs into `~/.local/share/vibest` and links `~/.local/bin/vibest`; no Node needed. Or with npm:
+This installs the newest stable release into `~/.local/share/vibest` and links `~/.local/bin/vibest`; no Node needed.
+`sh -s -- --beta` instead of `sh` installs the newest beta (or the stable, when it is newer). Or with npm:
 
 ```sh
-npm i -g @vibest/cli@beta
+npm i -g @vibest/cli        # stable
+npm i -g @vibest/cli@beta   # beta
 ```
 
-`vibest update` updates it the same way it was installed and, after a yes, replaces the running vibestd while your agents keep running (queued messages wait for the new one; `vibest daemon restart` does the same on its own). `vibest`, `vibest status` and `vibest doctor` say once a day when a newer vibest is out (`VIBEST_NO_UPDATE_CHECK=1` turns that off). `vibest doctor` checks each harness.
+`vibest update` updates it the same way it was installed, on the channel of the installed version (`--stable` or
+`--beta` to switch) and, after a yes, replaces the running vibestd while your agents keep running (queued messages wait for the new one; `vibest daemon restart` does the same on its own). `vibest`, `vibest status` and `vibest doctor` say once a day when a newer vibest is out (`VIBEST_NO_UPDATE_CHECK=1` turns that off). `vibest doctor` checks each harness.
 
 ## Cursor shell approval
 

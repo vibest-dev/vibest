@@ -1,7 +1,9 @@
-import { installMethod, latestOf } from "@vibest/client/release"
+import { channelOf, installMethod, latestOf } from "@vibest/client/release"
 import { NOT_CHECKED } from "@vibest/protocol/rpc"
 import { VibestCommand } from "@vibest/schema/layout"
 import { Clock, Config, Duration, Effect, Exit, Option, Ref, Schedule } from "effect"
+
+import { VERSION } from "./version.ts"
 
 export const UPDATE_CHECK_EVERY = Duration.hours(1)
 
@@ -35,5 +37,5 @@ export const updater = Effect.gen(function* () {
 
   if (!method) return Effect.succeed(NOT_CHECKED)
 
-  return yield* checkEveryHour(latestOf(method))
+  return yield* checkEveryHour(Effect.map(latestOf(method, channelOf(VERSION)), (found) => found.version))
 }).pipe(Effect.orDie)

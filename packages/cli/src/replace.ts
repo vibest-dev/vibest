@@ -9,6 +9,7 @@ import {
   startDaemon,
   stopByHand,
 } from "@vibest/client/client"
+import { compareVersions } from "@vibest/client/release"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import {
   DaemonBusy,
@@ -53,36 +54,6 @@ type StopError = Effect.Error<ReturnType<VibestClient["Daemon.Stop"]>>
 const _stopErrorsClassified: [Exclude<StopError, Refusal | RpcClientError.RpcClientError>] extends [never]
   ? true
   : never = true
-
-export const compareVersions = (a: string, b: string) => {
-  const parse = (v: string) => {
-    const [core = "", pre] = v.replace(/\+.*/, "").split(/-(.*)/)
-
-    return { core: core.split(".").map(Number), pre: pre ? pre.split(".") : [] }
-  }
-
-  const x = parse(a)
-  const y = parse(b)
-
-  for (let i = 0; i < 3; i++) if (x.core[i] !== y.core[i]) return (x.core[i] ?? 0) - (y.core[i] ?? 0)
-
-  if (!x.pre.length || !y.pre.length) return y.pre.length - x.pre.length
-
-  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
-    const [p, q] = [x.pre[i], y.pre[i]]
-
-    if (p === q) continue
-
-    if (p === undefined || q === undefined) return p === undefined ? -1 : 1
-    const [m, n] = [/^\d+$/.test(p), /^\d+$/.test(q)]
-
-    if (m && n) return Number(p) - Number(q)
-
-    return m !== n ? (m ? -1 : 1) : p < q ? -1 : 1
-  }
-
-  return 0
-}
 
 const FIRST_VERSION_RESTARTABLE_WITH_AGENTS = "0.0.1-beta.10"
 

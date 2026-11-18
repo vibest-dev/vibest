@@ -63,13 +63,26 @@ const olderProtocol = (bytes: Buffer, protocol: number) => {
   swapOnce(bytes, from, from.replace(/\d+$/, String(protocol - 1).padStart(String(protocol).length)))
 }
 
+const olderVersion = (bytes: Buffer, version: string) => {
+  const found = [
+    ...bytes
+      .toString("latin1")
+      .matchAll(new RegExp(`var VERSION\\d* = "${buildVersion.replaceAll(".", "\\.")}";`, "g")),
+  ]
+
+  expect(found.length === 1, `expected one var VERSION = "${buildVersion}", found ${found.length}`)
+  const from = found[0]![0]
+
+  swapOnce(bytes, from, from.replace(buildVersion, version))
+}
+
 const olderVibest = async (w: World, share: string, version: string, protocol: number) => {
   const dir = path.join(share, "versions", version)
   const bin = path.join(dir, "bin", "vibest")
   await fs.mkdir(path.dirname(bin), { recursive: true })
   const bytes = Buffer.from(await fs.readFile(compiled))
   olderProtocol(bytes, protocol)
-  swapOnce(bytes, `"${buildVersion}"`, `"${version}"`)
+  olderVersion(bytes, version)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
 
   if (process.platform === "darwin") {
@@ -197,7 +210,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "U1",
     title:
-      "update reads the latest version where vibest was installed from (npm's registry or the GitHub release) and installs nothing when it is this version; a build installs nothing",
+      "update reads the latest version where vibest was installed from (npm's registry or the GitHub release) and installs nothing when it is this version; a build installs nothing; --stable reads the newest stable release, --beta the newest of either channel, and without either the channel of this version",
     run: async (w) => {
       await w.stopDaemon()
       const r = await w.vibest(["update"], { timeoutMs: 60_000 })
@@ -208,6 +221,59 @@ const checks: ReadonlyArray<Check> = [
       else expect(r.code === 0 && r.stdout.includes(`vibest is already up to date (v${buildVersion})`), said)
       const version = await w.ok(["--version"])
       expect(version.trim() === `vibest v${buildVersion}`, `vibest --version after update: ${version}`)
+
+      if (method === "build") return
+      const [stable, beta] = ["0.0.0", "0.0.1-beta.0"]
+
+      const server = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        fetch: (req) => {
+          const at = new URL(req.url).pathname
+
+          if (at === "/-/package/@vibest/cli/dist-tags") return Response.json({ latest: stable, beta })
+
+          if (at === "/releases/latest/download/version") return new Response(`${stable}\n`)
+
+          if (at === "/releases.atom")
+            return new Response(
+              [beta, stable]
+                .map((v) => `<link href="https://github.com/vibest-dev/vibest/releases/tag/v${v}"/>`)
+                .join("\n"),
+            )
+
+          return new Response("not found", { status: 404 })
+        },
+      })
+
+      try {
+        const env = {
+          npm_config_registry: `http://127.0.0.1:${server.port}`,
+          VIBEST_DOWNLOAD_URL: undefined,
+          VIBEST_RELEASES_URL: `http://127.0.0.1:${server.port}/releases`,
+        }
+
+        const update = async (args: ReadonlyArray<string>) => {
+          const u = await w.vibest(["update", ...args], { env, timeoutMs: 60_000 })
+
+          return { code: u.code, said: `${u.stdout}${u.stderr}` }
+        }
+
+        const upToDate = `vibest is already up to date (v${buildVersion}).`
+        const onStable = `${upToDate} The newest stable release is ${stable}.`
+        const onBeta = `${upToDate} The newest release is ${beta}.`
+        const pinned = await update(["--stable"])
+        expect(pinned.code === 0 && pinned.said.includes(onStable), `update --stable: ${pinned.said}`)
+        const any = await update(["--beta"])
+        expect(any.code === 0 && any.said.includes(onBeta), `update --beta: ${any.said}`)
+        const own = await update([])
+        const ownChannel = buildVersion.includes("-") ? onBeta : onStable
+        expect(own.code === 0 && own.said.includes(ownChannel), `update on ${buildVersion}: ${own.said}`)
+        const both = await update(["--beta", "--stable"])
+        expect(both.code !== 0 && both.said.includes("--beta and --stable"), `update --beta --stable: ${both.said}`)
+      } finally {
+        await server.stop(true)
+      }
     },
   },
   {

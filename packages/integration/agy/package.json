@@ -1,6 +1,6 @@
 {
   "name": "@vibest/agy",
-  "version": "0.0.1-dev",
+  "version": "0.0.2-dev",
   "private": true,
   "description": "vibest's Antigravity CLI plugin: a workspace plugin loaded with `agy --add-dir` whose hooks report a session's conversation, work and execution end.",
   "license": "MIT",
