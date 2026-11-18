@@ -2,7 +2,6 @@ import type { Harness } from "@vibest/plugin/effect"
 import { Effect, Predicate, type Schema } from "effect"
 
 import { noProvider, opt } from "./models.ts"
-import { signInProblem } from "./subscriptions/index.ts"
 import { parseJson, record } from "./subscriptions/index.ts"
 
 export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
@@ -22,9 +21,6 @@ export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.R
       : []
   })
 }
-
-export const agySignedIn = (lines: ReadonlyArray<string>) =>
-  agyModels(lines) !== undefined ? true : lines.some((line) => line.includes("Please sign in")) ? false : undefined
 
 export const agyConversation = (event: Schema.JsonObject): string | undefined =>
   Predicate.isString(event.conversationId) && event.conversationId !== "" ? event.conversationId : undefined
@@ -121,7 +117,6 @@ export const agy: Harness.HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => ["--output-format", "json", "models"], answer: agyModels },
-  checkEnvironment: signInProblem(["--output-format", "json", "models"], agySignedIn),
   conversationOf: agyConversation,
   userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { text: "" } : undefined),
   executionEnd: agyExecutionEnd,

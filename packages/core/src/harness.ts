@@ -37,10 +37,6 @@ const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Recor
 export interface Interface {
   readonly available: (id: string) => Effect.Effect<boolean>
   readonly plugin: (id: string) => Effect.Effect<string, HarnessUnavailable>
-  readonly checkEnvironment: (
-    id: string,
-    env: Readonly<Record<string, string>>,
-  ) => Effect.Effect<void, HarnessUnavailable>
   readonly models: (
     id: string,
     provider: string | null,
@@ -77,7 +73,6 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.map((found) => Option.getOrElse(found, () => path.join(pkg, "harnesses"))))
 
   const plugins = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))) || beside
-  const home = yield* Config.String("HOME").pipe(Config.withDefault(""))
   const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
 
   const listOf = (key: string) => {
@@ -150,14 +145,6 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
-    checkEnvironment: Effect.fn("Harness.checkEnvironment")(function* (id, env) {
-      const definition = harnesses.find(id)
-
-      if (definition?.checkEnvironment === undefined) return
-      const problem = yield* definition.checkEnvironment(env.HOME ?? home, definition.binary, env)
-
-      if (problem) yield* new HarnessUnavailable({ harness: id, message: problem })
-    }),
     models: Effect.fn("Harness.models")(function* (id, provider, env) {
       const key = modelCacheKey(id, provider, env)
       const listed = yield* Cache.get(cached, key)
@@ -194,6 +181,10 @@ export const startable = Effect.fn("Harness.startable")(function* (id: string, p
 
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   yield* harness.plugin(id)
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
+  const problem = yield* adapter.checkEnvironment?.(home) ?? Effect.succeed(undefined)
+
+  if (problem) return yield* unavailable(problem)
 })
 
 export const preflight = Effect.fn("Harness.preflight")(function* (

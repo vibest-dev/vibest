@@ -549,7 +549,6 @@ export class VibestRpcs extends RpcGroup.make(
           model: Schema.optional(Schema.String),
           routing: Schema.optional(Routing),
           pid: Schema.optional(Schema.Number),
-          callerEnv: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         },
         success: Schema.Struct({
           sessionId: Schema.String,

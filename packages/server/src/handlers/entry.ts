@@ -16,16 +16,7 @@ export const make = Effect.gen(function* () {
         const { id, directory } = yield* cliOnly("Launch").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
         const at = yield* machineFromCaller({ callerEnv, runtimeSession })
 
-        return yield* entrySession.launch({
-          projectId: id,
-          root: directory,
-          at,
-          argv,
-          focus,
-          runtime,
-          agent,
-          callerEnv,
-        })
+        return yield* entrySession.launch({ projectId: id, root: directory, at, argv, focus, runtime, agent })
       }).pipe(
         Effect.catchTag("EntryRunning", (e) =>
           Effect.fail(
@@ -46,7 +37,7 @@ export const make = Effect.gen(function* () {
         return yield* entrySession.start({ projectId: id, root: directory, harness, agent, provider, model, runtime })
       }),
 
-    "Project.EntrySession": ({ harness, agent, fresh, terminal, runtime, provider, model, routing, pid, callerEnv }) =>
+    "Project.EntrySession": ({ harness, agent, fresh, terminal, runtime, provider, model, routing, pid }) =>
       Effect.gen(function* () {
         const { id, directory } = yield* cliOnly("Project.EntrySession").pipe(
           Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
@@ -64,7 +55,6 @@ export const make = Effect.gen(function* () {
           model,
           routing,
           pid,
-          callerEnv,
         })
       }).pipe(
         Effect.catchTags({

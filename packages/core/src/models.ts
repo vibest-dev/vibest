@@ -51,7 +51,7 @@ export const listModels = Effect.fn("listModels")(function* (
   if (providerError) return yield* unavailable(providerError)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cwd = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
-  const problem = yield* adapter.checkEnvironment?.(cwd, binary, env ?? {}) ?? Effect.succeed(undefined)
+  const problem = yield* adapter.checkEnvironment?.(cwd) ?? Effect.succeed(undefined)
 
   if (problem) return yield* unavailable(problem)
 

@@ -81,7 +81,7 @@ export const make = Effect.gen(function* () {
                   Effect.fail(
                     new NotReady({
                       id,
-                      message: `${id} did not become ready in ${Duration.format(READY_TIMEOUT)} (a startup dialog vibest could not answer? open ${adapter.id} once in the repository and accept it)`,
+                      message: `${id} did not become ready in ${Duration.format(READY_TIMEOUT)} (${adapter.binary} may be signed out: sign in with ${adapter.binary}; or a startup dialog vibest could not answer: open ${adapter.binary} once in the repository and accept it)`,
                     }),
                   ),
                 ),

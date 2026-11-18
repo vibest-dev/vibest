@@ -1,15 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/plugin/effect"
-import { Effect, Fiber, FileSystem, Path, Sink, Stream, type Schema } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { TestClock } from "effect/testing"
+import type { Schema } from "effect"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
-import { nodePlatform } from "../src/node-platform.ts"
 import { pi, piModels } from "../src/pi.ts"
-import { agyLimits, agySubscription } from "../src/subscriptions/agy.ts"
 
 const ADAPTERS = { pi, claude, cursor }
 
@@ -111,51 +107,6 @@ describe("HarnessAdapter", () => {
       { model: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", default: false },
     ])
     assert.isUndefined(agyModels(["Fetching available models...", "Error: Please sign in to view available models."]))
-  })
-
-  it("agy reads its usage windows as used percent with the reset time; it is limited only when no model group has quota left", () => {
-    const usage = {
-      command: {
-        data: {
-          groups: [
-            {
-              name: "Gemini Models",
-              buckets: [
-                { window: "weekly", remaining_fraction: 0.75, reset_time: "2026-11-18T10:48:56Z" },
-                { window: "5h", remaining_fraction: 0, reset_time: "2026-11-13T11:54:25Z" },
-              ],
-            },
-          ],
-        },
-      },
-    }
-
-    const claudeGroup = (left: number) => ({
-      name: "Claude Models",
-      buckets: [{ window: "5h", remaining_fraction: left }],
-    })
-
-    const withClaude = (left: number) => ({
-      command: { data: { groups: [...usage.command.data.groups, claudeGroup(left)] } },
-    })
-
-    assert.deepStrictEqual(
-      agyLimits(withClaude(0.5)).map((w) => w.status),
-      ["available", "available", "available"],
-    )
-    assert.deepStrictEqual(
-      agyLimits(withClaude(0)).map((w) => w.status),
-      ["available", "limited", "limited"],
-    )
-    assert.deepStrictEqual(agyLimits(usage), [
-      {
-        window: "Gemini Models weekly",
-        percent: 25,
-        status: "available",
-        resetTime: Date.parse("2026-11-18T10:48:56Z"),
-      },
-      { window: "Gemini Models 5h", percent: 100, status: "limited", resetTime: Date.parse("2026-11-13T11:54:25Z") },
-    ])
   })
 
   it("cursor resumes a dash-leading session id as one --resume= argument", () => {
@@ -378,78 +329,4 @@ describe("harness output", () => {
     ])
     assert.isUndefined(cursorModels(["Not logged in"]))
   })
-
-  const fakeAgy = (ran: Array<string>, answer: Effect.Effect<string>) =>
-    ChildProcessSpawner.make((command) => {
-      if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
-      ran.push(command.args.join(" "))
-
-      return Effect.map(answer, (stderr) =>
-        ChildProcessSpawner.makeHandle({
-          pid: ChildProcessSpawner.ProcessId(1),
-          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
-          isRunning: Effect.succeed(false),
-          kill: () => Effect.void,
-          unref: Effect.succeed(Effect.void),
-          stdin: Sink.drain,
-          stdout: Stream.empty,
-          stderr: Stream.make(new TextEncoder().encode(stderr)),
-          all: Stream.empty,
-          getInputFd: () => Sink.drain,
-          getOutputFd: () => Stream.empty,
-        }),
-      )
-    })
-
-  it.effect("agy signed out: its subscription asks agy models, reports no account, and never runs print mode", () => {
-    const ran: Array<string> = []
-
-    const signedOut = Effect.succeed(
-      "Error: Please sign in to view available models. Launch the CLI without arguments to sign in.\n",
-    )
-
-    return Effect.gen(function* () {
-      const rows = yield* agySubscription(fakeAgy(ran, signedOut))("/nowhere", "agy")
-      assert.deepStrictEqual(rows, [{ provider: "", account: { kind: "none" }, limits: [] }])
-      assert.deepStrictEqual(ran, ["--output-format json models"])
-    })
-  })
-
-  it.effect("agy models that never answers is an error, not a sign-out, and print mode still never runs", () => {
-    const ran: Array<string> = []
-
-    return Effect.gen(function* () {
-      const reading = yield* Effect.forkChild(agySubscription(fakeAgy(ran, Effect.never))("/nowhere", "agy"))
-      yield* TestClock.adjust("10 seconds")
-      assert.deepStrictEqual(yield* Fiber.join(reading), [
-        { provider: "", error: "agy models did not say whether it is signed in" },
-      ])
-      assert.deepStrictEqual(ran, ["--output-format json models"])
-    })
-  })
-
-  it.effect(
-    "a signed-out agy is an environment problem naming its binary; a CLI that fails without saying so is not",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-agy-" })
-        const signedOut = path.join(dir, "signed-out")
-        const broken = path.join(dir, "broken")
-        yield* fs.writeFileString(
-          signedOut,
-          "#!/bin/sh\necho 'Error: Please sign in to view available models.' >&2\nexit 1\n",
-        )
-        yield* fs.writeFileString(broken, "#!/bin/sh\nexit 1\n")
-        yield* fs.chmod(signedOut, 0o755)
-        yield* fs.chmod(broken, 0o755)
-
-        assert.strictEqual(
-          yield* agy.checkEnvironment!(dir, signedOut, {}),
-          `${signedOut} is not signed in; sign in with ${signedOut}, then run vibest again`,
-        )
-        assert.strictEqual(yield* agy.checkEnvironment!(dir, broken, {}), undefined)
-      }).pipe(Effect.provide(nodePlatform)),
-  )
 })

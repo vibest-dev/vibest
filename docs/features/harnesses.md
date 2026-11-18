@@ -40,10 +40,9 @@ inherit; otherwise the default applies (H7).
 
 Entering a project checks only that a harness can start there (its binary on `PATH`, vibest's plugin folder for it) and
 lists no models, so it waits on no harness CLI; a harness that is installed but cannot answer (for example signed out)
-is offered and fails when it starts. Right before it starts, and also for `vibest run`, only the chosen harness is asked whether it
-is signed in, with the environment of the terminal that ran `vibest`, through a CLI call that cannot start a login (`claude auth status`, `cursor-agent status`, `agy models`; Pi is not asked): a signed-out
-harness is refused with a message saying to sign in with it and run vibest again, and no pane opens. vibest never signs
-a harness in and never runs a harness command that can open a sign-in.
+is offered and fails when it starts. vibest never checks whether a harness is signed in and never signs one in: an
+entry session opened on a signed-out harness shows that harness's own login screen, and a `vibest run` agent that never
+becomes ready fails saying the harness may be signed out and to sign in with its binary.
 
 ## H7. The default harness is Claude
 
@@ -60,11 +59,10 @@ each. Whether this machine can start one is checked only when it is asked for: a
 
 ## H9. Antigravity (agy)
 
-`agy` appears in `vibest harness list` and its models in `vibest models`, read from the agy CLI without a model turn, and
-`vibest subscriptions` shows its usage windows (used percent, reset time) from `agy -p /usage`. vibest never reads agy's own
-config or credential files and never signs in; a CLI that is not signed in is listed as unavailable with its own message. vibest never makes agy open a browser sign-in:
-it reads the usage windows only after `agy models` answers with a model list, because agy's print mode starts an
-interactive OAuth in the browser when it is signed out.
+`agy` appears in `vibest harness list` and its models in `vibest models`, read from the agy CLI without a model turn.
+`vibest subscriptions` has no agy data: vibest never runs agy in the background, because agy's print mode starts an
+interactive OAuth in the browser when it is signed out. vibest never reads agy's own config or credential files and never
+signs in.
 The definition's `binary` can be pointed at a wrapper such as `agyx` by a plugin of the user's own; nothing assumes it is
 named `agy`.
 

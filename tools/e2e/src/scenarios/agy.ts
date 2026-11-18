@@ -157,7 +157,7 @@ const checks: ReadonlyArray<Check> = [
     id: "H9",
     tier: "agent",
     title:
-      "agy (real): loaded by default, the harness is listed as available, its models and its usage windows come from the CLI without a model turn",
+      "agy (real): loaded by default, the harness is listed as available, its models come from the CLI without a model turn, and `vibest subscriptions` has no agy row",
     run: async (w) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
@@ -179,17 +179,9 @@ const checks: ReadonlyArray<Check> = [
         models.models.some((m) => m.harness === "agy" && m.model !== ""),
         `models: ${JSON.stringify(models).slice(0, 500)}`,
       )
-      await until(
-        "agy's usage windows",
-        async () => {
-          const rows = await w.json<Array<{ harness: string; limits: Array<{ window: string }>; error?: string }>>([
-            "subscriptions",
-          ])
 
-          return rows.some((r) => r.harness === "agy" && r.limits.length > 0)
-        },
-        120_000,
-      )
+      const rows = await w.json<Array<{ harness: string }>>(["subscriptions"])
+      expect(!rows.some((r) => r.harness === "agy"), `subscriptions: ${JSON.stringify(rows)}`)
     },
   },
   {

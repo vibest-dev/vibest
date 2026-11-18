@@ -160,7 +160,6 @@ const make = Effect.gen(function* () {
     readonly focus: boolean
     readonly runtime: string | undefined
     readonly agent: string
-    readonly callerEnv: Readonly<Record<string, string>>
   }) {
     const { projectId: id, root, at, argv } = input
     const current = yield* db.session.entryOf(id)
@@ -220,7 +219,6 @@ const make = Effect.gen(function* () {
           harness: chosen,
           agent,
           root,
-          callerEnv: input.callerEnv,
           provider: decision.provider ?? null,
           model: decision.model ?? null,
           session: projectLocked.withLock(id)(
@@ -345,7 +343,6 @@ const make = Effect.gen(function* () {
     readonly routing: Routing | undefined
     readonly pid: number | undefined
     readonly agent: string
-    readonly callerEnv: Readonly<Record<string, string>> | undefined
   }) {
     const { projectId, directory, terminal } = input
     const agent = agentOf(yield* db.session.entryOf(projectId), input.fresh, input.agent)
@@ -374,7 +371,6 @@ const make = Effect.gen(function* () {
             harness: input.harness,
             agent,
             root: directory,
-            callerEnv: input.callerEnv,
             provider: input.provider ?? null,
             model: input.model ?? null,
             session: Effect.gen(function* () {

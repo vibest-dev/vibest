@@ -60,11 +60,7 @@ export interface HarnessDefinition {
   readonly checkProvider?: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
   readonly models: ModelLister
-  readonly checkEnvironment?: (
-    home: string,
-    binary: string,
-    env: Readonly<Record<string, string>>,
-  ) => Effect.Effect<string | undefined>
+  readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
   readonly subscription?: (home: string, binary: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => Schema.Json
   readonly guardCall?: (event: HarnessEvent) => HarnessEvent | undefined

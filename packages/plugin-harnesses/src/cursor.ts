@@ -5,7 +5,6 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { noProvider, opt } from "./models.ts"
 import { nodePlatform } from "./node-platform.ts"
 import { cursorSubscription } from "./subscriptions/cursor.ts"
-import { parseJson, record, signInProblem } from "./subscriptions/index.ts"
 
 export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   if (!lines.some((l) => l.startsWith("Available models"))) return undefined
@@ -15,12 +14,6 @@ export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harnes
 
     return m ? [{ model: m[1]!, name: m[2]!, default: (m[3] ?? "").split(/,\s*/).includes("current") }] : []
   })
-}
-
-export const cursorSignedIn = (lines: ReadonlyArray<string>) => {
-  const status = record(parseJson(lines.join("\n")))?.isAuthenticated
-
-  return Predicate.isBoolean(status) ? status : undefined
 }
 
 export const keychainProblem = (home: string) =>
@@ -44,15 +37,10 @@ export const keychainProblem = (home: string) =>
 
 const cursorEnvironment = (home: string) => keychainProblem(home).pipe(Effect.provide(nodePlatform))
 
-const cursorSignIn = signInProblem(["status", "--format", "json"], cursorSignedIn)
-
 export const cursor: Harness.HarnessDefinition = {
   id: "cursor",
   binary: "cursor-agent",
-  checkEnvironment: (home, binary, env) =>
-    Effect.flatMap(cursorEnvironment(home), (problem) =>
-      problem === undefined ? cursorSignIn(home, binary, env) : Effect.succeed(problem),
-    ),
+  checkEnvironment: cursorEnvironment,
   delivery: "typed",
   ownSessionId: false,
   systemPromptInPrompt: true,
