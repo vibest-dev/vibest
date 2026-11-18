@@ -66,6 +66,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       readonly recipient: string
       readonly kind: "task" | "send" | "notice"
       readonly sender: string | null
+      readonly address?: string | undefined
       readonly content: string
       readonly status: "pending" | "delivered" | "dropped"
       readonly request?: string | undefined
@@ -79,6 +80,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           kind: row.kind,
           recipient: row.recipient,
           ...(row.sender !== null && { sender: row.sender }),
+          ...(row.address !== undefined && { address: row.address }),
           content: row.content,
           status: row.status,
           ...(row.request !== undefined && { request: row.request }),

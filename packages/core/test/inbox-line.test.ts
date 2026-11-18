@@ -4,7 +4,12 @@ import { detailOf, noticeEnvelope, sessionEnvelope } from "@vibest/core/replies"
 const titles = { a: { agent: "general", title: "Alpha" }, b: { agent: "coordinator", title: "Beta" } }
 const who = (id: string) => (id === "a" || id === "b" ? titles[id] : undefined)
 
-const row = (message: string, sender: string | null, kind = "send") => ({ kind, sender, message })
+const row = (message: string, sender: string | null, kind = "send", address: string | null = null) => ({
+  kind,
+  sender,
+  address,
+  message,
+})
 
 describe("delivery detail", () => {
   it("an agent message keeps the sender and the unwrapped text", () => {
@@ -23,6 +28,16 @@ describe("delivery detail", () => {
         { sender: "vibest", message: "gone\nmore" },
         { sender: "user", message: "hello from the terminal" },
       ],
+    )
+  })
+
+  it("a peer send keeps the remote address instead of becoming the user", () => {
+    assert.deepStrictEqual(
+      detailOf(
+        [row(sessionEnvelope({ id: "mb/aaaaaaaa" }, "report from afar"), null, "send", "mb/aaaaaaaa")],
+        () => undefined,
+      ),
+      [{ sender: { address: "mb/aaaaaaaa" }, message: "report from afar" }],
     )
   })
 

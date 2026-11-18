@@ -66,7 +66,12 @@ const ENVELOPED =
 export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? rendered
 
 export const detailOf = (
-  batch: ReadonlyArray<{ readonly kind: string; readonly sender?: string | null; readonly message: string }>,
+  batch: ReadonlyArray<{
+    readonly kind: string
+    readonly sender?: string | null
+    readonly address?: string | null
+    readonly message: string
+  }>,
   who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
 ): ReadonlyArray<Detail> =>
   batch.map((row) => {
@@ -74,11 +79,15 @@ export const detailOf = (
 
     if (row.kind === "notice") return { sender: "vibest", message }
 
-    if (row.sender == null || row.sender === "") return { sender: "user", message }
+    if (row.sender != null && row.sender !== "") {
+      const session = who(row.sender)
 
-    const session = who(row.sender)
+      return { sender: { agent: session?.agent ?? "", title: session?.title ?? "", session: row.sender }, message }
+    }
 
-    return { sender: { agent: session?.agent ?? "", title: session?.title ?? "", session: row.sender }, message }
+    if (row.address != null && row.address !== "") return { sender: { address: row.address }, message }
+
+    return { sender: "user", message }
   })
 
 export type ObservedEnd = {

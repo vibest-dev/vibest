@@ -169,8 +169,8 @@ export const layer = Layer.effectDiscard(
       active((fact) => {
         const { data } = fact
 
-        return sql`INSERT INTO inbox (session_id, id, sender_session_id, kind, content, request, peer_item, status)
-          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${data.sender ?? null}, ${data.kind}, ${data.content},
+        return sql`INSERT INTO inbox (session_id, id, sender_session_id, sender_address, kind, content, request, peer_item, status)
+          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${data.sender ?? null}, ${data.address ?? null}, ${data.kind}, ${data.content},
             ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`
       }),
     )

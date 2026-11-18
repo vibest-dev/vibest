@@ -111,6 +111,7 @@ export const InboxQueued = fact("inbox.queued", "session", {
   kind: InboxKind,
   recipient: optional(Text),
   sender: optional(Text),
+  address: optional(Text),
   content: Schema.String,
   status: Schema.Literals(["pending", "delivered", "dropped"]),
   request: optional(Text),

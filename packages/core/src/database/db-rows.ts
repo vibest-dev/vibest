@@ -196,6 +196,7 @@ export type InboxSql = {
   readonly sessionId: string
   readonly kind: string
   readonly senderSessionId: string | null
+  readonly senderAddress: string | null
   readonly content: string
   readonly status: string
 }
@@ -213,6 +214,7 @@ export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
 export const toInbox = (row: InboxSql) => ({
   id: row.id,
   sender: row.senderSessionId,
+  address: row.senderAddress,
   recipient: row.sessionId,
   kind: row.kind,
   message: row.content,

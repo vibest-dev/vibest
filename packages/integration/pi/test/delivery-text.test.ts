@@ -32,6 +32,12 @@ describe("Pi delivery text", () => {
     )
   })
 
+  it("a remote address shows the machine and the first 8 of the id", () => {
+    const lines = deliveryText([{ sender: { address: "mb/aaaaaaaa" }, message: "report" }]).split("\n")
+    assert.strictEqual(lines[0], "Message from @Mb · (mb/aaaaaaaa)")
+    assert.strictEqual(lines[1], "report")
+  })
+
   it("trims the first line to about 120 characters", () => {
     const lines = deliveryText([agent("x".repeat(200))]).split("\n")
     assert.strictEqual([...lines[1]!].length, 120)
