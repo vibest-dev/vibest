@@ -173,7 +173,9 @@ describe.concurrent("Session", () => {
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.include(yield* replyOf(id), "landed")
-      assert.strictEqual((yield* sqlNotices(id)).filter((message) => message.includes("task_not_started")).length, 1)
+      const notStarted = (yield* sqlNotices(id)).filter((message) => message.includes("task_not_started"))
+      assert.strictEqual(notStarted.length, 1)
+      assert.include(notStarted[0], "(pi may be signed out: sign in with pi)")
     }),
     { promptsIgnored: true, hooked: ["pi"] },
   )

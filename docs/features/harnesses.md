@@ -60,8 +60,8 @@ each. Whether this machine can start one is checked only when it is asked for: a
 ## H9. Antigravity (agy)
 
 `agy` appears in `vibest harness list` and its models in `vibest models`, read from the agy CLI without a model turn.
-`vibest subscriptions` has no agy data: vibest never runs agy in the background, because agy's print mode starts an
-interactive OAuth in the browser when it is signed out. vibest never reads agy's own config or credential files and never
+`vibest subscriptions` has no agy data: vibest runs no background usage probe for agy, because agy's print mode starts
+an interactive OAuth in the browser when it is signed out. vibest never reads agy's own config or credential files and never
 signs in.
 The definition's `binary` can be pointed at a wrapper such as `agyx` by a plugin of the user's own; nothing assumes it is
 named `agy`.

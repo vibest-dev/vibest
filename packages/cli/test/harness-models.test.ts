@@ -9,7 +9,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-const lister = (delay: (spawn: number) => Duration.Input, searchPath = "") => {
+const lister = (delay: (spawn: number) => Duration.Input) => {
   const spawned: Array<number> = []
 
   const spawner = ChildProcessSpawner.make(() => {
@@ -47,7 +47,7 @@ const lister = (delay: (spawn: number) => Duration.Input, searchPath = "") => {
     Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
     Layer.provide(Platform.services),
     Layer.provide(Layer.succeed(VibestCommand, ["vibest"])),
-    Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nowhere", PATH: searchPath }))),
+    Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nowhere", PATH: "" }))),
   )
 
   return { spawned, layer }

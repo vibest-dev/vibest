@@ -307,7 +307,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* db.session.closeExecution(session.id, execution, "not_started")
 
-    return `task_not_started: ${session.id} did not start working on the message it was started with; ${peekHint(session.id)}`
+    return `task_not_started: ${session.id} did not start working on the message it was started with (${adapter.binary} may be signed out: sign in with ${adapter.binary}); ${peekHint(session.id)}`
   })
 
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
