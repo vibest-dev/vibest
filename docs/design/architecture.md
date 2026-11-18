@@ -406,12 +406,17 @@ How these modules keep the rules:
   keeps saying so after the process was killed. A terminal the runtime cannot
   find is. A terminal's exit and state events are bound, as vibestd receives them from the runtime, to the
   processes vibestd had recorded at that terminal (`terminal.exited` and `terminal.state` carry them). Ending a process
-  names the process it means (`endProcess` does nothing once another process is the session's current one): clearing an
-  entry session passes the bound process, a check woken by a bound event checks only that process, and an exit a check
-  records passes the process its session snapshot read. The event or the check is handled later, and by then `vibest`
+  names the process it means (`endProcess` does nothing once another process is the session's current one): a terminal
+  event only wakes a check, a check woken by a bound event checks only that process, and an exit a check records passes
+  the process its session snapshot read. An entry session's exit goes the same way, through the check, which ends its
+  process only on the runtime's current state or the harness-reported pid and then drops the messages waiting on it; the
+  check leaves an entry session alone while it moves. The event or the check is handled later, and by then `vibest`
   typed in the same pane may have started the entry session again, whose new process must keep running. A restart or a
-  usage-limit move in place records the new process at no terminal and places it in the terminal only once the runtime has run it there,
-  as an opened terminal is placed once opened: the replaced harness's exit, received in between, binds to no process.
+  usage-limit move in place records the new process at no terminal and runs it in the existing terminal
+  (`Placement.runInTerminal`): placed there once the runtime ran it, as an opened terminal is placed once opened, or ended
+  `launch_failed` when the run fails. The replaced harness's exit, received in between, binds to no process. A new
+  process left at no terminal (vibestd stopped mid-restart) is ended `launch_failed` by the next check, as a cut-off
+  start is.
   An entry session takes messages while its current process has not ended, placed or not, as a subagent being launched does. An execution counts
   as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.

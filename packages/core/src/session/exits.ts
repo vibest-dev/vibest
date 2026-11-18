@@ -104,6 +104,8 @@ export const make = Effect.gen(function* () {
     ) {
       yield* db.session.setStatus(session.id, "unknown")
       yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
+
+      if (session.entry) yield* db.inbox.dropWaiting(session.projectId)
     }
 
     if (cutOff) yield* undoCutOffStart(h, session)

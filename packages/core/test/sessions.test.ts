@@ -1,10 +1,13 @@
 import { assert, describe } from "@effect/vitest"
+import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, startOf } from "@vibest/core/database/db-rows"
 import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
@@ -82,6 +85,48 @@ describe.concurrent("Session", () => {
       const now = (yield* db.session.getSession(id))!.process!
       assert.notStrictEqual(now.id, old.process!.id)
       assert.isNull(now.endedAt)
+    }),
+  )
+
+  test(
+    "an entry session whose harness the runtime no longer shows is ended by its check, which drops the messages waiting on it; while it moves, a check leaves it",
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      const entryId = yield* entryOfProject(repo)
+      const project = yield* projectOf(repo)
+      const address = { machine: "local", id: "test/coord" }
+      const waiting = (yield* db.inbox.insertSend(entryId, "waiting"))!
+      assert.isTrue(yield* db.session.detachEntry(project, RUNTIME, address))
+      const ended = () => Effect.map(db.session.getSession(entryId), (row) => row!.process!.endedAt)
+      yield* sessions.check(entryId)
+      assert.isNull(yield* ended())
+      yield* db.session.reattachEntry(project, RUNTIME, address)
+      yield* sessions.check(entryId)
+      assert.isNotNull(yield* ended())
+      assert.deepStrictEqual(
+        (yield* db.inbox.inboxWithStatus(entryId, "dropped")).map((row) => row.id),
+        [waiting.id],
+      )
+    }),
+  )
+
+  test(
+    "an entry session restarted in place whose new process vibestd never placed is ended launch_failed by its check, back on the process the restart replaced",
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const entryId = yield* entryOfProject(yield* makeRepository)
+      const replaced = (yield* db.session.currentProcessId(entryId))!
+      yield* db.session.restartProcess(entryId)
+      assert.isDefined(yield* db.inbox.insertSend(entryId, "while it restarts"))
+      yield* sessions.check(entryId)
+      const row = (yield* db.session.getSession(entryId))!
+      assert.strictEqual(row.process!.id, replaced)
+      assert.isNotNull(row.process!.endedAt)
+      assert.isUndefined(yield* db.inbox.insertSend(entryId, "after it ended"))
+      assert.lengthOf(yield* db.inbox.inboxWithStatus(entryId, "dropped"), 1)
     }),
   )
 

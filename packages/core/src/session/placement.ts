@@ -275,6 +275,17 @@ export const make = Effect.gen(function* () {
         : undefined
     })
 
+  const runInTerminal = Effect.fn("Placement.runInTerminal")(function* (
+    h: Runtime,
+    id: string,
+    process: number | undefined,
+    terminal: Terminal,
+    launch: Launch,
+  ) {
+    yield* h.run!(terminal, launch).pipe(Effect.onError(() => db.session.endProcess(id, "launch_failed", process)))
+    yield* db.session.placeProcess(id, terminal.id)
+  })
+
   const openTerminal = Effect.fn("Placement.openTerminal")(function* (
     h: Runtime,
     target: string | undefined,
@@ -555,6 +566,7 @@ export const make = Effect.gen(function* () {
     republish,
     recount,
     openTerminal,
+    runInTerminal,
     show,
     locate,
   }

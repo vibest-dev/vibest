@@ -265,9 +265,14 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       liveRecipient,
       tellSender,
       insertInboxRow,
+      dropWaiting,
     } = inbox
 
     return {
+      dropWaiting: Effect.fn("Db.inbox.dropWaiting")((projectIdValue: string) =>
+        tx(dropWaiting(projectIdValue)).pipe(Effect.orDie),
+      ),
+
       insertInbox: Effect.fn("Db.inbox.insertInbox")((row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie)),
 
       insertSend: Effect.fn("Db.inbox.insertSend")(

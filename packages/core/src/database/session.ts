@@ -21,7 +21,7 @@ import {
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { type BoundProcess, Bus } from "../bus.ts"
+import { Bus } from "../bus.ts"
 import { type ObservedEnd } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
@@ -646,19 +646,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         session.processesAt(runtime, address).pipe(Effect.orDie),
       ),
 
-      clearEntry: Effect.fn("Db.session.clearEntry")((exited: ReadonlyArray<BoundProcess>) =>
-        tx(
-          Effect.forEach(exited, ({ sessionId, process }) =>
-            Effect.gen(function* () {
-              const [entry] = yield* sql<{ project: string }>`SELECT id AS project FROM project
-                WHERE entry_session_id = ${sessionId}`
-
-              if (entry === undefined || moving.has(entry.project)) return
-
-              if (yield* endProcess(sessionId, "exited", undefined, process)) yield* dropWaiting(entry.project)
-            }),
-          ),
-        ).pipe(Effect.asVoid, Effect.orDie),
+      entryMoving: Effect.fn("Db.session.entryMoving")((projectIdValue: string) =>
+        Effect.sync(() => moving.has(projectIdValue)),
       ),
 
       canResumeConversation,

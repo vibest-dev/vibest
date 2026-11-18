@@ -639,7 +639,7 @@ describe("Db", () => {
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             message: "n",
           })
-          yield* db.session.clearEntry(yield* db.session.processesAt(RUNTIME, place.address))
+          yield* db.inbox.dropWaiting(yield* projectOf("r"))
           assert.strictEqual(yield* noticeStatus("n"), "dropped")
         }),
       ),
@@ -660,25 +660,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a terminal exit bound to the entry session's earlier process leaves the process started since running",
-    () =>
-      memory(
-        Effect.gen(function* () {
-          const db = yield* Db.Service
-          const project = yield* projectOf("r")
-          yield* db.session.startEntry(project, "claude", false, place, ENTRY)
-          const exited = yield* db.session.processesAt(RUNTIME, place.address)
-          yield* db.session.startEntry(project, "claude", false, place, ENTRY)
-          yield* db.session.clearEntry(exited)
-          assert.strictEqual(yield* db.session.entryAt(RUNTIME, place.address), project)
-          yield* db.session.clearEntry(yield* db.session.processesAt(RUNTIME, place.address))
-          assert.isUndefined(yield* db.session.entryAt(RUNTIME, place.address))
-        }),
-      ),
-  )
-
-  it.effect(
-    "the entry session takes messages while an in-place restart runs, and the replaced harness's exit received meanwhile leaves its new process running",
+    "the entry session takes messages while an in-place restart runs, and no terminal event binds to its new process until it is placed",
     () =>
       memory(
         Effect.gen(function* () {
@@ -687,7 +669,7 @@ describe("Db", () => {
           const entry = yield* db.session.startEntry(project, "claude", false, place, ENTRY)
           const next = yield* db.session.restartProcess(entry.sessionId)
           assert.isDefined(yield* db.inbox.insertSend(entry.sessionId, "sent while it restarts"))
-          yield* db.session.clearEntry(yield* db.session.processesAt(RUNTIME, place.address))
+          assert.deepStrictEqual(yield* db.session.processesAt(RUNTIME, place.address), [])
           assert.strictEqual(yield* db.session.placeProcess(entry.sessionId, place.address.id), next)
           assert.strictEqual(yield* db.session.entryAt(RUNTIME, place.address), project)
         }),

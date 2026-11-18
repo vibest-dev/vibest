@@ -204,6 +204,28 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "a usage-limit move in place whose run fails leaves the next process ended launch_failed at no terminal",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sql = yield* SqlClient.SqlClient
+      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
+      const held = yield* herdr.hold("run")
+      yield* herdr.endExecution(id)
+      yield* writeEnd(id, "pi", { error: "rate_limit" })
+      const moving = yield* Effect.forkChild(sessions.check(id))
+      yield* held.reached
+      yield* held.release("busy")
+      yield* Fiber.join(moving)
+
+      const [next] = yield* sql<{ terminal: string | null; endReason: string | null }>`SELECT terminal, end_reason
+        FROM process WHERE session_id = ${id} ORDER BY id DESC LIMIT 1`
+
+      assert.deepStrictEqual(next, { terminal: null, endReason: "launch_failed" })
+    }),
+    { plugins: [chooseNext], harnesses: [PI, FIRST_IN_ARGV] },
+  )
+
+  test(
     "a usage-limit move in place binds no terminal event to the next process until the runtime has run it there",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
