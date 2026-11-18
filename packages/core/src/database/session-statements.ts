@@ -202,7 +202,7 @@ export const statements = Effect.gen(function* () {
         ...(at !== undefined && { at }),
         data: { process: current.id, reason },
       })
-      yield* afterCommitLive(sessionLive.dropIntegration(id))
+      yield* afterCommitLive(sessionLive.forgetProcess(id))
 
       return true
     })
@@ -264,7 +264,7 @@ export const statements = Effect.gen(function* () {
         },
       })
 
-      yield* afterCommitLive(sessionLive.dropIntegration(id))
+      yield* afterCommitLive(sessionLive.forgetProcess(id))
 
       return seq
     })
