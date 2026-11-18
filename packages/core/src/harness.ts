@@ -110,7 +110,10 @@ export const make = Effect.gen(function* () {
         return definition === undefined
           ? Effect.succeed(false)
           : Effect.findFirst(searchPath, (dir) =>
-              fs.exists(path.join(dir, definition.binary)).pipe(Effect.orElseSucceed(() => false)),
+              fs.stat(path.join(dir, definition.binary)).pipe(
+                Effect.map((info) => info.type === "File" && (info.mode & 0o111) !== 0),
+                Effect.orElseSucceed(() => false),
+              ),
             ).pipe(Effect.map(Option.isSome))
       }),
     ),

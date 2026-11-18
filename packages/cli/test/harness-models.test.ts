@@ -3,13 +3,13 @@ import { Harness } from "@vibest/core/harness"
 import { harnessesLayer } from "@vibest/platform-bun/test/lib/fakes"
 import { pi } from "@vibest/plugin-harnesses"
 import { VibestCommand } from "@vibest/schema/layout"
-import { ConfigProvider, Effect, Fiber, Layer, Sink, Stream } from "effect"
+import { ConfigProvider, Duration, Effect, Fiber, FileSystem, Layer, Path, Sink, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-const lister = (delay: (spawn: number) => string) => {
+const lister = (delay: (spawn: number) => Duration.Input, searchPath = "") => {
   const spawned: Array<number> = []
 
   const spawner = ChildProcessSpawner.make(() => {
@@ -35,7 +35,7 @@ const lister = (delay: (spawn: number) => string) => {
 
   const definition = {
     ...pi,
-    checkProvider: undefined,
+    checkProvider: () => undefined,
     models: {
       args: () => ["models"],
       answer: (seen: ReadonlyArray<string>) => (seen.length === 0 ? undefined : [{ model: seen[0]!, default: true }]),
@@ -47,7 +47,7 @@ const lister = (delay: (spawn: number) => string) => {
     Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
     Layer.provide(Platform.services),
     Layer.provide(Layer.succeed(VibestCommand, ["vibest"])),
-    Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nowhere", PATH: "" }))),
+    Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nowhere", PATH: searchPath }))),
   )
 
   return { spawned, layer }
@@ -65,10 +65,12 @@ describe("Harness.models keeps a model list per harness, provider and environmen
         const harness = yield* Harness.Service
         assert.deepStrictEqual(names(yield* harness.models("pi", null)), ["model-1"])
         yield* TestClock.adjust("5 minutes")
+
         const readers = yield* Effect.all(
           [1, 2, 3].map(() => harness.models("pi", null)),
           { concurrency: "unbounded" },
         )
+
         assert.deepStrictEqual(readers.map(names), [["model-1"], ["model-1"], ["model-1"]])
         yield* TestClock.adjust("1 millis")
         assert.strictEqual(fake.spawned.length, 2)
@@ -92,4 +94,26 @@ describe("Harness.models keeps a model list per harness, provider and environmen
       assert.strictEqual(fake.spawned.length, 34)
     }).pipe(Effect.provide(fake.layer))
   })
+
+  it.effect("a harness is available only through an executable file on PATH, not a plain file or a directory", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-path-" })
+      const binary = path.join(dir, pi.binary)
+
+      const available = Effect.flatMap(Harness.Service, (harness) => harness.available("pi")).pipe(
+        Effect.provide(lister(() => "0 millis", dir).layer),
+      )
+
+      yield* fs.makeDirectory(binary)
+      assert.isFalse(yield* available)
+      yield* fs.remove(binary, { recursive: true })
+      yield* fs.writeFileString(binary, "#!/bin/sh\n")
+      yield* fs.chmod(binary, 0o644)
+      assert.isFalse(yield* available)
+      yield* fs.chmod(binary, 0o755)
+      assert.isTrue(yield* available)
+    }).pipe(Effect.provide(Platform.services)),
+  )
 })
