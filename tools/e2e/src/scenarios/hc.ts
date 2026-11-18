@@ -130,7 +130,10 @@ const checks: ReadonlyArray<Check> = [
             what,
             () =>
               model.seen.some(
-                (m) => m.includes("<agent-") && !m.includes(`<agent-id>${entryId}</agent-id>`) && m.includes(marker),
+                (m) =>
+                  m.includes("<vibest-agent-message>") &&
+                  !m.includes(`<agent-id>${entryId}</agent-id>`) &&
+                  m.includes(marker),
               ),
             180_000,
           ).catch(async (e: Error) => {

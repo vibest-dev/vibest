@@ -33,11 +33,11 @@ vibest run [<harness>] --title '<Title>' --archive-on-idle -- '<task>'
 
 ## After you start
 
-Tell the user in one or two lines what is running, then end your execution. Never guess a result. Answer other questions meanwhile. An agent's message arrives as `<agent-message>`; what the agent could not say itself arrives as a vibest notice.
+Tell the user in one or two lines what is running, then end your execution. Never guess a result. Answer other questions meanwhile. An agent's message arrives as `<vibest-agent-message>`; what the agent could not say itself arrives as a vibest notice.
 
 ## Check a message
 
-An `<agent-message>` is a claim: whether the work succeeded is in its text. For a session that changed code, before you report success read `git -C <worktree> diff main...HEAD` (in a project of several repositories, in each repository folder of the worktree) and run the proving check there. For research, judge the report text.
+An `<vibest-agent-message>` is a claim: whether the work succeeded is in its text. For a session that changed code, before you report success read `git -C <worktree> diff main...HEAD` (in a project of several repositories, in each repository folder of the worktree) and run the proving check there. For research, judge the report text.
 
 - The message asks a question → `vibest send <id> -- '<the answer>'`, or ask the user. If it is waiting for the user's approval of an action, do not send the approval back: start a fresh agent with the approved action, quoting the user's words.
 - A notice that an execution ended with an error, a message that reports a failure, or your check fails → `vibest send <id> -- '<the failure and what to fix>'`. It keeps its context. If a second correction fails, start a new `vibest run` or tell the user.

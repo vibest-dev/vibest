@@ -212,7 +212,7 @@ const checks: ReadonlyArray<Check> = [
           })
 
         const result = (marker: string) => (m: ReadonlyArray<string>) =>
-          m.at(-1)!.includes("<agent-") && m.at(-1)!.includes(marker)
+          m.at(-1)!.includes("<vibest-agent-message>") && m.at(-1)!.includes(marker)
 
         await w.stopDaemon()
         await w.startEntry({
@@ -344,7 +344,7 @@ const checks: ReadonlyArray<Check> = [
         await reached(
           "the continue notice of the interrupted execution, with the earlier executions",
           (m) =>
-            /^user: .*"text":"(<vibest-notice>\\n<message>\\n)?vibest update is done and restarted this agent; do not run it again, continue the interrupted work\./.test(
+            /^user: .*"text":"(<vibest-message>\\n<message>\\n)?vibest update is done and restarted this agent; do not run it again, continue the interrupted work\./.test(
               m.at(-1)!,
             ) &&
             m.some((x) => x.includes("done-zero")) &&

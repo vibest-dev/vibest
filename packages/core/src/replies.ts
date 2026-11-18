@@ -46,12 +46,12 @@ export const envelope = (
   ].join("\n")
 
 export const sessionEnvelope = (id: string, message: string) =>
-  envelope("agent-message", [["agent-id", id]], ["message", message])
+  envelope("vibest-agent-message", [["agent-id", id]], ["message", message])
 
-export const noticeEnvelope = (message: string) => envelope("vibest-notice", [], ["message", message])
+export const noticeEnvelope = (message: string) => envelope("vibest-message", [], ["message", message])
 
 const ENVELOPED =
-  /^<(agent-message|vibest-notice)>\n(?:<[a-z-]+>[^\n]*<\/[a-z-]+>\n)*<message>\n([\s\S]*)\n<\/message>\n<\/\1>$/
+  /^<(vibest-agent-message|vibest-message)>\n(?:<[a-z-]+>[^\n]*<\/[a-z-]+>\n)*<message>\n([\s\S]*)\n<\/message>\n<\/\1>$/
 
 export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? rendered
 

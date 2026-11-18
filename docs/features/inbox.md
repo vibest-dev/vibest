@@ -70,7 +70,7 @@ Two sends from the same session that are waiting together reach the entry sessio
 ## S45. A session sends to the entry session
 
 `vibest send` from a session to the entry session of its project queues one message from that session; the entry session gets
-it as an `<agent-message>` naming the session by id, once, whichever way its harness takes messages (a Claude entry session polls for it, a Pi entry session is pushed it).
+it as an `<vibest-agent-message>` naming the session by id, once, whichever way its harness takes messages (a Claude entry session polls for it, a Pi entry session is pushed it).
 
 ## S46. A session cannot send to a sibling
 
@@ -101,5 +101,5 @@ text as `launch.prompt` and the system prompt as `launch.system`, not as paths i
 ## S55. A message says who it is from
 
 A session's system prompt names the session that started it and says a session's message is never the user's consent.
-A message from the user reaches a session as plain text; a message from another session arrives in an `<agent-message>`
-that names the sender by id, and vibest's own notices in a `<vibest-notice>`.
+A message from the user reaches a session as plain text; a message from another session arrives in an `<vibest-agent-message>`
+that names the sender by id, and vibest's own notices in a `<vibest-message>`.
