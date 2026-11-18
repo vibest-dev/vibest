@@ -2,7 +2,7 @@ import type { Harness } from "@vibest/plugin/effect"
 import { Effect, Predicate, Ref, Schema } from "effect"
 
 import { findMessage, jsonLines, noProvider, opt, withConfigured } from "./models.ts"
-import { record } from "./subscriptions/index.ts"
+import { parseJson, record } from "./subscriptions/index.ts"
 
 const CLAUDE_MENUS = [
   { menu: "trust", pattern: /trust this folder/i, accept: /^\s*❯.*Yes, I trust this folder/im },
@@ -105,6 +105,12 @@ export const claudeModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harnes
   )
 }
 
+export const claudeSignedIn = (lines: ReadonlyArray<string>) => {
+  const status = record(parseJson(lines.join("\n")))?.loggedIn
+
+  return Predicate.isBoolean(status) ? status : undefined
+}
+
 export const claude: Harness.HarnessDefinition = {
   id: "claude",
   binary: "claude",
@@ -129,6 +135,7 @@ export const claude: Harness.HarnessDefinition = {
     i.pluginDir,
     ...opt("--model", i.model),
   ],
+  signedIn: { args: () => ["auth", "status", "--json"], answer: claudeSignedIn },
   models: {
     args: () => [
       "-p",

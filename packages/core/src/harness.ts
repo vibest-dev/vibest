@@ -8,7 +8,7 @@ import { ChildProcessSpawner } from "effect/process"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { Harnesses, unprovided } from "./harnesses.ts"
-import { listModels, type Model } from "./models.ts"
+import { checkSignedIn, listModels, type Model } from "./models.ts"
 
 export * as Harness from "./harness.ts"
 
@@ -35,6 +35,7 @@ const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Recor
 export interface Interface {
   readonly available: (id: string) => Effect.Effect<boolean>
   readonly plugin: (id: string) => Effect.Effect<string, HarnessUnavailable>
+  readonly signedIn: (id: string) => Effect.Effect<boolean | undefined>
   readonly models: (
     id: string,
     provider: string | null,
@@ -90,6 +91,20 @@ export const make = Effect.gen(function* () {
     timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
   })
 
+  const signIns = yield* Cache.makeWith(
+    (id: string) => {
+      const definition = harnesses.find(id)
+
+      return definition === undefined
+        ? Effect.succeed(undefined)
+        : checkSignedIn(definition).pipe(Effect.provide(pinned))
+    },
+    {
+      capacity: MODEL_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) && exit.value === true ? MODELS_TTL : Duration.zero),
+    },
+  )
+
   const refreshing = new Set<string>()
   const scope = yield* Effect.scope
 
@@ -137,6 +152,7 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
+    signedIn: (id) => Cache.get(signIns, id),
     models: Effect.fn("Harness.models")(function* (id, provider, env) {
       const key = modelCacheKey(id, provider, env)
       const listed = yield* Cache.get(cached, key)

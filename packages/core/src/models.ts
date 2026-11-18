@@ -100,6 +100,23 @@ export const listModels = Effect.fn("listModels")(function* (
   return models
 })
 
+export const checkSignedIn = Effect.fn("checkSignedIn")(function* (adapter: HarnessDefinition) {
+  const check = adapter.signedIn
+
+  if (check === undefined) return undefined
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const cwd = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
+
+  const lines = yield* spawner
+    .streamLines(
+      ChildProcess.make(adapter.binary, check.args(), { stdin: "ignore", cwd, env: { HOME: cwd }, extendEnv: true }),
+      { includeStderr: true },
+    )
+    .pipe(Stream.runCollect, Effect.timeout("10 seconds"), Effect.option)
+
+  return Option.match(lines, { onNone: () => undefined, onSome: (seen) => check.answer([...seen]) })
+})
+
 export const forProvider = (
   choices: ReadonlyArray<HarnessChoice>,
   definitions: { readonly find: (id: string) => Pick<HarnessDefinition, "checkProvider"> | undefined },

@@ -164,6 +164,32 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "entering a project with a signed-out harness is refused before any pane opens, saying how to sign in",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+
+      const failed = yield* Effect.flip(
+        asCli(yield* client, repo).Launch({
+          agent: "coordinator",
+          callerEnv: {},
+          argv: ["/bin/vibest", "--harness", "cursor"],
+          focus: false,
+          runtime: "herdr",
+        }),
+      )
+
+      assert.ok(Predicate.isTagged(failed, "LaunchFailed"), failed._tag)
+      assert.strictEqual(
+        failed.message,
+        "cursor-agent is not signed in; sign in with cursor-agent, then run vibest again",
+      )
+      assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
+    }),
+    { signedOut: ["cursor"] },
+  )
+
+  test(
     "an entry launch whose typing fails leaves no open execution: the next start runs its first input",
     Effect.gen(function* () {
       const db = yield* Db.Service

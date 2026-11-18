@@ -158,12 +158,14 @@ export interface HarnessStandIn {
   readonly unusable?: ReadonlyArray<string>
   readonly models?: ReadonlyArray<string>
   readonly missingBinary?: ReadonlyArray<string>
+  readonly signedOut?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
 }
 
 export const harnessLayer = (options: HarnessStandIn = {}) =>
   Layer.succeed(Harness.Service, {
     available: (id) => Effect.succeed(!(options.missingBinary ?? []).includes(id)),
+    signedIn: (id) => Effect.succeed((options.signedOut ?? []).includes(id) ? false : undefined),
     plugin: (id) =>
       (options.hooked ?? (options.harnesses ?? HARNESSES).map((h) => h.id)).includes(id)
         ? Effect.succeed(`/vibest/harnesses/${id}`)

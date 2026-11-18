@@ -312,6 +312,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly db?: (db: Db.Interface) => Db.Interface
   readonly crypto?: (crypto: Crypto.Crypto) => Crypto.Crypto
   readonly missingBinary?: ReadonlyArray<string>
+  readonly signedOut?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
   readonly sshHosts?: Readonly<Record<string, string>>
   readonly transport?: Machines.MachineTransport["Service"]
@@ -353,6 +354,7 @@ const harnessStandIn = (options: TestOptions) => ({
   ...(options.unusable !== undefined && { unusable: options.unusable }),
   ...(options.models !== undefined && { models: options.models }),
   ...(options.missingBinary !== undefined && { missingBinary: options.missingBinary }),
+  ...(options.signedOut !== undefined && { signedOut: options.signedOut }),
   ...(options.harnesses !== undefined && { harnesses: options.harnesses }),
 })
 

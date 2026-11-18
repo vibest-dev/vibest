@@ -40,7 +40,10 @@ inherit; otherwise the default applies (H7).
 
 Entering a project checks only that a harness can start there (its binary on `PATH`, vibest's plugin folder for it) and
 lists no models, so it waits on no harness CLI; a harness that is installed but cannot answer (for example signed out)
-is offered and fails when it starts.
+is offered and fails when it starts. Only the harness about to start is asked whether it is signed in, through a CLI
+call that cannot start a login (`claude auth status`, `cursor-agent status`, `agy models`; Pi is not asked): a signed-out
+harness is refused with a message saying to sign in with it and run vibest again, and no pane opens. vibest never signs
+a harness in and never runs a harness command that can open a sign-in.
 
 ## H7. The default harness is Claude
 

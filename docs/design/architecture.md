@@ -874,16 +874,16 @@ works on day one.
 
 **Launch side:**
 
-| Capability     | Adapter provides                                                                                                      | Fallback                            |
-| -------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| Launch         | arguments for model, autonomy level, and initial prompt; startup dialogs to answer (trust prompts)                    | definition `arguments` as given     |
-| Instructions   | the native channel (system prompt flag, instruction file, skill or extension)                                         | sent as the first prompt            |
-| Command access | how `vibest` commands run without an approval prompt (`run`, `send`, … for the entry session; `report` for subagents) | the user approves once              |
-| Resume         | arguments to resume a conversation from herdr's `agent_session` reference                                             | start fresh with a handoff summary  |
-| Usage          | reads this CLI's usage windows into its Subscription                                                                  | none: plugins see only exits        |
-| Availability   | the CLI on PATH, its plugin folder, its environment check; `preflight` adds its model list (cached 5 minutes)         | none                                |
-| Read-only      | arguments that keep the CLI from editing files (plan or read-only sandbox modes)                                      | the instruction "do not edit files" |
-| Interrupt      | keys that stop the agent's current work                                                                               | `Escape`                            |
+| Capability     | Adapter provides                                                                                                                                                                                                             | Fallback                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Launch         | arguments for model, autonomy level, and initial prompt; startup dialogs to answer (trust prompts)                                                                                                                           | definition `arguments` as given     |
+| Instructions   | the native channel (system prompt flag, instruction file, skill or extension)                                                                                                                                                | sent as the first prompt            |
+| Command access | how `vibest` commands run without an approval prompt (`run`, `send`, … for the entry session; `report` for subagents)                                                                                                        | the user approves once              |
+| Resume         | arguments to resume a conversation from herdr's `agent_session` reference                                                                                                                                                    | start fresh with a handoff summary  |
+| Usage          | reads this CLI's usage windows into its Subscription                                                                                                                                                                         | none: plugins see only exits        |
+| Availability   | the CLI on PATH, its plugin folder, its environment check; `preflight` adds its model list (cached 5 minutes); entering a project asks the harness about to start whether it is signed in (`signedIn`, a yes kept 5 minutes) | none                                |
+| Read-only      | arguments that keep the CLI from editing files (plan or read-only sandbox modes)                                                                                                                                             | the instruction "do not edit files" |
+| Interrupt      | keys that stop the agent's current work                                                                                                                                                                                      | `Escape`                            |
 
 **Integration side: plugins loaded at launch, never installed.** vibest's plugin for each harness ships with the binary
 (`harnesses/<harness>`, `scripts/build-harnesses.ts`): in each release archive beside `bin/vibest`, and in the

@@ -66,6 +66,11 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
 
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   const pluginDir = yield* harness.plugin(input.harness)
+
+  if ((yield* harness.signedIn(input.harness)) === false)
+    return yield* unavailable(
+      `${adapter.binary} is not signed in; sign in with ${adapter.binary}, then run vibest again`,
+    )
   yield* unsafeOnly(systemPromptRoot)
 
   const env = {

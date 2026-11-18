@@ -22,6 +22,9 @@ export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.R
   })
 }
 
+export const agySignedIn = (lines: ReadonlyArray<string>) =>
+  agyModels(lines) !== undefined ? true : lines.some((line) => line.includes("Please sign in")) ? false : undefined
+
 export const agyConversation = (event: Schema.JsonObject): string | undefined =>
   Predicate.isString(event.conversationId) && event.conversationId !== "" ? event.conversationId : undefined
 
@@ -117,6 +120,7 @@ export const agy: Harness.HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => ["--output-format", "json", "models"], answer: agyModels },
+  signedIn: { args: () => ["--output-format", "json", "models"], answer: agySignedIn },
   conversationOf: agyConversation,
   userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { text: "" } : undefined),
   executionEnd: agyExecutionEnd,

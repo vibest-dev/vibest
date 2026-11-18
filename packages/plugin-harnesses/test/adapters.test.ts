@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/plugin/effect"
-import { Effect, Sink, Stream, type Schema } from "effect"
+import { Effect, Fiber, Sink, Stream, type Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
 
 import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
@@ -377,43 +378,52 @@ describe("harness output", () => {
     assert.isUndefined(cursorModels(["Not logged in"]))
   })
 
-  it.effect(
-    "agy signed out: its subscription reads only the model list and never runs print mode, which opens a browser login",
-    () => {
-      const ran: Array<string> = []
+  const fakeAgy = (ran: Array<string>, answer: Effect.Effect<string>) =>
+    ChildProcessSpawner.make((command) => {
+      if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
+      ran.push(command.args.join(" "))
 
-      const spawner = ChildProcessSpawner.make((command) => {
-        if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
-        ran.push(command.args.join(" "))
+      return Effect.map(answer, (stderr) =>
+        ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: Stream.empty,
+          stderr: Stream.make(new TextEncoder().encode(stderr)),
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        }),
+      )
+    })
 
-        const out = Stream.make(
-          new TextEncoder().encode(
-            "Error: Please sign in to view available models. Launch the CLI without arguments to sign in.\n",
-          ),
-        )
+  it.effect("agy signed out: its subscription asks agy models, reports no account, and never runs print mode", () => {
+    const ran: Array<string> = []
 
-        return Effect.succeed(
-          ChildProcessSpawner.makeHandle({
-            pid: ChildProcessSpawner.ProcessId(1),
-            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
-            isRunning: Effect.succeed(false),
-            kill: () => Effect.void,
-            unref: Effect.succeed(Effect.void),
-            stdin: Sink.drain,
-            stdout: out,
-            stderr: Stream.empty,
-            all: out,
-            getInputFd: () => Sink.drain,
-            getOutputFd: () => Stream.empty,
-          }),
-        )
-      })
+    const signedOut = Effect.succeed(
+      "Error: Please sign in to view available models. Launch the CLI without arguments to sign in.\n",
+    )
 
-      return Effect.gen(function* () {
-        const rows = yield* agySubscription(spawner)("/nowhere", "agy")
-        assert.deepStrictEqual(rows, [{ provider: "", account: { kind: "none" }, limits: [] }])
-        assert.deepStrictEqual(ran, ["--output-format json models"])
-      })
-    },
-  )
+    return Effect.gen(function* () {
+      const rows = yield* agySubscription(fakeAgy(ran, signedOut))("/nowhere", "agy")
+      assert.deepStrictEqual(rows, [{ provider: "", account: { kind: "none" }, limits: [] }])
+      assert.deepStrictEqual(ran, ["--output-format json models"])
+    })
+  })
+
+  it.effect("agy models that never answers is an error, not a sign-out, and print mode still never runs", () => {
+    const ran: Array<string> = []
+
+    return Effect.gen(function* () {
+      const reading = yield* Effect.forkChild(agySubscription(fakeAgy(ran, Effect.never))("/nowhere", "agy"))
+      yield* TestClock.adjust("10 seconds")
+      assert.deepStrictEqual(yield* Fiber.join(reading), [
+        { provider: "", error: "agy models did not say whether it is signed in" },
+      ])
+      assert.deepStrictEqual(ran, ["--output-format json models"])
+    })
+  })
 })

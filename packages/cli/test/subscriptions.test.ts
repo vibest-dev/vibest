@@ -74,6 +74,7 @@ const output = (stdout: string, exitCode: Effect.Effect<number> = Effect.succeed
 const harnessLayer = (installed: ReadonlyArray<string>) =>
   Layer.succeed(Harness.Service, {
     available: (id) => Effect.succeed(installed.includes(id)),
+    signedIn: () => Effect.succeed(undefined),
     plugin: (id) => Effect.fail(new HarnessUnavailable({ harness: id, message: "unused" })),
     models: () => Effect.die("unused"),
   })
