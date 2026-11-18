@@ -1,4 +1,4 @@
-import { sessionLabel, shortId } from "@vibest/schema/id"
+import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
 import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
 
@@ -261,7 +261,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed
 
-    return `${sessionLabel(session)} did not start working on the message; vibest peek ${shortId(session.id)}`
+    return `${sessionLabel(session)} did not start working on the message`
   }, Effect.scoped)
 
   const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
@@ -307,7 +307,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* db.session.closeExecution(session.id, execution, "not_started")
 
-    return `${sessionLabel(session)} did not start working on its first message; vibest peek ${shortId(session.id)}`
+    return `${sessionLabel(session)} did not start working on its first message`
   })
 
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {

@@ -1,4 +1,4 @@
-import { sessionLabel, shortId } from "@vibest/schema/id"
+import { sessionLabel } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
@@ -197,22 +197,19 @@ export const make = Effect.gen(function* () {
             if (seen !== "absent") {
               const settled = yield* settleAfterInterrupt(h, session, terminal)
 
-              if (!settled)
-                return yield* skip(
-                  `it did not go idle within ${Duration.format(STOP_WAIT)}; vibest archive ${shortId(id)}`,
-                )
+              if (!settled) return yield* skip(`it did not go idle within ${Duration.format(STOP_WAIT)}`)
             }
 
             const out = yield* removeLocked(id, { unlessPending: true })
 
             if (!out) return
             const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
-            const again = out.processes === "exited" ? "" : ` Run vibest archive ${shortId(id)} again to check.`
+            const unconfirmed = out.processes === "exited" ? "" : " Its processes are not confirmed gone."
 
-            if (kept || again)
+            if (kept || unconfirmed)
               yield* notice(
                 session,
-                `${sessionLabel(session)} archived (--archive-on-idle): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
+                `${sessionLabel(session)} archived (--archive-on-idle): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${unconfirmed}`,
               )
           }).pipe(
             Effect.catchCause((cause) =>
@@ -224,10 +221,7 @@ export const make = Effect.gen(function* () {
                         Effect.flatMap((told) =>
                           told
                             ? Effect.void
-                            : notice(
-                                session,
-                                `${sessionLabel(session)} auto-archive failed: ${errorMessage(cause)}; vibest archive ${shortId(id)}`,
-                              ),
+                            : notice(session, `${sessionLabel(session)} auto-archive failed: ${errorMessage(cause)}`),
                         ),
                       ),
                     ),
@@ -256,7 +250,7 @@ export const make = Effect.gen(function* () {
         if (out.processes !== "exited")
           yield* notice(
             session,
-            `${sessionLabel(session)} is archived, but ${out.pane === "kept" ? "its terminal could not be closed" : "its processes are not confirmed gone"}; run vibest archive ${shortId(id)} again to check`,
+            `${sessionLabel(session)} is archived, but ${out.pane === "kept" ? "its terminal could not be closed" : "its processes are not confirmed gone"}`,
           )
       }),
     ).pipe(logged(`archive ${id}`)),

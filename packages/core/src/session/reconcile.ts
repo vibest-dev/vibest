@@ -1,5 +1,5 @@
 import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
-import { sessionLabel, shortId } from "@vibest/schema/id"
+import { sessionLabel } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
@@ -164,7 +164,7 @@ export const make = Effect.gen(function* () {
         const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
         yield* notice(
           session,
-          `${sessionLabel(session)} (${harnessIdOf(session)}) is waiting for a permission decision since ${hhmm}; vibest peek ${shortId(id)} shows the request`,
+          `${sessionLabel(session)} (${harnessIdOf(session)}) is waiting for a permission decision since ${hhmm}`,
         )
       }
 
@@ -181,7 +181,7 @@ export const make = Effect.gen(function* () {
 
     if (execution === undefined) return
     yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
-    const failure = `the harness stopped without its end hook (a usage limit?); vibest peek ${shortId(id)}`
+    const failure = `the harness stopped without its end hook (a usage limit?)`
     yield* db.session.closeExecution(id, execution, "lost", {
       failure,
       notice: `${sessionLabel(session)} ended its execution with an error: ${failure}`,

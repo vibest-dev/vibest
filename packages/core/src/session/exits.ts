@@ -1,4 +1,4 @@
-import { sessionLabel, shortId } from "@vibest/schema/id"
+import { sessionLabel } from "@vibest/schema/id"
 import { Context, Effect, Layer } from "effect"
 
 import { type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf } from "../database/db-rows.ts"
@@ -69,7 +69,7 @@ export const make = Effect.gen(function* () {
       const lost = unsigned.map((r) => r.message).join("\n\n")
 
       const text = (how: string) =>
-        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${how}; vibest peek ${shortId(session.id)}; vibest send ${shortId(session.id)} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${how}${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
 
       if (
         execution !== undefined &&
