@@ -13,7 +13,7 @@ const row = (message: string, sender: string | null, kind = "send", address: str
 
 describe("delivery detail", () => {
   it("an agent message keeps the sender and the unwrapped text", () => {
-    assert.deepStrictEqual(detailOf([row(sessionEnvelope({ id: "a", title: "Alpha" }, "hello\nrest"), "a")], who), [
+    assert.deepStrictEqual(detailOf([row(sessionEnvelope("a", "hello\nrest"), "a")], who), [
       { sender: { agent: "general", title: "Alpha", session: "a" }, message: "hello\nrest" },
     ])
   })
@@ -33,10 +33,7 @@ describe("delivery detail", () => {
 
   it("a peer send keeps the remote address instead of becoming the user", () => {
     assert.deepStrictEqual(
-      detailOf(
-        [row(sessionEnvelope({ id: "mb/aaaaaaaa" }, "report from afar"), null, "send", "mb/aaaaaaaa")],
-        () => undefined,
-      ),
+      detailOf([row(sessionEnvelope("mb/aaaaaaaa", "report from afar"), null, "send", "mb/aaaaaaaa")], () => undefined),
       [{ sender: { address: "mb/aaaaaaaa" }, message: "report from afar" }],
     )
   })
