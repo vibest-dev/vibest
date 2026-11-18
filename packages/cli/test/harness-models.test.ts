@@ -95,25 +95,36 @@ describe("Harness.models keeps a model list per harness, provider and environmen
     }).pipe(Effect.provide(fake.layer))
   })
 
-  it.effect("a harness is available only through an executable file on PATH, not a plain file or a directory", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-path-" })
-      const binary = path.join(dir, pi.binary)
+  it.effect(
+    "a harness is available only through a file on PATH this user may execute, not a plain file, a directory or a file executable only by others",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-path-" })
+        const binary = path.join(dir, pi.binary)
 
-      const available = Effect.flatMap(Harness.Service, (harness) => harness.available("pi")).pipe(
-        Effect.provide(lister(() => "0 millis", dir).layer),
-      )
+        const available = Effect.flatMap(Harness.Service, (harness) => harness.available("pi")).pipe(
+          Effect.provide(
+            Harness.layer.pipe(
+              Layer.provide(harnessesLayer([pi])),
+              Layer.provide(Platform.services),
+              Layer.provide(Layer.succeed(VibestCommand, ["vibest"])),
+              Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nowhere", PATH: dir }))),
+            ),
+          ),
+        )
 
-      yield* fs.makeDirectory(binary)
-      assert.isFalse(yield* available)
-      yield* fs.remove(binary, { recursive: true })
-      yield* fs.writeFileString(binary, "#!/bin/sh\n")
-      yield* fs.chmod(binary, 0o644)
-      assert.isFalse(yield* available)
-      yield* fs.chmod(binary, 0o755)
-      assert.isTrue(yield* available)
-    }).pipe(Effect.provide(Platform.services)),
+        yield* fs.makeDirectory(binary)
+        assert.isFalse(yield* available)
+        yield* fs.remove(binary, { recursive: true })
+        yield* fs.writeFileString(binary, "#!/bin/sh\n")
+        yield* fs.chmod(binary, 0o644)
+        assert.isFalse(yield* available)
+        yield* fs.chmod(binary, 0o645)
+        assert.isFalse(yield* available)
+        yield* fs.chmod(binary, 0o755)
+        assert.isTrue(yield* available)
+      }).pipe(Effect.provide(Platform.services)),
   )
 })

@@ -3,7 +3,7 @@ import { VibestCommand } from "@vibest/schema/layout"
 import type { HarnessChoice } from "@vibest/schema/session"
 import { HarnessUnavailable } from "@vibest/schema/session"
 import { Cache, Clock, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
-import { ChildProcessSpawner } from "effect/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -25,6 +25,8 @@ const decodeModelCacheKey = Schema.decodeSync(
   ),
 )
 
+const EXECUTABLE_ON_PATH = 'IFS=:; for d in $PATH; do [ -f "$d/$1" ] && [ -x "$d/$1" ] && exit 0; done; exit 1'
+
 const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Record<string, string>>) =>
   JSON.stringify([
     id,
@@ -35,7 +37,7 @@ const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Recor
 export interface Interface {
   readonly available: (id: string) => Effect.Effect<boolean>
   readonly plugin: (id: string) => Effect.Effect<string, HarnessUnavailable>
-  readonly signedIn: (id: string, env: Readonly<Record<string, string>>) => Effect.Effect<boolean | undefined>
+  readonly signedIn: (id: string, env: Readonly<Record<string, string>>) => Effect.Effect<void, HarnessUnavailable>
   readonly models: (
     id: string,
     provider: string | null,
@@ -91,21 +93,6 @@ export const make = Effect.gen(function* () {
     timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
   })
 
-  const signIns = yield* Cache.makeWith(
-    (key: string) => {
-      const [id, , entries] = decodeModelCacheKey(key)
-      const definition = harnesses.find(id)
-
-      return definition === undefined
-        ? Effect.succeed(undefined)
-        : checkSignedIn(definition, Object.fromEntries(entries)).pipe(Effect.provide(pinned))
-    },
-    {
-      capacity: MODEL_CACHE_CAPACITY,
-      timeToLive: (exit) => (Exit.isSuccess(exit) && exit.value === true ? MODELS_TTL : Duration.zero),
-    },
-  )
-
   const refreshing = new Set<string>()
   const scope = yield* Effect.scope
 
@@ -125,12 +112,18 @@ export const make = Effect.gen(function* () {
 
         return definition === undefined
           ? Effect.succeed(false)
-          : Effect.findFirst(searchPath, (dir) =>
-              fs.stat(path.join(dir, definition.binary)).pipe(
-                Effect.map((info) => info.type === "File" && (info.mode & 0o111) !== 0),
+          : spawner
+              .exitCode(
+                ChildProcess.make("/bin/sh", ["-c", EXECUTABLE_ON_PATH, "sh", definition.binary], {
+                  stdin: "ignore",
+                  env: { PATH: searchPath.join(":") },
+                  extendEnv: false,
+                }),
+              )
+              .pipe(
+                Effect.map((code) => code === 0),
                 Effect.orElseSucceed(() => false),
-              ),
-            ).pipe(Effect.map(Option.isSome))
+              )
       }),
     ),
     plugin: Effect.fn("Harness.plugin")(function* (id) {
@@ -153,7 +146,16 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
-    signedIn: (id, env) => Cache.get(signIns, modelCacheKey(id, null, env)),
+    signedIn: Effect.fn("Harness.signedIn")(function* (id, env) {
+      const definition = harnesses.find(id)
+
+      if (definition === undefined || (yield* checkSignedIn(definition, env).pipe(Effect.provide(pinned))) !== false)
+        return
+      yield* new HarnessUnavailable({
+        harness: id,
+        message: `${definition.binary} is not signed in; sign in with ${definition.binary}, then run vibest again`,
+      })
+    }),
     models: Effect.fn("Harness.models")(function* (id, provider, env) {
       const key = modelCacheKey(id, provider, env)
       const listed = yield* Cache.get(cached, key)

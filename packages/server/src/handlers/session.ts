@@ -125,6 +125,7 @@ export const make = Effect.gen(function* () {
           provider: input.provider,
           model: input.model,
           env: input.env,
+          callerEnv: input.callerEnv,
           agent: input.agent,
           share: input.share === undefined ? undefined : yield* db.session.resolveSession(input.share),
           archive: input.archive,

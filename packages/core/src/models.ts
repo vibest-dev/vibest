@@ -108,10 +108,11 @@ export const checkSignedIn = Effect.fn("checkSignedIn")(function* (
 
   if (check === undefined) return undefined
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
 
   const lines = yield* spawner
     .streamLines(
-      ChildProcess.make(adapter.binary, check.args(), { stdin: "ignore", cwd: env.HOME, env, extendEnv: false }),
+      ChildProcess.make(adapter.binary, check.args(), { stdin: "ignore", cwd: env.HOME ?? home, env, extendEnv: true }),
       { includeStderr: true },
     )
     .pipe(Stream.runCollect, Effect.timeout("10 seconds"), Effect.option)

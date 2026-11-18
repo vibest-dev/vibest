@@ -165,7 +165,15 @@ export interface HarnessStandIn {
 export const harnessLayer = (options: HarnessStandIn = {}) =>
   Layer.succeed(Harness.Service, {
     available: (id) => Effect.succeed(!(options.missingBinary ?? []).includes(id)),
-    signedIn: (id, _env) => Effect.succeed((options.signedOut ?? []).includes(id) ? false : undefined),
+    signedIn: (id) =>
+      (options.signedOut ?? []).includes(id)
+        ? Effect.fail(
+            new HarnessUnavailable({
+              harness: id,
+              message: `${id} is not signed in; sign in with ${id}, then run vibest again`,
+            }),
+          )
+        : Effect.void,
     plugin: (id) =>
       (options.hooked ?? (options.harnesses ?? HARNESSES).map((h) => h.id)).includes(id)
         ? Effect.succeed(`/vibest/harnesses/${id}`)

@@ -93,6 +93,7 @@ export interface SpawnInput {
   readonly provider?: string | undefined
   readonly model?: string | undefined
   readonly env?: Record<string, string> | undefined
+  readonly callerEnv?: Readonly<Record<string, string>> | undefined
   readonly agent: string
   readonly share?: string | undefined
   readonly archive?: boolean | undefined
@@ -339,6 +340,11 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
 
         if (harnesses.find(harnessId) === undefined) return yield* routed(unprovided(harnessId, harnesses.all))
         yield* preflight(harnessId, provider ?? null, model ?? null, input.env).pipe(
+          Effect.andThen(
+            input.callerEnv === undefined
+              ? Effect.void
+              : harness.signedIn(harnessId, { ...input.callerEnv, ...input.env }),
+          ),
           Effect.provideService(Harness.Service, harness),
           Effect.provideService(Harnesses.Service, harnesses),
           Effect.catchTag("HarnessUnavailable", routed),

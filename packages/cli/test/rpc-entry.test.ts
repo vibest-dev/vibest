@@ -180,10 +180,7 @@ describe("vibest.sock", () => {
       )
 
       assert.ok(Predicate.isTagged(failed, "LaunchFailed"), failed._tag)
-      assert.strictEqual(
-        failed.message,
-        "cursor-agent is not signed in; sign in with cursor-agent, then run vibest again",
-      )
+      assert.strictEqual(failed.message, "cursor is not signed in; sign in with cursor, then run vibest again")
       assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
     }),
     { signedOut: ["cursor"] },

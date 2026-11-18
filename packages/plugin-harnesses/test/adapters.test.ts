@@ -386,7 +386,7 @@ describe("harness output", () => {
       return Effect.map(answer, (stderr) =>
         ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(1),
-          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
           isRunning: Effect.succeed(false),
           kill: () => Effect.void,
           unref: Effect.succeed(Effect.void),

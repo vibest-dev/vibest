@@ -245,6 +245,21 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "vibest run on a signed-out harness is refused with the caller's environment before any worktree or pane",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+
+      const error = yield* Effect.flip(
+        (yield* Session.Service).spawn({ ...(yield* spawnInput(repo)), harness: "pi", callerEnv: {} }),
+      )
+
+      assert.strictEqual(error._tag, "HarnessUnavailable")
+      assert.include(error.message, "pi is not signed in; sign in with pi, then run vibest again")
+    }),
+    { signedOut: ["pi"] },
+  )
+
+  test(
     "a git read that fails marks that session unknown and still lists the others",
     Effect.gen(function* () {
       const repo = yield* makeRepository
