@@ -88,7 +88,8 @@ const releaseStandIn = () =>
     fetch: (req) => {
       const at = new URL(req.url).pathname
 
-      if (at.endsWith("/@vibest/cli/beta")) return Response.json({ version: buildVersion })
+      if (at.endsWith("/-/package/@vibest/cli/dist-tags"))
+        return Response.json({ latest: buildVersion, beta: buildVersion })
 
       if (at.endsWith("/version")) return new Response(`${buildVersion}\n`)
 

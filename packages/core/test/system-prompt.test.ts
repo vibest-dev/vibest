@@ -43,6 +43,8 @@ describe("systemPrompt: the definition body first, then facts that name the chan
   it("every session is told what the two envelopes and the unwrapped text mean", () => {
     const prompt = facts({})
     assert.include(prompt, "`<agent-message>`")
+    assert.include(prompt, "sender's `<agent-id>`")
+    assert.notInclude(prompt, "<title>")
     assert.include(prompt, "`<vibest-notice>`")
     assert.include(prompt, "Text with no wrapper is from the user")
   })

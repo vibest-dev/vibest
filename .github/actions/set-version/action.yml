@@ -1,5 +1,5 @@
 name: Set the release version
-description: Sets the version in every package.json of VERSIONED (this checkout only) and records the tree
+description: Sets the version in every package.json of VERSIONED with bumpp (this checkout only; no commit, tag or push) and records the tree
 inputs:
   version:
     description: The release version
@@ -12,7 +12,7 @@ runs:
         VERSION: ${{ inputs.version }}
       run: |
         # shellcheck disable=SC2086 # VERSIONED is a list of globs
-        node -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace(/"version": "[^"]*"/, `"version": "${process.env.VERSION}"`)) }' $VERSIONED
+        pnpm exec bumpp --release "$VERSION" $VERSIONED --no-commit --no-tag --no-push --yes --quiet
         for f in $VERSIONED; do
           v=$(node -p "require('./$f').version")
           if [ "$v" != "$VERSION" ]; then echo "::error::$f is $v, not $VERSION"; exit 1; fi

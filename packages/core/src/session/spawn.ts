@@ -345,14 +345,9 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
         )
         const adapter = yield* harnesses.get(harnessId)
 
-        const sender =
-          parent !== undefined
-            ? { id: parent.id, title: parent.name }
-            : input.origin?.reportTo === undefined
-              ? undefined
-              : { id: input.origin.reportTo }
+        const senderId = parent?.id ?? input.origin?.reportTo
 
-        const task = sender === undefined ? decision.prompt : sessionEnvelope(sender, decision.prompt)
+        const task = senderId === undefined ? decision.prompt : sessionEnvelope(senderId, decision.prompt)
         const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
         const now = yield* Clock.currentTimeMillis
         const held = yield* Deferred.make<void>()

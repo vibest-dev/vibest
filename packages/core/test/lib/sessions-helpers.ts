@@ -38,7 +38,7 @@ export const entryOfProject = (repo: string) =>
   })
 
 export const taskOf = (repo: string, text = "do it") =>
-  Effect.map(entryOfProject(repo), (id) => sessionEnvelope({ id, title: "entry" }, text))
+  Effect.map(entryOfProject(repo), (id) => sessionEnvelope(id, text))
 
 export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {

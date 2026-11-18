@@ -312,7 +312,7 @@ optional `## Remember`. The recipient gets it as:
 
 ```
 <agent-message>
-<agent-id>agt_…</agent-id> <title>…</title>
+<agent-id>agt_…</agent-id>
 <message>what the agent sent</message>
 </agent-message>
 ```
@@ -936,8 +936,8 @@ permission rules are `Read(//<dir>/**)` and `Edit(//<dir>/**)`: Claude matches f
 rules (an Edit rule covers Write), and `//` starts an absolute path. A user prompt is a `prompt.submit` from origin
 `composer` or `bridge` (Remote Control); a task notification, a scheduled trigger, a peer or a plugin's prompt is not
 the person. An aborted `turn.complete` is a result only while vibest's execution is open, so `vibest interrupt`'s own Esc
-is none. vibest does not read Claude's session files. A subagent is resumed with `--resume` only after vibest recorded a
-execution end for that conversation; otherwise it starts with `--session-id`. The entry session is resumed when the harness
+is none. vibest does not read Claude's session files. A subagent is resumed with `--resume` once Claude has taken an
+input in that conversation (an execution that was accepted or has ended); before that it starts with `--session-id`. The entry session is resumed when the harness
 reported that conversation (`process.conversation`), because its own executions are not stored; a missing transcript then
 fails the resume, which is rare. Its models come from
 the stream-json `initialize` control request (the Agent SDK's `supportedModels()`; the list's `default` entry is

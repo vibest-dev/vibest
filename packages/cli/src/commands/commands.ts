@@ -332,8 +332,16 @@ const doctor = Spec.make("doctor", {
 const update = Spec.make("update", {
   alias: "upgrade",
   description:
-    "Update vibest the way it was installed (install.sh: the latest GitHub release; npm: the version the registry's beta tag names, at that exact version, with the package manager that installed it; either is first tried aside and must open the database), hand the running vibestd over to it (agents keep running), then offer to restart the agents still on the old integration in place, with their conversations",
+    "Update vibest the way it was installed (install.sh: from the GitHub releases; npm: from the registry, at that exact version, with the package manager that installed it; either is first tried aside and must open the database), hand the running vibestd over to it (agents keep running), then offer to restart the agents still on the old integration in place, with their conversations. A stable vibest updates to the newest stable release, a beta to the newest release of either channel",
   params: {
+    beta: Flag.Boolean("beta").pipe(
+      Flag.withDescription("Update to the newest release of either channel, beta or stable"),
+      Flag.withDefault(false),
+    ),
+    stable: Flag.Boolean("stable").pipe(
+      Flag.withDescription("Update to the newest stable release only"),
+      Flag.withDefault(false),
+    ),
     yes: Flag.Boolean("yes").pipe(
       Flag.withDescription(
         "Restart the agents still on the old integration without asking (a shell without a terminal)",
