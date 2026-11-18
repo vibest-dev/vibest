@@ -227,6 +227,9 @@ export const make = Effect.gen(function* () {
 
       if (signalled.sent === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
       const ran = yield* h.run!(t.terminal, argv(signalled.process)).pipe(Effect.exit)
+      yield* Exit.isSuccess(ran)
+        ? db.session.placeProcess(id, t.terminal.id)
+        : db.session.endProcess(id, "launch_failed", signalled.process)
       const back = Exit.isSuccess(ran) && (yield* startedAgain(id, t.liveNow))
       yield* restarting.clear(id)
 

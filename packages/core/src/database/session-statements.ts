@@ -125,8 +125,8 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => (rows[0] === undefined ? undefined : currentOf(rows[0]))),
     )
 
-  const placed = (projectIdValue: string, current: Current | undefined) =>
-    current !== undefined && current.ended === null && current.terminal !== null && !moving.has(projectIdValue)
+  const entryRunning = (projectIdValue: string, current: Current | undefined) =>
+    current !== undefined && current.ended === null && !moving.has(projectIdValue)
 
   const findEntrySessions = (project?: string) =>
     selectSessions(project === undefined ? [] : [sql`s.project_id = ${project}`], sql`entry = 1`).pipe(
@@ -416,7 +416,7 @@ export const statements = Effect.gen(function* () {
     findSession,
     currentProcess,
     currentProcessId,
-    placed,
+    entryRunning,
     findEntrySessions,
     openExecution,
     startExecution,

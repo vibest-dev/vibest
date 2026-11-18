@@ -611,7 +611,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             yield* endProcess(id, "restart")
             const { resume: _, pid: __, ...start } = current.start
 
-            return yield* startProcess(id, { ...start, ...(conversation && { resume: conversation }) })
+            return yield* startProcess(id, { ...start, terminal: "", ...(conversation && { resume: conversation }) })
           }),
         ).pipe(Effect.orDie),
       ),

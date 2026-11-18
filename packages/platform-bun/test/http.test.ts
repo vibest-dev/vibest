@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { pidOf } from "@vibest/core/database/db-rows"
+import { pidOf, terminalOf } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
 import { Session } from "@vibest/core/session"
 import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
@@ -98,9 +98,11 @@ describe("vibestd's HTTP API", () => {
         call("/session/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
 
       assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
+      const terminal = terminalOf((yield* db.session.getSession(worker))!).id
       yield* db.session.restartProcess(worker)
       const second = (yield* db.session.currentProcessId(worker))!
       assert.notStrictEqual(second, first)
+      yield* db.session.placeProcess(worker, terminal)
       const late = yield* ready(first, 111)
       assert.strictEqual(late.status, 204)
       assert.isUndefined(yield* db.session.readyAt(worker))

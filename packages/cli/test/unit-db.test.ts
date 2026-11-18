@@ -678,6 +678,23 @@ describe("Db", () => {
   )
 
   it.effect(
+    "the entry session takes messages while an in-place restart runs, and the replaced harness's exit received meanwhile leaves its new process running",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db.Service
+          const project = yield* projectOf("r")
+          const entry = yield* db.session.startEntry(project, "claude", false, place, ENTRY)
+          const next = yield* db.session.restartProcess(entry.sessionId)
+          assert.isDefined(yield* db.inbox.insertSend(entry.sessionId, "sent while it restarts"))
+          yield* db.session.clearEntry(yield* db.session.processesAt(RUNTIME, place.address))
+          assert.strictEqual(yield* db.session.placeProcess(entry.sessionId, place.address.id), next)
+          assert.strictEqual(yield* db.session.entryAt(RUNTIME, place.address), project)
+        }),
+      ),
+  )
+
+  it.effect(
     "a subagent resumes only after its execution ends; the entry session resumes a conversation the harness reported",
     () =>
       memory(
