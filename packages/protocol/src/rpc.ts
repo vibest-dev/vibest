@@ -1,3 +1,4 @@
+import { Sender } from "@vibest/schema/event"
 import { RequestId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
@@ -423,7 +424,12 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Send", {
-        payload: { id: Schema.String, message: Schema.String, request: Schema.optional(RequestId) },
+        payload: {
+          id: Schema.String,
+          message: Schema.String,
+          request: Schema.optional(RequestId),
+          from: Schema.optional(Sender),
+        },
         success: Schema.Struct({ id: Schema.String }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),

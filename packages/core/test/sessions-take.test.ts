@@ -228,8 +228,7 @@ describe.concurrent("an idle session takes its next batch", () => {
           recipient: entry.sessionId,
           kind: "send",
           sender: "mb/aaaaaaaa",
-          agent: "general",
-          title: "Ask me",
+          from: { session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", agent: "general", title: "Ask me", machine: "mb" },
           content: "report from afar",
         }),
         "queued",
@@ -237,7 +236,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       const taken = yield* inbox.take(entry.sessionId, undefined)
       assert.deepStrictEqual(taken?.detail, [
         {
-          sender: { agent: "general", title: "Ask me", session: "aaaaaaaa", machine: "mb" },
+          sender: { session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", agent: "general", title: "Ask me", machine: "mb" },
           message: "report from afar",
         },
       ])

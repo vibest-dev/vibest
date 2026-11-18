@@ -1,6 +1,7 @@
 import type { InboxRow } from "@vibest/schema/session"
 
-export const senderKey = (row: InboxRow) => (row.kind === "notice" ? "vibestd" : (row.sender ?? row.address ?? ""))
+export const senderKey = (row: InboxRow) =>
+  row.kind === "notice" ? "vibestd" : (row.from?.session ?? row.sender ?? "")
 
 export const nextBatch = (pending: ReadonlyArray<InboxRow>) => {
   const first = pending[0] ? senderKey(pending[0]) : undefined

@@ -1,4 +1,5 @@
 import { messageOf } from "@vibest/schema/error"
+import type { Sender } from "@vibest/schema/event"
 import type { AgentRefused, PluginsNotActive } from "@vibest/schema/plugin"
 import type { RemoveOutcome } from "@vibest/schema/remove"
 import {
@@ -107,12 +108,19 @@ export interface Interface {
     | PluginsNotActive
     | NoSuchSession
   >
-  readonly send: (id: string, message: string, request?: string, sender?: string) => Effect.Effect<void, NoSuchSession>
+  readonly send: (
+    id: string,
+    message: string,
+    request?: string,
+    sender?: string,
+    from?: Sender,
+  ) => Effect.Effect<void, NoSuchSession>
   readonly deliverTo: (
     id: string,
     message: string,
     request?: string,
     sender?: string,
+    from?: Sender,
   ) => Effect.Effect<void, NoSuchSession>
   readonly admit: (
     sender: { readonly sessionId: string; readonly projectId: string },

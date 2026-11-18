@@ -107,20 +107,12 @@ export const layer = Layer.effect(
 
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
-      const who = new Map<string, { readonly agent: string; readonly title: string }>()
-
-      for (const row of taken.rows) {
-        if (row.kind === "notice" || row.sender === null || who.has(row.sender)) continue
-        const found = yield* db.session.getSession(row.sender)
-
-        if (found !== undefined) who.set(row.sender, { agent: found.agent, title: found.name })
-      }
 
       return {
         execution: taken.execution,
         ids: taken.rows.map((r) => r.id),
         content: content(taken.rows),
-        detail: detailOf(taken.rows, (id) => who.get(id)),
+        detail: detailOf(taken.rows),
       } satisfies Taken
     })
 

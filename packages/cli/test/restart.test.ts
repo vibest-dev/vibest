@@ -163,8 +163,9 @@ describe("restart in place", () => {
   it("an entry session's continue notice keeps the whole instruction, including a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
 
-    const message = detailOf([{ kind: "notice", message: noticeEnvelope(continueText(version)) }], () => undefined)[0]!
-      .message
+    const message = detailOf([
+      { kind: "notice", sender: null, from: null, message: noticeEnvelope(continueText(version)) },
+    ])[0]!.message
 
     assert.isTrue(message.startsWith(CONTINUE))
 

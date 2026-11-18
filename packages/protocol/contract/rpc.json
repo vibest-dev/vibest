@@ -6659,20 +6659,28 @@
           "content": {
             "type": "string"
           },
-          "agent": {
+          "from": {
             "anyOf": [
               {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
+                "type": "object",
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "machine": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "additionalProperties": true
               },
               {
                 "type": "null"
@@ -12614,6 +12622,34 @@
                 "type": "string",
                 "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
                 "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "machine": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "additionalProperties": true
               },
               {
                 "type": "null"

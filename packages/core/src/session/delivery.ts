@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
+import { ExecutionEnded, InboxQueued, type Sender } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import {
   Cause,
@@ -220,7 +220,13 @@ export const make = Effect.gen(function* () {
     yield* deliverQueued(h, fresh, terminalOf(fresh))
   })
 
-  const send = Effect.fn("Delivery.send")(function* (id: string, message: string, request?: string, sender?: string) {
+  const send = Effect.fn("Delivery.send")(function* (
+    id: string,
+    message: string,
+    request?: string,
+    sender?: string,
+    from?: Sender,
+  ) {
     const session = yield* getRow(id)
 
     if (request !== undefined && (yield* db.inbox.queuedBy(id, request))) return
@@ -228,7 +234,7 @@ export const make = Effect.gen(function* () {
 
     if (archived(session) || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
       return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-    const row = yield* db.inbox.insertSend(id, message, request, sender)
+    const row = yield* db.inbox.insertSend(id, message, request, sender, from)
 
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
@@ -247,8 +253,9 @@ export const make = Effect.gen(function* () {
     message: string,
     request?: string,
     sender?: string,
+    from?: Sender,
   ) {
-    if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender)
+    if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender, from)
 
     return yield* toEntry(id, message, request)
   })

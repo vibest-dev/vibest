@@ -48,6 +48,9 @@ const peerScope = (method: string) =>
 const makeRouting = Effect.gen(function* () {
   const deps = yield* CallerChecks.Service
   const remote = yield* Remote.Service
+  const db = yield* Db.Service
+
+  const senderHere = (by: string) => (by === PEER_BY_USER ? Effect.succeed(undefined) : db.remote.senderOf(by))
 
   const reach = (method: Routed | "List") =>
     Effect.gen(function* () {
@@ -86,7 +89,19 @@ const makeRouting = Effect.gen(function* () {
     routed: {
       Send: <A, E, R2>(p: PayloadOf<"Send">, local: Local<A, E, R2>) =>
         routed("Send", p.id, local, (at, project, by) =>
-          remote.forward(at, project, by, (c, { id }, o) => c.Send({ ...p, id }, o)),
+          Effect.flatMap(senderHere(by), (from) =>
+            remote.forward(at, project, by, (c, { id }, o) =>
+              c.Send(
+                {
+                  id,
+                  message: p.message,
+                  ...(p.request !== undefined && { request: p.request }),
+                  ...(from !== undefined && { from }),
+                },
+                o,
+              ),
+            ),
+          ),
         ),
       Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
         routed("Interrupt", p.id, local, (at, project, by) =>

@@ -1,3 +1,5 @@
+import type { Sender } from "@vibest/schema/event"
+import { shortId } from "@vibest/schema/id"
 import type { Detail, HarnessId } from "@vibest/schema/session"
 import { Option, Predicate, Schema } from "effect"
 
@@ -55,40 +57,33 @@ const ENVELOPED =
 
 export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? rendered
 
-export const detailOf = (
-  batch: ReadonlyArray<{
-    readonly kind: string
-    readonly sender?: string | null
-    readonly address?: string | null
-    readonly agent?: string | null
-    readonly title?: string | null
-    readonly message: string
-  }>,
-  who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
-): ReadonlyArray<Detail> =>
+type Delivered = {
+  readonly kind: string
+  readonly sender: string | null
+  readonly from: Sender | null
+  readonly message: string
+}
+
+const shownSender = (row: Delivered): Detail["sender"] => {
+  if (row.kind === "notice") return "vibest"
+  const from = row.from ?? (row.sender === null ? undefined : { session: row.sender })
+
+  if (from === undefined) return "user"
+
+  if (from.agent === undefined)
+    return {
+      address: from.machine === undefined ? shortId(from.session) : `${from.machine}/${shortId(from.session)}`,
+    }
+  const agent = { agent: from.agent, title: from.title ?? "", session: from.session }
+
+  return from.machine === undefined ? agent : { ...agent, machine: from.machine }
+}
+
+export const detailOf = (batch: ReadonlyArray<Delivered>): ReadonlyArray<Detail> =>
   batch.map((row) => {
-    const message = unwrapped(row.message)
+    const sender = shownSender(row)
 
-    if (row.kind === "notice") return { sender: "vibest", message }
-
-    if (row.sender != null && row.sender !== "") {
-      const session = who(row.sender)
-
-      return { sender: { agent: session?.agent ?? "", title: session?.title ?? "", session: row.sender }, message }
-    }
-
-    if (row.address != null && row.address !== "") {
-      const slash = row.address.indexOf("/")
-      const machine = slash > 0 ? row.address.slice(0, slash) : row.address
-      const session = slash > 0 ? row.address.slice(slash + 1) : ""
-
-      if (row.agent != null && row.agent !== "")
-        return { sender: { agent: row.agent, title: row.title ?? "", session, machine }, message }
-
-      return { sender: { address: row.address }, message }
-    }
-
-    return { sender: "user", message }
+    return { sender, message: sender === "user" ? row.message : unwrapped(row.message) }
   })
 
 export type ObservedEnd = {

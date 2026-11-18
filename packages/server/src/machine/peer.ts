@@ -29,9 +29,7 @@ const outboxItem = (row: OutboxRow): OutboxItem => {
     session: row.sessionId,
     recipient: row.reportTo,
     kind: row.kind,
-
-    ...(row.agent !== null && { agent: row.agent }),
-    ...(row.title !== null && { title: row.title }),
+    ...(row.from !== null && { from: row.from }),
   }
 
   const { read } = new TextEncoder().encodeInto(row.content, new Uint8Array(OUTBOX_ITEM_MAX))

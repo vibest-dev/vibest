@@ -1,58 +1,43 @@
 import { assert, describe, it } from "@effect/vitest"
 import { detailOf, noticeEnvelope, sessionEnvelope } from "@vibest/core/replies"
+import type { Sender } from "@vibest/schema/event"
 
-const titles = { a: { agent: "general", title: "Alpha" }, b: { agent: "coordinator", title: "Beta" } }
-const who = (id: string) => (id === "a" || id === "b" ? titles[id] : undefined)
+const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const alpha = { session: A, agent: "general", title: "Alpha" }
 
-const row = (message: string, sender: string | null, kind = "send", address: string | null = null) => ({
+const row = (message: string, sender: string | null, from: Sender | null, kind = "send") => ({
   kind,
   sender,
-  address,
+  from,
   message,
 })
 
 describe("delivery detail", () => {
   it("an agent message keeps the sender and the unwrapped text", () => {
-    assert.deepStrictEqual(detailOf([row(sessionEnvelope("a", "hello\nrest"), "a")], who), [
-      { sender: { agent: "general", title: "Alpha", session: "a" }, message: "hello\nrest" },
+    assert.deepStrictEqual(detailOf([row(sessionEnvelope(A, "hello\nrest"), A, alpha)]), [
+      { sender: alpha, message: "hello\nrest" },
     ])
   })
 
-  it("a notice is from vibest and a send with no session is from the user", () => {
-    assert.deepStrictEqual(
-      detailOf(
-        [row(noticeEnvelope("gone\nmore"), "a", "notice"), row("hello from the terminal", null)],
-        () => undefined,
-      ),
-      [
-        { sender: "vibest", message: "gone\nmore" },
-        { sender: "user", message: "hello from the terminal" },
-      ],
-    )
-  })
+  it("a notice is from vibest; a send with no session is from the user and stays as typed", () => {
+    const pasted = sessionEnvelope(A, "an example")
 
-  it("a peer send with an agent keeps it, and one without stays the address", () => {
-    const sent = row(sessionEnvelope("mb/aaaaaaaa", "report from afar"), null, "send", "mb/aaaaaaaa")
-
-    assert.deepStrictEqual(
-      detailOf([{ ...sent, agent: "general", title: "Ask me" }], () => undefined),
-      [
-        {
-          sender: { agent: "general", title: "Ask me", session: "aaaaaaaa", machine: "mb" },
-          message: "report from afar",
-        },
-      ],
-    )
-    assert.deepStrictEqual(
-      detailOf([sent], () => undefined),
-      [{ sender: { address: "mb/aaaaaaaa" }, message: "report from afar" }],
-    )
-  })
-
-  it("keeps every message, including two from one sender", () => {
-    assert.deepStrictEqual(detailOf([row("first", "a"), row("second", "a")], who), [
-      { sender: { agent: "general", title: "Alpha", session: "a" }, message: "first" },
-      { sender: { agent: "general", title: "Alpha", session: "a" }, message: "second" },
+    assert.deepStrictEqual(detailOf([row(noticeEnvelope("gone\nmore"), A, null, "notice"), row(pasted, null, null)]), [
+      { sender: "vibest", message: "gone\nmore" },
+      { sender: "user", message: pasted },
     ])
+  })
+
+  it("a remote sender keeps its machine, and one without an agent shows only the machine and id", () => {
+    assert.deepStrictEqual(
+      detailOf([
+        row(sessionEnvelope("mb/aaaaaaaa", "report"), null, { ...alpha, machine: "mb" }),
+        row(sessionEnvelope("mb/aaaaaaaa", "old peer"), null, { session: A, machine: "mb" }),
+      ]),
+      [
+        { sender: { ...alpha, machine: "mb" }, message: "report" },
+        { sender: { address: "mb/aaaaaaaa" }, message: "old peer" },
+      ],
+    )
   })
 })

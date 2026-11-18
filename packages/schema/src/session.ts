@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-import { InboxKind } from "./event.ts"
+import { InboxKind, Sender } from "./event.ts"
 
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
 
@@ -46,9 +46,7 @@ export type RuntimeMachine = typeof RuntimeMachine.Type
 export const InboxRow = Schema.Struct({
   id: Schema.Number,
   sender: Schema.NullOr(Schema.String),
-  address: Schema.NullOr(Schema.String),
-  agent: Schema.NullOr(Schema.String),
-  title: Schema.NullOr(Schema.String),
+  from: Schema.NullOr(Sender),
   recipient: Schema.NullOr(Schema.String),
   kind: InboxKind,
   message: Schema.String,

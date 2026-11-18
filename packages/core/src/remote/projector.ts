@@ -36,10 +36,10 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(
       OutboxQueued,
       (fact) =>
-        sql`INSERT INTO outbox (id, seq, peer_id, session_id, recipient, kind, content, agent, title, created_at)
+        sql`INSERT INTO outbox (id, seq, peer_id, session_id, recipient, kind, content, from_session, from_agent, from_title, from_machine, created_at)
           VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.recipient ?? null},
             ${fact.data.kind ?? "notice"},
-            ${fact.data.content}, ${fact.data.agent ?? null}, ${fact.data.title ?? null}, ${fact.at})`,
+            ${fact.data.content}, ${fact.data.from?.session ?? null}, ${fact.data.from?.agent ?? null}, ${fact.data.from?.title ?? null}, ${fact.data.from?.machine ?? null}, ${fact.at})`,
     )
     yield* bus.project(
       OutboxAcked,

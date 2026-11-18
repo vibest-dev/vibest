@@ -119,6 +119,7 @@ describe("sends from sessions", () => {
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "report"))
           const out = yield* db.remote.outboxOf(peer)
           assert.deepInclude(out[0]!, { kind: "send", content: "report", reportTo })
+          assert.deepStrictEqual(out[0]!.from, { session: X, agent: session(X).agent, title: session(X).name })
           assert.isFalse(yield* db.remote.sendToPeer(X, "22222222-2222-4222-8222-222222222222", reportTo, "report"))
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
@@ -148,6 +149,7 @@ describe("sends from sessions", () => {
           recipient: ended,
           kind: "send" as const,
           sender: "mb/cccccccc",
+          from: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", agent: "general", title: "Far away", machine: "mc" },
           content: "report",
         }
 
@@ -159,6 +161,7 @@ describe("sends from sessions", () => {
         const out = yield* db.remote.outboxOf(peer)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
+        assert.deepStrictEqual(out[0]!.from, item.from, "the relay keeps the original sender, not the ended recipient")
       }).pipe(memory),
   )
 })

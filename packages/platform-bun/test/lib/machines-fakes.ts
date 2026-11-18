@@ -12,6 +12,7 @@ import * as Server from "@vibest/server/server"
 import { Clock, Deferred, Effect, Layer, Predicate } from "effect"
 import { RpcClient } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
+import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
@@ -249,3 +250,35 @@ export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: Te
 
     return { net, a, b, entryId, asEntry }
   })
+
+export const sendersTo = (recipient: string) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql<{
+        session: string | null
+        agent: string | null
+        title: string | null
+        machine: string | null
+      }>`SELECT from_session AS session, from_agent AS agent, from_title AS title, from_machine AS machine
+        FROM inbox WHERE session_id = ${recipient} AND kind = 'send' ORDER BY id`,
+  )
+
+export const inboxOf = (recipient: string) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql<{
+        content: string
+        kind: string
+      }>`SELECT content, kind FROM inbox WHERE session_id = ${recipient} ORDER BY id`,
+  )
+
+export const outboxRows = Effect.flatMap(
+  SqlClient.SqlClient,
+  (sql) =>
+    sql<{
+      peerId: string
+      sessionId: string
+    }>`SELECT peer_id, session_id FROM outbox ORDER BY created_at`,
+)
