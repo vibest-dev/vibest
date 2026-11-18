@@ -208,7 +208,12 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
 
           if (taken === null) return
           yield* pi.sendMessage(
-            { customType: "vibest", content: taken.text, display: false, details: { execution: taken.execution } },
+            {
+              customType: "vibest",
+              content: taken.content,
+              display: true,
+              details: { execution: taken.execution, detail: taken.detail },
+            },
             { triggerTurn: true },
           )
         }).pipe(Effect.ignore)

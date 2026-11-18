@@ -1,3 +1,4 @@
+import { Sender } from "@vibest/schema/event"
 import { RequestId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
@@ -36,6 +37,7 @@ import {
   RuntimeIncompatible,
   RuntimeUnreachable,
   SessionBusy,
+  Taken,
   UnknownAgent,
   ExecutionState,
 } from "@vibest/schema/session"
@@ -422,7 +424,12 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Send", {
-        payload: { id: Schema.String, message: Schema.String, request: Schema.optional(RequestId) },
+        payload: {
+          id: Schema.String,
+          message: Schema.String,
+          request: Schema.optional(RequestId),
+          from: Schema.optional(Sender),
+        },
         success: Schema.Struct({ id: Schema.String }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),
@@ -490,14 +497,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.Null, error: Schema.Union([Forbidden]), stream: true })),
   scoped(
     Rpc.make("Inbox.Take", {
-      success: Schema.NullOr(
-        Schema.Struct({
-          execution: Schema.Number,
-          ids: Schema.Array(Schema.Number),
-          line: Schema.String,
-          text: Schema.String,
-        }),
-      ),
+      success: Schema.NullOr(Taken),
       error: Schema.Union([Forbidden]),
     }),
   ),

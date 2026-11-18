@@ -498,6 +498,7 @@ describe("Db", () => {
           recipient: ended,
           kind: "notice" as const,
           sender: "mb/aaaaaaaa",
+          from: { session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", machine: "mb" },
           content: "done on mb",
         })
 

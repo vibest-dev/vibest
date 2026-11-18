@@ -1,6 +1,6 @@
-import type { Taken } from "@vibest/schema/session"
+import { Taken } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
-import * as Predicate from "effect/Predicate"
+import { Option, Schema } from "effect"
 
 export const MISMATCH_ACTION = "vibest update"
 
@@ -66,16 +66,9 @@ export const parseHookRoute = (path: string): { readonly harness: string; readon
   return m && hook ? { harness: m[1]!, hook } : undefined
 }
 
-export const isTaken = (body: unknown): body is Taken =>
-  Predicate.isObjectOrArray(body) &&
-  Predicate.hasProperty(body, "execution") &&
-  Predicate.isNumber(body.execution) &&
-  Predicate.hasProperty(body, "ids") &&
-  Array.isArray(body.ids) &&
-  Predicate.hasProperty(body, "line") &&
-  Predicate.isString(body.line) &&
-  Predicate.hasProperty(body, "text") &&
-  Predicate.isString(body.text)
+const decodeTaken = Schema.decodeUnknownOption(Taken)
+
+export const isTaken = (body: unknown): body is Taken => Option.isSome(decodeTaken(body))
 
 export type SessionIdentity = {
   readonly sessionId: string

@@ -32,7 +32,7 @@ into that execution.
 ## S11. Claude entry session inbox
 
 A Claude entry session takes its messages from vibestd when it is idle, one batch at a time; the batch opens an execution
-and is recorded as that execution's input; a message from a session still arrives as one line with its context after the
+and is recorded as that execution's input; a message from a session still arrives as `Message from @General · <title> (<id>)` plus its first line, with its context after the
 conversation is cleared, and after the entry session is stopped and resumed in the same pane.
 
 ## S12. Pi entry session inbox and its screen

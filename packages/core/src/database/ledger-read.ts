@@ -10,6 +10,8 @@ import {
   type Integration,
   type SessionBrief,
   type SpawnedBefore,
+  type FromSql,
+  fromOf,
   toInbox,
 } from "./db-rows.ts"
 import type { MachineRow, OutboxRow } from "./remote.ts"
@@ -147,7 +149,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
 export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
 
-type InboxColumns = {
+type InboxColumns = FromSql & {
   readonly id: number
   readonly sessionId: string
   readonly senderSessionId: string | null
@@ -175,7 +177,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_session_id, m.kind, m.content, m.status
+    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_session_id, m.from_session, m.from_agent, m.from_title, m.from_machine, m.kind, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
   const briefs = (ids: ReadonlyArray<string>) =>
@@ -258,11 +260,19 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     )
 
   const outboxOf = (peer: string, after: number, limit: number) =>
-    sql<OutboxRow>`SELECT o.id, o.seq, o.session_id, o.kind, o.content, o.created_at,
+    sql<Omit<OutboxRow, "from"> & FromSql>`SELECT o.id, o.seq, o.session_id, o.kind, o.content,
+        o.from_session, o.from_agent, o.from_title, o.from_machine, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
       FROM outbox o LEFT JOIN session s ON s.id = o.session_id
       WHERE o.peer_id = ${peer} AND o.seq > ${after} AND coalesce(o.recipient, s.origin_session) IS NOT NULL
-      ORDER BY o.seq LIMIT ${limit}`
+      ORDER BY o.seq LIMIT ${limit}`.pipe(
+      Effect.map((rows) =>
+        rows.map(({ fromSession, fromAgent, fromTitle, fromMachine, ...row }): OutboxRow => ({
+          ...row,
+          from: fromOf({ fromSession, fromAgent, fromTitle, fromMachine }),
+        })),
+      ),
+    )
 
   const rescheduleSource = (id: string) =>
     Effect.gen(function* () {

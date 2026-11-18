@@ -1,5 +1,5 @@
 {
-  "protocol": 11,
+  "protocol": 12,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -7,7 +7,9 @@
     "watch": true,
     "events": true,
     "projects": true,
-    "spawnRuntime": true
+    "spawnRuntime": true,
+    "spawnFiles": true,
+    "peerSpawnFiles": true
   },
   "methods": {
     "Agents.Outdated": {
@@ -2761,18 +2763,103 @@
                   ]
                 }
               },
-              "line": {
+              "content": {
                 "type": "string"
               },
-              "text": {
-                "type": "string"
+              "detail": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sender": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "agent": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "session": {
+                              "type": "string"
+                            },
+                            "machine": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "agent",
+                            "title",
+                            "session",
+                            "machine"
+                          ],
+                          "additionalProperties": true
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "agent": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "session": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "agent",
+                            "title",
+                            "session"
+                          ],
+                          "additionalProperties": true
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "address": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "address"
+                          ],
+                          "additionalProperties": true
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "vibest"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "user"
+                          ]
+                        }
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sender",
+                    "message"
+                  ],
+                  "additionalProperties": true
+                }
               }
             },
             "required": [
               "execution",
               "ids",
-              "line",
-              "text"
+              "content",
+              "detail"
             ],
             "additionalProperties": true
           },
@@ -6572,6 +6659,34 @@
           "content": {
             "type": "string"
           },
+          "from": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "machine": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cut": {
             "anyOf": [
               {
@@ -6836,6 +6951,34 @@
           },
           "request": {
             "type": "string"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string",
+                      "format": "byte",
+                      "contentEncoding": "base64"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "content"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12484,6 +12627,34 @@
                 "type": "null"
               }
             ]
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "machine": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -13438,6 +13609,34 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "files": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string",
+                      "format": "byte",
+                      "contentEncoding": "base64"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "content"
+                  ],
+                  "additionalProperties": true
+                }
               },
               {
                 "type": "null"

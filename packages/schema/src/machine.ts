@@ -1,5 +1,7 @@
 import { Schema, Struct } from "effect"
 
+import { Sender } from "./event.ts"
+
 export class MachineFailed extends Schema.TaggedError<MachineFailed>()("MachineFailed", { message: Schema.String }) {}
 
 export class UnknownMachine extends Schema.TaggedError<UnknownMachine>()("UnknownMachine", {
@@ -108,6 +110,7 @@ export const OutboxItem = Schema.Struct({
   recipient: Schema.String,
   kind: Schema.Literals(["send", "notice"]),
   content: Schema.String,
+  from: Schema.optional(Sender),
   cut: Schema.optional(Schema.Boolean),
 })
 

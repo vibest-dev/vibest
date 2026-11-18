@@ -5,6 +5,7 @@ import {
   OutboxAcked,
   OutboxQueued,
   PeerSeen,
+  type Sender,
 } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Effect } from "effect"
@@ -38,6 +39,7 @@ export type OutboxRow = {
   readonly sessionId: string
   readonly content: string
   readonly kind: "send" | "notice"
+  readonly from: Sender | null
   readonly createdAt: number
   readonly reportTo: string
 }
@@ -71,6 +73,7 @@ export const statements = Effect.gen(function* () {
       readonly sessionId: string
       readonly content: string
       readonly kind: "send" | "notice"
+      readonly from?: Sender | undefined
       readonly at?: number
       readonly request?: string | undefined
     },
@@ -91,13 +94,19 @@ export const statements = Effect.gen(function* () {
           recipient: recipientSession,
           kind: row.kind,
           content: row.content,
+          ...(row.from !== undefined && { from: row.from }),
         },
       })
 
       return true
     })
 
-  return { ofPeer, origins, queueForPeer }
+  const senderOf = (sessionId: string) =>
+    sql<{ agent: string; name: string }>`SELECT agent, name FROM session WHERE id = ${sessionId}`.pipe(
+      Effect.map(([row]): Sender | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
+    )
+
+  return { ofPeer, origins, queueForPeer, senderOf }
 })
 
 export type Statements = Effect.Success<typeof statements>
@@ -164,6 +173,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           readonly recipient: string
           readonly kind: "send" | "notice"
           readonly sender: string
+          readonly from: Sender
           readonly content: string
         }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
           tx(
@@ -187,6 +197,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   recipient: item.recipient,
                   kind: item.kind,
                   sender: null,
+                  from: item.from,
                   content,
                   status: "dropped",
                   peerItem: item.id,
@@ -195,6 +206,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
+                  from: item.from,
                 })
 
                 return "queued" as const
@@ -210,6 +222,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 recipient: target ?? item.recipient,
                 kind: item.kind,
                 sender: null,
+                from: item.from,
                 content,
                 status: here ? "pending" : "dropped",
                 peerItem: item.id,
@@ -250,6 +263,16 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(publish(PeerSeen, { data: { id: peer.id, name: peer.name } })).pipe(Effect.asVoid, Effect.orDie),
       ),
 
+      senderOf: Effect.fn("Db.remote.senderOf")((sessionId: string) => remote.senderOf(sessionId).pipe(Effect.orDie)),
+
+      nameForPeer: Effect.fn("Db.remote.nameForPeer")((id: string) =>
+        sql<{ name: string }>`SELECT name FROM machine WHERE vibestd_id = ${id}
+          UNION ALL SELECT name FROM peer WHERE id = ${id}`.pipe(
+          Effect.map((rows) => rows[0]?.name),
+          Effect.orDie,
+        ),
+      ),
+
       peerKnown: Effect.fn("Db.remote.peerKnown")((id: string) =>
         sql`SELECT 1 FROM peer WHERE id = ${id}`.pipe(
           Effect.map((rows) => rows.length > 0),
@@ -271,6 +294,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 kind: "send",
                 content: message,
                 request,
+                from: yield* remote.senderOf(sessionId),
               })
             }),
           ).pipe(Effect.orDie),
@@ -278,9 +302,17 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       sendToPeer: Effect.fn("Db.remote.sendToPeer")(
         (sender: string, peer: string, session: string, message: string, request?: string) =>
-          tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message, request })).pipe(
-            Effect.orDie,
-          ),
+          tx(
+            Effect.gen(function* () {
+              return yield* queueForPeer(peer, session, {
+                sessionId: sender,
+                kind: "send",
+                content: message,
+                request,
+                from: yield* remote.senderOf(sender),
+              })
+            }),
+          ).pipe(Effect.orDie),
       ),
     }
   })

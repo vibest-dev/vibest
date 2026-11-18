@@ -1,4 +1,4 @@
-import { ExecutionOutcome, ProcessEndReason } from "@vibest/schema/event"
+import { ExecutionOutcome, ProcessEndReason, type Sender } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
 import { Routing } from "@vibest/schema/plugin"
 import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
@@ -191,7 +191,24 @@ export const attemptsOf = (raw: string | null) => {
   return seen
 }
 
-export type InboxSql = {
+export type FromSql = {
+  readonly fromSession: string | null
+  readonly fromAgent: string | null
+  readonly fromTitle: string | null
+  readonly fromMachine: string | null
+}
+
+export const fromOf = (row: FromSql): Sender | null =>
+  row.fromSession === null
+    ? null
+    : {
+        session: row.fromSession,
+        ...(row.fromAgent !== null && { agent: row.fromAgent }),
+        ...(row.fromTitle !== null && { title: row.fromTitle }),
+        ...(row.fromMachine !== null && { machine: row.fromMachine }),
+      }
+
+export type InboxSql = FromSql & {
   readonly id: number
   readonly sessionId: string
   readonly kind: string
@@ -213,6 +230,7 @@ export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
 export const toInbox = (row: InboxSql) => ({
   id: row.id,
   sender: row.senderSessionId,
+  from: fromOf(row),
   recipient: row.sessionId,
   kind: row.kind,
   message: row.content,

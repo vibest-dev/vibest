@@ -1,4 +1,4 @@
-import { InboxMoved, InboxQueued, type InboxKind } from "@vibest/schema/event"
+import { InboxMoved, InboxQueued, type InboxKind, type Sender } from "@vibest/schema/event"
 import { InboxStatus } from "@vibest/schema/session"
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
@@ -63,6 +63,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       readonly recipient: string
       readonly kind: "task" | "send" | "notice"
       readonly sender: string | null
+      readonly from?: Sender | undefined
       readonly content: string
       readonly status: "pending" | "delivered" | "dropped"
       readonly request?: string | undefined
@@ -76,6 +77,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           kind: row.kind,
           recipient: row.recipient,
           ...(row.sender !== null && { sender: row.sender }),
+          ...(row.from !== undefined && { from: row.from }),
           content: row.content,
           status: row.status,
           ...(row.request !== undefined && { request: row.request }),
@@ -108,12 +110,19 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         return found !== undefined && !archived(found)
       })
 
-    const queueSend = (recipient: string, sender: string | undefined, message: string, request?: string) =>
+    const queueSend = (
+      recipient: string,
+      sender: string | undefined,
+      message: string,
+      request?: string,
+      from?: Sender,
+    ) =>
       Effect.gen(function* () {
         const id = yield* queueInbox({
           recipient,
           kind: "send",
           sender: sender ?? null,
+          from: from ?? (sender === undefined ? undefined : yield* remote.senderOf(sender)),
           content: sender === undefined ? message : sessionEnvelope(sender, message),
           status: "pending",
           request,
@@ -257,7 +266,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       insertInbox: Effect.fn("Db.inbox.insertInbox")((row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie)),
 
       insertSend: Effect.fn("Db.inbox.insertSend")(
-        (recipient: string, message: string, request?: string, sender?: string) =>
+        (recipient: string, message: string, request?: string, sender?: string, from?: Sender) =>
           tx(
             Effect.gen(function* () {
               const before = request === undefined ? undefined : yield* reads.queuedBy(recipient, request)
@@ -266,7 +275,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
               if (!(yield* liveRecipient(recipient))) return undefined
 
-              return yield* queueSend(recipient, sender, message, request)
+              return yield* queueSend(recipient, sender, message, request, from)
             }),
           ).pipe(Effect.orDie),
       ),

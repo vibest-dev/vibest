@@ -24,7 +24,14 @@ export * as Peer from "./peer.ts"
 export const OUTBOX_PAGE = 100
 
 const outboxItem = (row: OutboxRow): OutboxItem => {
-  const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
+  const base = {
+    id: row.id,
+    session: row.sessionId,
+    recipient: row.reportTo,
+    kind: row.kind,
+    ...(row.from !== null && { from: row.from }),
+  }
+
   const { read } = new TextEncoder().encodeInto(row.content, new Uint8Array(OUTBOX_ITEM_MAX))
 
   return read === row.content.length

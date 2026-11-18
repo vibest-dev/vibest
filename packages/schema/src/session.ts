@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-import { InboxKind } from "./event.ts"
+import { InboxKind, Sender } from "./event.ts"
 
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
 
@@ -46,6 +46,7 @@ export type RuntimeMachine = typeof RuntimeMachine.Type
 export const InboxRow = Schema.Struct({
   id: Schema.Number,
   sender: Schema.NullOr(Schema.String),
+  from: Schema.NullOr(Sender),
   recipient: Schema.NullOr(Schema.String),
   kind: InboxKind,
   message: Schema.String,
@@ -54,12 +55,36 @@ export const InboxRow = Schema.Struct({
 
 export type InboxRow = typeof InboxRow.Type
 
-export type Taken = {
-  readonly execution: number
-  readonly ids: ReadonlyArray<number>
-  readonly line: string
-  readonly text: string
-}
+export const Detail = Schema.Struct({
+  sender: Schema.Union([
+    Schema.Struct({
+      agent: Schema.String,
+      title: Schema.String,
+      session: Schema.String,
+      machine: Schema.String,
+    }),
+    Schema.Struct({
+      agent: Schema.String,
+      title: Schema.String,
+      session: Schema.String,
+    }),
+    Schema.Struct({ address: Schema.String }),
+    Schema.Literal("vibest"),
+    Schema.Literal("user"),
+  ]),
+  message: Schema.String,
+})
+
+export type Detail = typeof Detail.Type
+
+export const Taken = Schema.Struct({
+  execution: Schema.Number,
+  ids: Schema.Array(Schema.Number),
+  content: Schema.String,
+  detail: Schema.Array(Detail),
+})
+
+export type Taken = typeof Taken.Type
 
 export type HarnessId = string
 

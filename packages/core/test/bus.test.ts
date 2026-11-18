@@ -584,6 +584,10 @@ describe("projectors", () => {
           sessionId: REMOTE,
           kind: "send",
           content: "archived",
+          fromSession: null,
+          fromAgent: null,
+          fromTitle: null,
+          fromMachine: null,
           createdAt: 511,
         },
       ])

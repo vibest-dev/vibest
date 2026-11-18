@@ -1,5 +1,4 @@
 import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued } from "@vibest/schema/event"
-import { shortId } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
@@ -10,7 +9,7 @@ import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { Harnesses } from "./harnesses.ts"
 import * as Reactor from "./reactor.ts"
-import { unwrapped } from "./replies.ts"
+import { detailOf } from "./replies.ts"
 import { agentState, alive, RuntimeError, type Runtime } from "./runtimes.ts"
 
 export * as Inbox from "./inbox.ts"
@@ -28,39 +27,7 @@ export const entryIdle = Effect.fn("Inbox.entryIdle")(function* (
   return seen === "idle" ? "idle" : "busy"
 })
 
-export const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
-
-export const LINE_MAX = 120
-
-const codePoints = (s: string) => [...s].length
-
-const clip = (s: string, max: number) => {
-  const cps = [...s]
-
-  return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
-}
-
-export const line = (
-  batch: ReadonlyArray<InboxRow>,
-  who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
-) => {
-  const last = batch.at(-1)
-
-  if (!last) return ""
-  const more = batch.length > 1 ? ` · +${batch.length - 1} more` : ""
-
-  const fit = (prefix: string, middle: string, suffix: string) =>
-    `${prefix}${clip(middle, LINE_MAX - codePoints(prefix) - codePoints(suffix))}${suffix}`
-
-  if (last.kind === "notice") return fit("Notice: ", unwrapped(last.message).trim().split("\n")[0] ?? "", more)
-  const sender = last.sender ?? ""
-  const session = who(sender)
-
-  const type =
-    session === undefined ? "Agent" : `${session.agent.charAt(0).toUpperCase()}${session.agent.slice(1)} Agent`
-
-  return fit(`${type} "`, session?.title ?? "", `" sent a message (${shortId(sender)})${more}`)
-}
+export const content = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
 
 export type Undelivered = ReadonlyArray<{
   readonly id: number
@@ -140,16 +107,12 @@ export const layer = Layer.effect(
 
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
-      const last = taken.rows.at(-1)!
-
-      const sender =
-        last.kind === "notice" || last.sender === null ? undefined : yield* db.session.getSession(last.sender)
 
       return {
         execution: taken.execution,
         ids: taken.rows.map((r) => r.id),
-        line: line(taken.rows, () => sender && { agent: sender.agent, title: sender.name }),
-        text: text(taken.rows),
+        content: content(taken.rows),
+        detail: detailOf(taken.rows),
       } satisfies Taken
     })
 

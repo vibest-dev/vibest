@@ -4,7 +4,7 @@ Implementation notes for the Pi [harness adapter](../../../docs/design/architect
 
 `pi -e <dir>/extension.mjs` loads `src/extension.ts` bundled with everything it imports except
 Pi's own packages, which Pi resolves for the extensions it loads. With `VIBEST_SESSION_ID` it
-serves the session (inbox rows taken in process and delivered as custom messages the model sees and the TUI hides: an
+serves the session (inbox rows taken in process and delivered as custom messages: the model gets the full text as Pi's `content`, and the TUI shows the two-line form from `details.detail` — Pi's own `display` boolean only means the pane shows the message: an
 execution starts when Pi is idle, else they queue as follow-ups; execution starts and ends are sent); without it it does
 nothing. Tool calls go through the session's agent definition in vibestd. Only the TUI session
 is the harness's root session: print, RPC and JSON modes have no PTY, so a Pi child of a session, which inherits

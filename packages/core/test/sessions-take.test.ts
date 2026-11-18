@@ -66,7 +66,7 @@ describe.concurrent("an idle session takes its next batch", () => {
     Effect.gen(function* () {
       const { db, inbox, entryId } = yield* entryAsked
       const taken = yield* inbox.take(entryId, undefined)
-      assert.include(taken!.text, "a question")
+      assert.include(taken!.content, "a question")
       assert.deepStrictEqual(yield* db.session.openExecution(entryId), taken!.execution)
       assert.isUndefined(yield* inbox.take(entryId, undefined))
     }),
@@ -201,6 +201,47 @@ describe.concurrent("an idle session takes its next batch", () => {
       assert.deepStrictEqual(yield* inboxStatuses(sender), ["pending"])
       assert.isDefined(yield* inbox.take(entryId, undefined))
       assert.isUndefined(yield* inbox.take(sender, undefined))
+    }),
+  )
+
+  test(
+    "a peer send taken by the entry names the remote address, not the user",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const inbox = yield* Inbox.Service
+      const repo = yield* makeRepository
+
+      const entry = yield* db.session.startEntry(
+        yield* projectOf(repo),
+        "pulling-pi",
+        false,
+        { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+        { agent: "coordinator" },
+      )
+
+      yield* herdr.seedAgent("test/coord")
+
+      assert.strictEqual(
+        yield* db.remote.receivePeerItem({
+          id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
+          recipient: entry.sessionId,
+          kind: "send",
+          sender: "mb/aaaaaaaa",
+          from: { session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", agent: "general", title: "Ask me", machine: "mb" },
+          content: "report from afar",
+        }),
+        "queued",
+      )
+      const taken = yield* inbox.take(entry.sessionId, undefined)
+      assert.deepStrictEqual(taken?.detail, [
+        {
+          sender: { session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", agent: "general", title: "Ask me", machine: "mb" },
+          message: "report from afar",
+        },
+      ])
+      assert.isTrue(taken?.content.includes("<vibest-agent-message>") === true)
+      assert.isTrue(taken?.content.includes("report from afar") === true)
     }),
   )
 })
