@@ -584,6 +584,8 @@ describe("projectors", () => {
           sessionId: REMOTE,
           kind: "send",
           content: "archived",
+          agent: null,
+          title: null,
           createdAt: 511,
         },
       ])

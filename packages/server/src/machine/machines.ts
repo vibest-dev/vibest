@@ -376,6 +376,8 @@ const make = Effect.gen(function* () {
         recipient: item.recipient,
         kind: item.kind,
         sender: address,
+        ...(item.agent !== undefined && { agent: item.agent }),
+        ...(item.title !== undefined && { title: item.title }),
         content: `${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`,
       })
 

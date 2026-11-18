@@ -112,6 +112,8 @@ export const InboxQueued = fact("inbox.queued", "session", {
   recipient: optional(Text),
   sender: optional(Text),
   address: optional(Text),
+  agent: optional(Text),
+  title: optional(Text),
   content: Schema.String,
   status: Schema.Literals(["pending", "delivered", "dropped"]),
   request: optional(Text),
@@ -137,6 +139,8 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
+  agent: optional(Text),
+  title: optional(Text),
 })
 
 export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })

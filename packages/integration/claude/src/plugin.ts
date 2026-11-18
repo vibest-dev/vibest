@@ -40,6 +40,9 @@ const head = (sender: Taken["detail"][number]["sender"]) => {
 
   if (sender === "user") return "Message from You"
 
+  if ("machine" in sender)
+    return `Message from @${titled(sender.agent)} · ${sender.title} (${sender.machine}/${sender.session.slice(0, 8)})`
+
   if ("address" in sender) return remote(sender.address)
 
   return `Message from @${titled(sender.agent)} · ${sender.title} (${sender.session.slice(0, 8)})`

@@ -2784,6 +2784,30 @@
                             },
                             "session": {
                               "type": "string"
+                            },
+                            "machine": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "agent",
+                            "title",
+                            "session",
+                            "machine"
+                          ],
+                          "additionalProperties": true
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "agent": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "session": {
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -6634,6 +6658,26 @@
           },
           "content": {
             "type": "string"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cut": {
             "anyOf": [

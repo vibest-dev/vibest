@@ -60,6 +60,8 @@ export const detailOf = (
     readonly kind: string
     readonly sender?: string | null
     readonly address?: string | null
+    readonly agent?: string | null
+    readonly title?: string | null
     readonly message: string
   }>,
   who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
@@ -75,7 +77,16 @@ export const detailOf = (
       return { sender: { agent: session?.agent ?? "", title: session?.title ?? "", session: row.sender }, message }
     }
 
-    if (row.address != null && row.address !== "") return { sender: { address: row.address }, message }
+    if (row.address != null && row.address !== "") {
+      const slash = row.address.indexOf("/")
+      const machine = slash > 0 ? row.address.slice(0, slash) : row.address
+      const session = slash > 0 ? row.address.slice(slash + 1) : ""
+
+      if (row.agent != null && row.agent !== "")
+        return { sender: { agent: row.agent, title: row.title ?? "", session, machine }, message }
+
+      return { sender: { address: row.address }, message }
+    }
 
     return { sender: "user", message }
   })

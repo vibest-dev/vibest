@@ -31,9 +31,20 @@ describe("delivery detail", () => {
     )
   })
 
-  it("a peer send keeps the remote address instead of becoming the user", () => {
+  it("a peer send with an agent keeps it, and one without stays the address", () => {
+    const sent = row(sessionEnvelope("mb/aaaaaaaa", "report from afar"), null, "send", "mb/aaaaaaaa")
+
     assert.deepStrictEqual(
-      detailOf([row(sessionEnvelope("mb/aaaaaaaa", "report from afar"), null, "send", "mb/aaaaaaaa")], () => undefined),
+      detailOf([{ ...sent, agent: "general", title: "Ask me" }], () => undefined),
+      [
+        {
+          sender: { agent: "general", title: "Ask me", session: "aaaaaaaa", machine: "mb" },
+          message: "report from afar",
+        },
+      ],
+    )
+    assert.deepStrictEqual(
+      detailOf([sent], () => undefined),
       [{ sender: { address: "mb/aaaaaaaa" }, message: "report from afar" }],
     )
   })

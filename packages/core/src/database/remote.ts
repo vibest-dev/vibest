@@ -38,6 +38,8 @@ export type OutboxRow = {
   readonly sessionId: string
   readonly content: string
   readonly kind: "send" | "notice"
+  readonly agent: string | null
+  readonly title: string | null
   readonly createdAt: number
   readonly reportTo: string
 }
@@ -71,6 +73,8 @@ export const statements = Effect.gen(function* () {
       readonly sessionId: string
       readonly content: string
       readonly kind: "send" | "notice"
+      readonly agent?: string | undefined
+      readonly title?: string | undefined
       readonly at?: number
       readonly request?: string | undefined
     },
@@ -91,6 +95,8 @@ export const statements = Effect.gen(function* () {
           recipient: recipientSession,
           kind: row.kind,
           content: row.content,
+          ...(row.agent !== undefined && { agent: row.agent }),
+          ...(row.title !== undefined && { title: row.title }),
         },
       })
 
@@ -165,6 +171,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           readonly kind: "send" | "notice"
           readonly sender: string
           readonly content: string
+          readonly agent?: string | undefined
+          readonly title?: string | undefined
         }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
           tx(
             Effect.gen(function* () {
@@ -188,6 +196,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   kind: item.kind,
                   sender: null,
                   address: item.sender,
+                  ...(item.agent !== undefined && { agent: item.agent }),
+                  ...(item.title !== undefined && { title: item.title }),
                   content,
                   status: "dropped",
                   peerItem: item.id,
@@ -196,6 +206,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
+                  ...(item.agent !== undefined && { agent: item.agent }),
+                  ...(item.title !== undefined && { title: item.title }),
                 })
 
                 return "queued" as const
@@ -212,6 +224,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 kind: item.kind,
                 sender: null,
                 address: item.sender,
+                ...(item.agent !== undefined && { agent: item.agent }),
+                ...(item.title !== undefined && { title: item.title }),
                 content,
                 status: here ? "pending" : "dropped",
                 peerItem: item.id,
@@ -268,11 +282,17 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
 
+              const [who] = yield* sql<{
+                agent: string
+                name: string
+              }>`SELECT agent, name FROM session WHERE id = ${sessionId}`
+
               return yield* queueForPeer(origin.peer, creator, {
                 sessionId,
                 kind: "send",
                 content: message,
                 request,
+                ...(who !== undefined && { agent: who.agent, title: who.name }),
               })
             }),
           ).pipe(Effect.orDie),
@@ -280,9 +300,22 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       sendToPeer: Effect.fn("Db.remote.sendToPeer")(
         (sender: string, peer: string, session: string, message: string, request?: string) =>
-          tx(queueForPeer(peer, session, { sessionId: sender, kind: "send", content: message, request })).pipe(
-            Effect.orDie,
-          ),
+          tx(
+            Effect.gen(function* () {
+              const [who] = yield* sql<{
+                agent: string
+                name: string
+              }>`SELECT agent, name FROM session WHERE id = ${sender}`
+
+              return yield* queueForPeer(peer, session, {
+                sessionId: sender,
+                kind: "send",
+                content: message,
+                request,
+                ...(who !== undefined && { agent: who.agent, title: who.name }),
+              })
+            }),
+          ).pipe(Effect.orDie),
       ),
     }
   })

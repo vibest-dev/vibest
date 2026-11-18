@@ -108,6 +108,8 @@ export const OutboxItem = Schema.Struct({
   recipient: Schema.String,
   kind: Schema.Literals(["send", "notice"]),
   content: Schema.String,
+  agent: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
   cut: Schema.optional(Schema.Boolean),
 })
 

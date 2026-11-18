@@ -47,6 +47,8 @@ export const InboxRow = Schema.Struct({
   id: Schema.Number,
   sender: Schema.NullOr(Schema.String),
   address: Schema.NullOr(Schema.String),
+  agent: Schema.NullOr(Schema.String),
+  title: Schema.NullOr(Schema.String),
   recipient: Schema.NullOr(Schema.String),
   kind: InboxKind,
   message: Schema.String,
@@ -57,6 +59,12 @@ export type InboxRow = typeof InboxRow.Type
 
 export const Detail = Schema.Struct({
   sender: Schema.Union([
+    Schema.Struct({
+      agent: Schema.String,
+      title: Schema.String,
+      session: Schema.String,
+      machine: Schema.String,
+    }),
     Schema.Struct({
       agent: Schema.String,
       title: Schema.String,

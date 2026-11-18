@@ -32,7 +32,16 @@ describe("Pi delivery text", () => {
     )
   })
 
-  it("a remote address shows the machine and the first 8 of the id", () => {
+  it("a remote send shows the agent, the title and the machine", () => {
+    assert.strictEqual(
+      deliveryText([
+        { sender: { agent: "general", title: "Ask me", session: "aaaaaaaa", machine: "mb" }, message: "report" },
+      ]).split("\n")[0],
+      "Message from @General · Ask me (mb/aaaaaaaa)",
+    )
+  })
+
+  it("a remote address without an agent shows the machine only", () => {
     const lines = deliveryText([{ sender: { address: "mb/aaaaaaaa" }, message: "report" }]).split("\n")
     assert.strictEqual(lines[0], "Message from @Mb · (mb/aaaaaaaa)")
     assert.strictEqual(lines[1], "report")

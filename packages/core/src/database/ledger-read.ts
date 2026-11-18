@@ -152,6 +152,8 @@ type InboxColumns = {
   readonly sessionId: string
   readonly senderSessionId: string | null
   readonly senderAddress: string | null
+  readonly senderAgent: string | null
+  readonly senderTitle: string | null
   readonly kind: string
   readonly content: string
   readonly status: string
@@ -176,7 +178,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_session_id, m.sender_address, m.kind, m.content, m.status
+    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_session_id, m.sender_address, m.sender_agent, m.sender_title, m.kind, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
   const briefs = (ids: ReadonlyArray<string>) =>
@@ -259,7 +261,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     )
 
   const outboxOf = (peer: string, after: number, limit: number) =>
-    sql<OutboxRow>`SELECT o.id, o.seq, o.session_id, o.kind, o.content, o.created_at,
+    sql<OutboxRow>`SELECT o.id, o.seq, o.session_id, o.kind, o.content, o.agent, o.title, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
       FROM outbox o LEFT JOIN session s ON s.id = o.session_id
       WHERE o.peer_id = ${peer} AND o.seq > ${after} AND coalesce(o.recipient, s.origin_session) IS NOT NULL

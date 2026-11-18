@@ -197,6 +197,8 @@ export type InboxSql = {
   readonly kind: string
   readonly senderSessionId: string | null
   readonly senderAddress: string | null
+  readonly senderAgent: string | null
+  readonly senderTitle: string | null
   readonly content: string
   readonly status: string
 }
@@ -215,6 +217,8 @@ export const toInbox = (row: InboxSql) => ({
   id: row.id,
   sender: row.senderSessionId,
   address: row.senderAddress,
+  agent: row.senderAgent,
+  title: row.senderTitle,
   recipient: row.sessionId,
   kind: row.kind,
   message: row.content,
