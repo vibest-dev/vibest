@@ -341,7 +341,7 @@ export const make = Effect.gen(function* () {
 
       const plan = yield* launching(nextRow, false, yield* taskInput(nextRow, next.prompt))
 
-      if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: terminalOf(row).id })
+      if (inPlace) yield* db.session.startProcess(row.id, { ...startOf(nextRow), terminal: "" })
 
       const placed = inPlace
         ? yield* plan
@@ -349,7 +349,9 @@ export const make = Effect.gen(function* () {
               Effect.andThen(
                 plan.beforeStart,
                 Effect.flatMap(db.session.currentProcessId(row.id), (process) =>
-                  h.run!(terminal!, plan.launch(process)),
+                  h.run!(terminal!, plan.launch(process)).pipe(
+                    Effect.ensuring(db.session.placeProcess(row.id, terminal!.id)),
+                  ),
                 ),
               ),
             )

@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { harnessIdOf, exitedAt, executionStateOf, terminalOf } from "@vibest/core/database/db-rows"
+import { harnessIdOf, exitedAt, executionStateOf, runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -199,6 +199,32 @@ describe.concurrent("Session", () => {
       assert.isTrue(yield* db.session.executionAccepted(id))
       assert.strictEqual(yield* db.session.openExecution(id), execution)
       assert.strictEqual((yield* herdr.callsTo("send")).filter((call) => call.text !== undefined).length, typed)
+    }),
+    { plugins: [chooseNext], harnesses: [PI, FIRST_IN_ARGV] },
+  )
+
+  test(
+    "a usage-limit move in place binds no terminal event to the next process until the runtime has run it there",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const before = (yield* db.session.getSession(id))!
+      const at = () => db.session.processesAt(runtimeOf(before), terminalOf(before))
+      const held = yield* herdr.hold("run")
+      yield* herdr.endExecution(id)
+      yield* writeEnd(id, "pi", { error: "rate_limit" })
+      const moving = yield* Effect.forkChild(sessions.check(id))
+      yield* held.reached
+      assert.deepStrictEqual(yield* at(), [])
+      yield* held.release()
+      yield* until(db.session.openExecution(id), (open) => open !== undefined)
+      yield* (yield* Integration.Service).prompt(
+        { id, entry: false, harness: FIRST_IN_ARGV.id },
+        JSON.stringify({ hook_event_name: "afterAgentThought" }),
+      )
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(moving)
+      assert.deepStrictEqual(yield* at(), [{ sessionId: id, process: (yield* db.session.currentProcessId(id))! }])
     }),
     { plugins: [chooseNext], harnesses: [PI, FIRST_IN_ARGV] },
   )
