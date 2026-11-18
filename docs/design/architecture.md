@@ -311,10 +311,10 @@ The subagent's rules ask for a message whose first line is one sentence the reci
 optional `## Remember`. The recipient gets it as:
 
 ```
-<agent-message>
+<vibest-agent-message>
 <agent-id>agt_…</agent-id>
 <message>what the agent sent</message>
-</agent-message>
+</vibest-agent-message>
 ```
 
 ### 3.2 Execution

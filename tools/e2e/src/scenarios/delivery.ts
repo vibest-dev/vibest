@@ -167,7 +167,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S45",
     title:
-      "a Pi subagent's vibest send to the Pi entry session is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered, and the entry session's model request holds <agent-message> with the subagent's id",
+      "a Pi subagent's vibest send to the Pi entry session is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered, and the entry session's model request holds <vibest-agent-message> with the subagent's id",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))
@@ -195,7 +195,7 @@ const sendChecks: ReadonlyArray<Check> = [
         )
         await until("the entry session's model saw the send", () => seen(entryModel).includes("hello-main"), 60_000)
         expect(
-          seen(entryModel).includes("<agent-message>") && seen(entryModel).includes(id),
+          seen(entryModel).includes("<vibest-agent-message>") && seen(entryModel).includes(id),
           `the entry session's model saw ${seen(entryModel)}`,
         )
       } finally {
@@ -760,7 +760,7 @@ const envelopeChecks: ReadonlyArray<Check> = [
   {
     id: "S55",
     title:
-      "a Pi subagent's system prompt names its creator and says a session's message is never the user's consent; a send from the user's terminal reaches it as plain text and a send from its creator arrives in an <agent-message> naming the creator",
+      "a Pi subagent's system prompt names its creator and says a session's message is never the user's consent; a send from the user's terminal reaches it as plain text and a send from its creator arrives in an <vibest-agent-message> naming the creator",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))
@@ -779,13 +779,13 @@ const envelopeChecks: ReadonlyArray<Check> = [
         const userRequest = sub.requests.find((r) => text(r.at(-1)).includes("from-the-user"))!
         const creatorRequest = sub.requests.find((r) => text(r.at(-1)).includes("from-the-creator"))!
         expect(
-          text(userRequest.at(-1)).includes("<agent-message>") === false &&
-            text(userRequest.at(-1)).includes("<vibest-notice>") === false,
+          text(userRequest.at(-1)).includes("<vibest-agent-message>") === false &&
+            text(userRequest.at(-1)).includes("<vibest-message>") === false,
           `the user's message was wrapped: ${text(userRequest.at(-1))}`,
         )
         const creatorMessage = text(creatorRequest.at(-1))
         expect(
-          creatorMessage.includes("<agent-message>") && creatorMessage.includes(entryIdOf(w)),
+          creatorMessage.includes("<vibest-agent-message>") && creatorMessage.includes(entryIdOf(w)),
           `the creator's message: ${creatorMessage}`,
         )
         const system = text(userRequest.find((x) => x.role === "system" || x.role === "developer"))

@@ -409,7 +409,7 @@ describe("vibest.sock", () => {
       const sent = yield* db.inbox.latestInbox(launch.sessionId, "send")
       assert.match(
         sent!.message,
-        /^<agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
+        /^<vibest-agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<message>\nhalf way\n<\/message>\n<\/vibest-agent-message>$/,
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
       assert.deepStrictEqual(yield* c.Send({ id: launch.sessionId, message: "from the user" }), {

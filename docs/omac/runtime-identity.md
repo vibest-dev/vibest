@@ -686,7 +686,7 @@ sessions; they do the work." and "Start a session (an interactive coding agent i
 `spawn`; "agent" stays only where it means the definition, which today is nowhere else. When user-defined agents exist,
 `--agent <name>` gets one line.
 
-Envelopes: `<agent-result …>` and `<agent-message …>` keep their names — a session reports as the agent it runs — and
+Envelopes: `<agent-result …>` and `<vibest-agent-message …>` keep their names — a session reports as the agent it runs — and
 gain `agent="general"`; `id` is the session id. Nothing that reads them changes.
 
 Internal names (`workers.ts` / `Workers` service, `WorkerRow`, `WorkerView`, `WorkerInfo`, `getWorker`, …) are renamed
