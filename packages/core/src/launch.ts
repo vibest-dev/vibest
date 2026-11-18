@@ -53,6 +53,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     R
   >
   readonly message?: string | undefined
+  readonly callerEnv?: Readonly<Record<string, string>> | undefined
 }) {
   const definition = yield* definitionOf(input.agent)
   const adapter = yield* (yield* Harnesses.Service).get(input.harness)
@@ -67,7 +68,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   const pluginDir = yield* harness.plugin(input.harness)
 
-  if ((yield* harness.signedIn(input.harness)) === false)
+  if (input.callerEnv !== undefined && (yield* harness.signedIn(input.harness, input.callerEnv)) === false)
     return yield* unavailable(
       `${adapter.binary} is not signed in; sign in with ${adapter.binary}, then run vibest again`,
     )

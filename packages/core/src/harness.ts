@@ -35,7 +35,7 @@ const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Recor
 export interface Interface {
   readonly available: (id: string) => Effect.Effect<boolean>
   readonly plugin: (id: string) => Effect.Effect<string, HarnessUnavailable>
-  readonly signedIn: (id: string) => Effect.Effect<boolean | undefined>
+  readonly signedIn: (id: string, env: Readonly<Record<string, string>>) => Effect.Effect<boolean | undefined>
   readonly models: (
     id: string,
     provider: string | null,
@@ -92,12 +92,13 @@ export const make = Effect.gen(function* () {
   })
 
   const signIns = yield* Cache.makeWith(
-    (id: string) => {
+    (key: string) => {
+      const [id, , entries] = decodeModelCacheKey(key)
       const definition = harnesses.find(id)
 
       return definition === undefined
         ? Effect.succeed(undefined)
-        : checkSignedIn(definition).pipe(Effect.provide(pinned))
+        : checkSignedIn(definition, Object.fromEntries(entries)).pipe(Effect.provide(pinned))
     },
     {
       capacity: MODEL_CACHE_CAPACITY,
@@ -152,7 +153,7 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
-    signedIn: (id) => Cache.get(signIns, id),
+    signedIn: (id, env) => Cache.get(signIns, modelCacheKey(id, null, env)),
     models: Effect.fn("Harness.models")(function* (id, provider, env) {
       const key = modelCacheKey(id, provider, env)
       const listed = yield* Cache.get(cached, key)

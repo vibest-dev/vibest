@@ -136,6 +136,7 @@ export default Runtime.handler(Commands, (o) =>
         client,
         terminal,
         client["Project.EntrySession"]({
+          callerEnv: callerEnvOf(),
           harness: chosen.harness,
           agent: ENTRY_AGENT,
           fresh: o.fresh,
