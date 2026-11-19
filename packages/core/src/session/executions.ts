@@ -307,6 +307,12 @@ export const make = Effect.gen(function* () {
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* db.session.closeExecution(session.id, execution, "not_started")
 
+    if (adapter.ready === "integration" && (yield* db.session.readyAt(session.id)) === undefined)
+      return yield* new NotReady({
+        id: session.id,
+        message: `did not become ready in ${Duration.format(READY_TIMEOUT)} (${adapter.binary} may be signed out: sign in with ${adapter.binary})`,
+      })
+
     return `${sessionLabel(session)} did not start working on its first message (${adapter.binary} may be signed out: sign in with ${adapter.binary})`
   })
 

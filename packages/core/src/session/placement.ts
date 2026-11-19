@@ -275,6 +275,13 @@ export const make = Effect.gen(function* () {
         : undefined
     })
 
+  const closeLeftTerminal = (session: SessionRow) => {
+    const left = terminalOf(session)
+    const owner = runtimes.find(runtimeOf(session))
+
+    return left.id === "" || owner === undefined ? Effect.void : owner.close(left).pipe(Effect.ignore)
+  }
+
   const openTerminal = Effect.fn("Placement.openTerminal")(function* (
     h: Runtime,
     target: string | undefined,
@@ -292,6 +299,7 @@ export const make = Effect.gen(function* () {
   ) {
     const near = input.near !== undefined ? input.near : yield* nearCreator(session, h.id)
     const remote = yield* db.session.startedByPeer(session.id)
+    yield* closeLeftTerminal(session)
     yield* db.session.startProcess(session.id, startOf(session))
 
     if (input.beforeStart !== undefined) yield* input.beforeStart

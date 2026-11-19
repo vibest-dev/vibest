@@ -139,7 +139,7 @@ export const make = Effect.gen(function* () {
         removal.release({
           h,
           session,
-          terminal: exitedAt(session) === null ? terminal : undefined,
+          terminal,
           keepWorktree: options.keepWorktree,
           reasons,
         }),

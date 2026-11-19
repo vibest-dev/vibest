@@ -22,19 +22,20 @@ import {
 
 describe.concurrent("Session", () => {
   test(
-    "a resume whose start fails closes the pane it placed; the next resume on the same harness starts a process whose terminal report is accepted",
+    "a resume first closes the terminal its exited harness left, and a start that fails places nothing more to close; the next resume on the same harness starts a process whose terminal report is accepted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
+      const left = terminalOf((yield* (yield* Db.Service).session.getSession(id))!).id
       const placed = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open", id)
       yield* sessions.send(id, "again")
       yield* held.reached
       yield* held.release("failed")
       yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 1)
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [{ terminal: left }])
 
       const notice = yield* until(sqlNotices(id), (rows) =>
         rows.some((message) => message.includes("A message to") && message.includes("again")),

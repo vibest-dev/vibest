@@ -335,6 +335,7 @@ export const make = Effect.gen(function* () {
                 provider: next.provider ?? null,
                 model: next.model ?? null,
                 conversation: harnessSessionId,
+                terminal: gone ? null : row.process.terminal,
               },
       }
 

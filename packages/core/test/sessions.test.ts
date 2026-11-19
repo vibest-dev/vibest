@@ -2,6 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, startOf } from "@vibest/core/database/db-rows"
+import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { Effect, Fiber } from "effect"
@@ -13,7 +14,15 @@ import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { entryOfProject, sessionWorktree, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
+import {
+  entryOfProject,
+  idleSession,
+  sessionWorktree,
+  spawnInput,
+  spawnWorking,
+  test,
+  sqlNotices,
+} from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Session", () => {
   test(
@@ -132,6 +141,17 @@ describe.concurrent("Session", () => {
       assert.strictEqual(row.process!.id, next)
       assert.isNull(row.process!.endedAt)
       assert.isDefined(yield* db.inbox.insertSend(entryId, "after the exit"))
+    }),
+  )
+
+  test(
+    "a restarted session whose terminal reports no state shows idle once its harness reports ready",
+    Effect.gen(function* () {
+      const { id, db } = yield* idleSession(yield* makeRepository)
+      yield* db.session.restartProcess(id)
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "unknown")
+      yield* (yield* Integration.Service).ready(id, 4343)
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
     }),
   )
 

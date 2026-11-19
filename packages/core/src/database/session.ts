@@ -580,6 +580,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               const integration = patch.integration ?? (yield* sessionLive.integration(id))
 
               if (integration !== undefined) yield* afterCommitLive(sessionLive.setIntegration(id, integration))
+
+              if ((yield* openExecution(id)) === undefined) yield* setStatus(id, "idle")
               yield* publish(ProcessReady, {
                 sessionId: id,
                 at: ready,

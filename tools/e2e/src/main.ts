@@ -15,6 +15,7 @@ import delivery from "./scenarios/delivery.ts"
 import entrySession from "./scenarios/entry.ts"
 import exits from "./scenarios/exits.ts"
 import harness from "./scenarios/harness.ts"
+import hcTerminals from "./scenarios/hc-terminals.ts"
 import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
@@ -56,7 +57,7 @@ const areas = {
   inbox,
   exits,
   restart: [...restart, ...restartHc],
-  hc,
+  hc: [...hc, ...hcTerminals],
   sessions,
   delivery,
   routing,
