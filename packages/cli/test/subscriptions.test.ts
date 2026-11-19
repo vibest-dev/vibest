@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/core/harness"
+import { Harnesses } from "@vibest/core/harnesses"
 import { makePlugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -438,7 +439,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
     }),
   )
 
-  it.effect("a read a minute after the last poll refreshes once, shared by two readers at once", () =>
+  it.effect("a read a minute after the last poll refreshes once in the background, shared by two readers at once", () =>
     Effect.gen(function* () {
       const fake = loggedOut(yield* home)
       yield* fake.provide(
@@ -450,6 +451,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           assert.strictEqual(fake.spawned.length, 1)
           yield* TestClock.adjust("1 second")
           const [one, two] = yield* Effect.all([subs.list, subs.list], { concurrency: "unbounded" })
+          yield* TestClock.adjust("1 second")
           assert.strictEqual(fake.spawned.length, 2)
           assert.deepStrictEqual(one, two)
           assert.strictEqual(one[0]?.account.kind, "none")
@@ -458,6 +460,31 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         }),
       )
     }),
+  )
+
+  it.effect(
+    "harnesses registered after vibestd starts: routing reads the snapshot without waiting, vibest subscriptions waits for the first poll that started",
+    () =>
+      Effect.gen(function* () {
+        const context = yield* Layer.build(
+          Subscriptions.layer.pipe(Layer.provideMerge(Harnesses.layer), Layer.provide(harnessLayer(["pi"]))),
+        )
+
+        const subs = Context.get(context, Subscriptions.Service)
+        yield* Context.get(context, Harnesses.Service).transform((editor) =>
+          editor.add({
+            ...pi,
+            subscription: () => Effect.as(Effect.sleep("50 millis"), [{ provider: "", account: { kind: "none" } }]),
+          }),
+        )
+        assert.deepStrictEqual(yield* subs.list, [])
+        const reading = yield* Effect.forkChild(subs.read)
+        yield* TestClock.adjust("50 millis")
+        assert.deepStrictEqual(
+          (yield* Fiber.join(reading)).map((row) => row.harness),
+          ["pi"],
+        )
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nowhere" })))),
   )
 
   it.effect("a plugin report is what agent.start.before receives", () =>

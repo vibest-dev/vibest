@@ -19,7 +19,7 @@ import { Db } from "../database/db.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
-import { Harness, harnessOptions } from "../harness.ts"
+import { Harness, startableOptions } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
@@ -114,7 +114,7 @@ const make = Effect.gen(function* () {
         harness: input.harness ?? (input.current === undefined ? undefined : harnessIdOf(input.current)),
         provider: input.provider,
         model: input.model,
-        harnesses: yield* withHarness(harnessOptions),
+        harnesses: yield* withHarness(startableOptions),
         attempts: [],
         machine: { id: input.machine },
         runtime: input.runtime,

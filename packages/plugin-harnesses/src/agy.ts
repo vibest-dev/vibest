@@ -1,10 +1,7 @@
 import type { Harness } from "@vibest/plugin/effect"
 import { Effect, Predicate, type Schema } from "effect"
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { noProvider, opt } from "./models.ts"
-import { nodePlatform } from "./node-platform.ts"
-import { agySubscription } from "./subscriptions/agy.ts"
 import { parseJson, record } from "./subscriptions/index.ts"
 
 export const agyModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
@@ -120,11 +117,6 @@ export const agy: Harness.HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => ["--output-format", "json", "models"], answer: agyModels },
-  subscription: (home, binary) =>
-    Effect.service(ChildProcessSpawner.ChildProcessSpawner).pipe(
-      Effect.flatMap((spawner) => agySubscription(spawner)(home, binary)),
-      Effect.provide(nodePlatform),
-    ),
   conversationOf: agyConversation,
   userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { text: "" } : undefined),
   executionEnd: agyExecutionEnd,

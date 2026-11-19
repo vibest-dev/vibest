@@ -4,8 +4,8 @@ import path from "node:path"
 import { commandOf } from "../../../reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, type Message, piDir, sendOrReply, text, toolCall } from "../fake-model.ts"
-import { alive, binary, expect, fail, harnesses, readDb, row, Skip, until, type World } from "../world.ts"
-import { addCursorPlugin } from "../world/plugins.ts"
+import { alive, binary, expect, fail, readDb, row, Skip, until, type World } from "../world.ts"
+import { configurePlugins } from "../world/plugins.ts"
 
 type Machine = { name: string; id: string; state: string; reason?: string }
 
@@ -125,7 +125,7 @@ const hcCore = async (w: World, tag: string, env: Record<string, string | undefi
   return hc
 }
 
-const setup = async (w: World, options: { readonly bSession?: boolean; readonly bCursor?: boolean } = {}) => {
+const setup = async (w: World, options: { readonly bSession?: boolean; readonly aWithoutCursor?: boolean } = {}) => {
   for (const bin of ["pi", "hc", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   w.ownRuntimes.add("hc")
   const bin = path.join(w.root, "bin")
@@ -181,7 +181,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     return r.stdout
   }
 
-  if (options.bCursor) await addCursorPlugin({ vibestHome: bEnv.VIBEST_HOME }, harnesses)
+  if (options.aWithoutCursor) await configurePlugins(w, (plugins) => [...plugins, "-harness-cursor"])
   await okB(["project", "add"])
 
   const aEnv = {
@@ -611,12 +611,12 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M9",
     title:
-      "harness ls --machine: B has the Cursor plugin and A does not; A's harness ls has no cursor, --machine mb lists cursor with the same shape, A's entry session gets the same list, and after B stops the call fails saying mb is not connected",
+      "harness ls --machine: A removes the builtin Cursor plugin and B keeps it; A's harness ls has no cursor, --machine mb lists cursor with the same shape, A's entry session gets the same list, and after B stops the call fails saying mb is not connected",
     run: async (w) => {
       let s: Setup | undefined
 
       try {
-        s = await setup(w, { bCursor: true })
+        s = await setup(w, { aWithoutCursor: true })
         await s.okA(["machine", "add", "mb", "b-host"])
 
         type Entry = {

@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { compiled, expect, harnesses, herdr, row, rows, SESSIONS, Skip, until, type World } from "../world.ts"
-import { addAgyPlugin } from "../world/plugins.ts"
+import { useAgyBinary } from "../world/plugins.ts"
 import { hcKey } from "./cursor.ts"
 import { isolatedCore } from "./hc.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
@@ -157,11 +157,11 @@ const checks: ReadonlyArray<Check> = [
     id: "H9",
     tier: "agent",
     title:
-      "agy (real): with its plugin added, the harness is listed as available, its models and its usage windows come from the CLI without a model turn",
+      "agy (real): loaded by default, the harness is listed as available, its models come from the CLI without a model turn, and `vibest subscriptions` has no agy row",
     run: async (w) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
-      await addAgyPlugin(w, harnesses, binary)
+      await useAgyBinary(w, binary)
       await w.ok(["daemon"])
 
       const list = await w.json<Array<{ harness: string; binary: string; available: boolean }>>(["harness", "list"], {
@@ -179,17 +179,9 @@ const checks: ReadonlyArray<Check> = [
         models.models.some((m) => m.harness === "agy" && m.model !== ""),
         `models: ${JSON.stringify(models).slice(0, 500)}`,
       )
-      await until(
-        "agy's usage windows",
-        async () => {
-          const rows = await w.json<Array<{ harness: string; limits: Array<{ window: string }>; error?: string }>>([
-            "subscriptions",
-          ])
 
-          return rows.some((r) => r.harness === "agy" && r.limits.length > 0)
-        },
-        120_000,
-      )
+      const rows = await w.json<Array<{ harness: string }>>(["subscriptions"])
+      expect(!rows.some((r) => r.harness === "agy"), `subscriptions: ${JSON.stringify(rows)}`)
     },
   },
   {
@@ -200,7 +192,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w, evidence) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
-      await addAgyPlugin(w, harnesses, binary)
+      await useAgyBinary(w, binary)
       await withSession(w, "agy", [], PONG(1), async ({ id, socket }) => {
         await untilShown(
           w,
@@ -262,7 +254,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w, evidence) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
-      await addAgyPlugin(w, harnesses, binary)
+      await useAgyBinary(w, binary)
       const a = await agyWorld(w, "hc", "agy-h11", "pi")
 
       try {
@@ -306,7 +298,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
-      await addAgyPlugin(w, harnesses, binary)
+      await useAgyBinary(w, binary)
       const a = await agyWorld(w, "herdr", "agy-entry", "agy")
 
       try {
@@ -378,7 +370,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w, evidence) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
-      await addAgyPlugin(w, harnesses, binary)
+      await useAgyBinary(w, binary)
       const ran = path.join(w.root, "h14-ran.txt")
       const marker = path.join(w.root, "h14-marker.txt")
       const task = `Run exactly this shell command with your command tool: herdr --version > ${ran}. Whatever happens, then run exactly this shell command: echo done > ${marker}. Then reply with exactly: H14-DONE`
@@ -407,7 +399,7 @@ const checks: ReadonlyArray<Check> = [
       const valid = await w.run(w.repository, [binary, "plugin", "validate", plugin, "--strict", "--json"])
       expect(valid.code === 0, `agy plugin validate: ${valid.stdout}${valid.stderr}`)
       await w.stopDaemon()
-      await addAgyPlugin(w, harnesses, binary)
+      await useAgyBinary(w, binary)
       const a = await agyWorld(w, "herdr", "agy-h13", "agy")
 
       try {

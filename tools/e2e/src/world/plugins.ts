@@ -10,27 +10,19 @@ export const configurePlugins = async (
   await fs.writeFile(file, JSON.stringify({ ...config, plugins: change(config.plugins ?? []) }))
 }
 
-export const addCursorPlugin = (w: { readonly vibestHome: string }, harnesses: string) =>
-  configurePlugins(w, (plugins) => [...plugins, path.join(harnesses, "cursor")])
-
-export const addAgyPlugin = async (w: { readonly vibestHome: string }, harnesses: string, binary: string) => {
-  const plugins = [path.join(harnesses, "agy")]
-
-  if (binary !== "agy") {
-    const dir = path.join(w.vibestHome, "agy-binary")
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(
-      path.join(dir, "index.js"),
-      `import { Plugin } from "@vibest/plugin/effect"
+export const useAgyBinary = async (w: { readonly vibestHome: string }, binary: string) => {
+  if (binary === "agy") return
+  const dir = path.join(w.vibestHome, "agy-binary")
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(
+    path.join(dir, "index.js"),
+    `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 export default Plugin.define({
   id: "agy-binary",
   effect: (ctx) => ctx.harness.transform((editor) => editor.update("agy", (definition) => { definition.binary = ${JSON.stringify(binary)} })).pipe(Effect.asVoid),
 })
 `,
-    )
-    plugins.push(dir)
-  }
-
-  await configurePlugins(w, (existing) => [...existing, ...plugins])
+  )
+  await configurePlugins(w, (existing) => [...existing, dir])
 }

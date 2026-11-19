@@ -6,7 +6,6 @@ import { agy, agyModels } from "../src/agy.ts"
 import { claude, claudeMenuKey, claudeModels } from "../src/claude.ts"
 import { cursor, cursorModels } from "../src/cursor.ts"
 import { pi, piModels } from "../src/pi.ts"
-import { agyLimits } from "../src/subscriptions/agy.ts"
 
 const ADAPTERS = { pi, claude, cursor }
 
@@ -108,51 +107,6 @@ describe("HarnessAdapter", () => {
       { model: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", default: false },
     ])
     assert.isUndefined(agyModels(["Fetching available models...", "Error: Please sign in to view available models."]))
-  })
-
-  it("agy reads its usage windows as used percent with the reset time; it is limited only when no model group has quota left", () => {
-    const usage = {
-      command: {
-        data: {
-          groups: [
-            {
-              name: "Gemini Models",
-              buckets: [
-                { window: "weekly", remaining_fraction: 0.75, reset_time: "2026-11-18T10:48:56Z" },
-                { window: "5h", remaining_fraction: 0, reset_time: "2026-11-13T11:54:25Z" },
-              ],
-            },
-          ],
-        },
-      },
-    }
-
-    const claudeGroup = (left: number) => ({
-      name: "Claude Models",
-      buckets: [{ window: "5h", remaining_fraction: left }],
-    })
-
-    const withClaude = (left: number) => ({
-      command: { data: { groups: [...usage.command.data.groups, claudeGroup(left)] } },
-    })
-
-    assert.deepStrictEqual(
-      agyLimits(withClaude(0.5)).map((w) => w.status),
-      ["available", "available", "available"],
-    )
-    assert.deepStrictEqual(
-      agyLimits(withClaude(0)).map((w) => w.status),
-      ["available", "limited", "limited"],
-    )
-    assert.deepStrictEqual(agyLimits(usage), [
-      {
-        window: "Gemini Models weekly",
-        percent: 25,
-        status: "available",
-        resetTime: Date.parse("2026-11-18T10:48:56Z"),
-      },
-      { window: "Gemini Models 5h", percent: 100, status: "limited", resetTime: Date.parse("2026-11-13T11:54:25Z") },
-    ])
   })
 
   it("cursor resumes a dash-leading session id as one --resume= argument", () => {

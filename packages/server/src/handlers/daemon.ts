@@ -85,7 +85,7 @@ export const make = Effect.gen(function* () {
         ),
       ),
 
-    Subscriptions: () => subscriptions.list,
+    Subscriptions: () => subscriptions.read,
 
     "Daemon.Stop": ({ instance }) =>
       Effect.gen(function* () {

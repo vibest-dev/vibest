@@ -44,6 +44,7 @@ export interface AgentsDomain {
 
 export interface SubscriptionsDomain {
   readonly list: Effect.Effect<ReadonlyArray<Subscription>>
+  readonly read: Effect.Effect<ReadonlyArray<Subscription>>
   readonly report: (input: SubscriptionReport) => Effect.Effect<void>
   readonly poll: Effect.Effect<void>
 }
