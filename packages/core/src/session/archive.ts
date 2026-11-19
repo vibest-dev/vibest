@@ -40,7 +40,7 @@ export const make = Effect.gen(function* () {
   const removal = yield* Remove.make
   const locks = yield* SessionLocks.Service
   const sessionLive = yield* SessionLive.Service
-  const { notice, recount } = yield* Placement.Service
+  const { notice, recount, ownTerminal } = yield* Placement.Service
   const { interruptAgent, settleAfterInterrupt } = yield* Executions.Service
   const archives = yield* FiberSet.make()
   const { locked } = locks
@@ -98,17 +98,16 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       let session = yield* getRow(id)
       const h = yield* live(session)
-      const terminal = terminalOf(session)
-      const seen = yield* agentState(h, terminal)
+      const terminal = yield* ownTerminal(session)
       const reasons: Array<string> = []
-      const working = busyOf(seen)
+      const working = terminal !== undefined && busyOf(yield* agentState(h, terminal))
       const execution = yield* db.session.openExecution(id)
 
       if (working || execution !== undefined) {
         if (options.unlessPending) return undefined
 
         if (working) {
-          const stopped = yield* interruptAgent(h, session, terminal)
+          const stopped = yield* interruptAgent(h, session, terminalOf(session))
           reasons.push(
             stopped
               ? "it was working: interrupted, then its terminal closed"

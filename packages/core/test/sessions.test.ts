@@ -145,13 +145,44 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "a restarted session whose terminal reports no state shows idle once its harness reports ready",
+    "a restarted session whose terminal reports no state shows idle once its harness reports ready; a state the runtime already reported stays",
     Effect.gen(function* () {
       const { id, db } = yield* idleSession(yield* makeRepository)
+      const integration = yield* Integration.Service
       yield* db.session.restartProcess(id)
       assert.strictEqual((yield* db.session.getSession(id))!.status, "unknown")
-      yield* (yield* Integration.Service).ready(id, 4343)
+      yield* integration.ready(id, 4343)
       assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
+
+      yield* db.session.restartProcess(id)
+      yield* db.session.setStatus(id, "blocked")
+      yield* integration.ready(id, 4344)
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "blocked")
+    }),
+  )
+
+  test(
+    "archiving an entry session that exited leaves alone the terminal it recorded once a newer entry session runs there",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      const location = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } }
+      const project = yield* projectOf(repo)
+
+      const entryIn = (fresh: boolean) =>
+        db.session.startEntry(project, "pi", fresh, location, { agent: "coordinator", projectDirectory: repo })
+
+      const old = yield* entryIn(false)
+      yield* herdr.seedAgent("test/coord")
+      yield* herdr.updateAgent("test/coord", (agent) => ({ ...agent, alive: false }))
+      yield* sessions.check(old.sessionId)
+      yield* until(db.session.getSession(old.sessionId), (now) => (now?.process?.endedAt ?? null) !== null)
+      yield* entryIn(true)
+      yield* herdr.seedAgent("test/coord")
+      assert.include(yield* sessions.remove(old.sessionId, { keepWorktree: true }), { pane: "none" })
+      assert.notDeepInclude(yield* herdr.callsTo("close"), { terminal: "test/coord" })
     }),
   )
 

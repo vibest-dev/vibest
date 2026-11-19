@@ -57,6 +57,33 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "a resume whose close of the left terminal fails opens no second terminal and keeps the old record; a left terminal already gone counts as closed",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const { id, sessions } = yield* idleSession(yield* makeRepository)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      const left = (yield* db.session.getSession(id))!
+      const placed = (yield* herdr.callsTo("open")).length
+      const notices = (yield* sqlNotices(id)).length
+      const refused = yield* herdr.hold("close", terminalOf(left).id)
+      yield* sessions.send(id, "again")
+      yield* refused.reached
+      yield* refused.release("failed")
+      yield* until(sqlNotices(id), (rows) => rows.length > notices)
+      assert.strictEqual((yield* herdr.callsTo("open")).length, placed)
+      assert.strictEqual(yield* db.session.currentProcessId(id), left.process!.id)
+
+      const gone = yield* herdr.hold("close", terminalOf(left).id)
+      yield* sessions.send(id, "once more")
+      yield* gone.reached
+      yield* gone.release("not_found")
+      yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 1)
+    }),
+  )
+
+  test(
     "an execution end that lands after the terminal died, with a send queued: the exit is recorded and fails the send; nothing resumes the session",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

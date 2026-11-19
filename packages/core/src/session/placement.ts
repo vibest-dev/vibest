@@ -275,12 +275,27 @@ export const make = Effect.gen(function* () {
         : undefined
     })
 
-  const closeLeftTerminal = (session: SessionRow) => {
-    const left = terminalOf(session)
+  const ownTerminal = Effect.fn("Placement.ownTerminal")(function* (session: SessionRow) {
+    const recorded = terminalOf(session)
+
+    if (recorded.id === "") return undefined
+    const holders = yield* db.session.processesAt(runtimeOf(session), recorded)
+
+    return holders.some((held) => held.sessionId !== session.id) ? undefined : recorded
+  })
+
+  const closeLeftTerminal = Effect.fn("Placement.closeLeftTerminal")(function* (session: SessionRow) {
+    const left = yield* ownTerminal(session)
     const owner = runtimes.find(runtimeOf(session))
 
-    return left.id === "" || owner === undefined ? Effect.void : owner.close(left).pipe(Effect.ignore)
-  }
+    if (left === undefined || owner === undefined) return
+    yield* owner.close(left).pipe(
+      Effect.catchIf(
+        (e) => e.code === "not_found",
+        () => Effect.void,
+      ),
+    )
+  })
 
   const openTerminal = Effect.fn("Placement.openTerminal")(function* (
     h: Runtime,
@@ -565,6 +580,7 @@ export const make = Effect.gen(function* () {
     republish,
     recount,
     openTerminal,
+    ownTerminal,
     show,
     locate,
   }
