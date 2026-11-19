@@ -265,6 +265,27 @@ describe("Db", () => {
   )
 
   it.effect(
+    "a send counts in the execution its sender had open, also in the millisecond one ends and the next starts",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db.Service
+          const [parent, child] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
+          yield* db.session.insertSession(session(parent), yield* projectOf("r"))
+          yield* db.session.insertSession(session(child), yield* projectOf("r"))
+          const first = (yield* db.session.startExecution(child, 2)).execution
+          yield* complete(db, child)
+          const second = (yield* db.session.startExecution(child, 2)).execution
+          yield* db.inbox.insertSend(parent, "done", { session: child })
+          yield* complete(db, child)
+          yield* db.inbox.insertSend(parent, "between executions", { session: child })
+
+          assert.deepStrictEqual([yield* db.inbox.sentIn(child, first), yield* db.inbox.sentIn(child, second)], [0, 1])
+        }),
+      ),
+  )
+
+  it.effect(
     "a request queues once per sender, whatever the recipient; the same request from another sender queues",
     () =>
       memory(

@@ -24,6 +24,16 @@ import { localSessionOf, senderKey } from "../database/db-rows.ts"
 
 const sessionIdOf = (fact: Fact) => fact.sessionId!
 
+export const countSent = (
+  sql: SqlClient.SqlClient,
+  session: string | undefined,
+  kind: string,
+  execution: number | undefined,
+) =>
+  session === undefined || kind !== "send" || execution === undefined
+    ? Effect.void
+    : sql`UPDATE execution SET sent = sent + 1 WHERE session_id = ${session} AND id = ${execution}`
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
@@ -171,10 +181,12 @@ export const layer = Layer.effectDiscard(
         const { data } = fact
 
         return sql`INSERT INTO inbox (session_id, id, sender, sender_key, sender_session_id, about_session_id, kind, content,
-            request, peer_item, status, queued_at)
+            request, peer_item, status)
           VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${JSON.stringify(data.sender)}, ${senderKey(data.sender)},
             ${localSessionOf(data.sender) ?? null}, ${data.about ?? null}, ${data.kind}, ${data.content},
-            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.at})`
+            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`.pipe(
+          Effect.andThen(countSent(sql, localSessionOf(data.sender), data.kind, data.execution)),
+        )
       }),
     )
     yield* bus.project(

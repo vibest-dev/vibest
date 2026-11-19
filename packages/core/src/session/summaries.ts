@@ -19,7 +19,7 @@ export const make = Effect.gen(function* () {
           : {
               execution: last.id,
               outcome: last.outcome,
-              sent: yield* db.inbox.sentDuring(row.id, last.startedAt, last.endedAt),
+              sent: yield* db.inbox.sentIn(row.id, last.id),
               endedAt: last.endedAt,
             }
 

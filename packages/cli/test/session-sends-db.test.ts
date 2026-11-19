@@ -114,6 +114,7 @@ describe("sends from sessions", () => {
           })
           yield* db.session.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: B })
           yield* db.session.archive(B)
+          const { execution } = yield* db.session.startExecution(X, 1)
           const heir = yield* db.session.nearestAlive(X)
           assert.deepStrictEqual(heir, { peer, session: reportTo })
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "report"))
@@ -124,6 +125,15 @@ describe("sends from sessions", () => {
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
           assert.lengthOf(yield* db.remote.outboxOf(peer), 2)
+          yield* db.remote.ackOutbox(
+            peer,
+            (yield* db.remote.outboxOf(peer)).map((row) => row.id),
+          )
+          assert.strictEqual(
+            yield* db.inbox.sentIn(X, execution),
+            2,
+            "both sends count in X's execution, also once acked",
+          )
         }),
       ),
   )

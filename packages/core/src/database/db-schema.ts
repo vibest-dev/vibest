@@ -126,7 +126,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 14
+export const PROJECTION_VERSION = 15
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -193,6 +193,7 @@ export const PROJECTION_SCHEMA = [
     failure_kind TEXT CHECK (failure_kind IN ('limit')),
     reply        TEXT,
     ended_at     INTEGER,
+    sent         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL`,
@@ -209,12 +210,11 @@ export const PROJECTION_SCHEMA = [
     peer_item         TEXT,
     status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
     execution_id      INTEGER,
-    queued_at         INTEGER NOT NULL,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE INDEX inbox_status ON inbox (status, session_id)`,
   `CREATE INDEX inbox_kind ON inbox (session_id, kind, id)`,
-  `CREATE INDEX inbox_sender ON inbox (sender_session_id, queued_at) WHERE sender_session_id IS NOT NULL`,
+  `CREATE INDEX inbox_sender ON inbox (sender_session_id) WHERE sender_session_id IS NOT NULL`,
   `CREATE INDEX inbox_about ON inbox (about_session_id) WHERE about_session_id IS NOT NULL`,
   `CREATE INDEX inbox_execution ON inbox (session_id, execution_id) WHERE execution_id IS NOT NULL`,
   `CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request) WHERE request IS NOT NULL`,

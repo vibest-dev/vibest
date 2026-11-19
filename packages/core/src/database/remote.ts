@@ -85,6 +85,12 @@ export const statements = Effect.gen(function* () {
       const id = row.request ?? randomId()
 
       if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
+
+      const [open] =
+        row.kind === "send"
+          ? yield* sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${row.sessionId} AND outcome IS NULL`
+          : []
+
       yield* publish(OutboxQueued, {
         ...(row.at !== undefined && { at: row.at }),
         data: {
@@ -95,6 +101,7 @@ export const statements = Effect.gen(function* () {
           kind: row.kind,
           content: row.content,
           ...(row.from !== undefined && { from: row.from }),
+          ...(open !== undefined && { execution: open.id }),
         },
       })
 

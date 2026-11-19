@@ -111,4 +111,5 @@ execution completes without the subagent sending a message, the session that sta
 the plugin ("Message from Vibest · silent-execution") naming the subagent and the execution. A subagent that sent a
 message during the execution, an entry session, and a failed or interrupted execution get nothing. An execution that
 ended while the plugin was not loaded, or while vibestd was restarting, is reported once when it loads: the plugin
-checks each session's latest execution then. Without the plugin, nothing is sent.
+checks each session's latest execution then. Without the plugin, nothing is sent. A message the subagent sends to a
+session it started on another machine does not count as sending: it is not a report to the session that started it.

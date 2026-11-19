@@ -68,6 +68,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       readonly status: "pending" | "delivered" | "dropped"
       readonly request?: string | undefined
       readonly peerItem?: string | undefined
+      readonly execution?: number | undefined
       readonly at?: number | undefined
     }) =>
       publish(InboxQueued, {
@@ -82,6 +83,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           status: row.status,
           ...(row.request !== undefined && { request: row.request }),
           ...(row.peerItem !== undefined && { peerItem: row.peerItem }),
+          ...(row.execution !== undefined && { execution: row.execution }),
         },
       })
 
@@ -126,9 +128,16 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         Effect.map((rows) => rows[0]),
       )
 
+    const executionOf = (sender: Sender) => {
+      const local = localSessionOf(sender)
+
+      return local === undefined ? Effect.succeed(undefined) : openExecution(local)
+    }
+
     const queueSend = (recipient: string, sender: Sender, message: string, request?: string) =>
       Effect.gen(function* () {
         const id = yield* queueInbox({
+          execution: yield* executionOf(sender),
           recipient,
           kind: "send",
           sender: yield* recorded(sender),
@@ -296,9 +305,8 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         tx(tellSender(recipient, message)).pipe(Effect.orDie),
       ),
 
-      sentDuring: Effect.fn("Db.inbox.sentDuring")((sessionId: string, from: number, to: number) =>
-        sql<{ sent: number }>`SELECT count(*) AS sent FROM inbox WHERE sender_session_id = ${sessionId}
-          AND kind = 'send' AND queued_at BETWEEN ${from} AND ${to}`.pipe(
+      sentIn: Effect.fn("Db.inbox.sentIn")((sessionId: string, execution: number) =>
+        sql<{ sent: number }>`SELECT sent FROM execution WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(
           Effect.map((rows) => rows[0]?.sent ?? 0),
           Effect.orDie,
         ),
