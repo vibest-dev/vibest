@@ -55,7 +55,7 @@ harness to inherit.
 Claude, Pi, Cursor and agy are loaded without any line in `~/.vibest/vibest.json`, and `vibest harness list` lists
 each. Whether this machine can start one is checked only when it is asked for: a harness whose binary is not on
 `PATH` is listed as unavailable saying so, and vibestd starts as usual. `"-vibest.harness-cursor"` (or another
-`-harness-<id>`) in `plugins` removes one.
+`-vibest.harness-<id>`) in `plugins` removes one.
 
 ## H9. Antigravity (agy)
 
