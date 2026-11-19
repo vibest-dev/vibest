@@ -218,7 +218,13 @@ const checks: ReadonlyArray<Check> = [
 
       if (method === "build")
         expect(r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout), said)
-      else expect(r.code === 0 && r.stdout.includes(`vibest is already up to date (v${buildVersion})`), said)
+      else
+        expect(
+          r.code === 0 &&
+            r.stdout.startsWith(`Checking for a newer vibest (this is ${buildVersion})…`) &&
+            r.stdout.includes(`vibest is already up to date (v${buildVersion})`),
+          said,
+        )
       const version = await w.ok(["--version"])
       expect(version.trim() === `vibest v${buildVersion}`, `vibest --version after update: ${version}`)
 
@@ -393,11 +399,25 @@ const checks: ReadonlyArray<Check> = [
           `the database is still there after ${moveAside}: ${out(moved)}`,
         )
         const through = await vibest(["update"])
+
+        const stages = [
+          `Checking for a newer vibest (this is ${version})…`,
+          "vibest 999.0.0 is available",
+          "Downloading vibest 999.0.0 (",
+          "  100%",
+          "Checking that vibest 999.0.0 runs here and opens the database…",
+          "Installing vibest 999.0.0…",
+          "vibest 999.0.0 installed:",
+        ]
+
+        const shown = out(through)
+        const at = stages.map((s) => shown.indexOf(s))
         expect(
-          through.code === 0 && out(through).includes("vibest 999.0.0 is available"),
-          `vibest update after the way out exited ${through.code}: ${out(through)}`,
+          through.code === 0 && at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1]!)),
+          `vibest update after the way out exited ${through.code}, its stages not shown in order: ${shown}`,
         )
-        expect(downloads === 3, `the release was downloaded ${downloads} times; one try, then one try and one install`)
+
+        expect(downloads === 2, `the release was downloaded ${downloads} times; one try, then one that installs`)
         expect(
           (await fs.readFile(path.join(share, "current"), "utf8")).trim() === "999.0.0",
           "install.sh did not record 999.0.0 as current",

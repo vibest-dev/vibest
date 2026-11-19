@@ -2,10 +2,25 @@ import { Claim, cliHeaders, connect, type VibestClient, readPing } from "@vibest
 import { compareVersions, UpdateError } from "@vibest/client/release"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { type Ping } from "@vibest/protocol/rpc"
+import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
 import { Layout, shellQuote } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Cause, Config, Console, Duration, Effect, Exit, FileSystem, Match, Option, Path, Schedule } from "effect"
+import {
+  Cause,
+  Config,
+  Console,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Match,
+  Option,
+  Path,
+  Schedule,
+  Stream,
+} from "effect"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
 
@@ -56,6 +71,38 @@ export const stageCommand = (
     ? ["bun", "add", "--cwd", dir, `@vibest/cli@${version}`, `@vibest/cli-${platform}@${version}`]
     : [owner?.kind === "npm" ? `${owner.prefix}/bin/npm` : "npm", "install", "--prefix", dir, `@vibest/cli@${version}`]
 }
+
+const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
+
+const QUARTERS = 4
+
+export const download = (url: string, to: string, label?: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const response = yield* HttpClient.get(url).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk))
+    const size = Number(response.headers["content-length"]) || undefined
+
+    if (label !== undefined)
+      yield* Console.log(`Downloading ${label}${size === undefined ? "" : ` (${megabytes(size)})`}…`)
+    const seen = { bytes: 0, quarter: 0 }
+
+    const progress = (chunk: Uint8Array) => {
+      seen.bytes += chunk.length
+
+      if (label === undefined || size === undefined) return Effect.void
+      const quarter = Math.min(QUARTERS, Math.floor((seen.bytes * QUARTERS) / size))
+
+      if (quarter <= seen.quarter) return Effect.void
+      seen.quarter = quarter
+
+      return Console.log(`  ${(quarter * 100) / QUARTERS}%`)
+    }
+
+    yield* response.stream.pipe(Stream.tap(progress), Stream.run(fs.sink(to)))
+  }).pipe(
+    Effect.as(undefined),
+    Effect.catch((e) => Effect.succeed(`${url}: ${messageOf(e)}`)),
+  )
 
 export const removeCommand = (link: string, real: string) => {
   return Match.value(ownerOf(real)).pipe(
