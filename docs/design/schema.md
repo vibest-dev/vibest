@@ -172,7 +172,9 @@ CREATE TABLE inbox (                                  -- id: the seq of its inbo
   session_id        TEXT    NOT NULL,                 -- the recipient
   id                INTEGER NOT NULL,
   sender            TEXT    NOT NULL,                 -- the inbox.queued sender as JSON
-  sender_session_id TEXT,                             -- routing: the local session that sent it; notice: its about; else null
+  sender_key        TEXT    NOT NULL,                 -- who sent it, for request dedupe: user, vibest, plugin:<id>, <machine>/<session>
+  sender_session_id TEXT,                             -- the local agent session that sent it, else null
+  about_session_id  TEXT,                             -- a notice: the session it is about, else null
   kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
   content           TEXT    NOT NULL,
   request           TEXT,                             -- the request id of the `vibest send` or `vibest run` that queued it
@@ -185,8 +187,9 @@ CREATE TABLE inbox (                                  -- id: the seq of its inbo
 CREATE INDEX inbox_status    ON inbox (status, session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'
 CREATE INDEX inbox_kind      ON inbox (session_id, kind, id);
 CREATE INDEX inbox_sender    ON inbox (sender_session_id, queued_at) WHERE sender_session_id IS NOT NULL;
+CREATE INDEX inbox_about     ON inbox (about_session_id) WHERE about_session_id IS NOT NULL;
 CREATE INDEX inbox_execution ON inbox (session_id, execution_id) WHERE execution_id IS NOT NULL;
-CREATE INDEX inbox_request   ON inbox (request) WHERE request IS NOT NULL;
+CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request) WHERE request IS NOT NULL;
 CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL;
 ```
 
@@ -199,19 +202,19 @@ unique indexes, so a fact that would break them fails its transaction.
 An inbox row is text for one recipient session (`session_id`); its id is the `seq` of its `inbox.queued` in that
 session, so a row is named by both.
 
-| `kind`   | What it is                                                                                                                                         |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task`   | the first input of a session, from whoever spawned it                                                                                              |
-| `send`   | a message from the user to any unfinished session of the project, or from a session to its creator or a session it started                         |
-| `notice` | something vibest tells the recipient about a session (`sender_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
+| `kind`   | What it is                                                                                                                                        |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task`   | the first input of a session, from whoever spawned it                                                                                             |
+| `send`   | a message from the user to any unfinished session of the project, or from a session to its creator or a session it started                        |
+| `notice` | something vibest tells the recipient about a session (`about_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
 
 - `sender` is one of: an agent session `{session, agent?, title?, machine?}` (`machine` set when it was received from
-  another vibestd), a plugin `{plugin}`, `"vibest"` (every notice) or `"user"` (a send or task with no session). The
-  routing column `sender_session_id` is the session of a local agent sender, or a notice's `about`; a relay to the
-  nearest living ancestor keeps the sender, so it stays right after the recipient changes.
-- A `request` repeats nothing: a send with the request of a row already queued for the same recipient returns that row;
-  for a plugin sender the match is the plugin and the request whatever the recipient, so a plugin's repeat that a
-  relay sends elsewhere is still one message.
+  another vibestd), a plugin `{plugin}`, `"vibest"` (every notice) or `"user"` (a send or task with no session).
+  `sender_session_id` is the session of a local agent sender and `about_session_id` a notice's `about`; a relay to the
+  nearest living ancestor keeps the sender, so both stay right after the recipient changes.
+- A `request` repeats nothing: one sender (`sender_key`) queues one row per request, whatever the recipient, so a
+  repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The
+  unique index `inbox_request` backs it: a second row would fail its transaction.
 - The messages a session sent during an execution are the `send` rows with its `sender_session_id` queued between the
   execution's start and end (a plugin's `ctx.session` reads them as `sent`); a send to another machine goes through
   the outbox, whose rows go once acknowledged, so it is not counted.

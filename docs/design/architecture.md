@@ -359,7 +359,9 @@ below it and subscribing to the events it handles itself:
 | `placement.ts` (`Placement`)   | the worktree, environment, system prompt and argv of a start; opening the terminal; notices      |
 | `move.ts` (`Move`)             | moving a session to another harness after a usage limit                                          |
 | `archive.ts` (`Archive`)       | remove, archive, `--archive-on-idle` and finishing an archive vibestd stopped in                 |
-| `delivery.ts` (`Delivery`)     | send, queued inbox rows, the next batch after an execution, interrupt, typed prompts             |
+| `sends.ts` (`Sends`)           | send, admit, and relay to the nearest living ancestor; what plugins send through                 |
+| `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins          |
+| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts                   |
 | `exits.ts` (`Exits`)           | recording a harness exit and what a usage limit leaves behind                                    |
 | `spawn.ts` (`Spawn`)           | admitting and starting a session, `VIBEST_MAX_SESSIONS`                                          |
 | `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`       |

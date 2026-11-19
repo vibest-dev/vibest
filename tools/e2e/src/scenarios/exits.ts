@@ -65,7 +65,7 @@ export const piProject = async (w: World, name: string) => {
     q<{ n: number }>("SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome IS NOT NULL", id)?.n ?? 0
 
   const sent = (id: string) =>
-    q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE sender_session_id = ?", id)?.n ?? 0
+    q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE ?1 IN (sender_session_id, about_session_id)", id)?.n ?? 0
 
   const lastEnd = (id: string) => {
     return q<{ status: string; reply: string | null; failure: string | null }>(
@@ -87,7 +87,7 @@ export const piProject = async (w: World, name: string) => {
 
   const notices = (id: string, text: string) =>
     q<{ n: number }>(
-      "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice' AND instr(content, ?) > 0",
+      "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice' AND instr(content, ?) > 0",
       id,
       text,
     )?.n ?? 0
@@ -450,7 +450,7 @@ const checks: ReadonlyArray<Check> = [
         expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
 
         const text =
-          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", sub)
+          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE about_session_id = ? AND kind = 'notice'", sub)
             ?.c ?? ""
 
         const kept = await fs.stat(worktree).then(

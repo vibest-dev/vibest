@@ -449,7 +449,7 @@ const checks: ReadonlyArray<Check> = [
           expect((await aborted()) === 1, `execution ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
 
           const notices = () =>
-            row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)
+            row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice'", id)
               ?.n
 
           await w.ok(["send", id, HOLD])

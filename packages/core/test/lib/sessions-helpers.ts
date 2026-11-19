@@ -138,7 +138,9 @@ export const executionAndSentCounts = (sessionId: string) =>
 
     const [sent] = yield* sql<{
       n: number
-    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId}`.pipe(Effect.orDie)
+    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId} OR about_session_id = ${sessionId}`.pipe(
+      Effect.orDie,
+    )
 
     return { executions: executions!.n, sent: sent!.n }
   })
@@ -149,7 +151,7 @@ export const sqlNotices = (sessionId: string) =>
 
     const rows = yield* sql<{
       message: string
-    }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.sender_session_id = ${sessionId} ORDER BY m.id`.pipe(
+    }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.about_session_id = ${sessionId} ORDER BY m.id`.pipe(
       Effect.orDie,
     )
 

@@ -225,11 +225,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       WHERE i.session_id = ${id} AND i.kind = 'task' AND i.execution_id IS NULL
       ORDER BY i.id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.content))
 
-  const queuedBy = (session: string, request: string) =>
-    sql<{ id: number }>`SELECT id FROM inbox
-      WHERE request = ${request} AND session_id = ${session}
-      ORDER BY id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
-
   const spawnedBy = (project: string, request: string) =>
     sql<{
       id: string
@@ -326,7 +321,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     briefs,
     hadTerminal,
     untakenTask,
-    queuedBy,
     spawnedBy,
     outboxOf,
     sessionRows,

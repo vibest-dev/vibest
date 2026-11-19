@@ -17,9 +17,10 @@ import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { Archive } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
+import { Sends } from "@vibest/core/session/sends"
 import { Spawn } from "@vibest/core/session/spawn"
+import { Summaries } from "@vibest/core/session/summaries"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
@@ -143,14 +144,15 @@ export const pluginsHost = (
     ),
     deps: [
       Agents.node,
-      Archive.node,
       Bus.node,
       Db.node,
       Harnesses.node,
       Hooks.node,
       Runtimes.node,
+      Sends.node,
       SessionLive.node,
       Subscriptions.node,
+      Summaries.node,
       platform,
       home,
     ],

@@ -134,7 +134,7 @@ const claudeEntry = async (
   const delivered = (from: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ? AND status = 'delivered'",
+      "SELECT count(*) AS n FROM inbox WHERE session_id = ?1 AND ?2 IN (sender_session_id, about_session_id) AND status = 'delivered'",
       entryId,
       from,
     )?.n ?? 0
@@ -409,7 +409,7 @@ const checks: ReadonlyArray<Check> = [
         const results = () =>
           row<{ n: number }>(
             w,
-            "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ?",
+            "SELECT count(*) AS n FROM inbox WHERE session_id = ?1 AND ?2 IN (sender_session_id, about_session_id)",
             c!.entryId,
             a,
           )?.n ?? 0

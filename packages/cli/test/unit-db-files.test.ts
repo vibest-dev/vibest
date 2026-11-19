@@ -271,6 +271,20 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("a database at event catalog 2 is refused with the sender rewrite to run, left untouched", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const file = yield* fileAt(yield* tempDirectory("vibest-schema-catalog-2-"), "vibest.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+      yield* writeSql(file, ["UPDATE meta SET value = '2' WHERE key = 'catalog'"])
+      const before = yield* fs.readFile(file)
+      const said = yield* refusal(file)
+      assert.include(said, "stop vibestd, run the one-time sender rewrite (ledger-rewrite-sender)")
+      assert.notInclude(said, "move it aside")
+      assert.deepStrictEqual(yield* fs.readFile(file), before)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("vibestd and import-check refuse a database in the old event shape and point to the CHANGELOG", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

@@ -23,7 +23,6 @@ import { SqlError } from "effect/sql"
 import { Agents } from "./agents.ts"
 import { Bus } from "./bus.ts"
 import { DatabaseOpenFailed, SchemaMismatch } from "./database/db-schema.ts"
-import { Db } from "./database/db.ts"
 import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -43,6 +42,8 @@ import { type AnyPlugin, type Candidate, keyOf, openSources, PluginLoader, plugi
 import { supervise } from "./plugin/supervisor.ts"
 import { logFailure } from "./reactor.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
+import { Sends } from "./session/sends.ts"
+import { Summaries } from "./session/summaries.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 
 export * as Plugins from "./plugin.ts"
@@ -569,12 +570,13 @@ export const node = LayerNode.make({
     builtinsNode,
     Agents.node,
     Bus.node,
-    Db.node,
     Harnesses.node,
     Hooks.node,
     pluginLoaderNode,
     Runtimes.node,
+    Sends.node,
     Subscriptions.node,
+    Summaries.node,
     PlatformNode.crypto,
     PlatformNode.fileSystem,
     PlatformNode.layout,

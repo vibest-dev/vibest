@@ -524,7 +524,7 @@ describe("projectors", () => {
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
-          `SELECT id, session_id, sender_session_id, kind, content, request, peer_item,
+          `SELECT id, session_id, sender_session_id, about_session_id, kind, content, request, peer_item,
             status, execution_id FROM inbox ORDER BY session_id = '${SUB}' DESC, id`,
         ),
         [
@@ -532,6 +532,7 @@ describe("projectors", () => {
             id: task,
             sessionId: SUB,
             senderSessionId: MAIN,
+            aboutSessionId: null,
             kind: "task",
             content: "fix it",
             request: "r-1",
@@ -542,7 +543,8 @@ describe("projectors", () => {
           {
             id: result,
             sessionId: MAIN,
-            senderSessionId: SUB,
+            senderSessionId: null,
+            aboutSessionId: SUB,
             kind: "notice",
             content: "",
             request: null,
@@ -554,6 +556,7 @@ describe("projectors", () => {
             id: notice,
             sessionId: MAIN,
             senderSessionId: null,
+            aboutSessionId: null,
             kind: "notice",
             content: "remote done",
             request: null,

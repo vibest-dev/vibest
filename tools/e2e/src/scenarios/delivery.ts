@@ -132,7 +132,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; recipient: string | null; content: string }>(
             w,
-            "SELECT status, session_id AS recipient, content FROM inbox WHERE sender_session_id = ? AND kind = 'notice'",
+            "SELECT status, session_id AS recipient, content FROM inbox WHERE about_session_id = ? AND kind = 'notice'",
             id,
           )
 
@@ -248,7 +248,7 @@ const sendChecks: ReadonlyArray<Check> = [
         expect(
           countFacts(
             w,
-            "type = 'inbox.queued' AND json_extract(data, '$.sender') = ? AND json_extract(data, '$.recipient') = ?",
+            "type = 'inbox.queued' AND json_extract(data, '$.sender.session') = ? AND json_extract(data, '$.recipient') = ?",
             id,
             siblingId,
           ) === 0,
@@ -308,7 +308,7 @@ const sendChecks: ReadonlyArray<Check> = [
         expect(
           countFacts(
             w,
-            "type = 'inbox.queued' AND json_extract(data, '$.kind') = 'send' AND json_extract(data, '$.sender') = ?",
+            "type = 'inbox.queued' AND json_extract(data, '$.kind') = 'send' AND json_extract(data, '$.sender.session') = ?",
             id,
           ) === 0,
           `an inbox.queued names ${id} as sender`,
@@ -360,7 +360,7 @@ const sendChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
-            "SELECT status, sender_session_id AS sender FROM inbox WHERE session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
+            "SELECT status, about_session_id AS sender FROM inbox WHERE session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
             entryId,
           )
 
@@ -516,9 +516,9 @@ const checks: ReadonlyArray<Check> = [
           entryModel.requests.length === asked,
           `the entry session's model got ${entryModel.requests.length - asked} more requests`,
         )
-        expect(inboxRows(w, "sender_session_id = ?", id) === 0, `rows sent by ${id}`)
+        expect(inboxRows(w, "? IN (sender_session_id, about_session_id)", id) === 0, `rows sent by ${id}`)
         expect(
-          countFacts(w, "type = 'inbox.queued' AND json_extract(data, '$.sender') = ?", id) === 0,
+          countFacts(w, "type = 'inbox.queued' AND json_extract(data, '$.sender.session') = ?", id) === 0,
           `an inbox.queued names ${id} as sender`,
         )
       } finally {
@@ -558,7 +558,10 @@ const checks: ReadonlyArray<Check> = [
           () => inboxRows(w, "session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 1,
           10_000,
         )
-        expect(inboxRows(w, "sender_session_id = ?", sub) === 0, "the subagent sent or notified something")
+        expect(
+          inboxRows(w, "? IN (sender_session_id, about_session_id)", sub) === 0,
+          "the subagent sent or notified something",
+        )
 
         const executions = rows<{ status: string }>(
           w,

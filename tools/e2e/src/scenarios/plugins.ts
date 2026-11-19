@@ -4,6 +4,7 @@ import url from "node:url"
 
 import type { Check } from "../check.ts"
 import { expect, until, type World } from "../world.ts"
+import pluginSessions from "./plugin-sessions.ts"
 
 type Info = {
   id: string
@@ -355,4 +356,4 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
   },
 ]
 
-export default checks
+export default [...checks, ...pluginSessions]

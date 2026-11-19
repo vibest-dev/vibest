@@ -20,7 +20,6 @@ import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machines from "./scenarios/machines.ts"
-import pluginSessions from "./scenarios/plugin-sessions.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
 import restartHc from "./scenarios/restart-hc.ts"
@@ -37,6 +36,7 @@ import {
   harnesses,
   ledgerSnapshot,
   method,
+  plugins as shippedPlugins,
   removeExpiredWorlds,
   removeWorldDir,
   Skip,
@@ -49,7 +49,7 @@ const areas = {
   agy,
   daemon,
   project,
-  plugins: [...plugins, ...pluginSessions],
+  plugins,
   harness,
   integration: [...integration, ...cursor],
   update,
@@ -270,7 +270,16 @@ const print = (r: Result) =>
 
 const t0 = Date.now()
 const results = new Map<string, Result>()
-const keyOf = await cacheKeys({ login, binaries: [binary, compiled], harnesses, method, userFiles: userFilesBefore })
+
+const keyOf = await cacheKeys({
+  login,
+  binaries: [binary, compiled],
+  harnesses,
+  plugins: shippedPlugins,
+  method,
+  userFiles: userFilesBefore,
+})
+
 const keys = new Map(await Promise.all(selected.map(async (c) => [c.id, await keyOf(c.area, c.id)] as const)))
 const cacheable = (c: (typeof checks)[number]) => !noCache && (c.check.tier ?? "gate") !== "agent"
 

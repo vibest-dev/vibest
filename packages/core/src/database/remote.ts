@@ -106,7 +106,11 @@ export const statements = Effect.gen(function* () {
       Effect.map(([row]): AgentSender | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
     )
 
-  return { ofPeer, origins, queueForPeer, senderOf }
+  const peerName = (id: string) =>
+    sql<{ name: string }>`SELECT name FROM machine WHERE vibestd_id = ${id}
+      UNION ALL SELECT name FROM peer WHERE id = ${id}`.pipe(Effect.map((rows) => rows[0]?.name))
+
+  return { ofPeer, origins, queueForPeer, senderOf, peerName }
 })
 
 export type Statements = Effect.Success<typeof statements>
@@ -263,13 +267,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       senderOf: Effect.fn("Db.remote.senderOf")((sessionId: string) => remote.senderOf(sessionId).pipe(Effect.orDie)),
 
-      nameForPeer: Effect.fn("Db.remote.nameForPeer")((id: string) =>
-        sql<{ name: string }>`SELECT name FROM machine WHERE vibestd_id = ${id}
-          UNION ALL SELECT name FROM peer WHERE id = ${id}`.pipe(
-          Effect.map((rows) => rows[0]?.name),
-          Effect.orDie,
-        ),
-      ),
+      nameForPeer: Effect.fn("Db.remote.nameForPeer")((id: string) => remote.peerName(id).pipe(Effect.orDie)),
 
       peerKnown: Effect.fn("Db.remote.peerKnown")((id: string) =>
         sql`SELECT 1 FROM peer WHERE id = ${id}`.pipe(

@@ -395,6 +395,17 @@ describe("another machine's vibestd runs agents here", () => {
       )
 
       assert.deepStrictEqual(row, [{ parent: null, origin: A_ENTRY }])
+
+      const [task] = yield* b.run(
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) =>
+            sql<{ sender: string }>`SELECT sender FROM inbox WHERE session_id = ${spawned.session} AND kind = 'task'`,
+        ),
+      )
+
+      assert.include(JSON.parse(task!.sender), { session: A_ENTRY }, "the task is from A's entry session")
+      assert.isString(JSON.parse(task!.sender).machine)
       assert.strictEqual((yield* b.spawn(call, request)).session, spawned.session, "the same request")
 
       const noCommit = yield* Effect.flip(

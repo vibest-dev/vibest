@@ -30,36 +30,37 @@ describe("cache key", () => {
     expect(hashes.size).toBe(1)
   })
 
-  test("changes when the compiled binary behind a stable launcher changes", async () => {
+  test("changes when the compiled binary behind a stable launcher, or a shipped plugin, changes", async () => {
     const root = await temp()
     const launcher = path.join(root, "vibest.cjs")
     const compiled = path.join(root, "vibest")
+    const plugin = path.join(root, "plugins", "p", "index.js")
     await fs.mkdir(path.join(root, "harnesses"))
+    await fs.mkdir(path.dirname(plugin), { recursive: true })
     await fs.writeFile(launcher, "launcher")
     await fs.writeFile(compiled, "core 1")
+    await fs.writeFile(plugin, "plugin 1")
 
-    const key = await cacheKeys({
-      login: {},
-      binaries: [launcher, compiled],
-      harnesses: path.join(root, "harnesses"),
-      method: "npm",
-      userFiles: {},
-    })
+    const key = async () =>
+      (
+        await cacheKeys({
+          login: {},
+          binaries: [launcher, compiled],
+          harnesses: path.join(root, "harnesses"),
+          plugins: path.join(root, "plugins"),
+          method: "npm",
+          userFiles: {},
+        })
+      )("daemon", "D1")
 
-    const before = await key("daemon", "D1")
+    const before = await key()
     await fs.writeFile(compiled, "core 2")
+    const afterBinary = await key()
+    await fs.writeFile(plugin, "plugin 2")
+    const afterPlugin = await key()
 
-    const after = await (
-      await cacheKeys({
-        login: {},
-        binaries: [launcher, compiled],
-        harnesses: path.join(root, "harnesses"),
-        method: "npm",
-        userFiles: {},
-      })
-    )("daemon", "D1")
-
-    expect(after).not.toBe(before)
+    expect(afterBinary).not.toBe(before)
+    expect(afterPlugin).not.toBe(afterBinary)
   }, 60_000)
 
   test("a run whose invariants failed caches none of its passes", async () => {

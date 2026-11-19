@@ -264,31 +264,34 @@ describe("Db", () => {
       ),
   )
 
-  it.effect("a plugin's request queues once even when the repeat resolves to another recipient", () =>
-    memory(
-      Effect.gen(function* () {
-        const db = yield* Db.Service
-        const sql = yield* SqlClient.SqlClient
-        const [x, y] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
-        yield* db.session.insertSession(session(x), yield* projectOf("r"))
-        yield* db.session.insertSession(session(y), yield* projectOf("r"))
-        const first = yield* db.inbox.insertSend(x, "remind", { plugin: "p" }, "p:x:1")
-        assert.isTrue(yield* db.inbox.pluginQueued("p", "p:x:1"))
-        assert.isFalse(yield* db.inbox.pluginQueued("other", "p:x:1"))
-        assert.deepStrictEqual(yield* db.inbox.insertSend(y, "remind", { plugin: "p" }, "p:x:1"), first)
-        assert.isDefined(yield* db.inbox.insertSend(y, "remind", { plugin: "other" }, "p:x:1"))
-        assert.deepStrictEqual(
-          yield* sql<{
-            session: string
-            sender: string
-          }>`SELECT session_id AS session, sender FROM inbox ORDER BY session_id`,
-          [
-            { session: x, sender: '{"plugin":"p"}' },
-            { session: y, sender: '{"plugin":"other"}' },
-          ],
-        )
-      }),
-    ),
+  it.effect(
+    "a request queues once per sender, whatever the recipient; the same request from another sender queues",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db.Service
+          const sql = yield* SqlClient.SqlClient
+          const [x, y] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
+          yield* db.session.insertSession(session(x), yield* projectOf("r"))
+          yield* db.session.insertSession(session(y), yield* projectOf("r"))
+          const first = yield* db.inbox.insertSend(x, "remind", { plugin: "p" }, "r1")
+          assert.deepStrictEqual(yield* db.inbox.insertSend(y, "remind", { plugin: "p" }, "r1"), first)
+          assert.isDefined(yield* db.inbox.insertSend(y, "remind", { plugin: "other" }, "r1"))
+          assert.isDefined(yield* db.inbox.insertSend(y, "typed", "user", "r1"))
+          assert.isTrue(yield* db.inbox.queuedFrom("user", "r1"))
+          assert.deepStrictEqual(
+            yield* sql<{
+              session: string
+              senderKey: string
+            }>`SELECT session_id AS session, sender_key FROM inbox ORDER BY session_id, id`,
+            [
+              { session: x, senderKey: "plugin:p" },
+              { session: y, senderKey: "plugin:other" },
+              { session: y, senderKey: "user" },
+            ],
+          )
+        }),
+      ),
   )
 
   it.effect("startObserved keeps an execution that is already open and does not record the typed text", () =>
@@ -631,7 +634,7 @@ describe("Db", () => {
           const noticeStatus = (content: string) =>
             Effect.map(
               sql<{ status: string }>`SELECT status FROM inbox
-              WHERE sender_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${noticeEnvelope(content)}`,
+              WHERE about_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${noticeEnvelope(content)}`,
               (rows) => rows.map((row) => row.status).join(),
             )
 

@@ -20,7 +20,7 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
-import { localSessionOf } from "../database/db-rows.ts"
+import { localSessionOf, senderKey } from "../database/db-rows.ts"
 
 const sessionIdOf = (fact: Fact) => fact.sessionId!
 
@@ -170,8 +170,10 @@ export const layer = Layer.effectDiscard(
       active((fact) => {
         const { data } = fact
 
-        return sql`INSERT INTO inbox (session_id, id, sender, sender_session_id, kind, content, request, peer_item, status, queued_at)
-          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${JSON.stringify(data.sender)}, ${localSessionOf(data.sender) ?? data.about ?? null}, ${data.kind}, ${data.content},
+        return sql`INSERT INTO inbox (session_id, id, sender, sender_key, sender_session_id, about_session_id, kind, content,
+            request, peer_item, status, queued_at)
+          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${JSON.stringify(data.sender)}, ${senderKey(data.sender)},
+            ${localSessionOf(data.sender) ?? null}, ${data.about ?? null}, ${data.kind}, ${data.content},
             ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.at})`
       }),
     )

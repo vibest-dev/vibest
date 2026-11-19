@@ -19,7 +19,7 @@ import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
 import { until, yieldToIo } from "./lib/observe.ts"
 import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
-import { memoryDb } from "./platform/bun.ts"
+import { memoryPluginHost } from "./platform/bun.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
@@ -285,7 +285,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(memoryDb),
+      Effect.provide(memoryPluginHost),
     ),
   )
 
@@ -317,7 +317,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(memoryDb),
+      Effect.provide(memoryPluginHost),
     ),
   )
 
@@ -364,7 +364,7 @@ describe("plugins: spawn hook", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(memoryDb),
+        Effect.provide(memoryPluginHost),
       ),
   )
 })
@@ -392,7 +392,7 @@ const loaded = (dir: string) =>
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(memoryDb),
+    Layer.provide(memoryPluginHost),
     Layer.provide(Hooks.layer),
     Layer.build,
     Effect.map(Context.get(Plugins.Service)),

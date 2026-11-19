@@ -1,5 +1,5 @@
 {
-  "protocol": 12,
+  "protocol": 13,
   "capabilities": {
     "http": true,
     "handoff": true,

@@ -33,7 +33,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "../../platform-bun/src/bun.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryDb } from "./platform/bun.ts"
+import { memoryPluginHost } from "./platform/bun.ts"
 
 const events: Array<string> = []
 
@@ -94,7 +94,7 @@ const host = <A, E>(
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
-    Effect.provide(memoryDb),
+    Effect.provide(memoryPluginHost),
     Effect.provide(Hooks.layer),
   )
 
@@ -377,7 +377,7 @@ const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(memoryDb),
+    Layer.provide(memoryPluginHost),
     Layer.provide(Hooks.layer),
     Layer.build,
     Effect.map(Context.get(Plugins.Service)),
@@ -705,7 +705,7 @@ describe("plugins: supervisor", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(memoryDb),
+        Effect.provide(memoryPluginHost),
       )
     }),
   )
@@ -753,7 +753,7 @@ describe("plugins: supervisor", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(memoryDb),
+        Effect.provide(memoryPluginHost),
       )
     }),
   )

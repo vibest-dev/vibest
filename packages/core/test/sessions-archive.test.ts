@@ -153,7 +153,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const rows = yield* sql<{
         kind: string
         status: string
-      }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE m.sender_session_id = ${w.id} ORDER BY m.id`.pipe(
+      }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE (m.sender_session_id = ${w.id} OR m.about_session_id = ${w.id}) ORDER BY m.id`.pipe(
         Effect.orDie,
       )
 

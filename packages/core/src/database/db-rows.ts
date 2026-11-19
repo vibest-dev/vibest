@@ -191,6 +191,12 @@ export const attemptsOf = (raw: string | null) => {
   return seen
 }
 
+export const senderKey = (sender: Sender) => {
+  if (Predicate.isString(sender)) return sender
+
+  return "plugin" in sender ? `plugin:${sender.plugin}` : `${sender.machine ?? ""}/${sender.session}`
+}
+
 export const localSessionOf = (sender: Sender) =>
   Predicate.isString(sender) || "plugin" in sender || sender.machine !== undefined ? undefined : sender.session
 

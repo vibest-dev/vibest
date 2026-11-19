@@ -73,12 +73,13 @@ export const cacheKeys = async (o: {
   readonly login: Readonly<Record<string, string>>
   readonly binaries: ReadonlyArray<string>
   readonly harnesses: string
+  readonly plugins: string
   readonly method: string
   readonly userFiles: Record<string, string>
 }) => {
   const env = o.login
 
-  const [binaries, harnesses, runner, versions] = await Promise.all([
+  const [binaries, harnesses, plugins, runner, versions] = await Promise.all([
     Promise.all(
       [...new Set(o.binaries)].map((file) =>
         Bun.file(file)
@@ -87,6 +88,7 @@ export const cacheKeys = async (o: {
       ),
     ),
     tree(o.harnesses, writtenByHarness),
+    tree(o.plugins),
     tree(src, (rel) => rel.startsWith("scenarios/")),
     Promise.all(TOOLS.map((argv) => version(argv, env))),
   ])
@@ -94,6 +96,7 @@ export const cacheKeys = async (o: {
   const base = sha(
     ...binaries,
     harnesses,
+    plugins,
     runner,
     ...versions,
     o.method,

@@ -289,9 +289,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   recipient: row.id,
                   kind: "task",
                   sender:
-                    parentSessionId === undefined
-                      ? "user"
-                      : ((yield* remote.senderOf(parentSessionId)) ?? { session: parentSessionId }),
+                    parentSessionId !== undefined
+                      ? ((yield* remote.senderOf(parentSessionId)) ?? { session: parentSessionId })
+                      : origin?.reportTo !== undefined
+                        ? { session: origin.reportTo, machine: (yield* remote.peerName(origin.peer)) ?? origin.peer }
+                        : "user",
                   content: task,
                   status: "delivered",
                   request,

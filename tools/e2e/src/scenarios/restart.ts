@@ -857,7 +857,7 @@ export default Plugin.define({
             try {
               return db
                 .query<{ content: string }, [string]>(
-                  `SELECT content FROM inbox WHERE sender_session_id = ? AND kind = 'notice' ORDER BY id`,
+                  `SELECT content FROM inbox WHERE about_session_id = ? AND kind = 'notice' ORDER BY id`,
                 )
                 .all(id)
                 .map((r) => r.content)

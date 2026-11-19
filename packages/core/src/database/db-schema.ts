@@ -47,8 +47,11 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   override get message() {
     const file = this.file ?? "vibest.db"
 
-    if (this.catalog !== undefined)
+    if (this.catalog !== undefined && this.catalog > CATALOG_VERSION)
       return `${file} was written by a newer vibest (event catalog ${this.catalog}, this vibest knows ${CATALOG_VERSION}): run vibest update`
+
+    if (this.catalog !== undefined)
+      return `${file} holds event catalog ${this.catalog}, from before one sender type for every message (this vibest knows ${CATALOG_VERSION}): stop vibestd, run the one-time sender rewrite (ledger-rewrite-sender) on it, then start vibestd again`
     const aside = `To start empty, with vibestd stopped, move it aside with its -wal and -shm files: for f in ${["", "-wal", "-shm"].map((suffix) => shellQuote(file + suffix)).join(" ")}; do [ -e "$f" ] && mv "$f" "$f.old"; done (the sessions, results and queued messages it holds are lost; agents still running keep running, but vibest no longer knows them)`
 
     if (this.oldEvents)
@@ -62,6 +65,8 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
     return `${file} is not this vibest's schema (application_id ${id}, v${this.version}${extra}). ${aside}`
   }
 }
+
+const SENDER_REWRITE_FROM = 2
 
 export const mismatch = (version: number, applicationId: number, detail?: string) =>
   new SchemaMismatch({ version, applicationId, ...(detail !== undefined && { detail }) })
@@ -97,7 +102,13 @@ export const inspectSchema = Effect.gen(function* () {
 
   if (catalog > CATALOG_VERSION) return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
 
-  if (catalog < CATALOG_VERSION || (yield* ledgerOf(sql)) === undefined)
+  if ((yield* ledgerOf(sql)) === undefined)
+    return yield* new SchemaMismatch({ version: userVersion, applicationId, oldEvents: true })
+
+  if (catalog === SENDER_REWRITE_FROM)
+    return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
+
+  if (catalog < CATALOG_VERSION)
     return yield* new SchemaMismatch({ version: userVersion, applicationId, oldEvents: true })
   const rebuilt = (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
 
@@ -115,7 +126,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 13
+export const PROJECTION_VERSION = 14
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -189,7 +200,9 @@ export const PROJECTION_SCHEMA = [
     session_id        TEXT    NOT NULL,
     id                INTEGER NOT NULL,
     sender            TEXT    NOT NULL,
+    sender_key        TEXT    NOT NULL,
     sender_session_id TEXT,
+    about_session_id  TEXT,
     kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
     content           TEXT    NOT NULL,
     request           TEXT,
@@ -202,8 +215,9 @@ export const PROJECTION_SCHEMA = [
   `CREATE INDEX inbox_status ON inbox (status, session_id)`,
   `CREATE INDEX inbox_kind ON inbox (session_id, kind, id)`,
   `CREATE INDEX inbox_sender ON inbox (sender_session_id, queued_at) WHERE sender_session_id IS NOT NULL`,
+  `CREATE INDEX inbox_about ON inbox (about_session_id) WHERE about_session_id IS NOT NULL`,
   `CREATE INDEX inbox_execution ON inbox (session_id, execution_id) WHERE execution_id IS NOT NULL`,
-  `CREATE INDEX inbox_request ON inbox (request) WHERE request IS NOT NULL`,
+  `CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request) WHERE request IS NOT NULL`,
   `CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL`,
   `CREATE TABLE machine (
     name         TEXT PRIMARY KEY,

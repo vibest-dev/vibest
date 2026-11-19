@@ -3,6 +3,7 @@ import { Harness } from "@vibest/core/harness"
 import { makePlugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { memoryPluginHost } from "@vibest/core/test/platform/bun"
 import {
   agentsLayer,
   runtimesLayer,
@@ -12,7 +13,6 @@ import {
   runVibest,
   testLayer,
 } from "@vibest/platform-bun/test/lib/fakes"
-import { database, memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
 import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
@@ -504,8 +504,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(agentsLayer),
-        Effect.provide(memoryBus),
-        Effect.provide(database(":memory:")),
+        Effect.provide(memoryPluginHost),
         Effect.scoped,
       )
 
