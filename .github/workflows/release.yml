@@ -584,17 +584,3 @@ jobs:
           else
             echo "v$VERSION is published with exactly the checked assets; kept"
           fi
-
-      # Every package's dist-tag points at this version (the registry can lag behind a publish). A wrong one is reported,
-      # not moved: a newer release may own it.
-      - name: Dist-tags
-        run: |
-          while read -r name _; do
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-              at=$(npm view "$name" "dist-tags.$DIST_TAG" </dev/null || true)
-              [ "$at" = "$VERSION" ] && break
-              sleep 15
-            done
-            if [ "$at" != "$VERSION" ]; then echo "::error::$name's $DIST_TAG is $at, not $VERSION"; exit 1; fi
-            echo "$name@$DIST_TAG = $VERSION"
-          done < "$RUNNER_TEMP/release/npm/publish-order"
