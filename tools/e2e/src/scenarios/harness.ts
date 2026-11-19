@@ -94,6 +94,9 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       const bin = path.join(w.root, "no-harness-bin")
       await fs.mkdir(bin, { recursive: true })
+      const node = Bun.which("node")
+
+      if (node !== null) await fs.symlink(node, path.join(bin, "node"))
       const env = { PATH: bin + ":/usr/bin:/bin" }
 
       try {
