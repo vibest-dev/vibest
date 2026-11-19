@@ -113,3 +113,15 @@ message during the execution, an entry session, and a failed or interrupted exec
 ended while the plugin was not loaded, or while vibestd was restarting, is reported once when it loads: the plugin
 checks each session's latest execution then. Without the plugin, nothing is sent. A message the subagent sends to a
 session it started on another machine does not count as sending: it is not a report to the session that started it.
+
+## G19. Stopping idle subagents
+
+vibest ships the plugin `vibest.idle-stop`, not loaded by default; writing `"vibest.idle-stop"` in `plugins` of
+`~/.vibest/vibest.json` turns it on, and `{ "package": "vibest.idle-stop", "options": { "idleMinutes": <n> } }` sets how
+long a session must be idle (30 minutes by default). It looks at the running sessions every few minutes (every
+`idleMinutes` when that is shorter) and stops, as `vibest stop` does (S58), each subagent idle that long: no
+execution open, nothing it sent or was sent still waiting. The process's end is recorded as stopped by the plugin, and
+the session that started it receives one message from the plugin: "<title> (<id>) was idle for 30 minutes and was
+stopped. Send it a message with vibest send to resume it; archive it with vibest archive when you no longer need it."
+The entry session and a session with an open execution keep running. The plugin keeps no state of its own: it reads
+each session's last activity, so a vibestd restart changes nothing.

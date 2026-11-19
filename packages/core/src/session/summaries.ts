@@ -23,7 +23,15 @@ export const make = Effect.gen(function* () {
               endedAt: last.endedAt,
             }
 
-      return { id: row.id, title: row.name, parentId: row.parentId, status: row.status, latest }
+      return {
+        id: row.id,
+        title: row.name,
+        parentId: row.parentId,
+        status: row.status,
+        lastActive: row.lastActive,
+        waiting: row.openExecution !== null || (yield* db.inbox.waitingOn(row.id)),
+        latest,
+      }
     })
 
   return {

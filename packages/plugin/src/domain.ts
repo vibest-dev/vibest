@@ -18,6 +18,8 @@ export interface PluginSession {
   readonly title: string
   readonly parentId: string | null
   readonly status: AgentStatus
+  readonly lastActive: number
+  readonly waiting: boolean
   readonly latest: {
     readonly execution: number
     readonly outcome: ExecutionOutcome
