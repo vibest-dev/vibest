@@ -216,8 +216,8 @@ session, so a row is named by both.
   repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The
   unique index `inbox_request` backs it: a second row would fail its transaction.
 - A send from a local agent session names the execution it had open (`execution` on `inbox.queued` and
-  `outbox.queued`); each raises that execution's `sent`, which a plugin's `ctx.session` reads, also after an outbox
-  row is acknowledged and gone. A send forwarded straight to a session on another machine (one this session started
+  `outbox.queued`); each raises that execution's `sent`, which a plugin's `ctx.session` reads, also after the outbox
+  row is acknowledged. A send forwarded straight to a session on another machine (one this session started
   there) writes no local fact and is not counted.
 - An execution end writes no inbox row. The recipient of a `notice` is `parent_session_id` while it lives, then the entry
   session, then `origin_session` through the outbox; an undeliverable `send` notifies its sender.

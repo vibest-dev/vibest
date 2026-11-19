@@ -68,7 +68,7 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(SessionEnded, (fact) =>
       Effect.andThen(
         sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
-        sql`DELETE FROM outbox WHERE session_id = ${sessionIdOf(fact)}`,
+        sql`DELETE FROM outbox WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
       ),
     )
 

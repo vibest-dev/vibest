@@ -126,7 +126,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 15
+export const PROJECTION_VERSION = 16
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -243,9 +243,10 @@ export const PROJECTION_SCHEMA = [
     from_agent   TEXT,
     from_title   TEXT,
     from_machine TEXT,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    acked_at   INTEGER
   ) STRICT`,
-  `CREATE INDEX outbox_peer ON outbox (peer_id, seq)`,
+  `CREATE INDEX outbox_peer ON outbox (peer_id, seq) WHERE acked_at IS NULL`,
   `CREATE INDEX outbox_session ON outbox (session_id)`,
 ]
 

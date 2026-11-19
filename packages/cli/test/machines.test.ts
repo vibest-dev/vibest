@@ -457,7 +457,7 @@ describe("another machine's vibestd runs agents here", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("a result goes to the outbox, not to B's inbox delivery; the stream sends it and Ack deletes it", () =>
+  it.effect("a result goes to the outbox, not to B's inbox delivery; the stream sends it and Ack settles it", () =>
     Effect.gen(function* () {
       const b = yield* peerB
       const a = randomId()

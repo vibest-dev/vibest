@@ -258,7 +258,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           : tx(
               Effect.gen(function* () {
                 const found = yield* sql<{ id: string }>`SELECT id FROM outbox WHERE peer_id = ${peer}
-                  AND ${sql.in("id", ids)} ORDER BY seq`
+                  AND acked_at IS NULL AND ${sql.in("id", ids)} ORDER BY seq`
 
                 const [first, ...rest] = found.map((row) => row.id)
 

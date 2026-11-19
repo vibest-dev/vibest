@@ -44,7 +44,9 @@ export const layer = Layer.effectDiscard(
     )
     yield* bus.project(
       OutboxAcked,
-      (fact) => sql`DELETE FROM outbox WHERE peer_id = ${fact.data.peer} AND ${sql.in("id", fact.data.ids)}`,
+      (fact) =>
+        sql`UPDATE outbox SET acked_at = ${fact.at}
+          WHERE peer_id = ${fact.data.peer} AND acked_at IS NULL AND ${sql.in("id", fact.data.ids)}`,
     )
   }),
 )

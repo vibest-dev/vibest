@@ -345,7 +345,7 @@ describe("projectors", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
         { endedAt: 700 },
       ])
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox"), [])
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox WHERE acked_at IS NULL"), [])
     }).pipe(Effect.provide(memory())),
   )
 
@@ -599,7 +599,7 @@ describe("projectors", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [])
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM peer"), [{ id: PEER, name: "mac2", connectedAt: 170 }])
       const [queued] = yield* sql<{ seq: number }>`SELECT seq FROM event WHERE type = 'outbox.queued' ORDER BY seq DESC`
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM outbox"), [
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM outbox WHERE acked_at IS NULL"), [
         {
           id: ITEM_2,
           seq: queued!.seq,
@@ -613,6 +613,7 @@ describe("projectors", () => {
           fromTitle: null,
           fromMachine: null,
           createdAt: 511,
+          ackedAt: null,
         },
       ])
       yield* bus.transaction(

@@ -129,6 +129,8 @@ describe("sends from sessions", () => {
             peer,
             (yield* db.remote.outboxOf(peer)).map((row) => row.id),
           )
+          assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
+          assert.lengthOf(yield* db.remote.outboxOf(peer), 0, "a retry of an acknowledged request is not sent again")
           assert.strictEqual(
             yield* db.inbox.sentIn(X, execution),
             2,
