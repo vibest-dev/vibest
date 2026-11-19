@@ -8,6 +8,9 @@ import type {
   MachineHooks,
   MachineNote,
   PluginOptions,
+  PluginSession,
+  SessionSend,
+  SessionSendFailed,
   SubscriptionReport,
 } from "../domain.ts"
 import type { EventDomain } from "./event.ts"
@@ -28,6 +31,12 @@ export interface MachineDomain {
   ) => Effect.Effect<Registration, never, Scope.Scope>
 }
 
+export interface SessionDomain {
+  readonly list: () => Effect.Effect<ReadonlyArray<PluginSession>>
+  readonly get: (id: string) => Effect.Effect<PluginSession | undefined>
+  readonly send: (input: SessionSend) => Effect.Effect<void, SessionSendFailed>
+}
+
 interface SubscriptionDomain {
   readonly report: (input: SubscriptionReport) => Effect.Effect<void>
 }
@@ -40,6 +49,7 @@ export interface Context {
   readonly harness: HarnessDomain
   readonly subscription: SubscriptionDomain
   readonly event: EventDomain
+  readonly session: SessionDomain
 }
 
 export interface Plugin {

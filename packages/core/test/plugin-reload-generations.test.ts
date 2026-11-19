@@ -9,7 +9,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "../../platform-bun/src/bun.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
-import { memoryBus } from "./platform/bun.ts"
+import { memoryDb } from "./platform/bun.ts"
 
 const events: Array<string> = []
 
@@ -103,7 +103,7 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(Layer.effect(Layout, Layout.make(dir))),
           Layer.provide(runtimesLayer),
           Layer.provide(Agents.layer),
-          Layer.provide(memoryBus),
+          Layer.provide(memoryDb),
           Layer.provide(Hooks.layer),
           Layer.build,
           Effect.map(Context.get(Plugins.Service)),

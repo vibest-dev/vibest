@@ -55,8 +55,10 @@ export const noticeEnvelope = (message: string) => envelope("vibest-message", []
 export const envelopeFrom = (sender: Sender, message: string) => {
   if (sender === "user") return message
 
-  return Predicate.isString(sender) || "plugin" in sender
-    ? noticeEnvelope(message)
+  if (Predicate.isString(sender)) return noticeEnvelope(message)
+
+  return "plugin" in sender
+    ? envelope("vibest-message", [["plugin", sender.plugin]], ["message", message])
     : sessionEnvelope(sender.session, message)
 }
 

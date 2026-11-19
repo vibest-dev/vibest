@@ -23,6 +23,7 @@ import { SqlError } from "effect/sql"
 import { Agents } from "./agents.ts"
 import { Bus } from "./bus.ts"
 import { DatabaseOpenFailed, SchemaMismatch } from "./database/db-schema.ts"
+import { Db } from "./database/db.ts"
 import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -568,6 +569,7 @@ export const node = LayerNode.make({
     builtinsNode,
     Agents.node,
     Bus.node,
+    Db.node,
     Harnesses.node,
     Hooks.node,
     pluginLoaderNode,

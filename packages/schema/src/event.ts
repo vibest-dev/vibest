@@ -95,6 +95,8 @@ export const ExecutionStarted = fact("execution.started", "session", {
 export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
 
+export type ExecutionOutcome = typeof ExecutionOutcome.Type
+
 export const ExecutionEnded = fact("execution.ended", "session", {
   execution: Seq,
   outcome: ExecutionOutcome,

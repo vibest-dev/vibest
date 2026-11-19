@@ -81,6 +81,11 @@ export const fromPromise =
         harness: definitions(host.harness),
         subscription: { report: (input) => run(host.subscription.report(input)) },
         event: { subscribe: (input) => iterable(host.event.subscribe(input)) },
+        session: {
+          list: () => run(host.session.list()),
+          get: (id) => run(host.session.get(id)),
+          send: (input) => run(host.session.send(input)),
+        },
       }
 
       yield* Effect.acquireRelease(

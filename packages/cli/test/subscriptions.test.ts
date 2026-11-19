@@ -12,7 +12,7 @@ import {
   runVibest,
   testLayer,
 } from "@vibest/platform-bun/test/lib/fakes"
-import { memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { database, memoryBus } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { claude, claudePlugin, cursor, pi, piPlugin } from "@vibest/plugin-harnesses"
 import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
@@ -144,6 +144,7 @@ const fakeMachine = (options: {
         harness: { transform: (edit) => Effect.sync(() => (edit(editor), registration)) },
         subscription: { report: () => Effect.void },
         event: { subscribe: () => Stream.never },
+        session: { list: () => Effect.succeed([]), get: () => Effect.succeed(undefined), send: () => Effect.void },
       }
 
       yield* plugin.effect(ctx)
@@ -504,6 +505,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         Effect.provide(runtimesLayer),
         Effect.provide(agentsLayer),
         Effect.provide(memoryBus),
+        Effect.provide(database(":memory:")),
         Effect.scoped,
       )
 

@@ -153,7 +153,7 @@ started, an entry session) cannot answer results with results (rule 4), and that
 
 **Packages.** Most workspace packages export `./*` → `./src/*.ts`, so an import names the module
 (`@vibest/core/database/db`); `plugin`, `builtins`, the herdr SDKs and `integration/cursor` export named entries
-(`@vibest/plugin/effect`, `@vibest/plugin/testing`). A module imports a name from the module that defines it (no re-exports of other
+(`@vibest/plugin/effect`, `@vibest/plugin/testing`; host-side helpers that vibestd and the builtin plugins share, such as `capture` and `isLimited`, are on `@vibest/plugin/host`, off the plugin API). A module imports a name from the module that defines it (no re-exports of other
 modules' names, except a domain facade re-exporting its own domain, see below).
 
 | Package                 | Role                                                                                                                                                                                              |
@@ -818,7 +818,7 @@ client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and 
 **Loading and watching:** local plugin changes reload without repeating unchanged imports; failed revisions keep
 the previous one. See [loading and watching](plugin-loading.md#loading-and-watching) for watch and reload details.
 
-**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin` and `@vibest/plugin/effect` instances while local modules reload.
+**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin`, `@vibest/plugin/effect` and `@vibest/plugin/host` instances while local modules reload.
 See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module lifetime details.
 
 **Order:**

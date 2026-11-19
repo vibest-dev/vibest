@@ -5,7 +5,9 @@ import { BunServices, BunSocket } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Bus } from "@vibest/core/bus"
-import { SQL_NAMES } from "@vibest/core/database/db"
+import { Db, SQL_NAMES } from "@vibest/core/database/db"
+import * as Projectors from "@vibest/core/database/projectors"
+import { SessionLive } from "@vibest/core/session/live"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import { Layer } from "effect"
 import { FetchHttpClient } from "effect/http"
@@ -29,3 +31,10 @@ export const services = Layer.mergeAll(
 export const memorySqlite = SqliteClient.layer({ filename: ":memory:", disableWAL: true, ...SQL_NAMES })
 
 export const memoryBus = Bus.layer.pipe(Layer.provide(memorySqlite))
+
+export const memoryDb = Db.layer.pipe(
+  Layer.provide(Projectors.layer),
+  Layer.provideMerge(Bus.layer),
+  Layer.provide(SessionLive.layer),
+  Layer.provide(memorySqlite),
+)

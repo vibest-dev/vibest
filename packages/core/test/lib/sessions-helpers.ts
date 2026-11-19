@@ -3,7 +3,8 @@ import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/db-rows"
 import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
-import { isLimited, Plugin, stillLimited } from "@vibest/plugin/effect"
+import { Plugin } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import type { HarnessId } from "@vibest/schema/session"
 import { Effect, type Scope } from "effect"
 import { SqlClient } from "effect/sql"
@@ -171,7 +172,7 @@ export const chooseNext = Plugin.define({
           if (attempt.outcome !== "limited") continue
 
           if (attempt.provider === undefined) excludedHarnesses.add(attempt.harness)
-          else if (stillLimited(attempt, event.subscriptions))
+          else if (Host.stillLimited(attempt, event.subscriptions))
             excludedPairs.add(pair(attempt.harness, attempt.provider))
         }
 
@@ -190,7 +191,7 @@ export const chooseNext = Plugin.define({
           const rows = event.subscriptions.filter(
             (row) =>
               row.harness === option.harness &&
-              !isLimited(row) &&
+              !Host.isLimited(row) &&
               !excludedPairs.has(pair(option.harness, row.provider)),
           )
 

@@ -179,10 +179,12 @@ CREATE TABLE inbox (                                  -- id: the seq of its inbo
   peer_item         TEXT,                             -- a notice from another vibestd: its outbox item id
   status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
   execution_id      INTEGER,                          -- delivered: the execution that took it
+  queued_at         INTEGER NOT NULL,                 -- the at of its inbox.queued
   PRIMARY KEY (session_id, id)
 ) STRICT;
 CREATE INDEX inbox_status    ON inbox (status, session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'
 CREATE INDEX inbox_kind      ON inbox (session_id, kind, id);
+CREATE INDEX inbox_sender    ON inbox (sender_session_id, queued_at) WHERE sender_session_id IS NOT NULL;
 CREATE INDEX inbox_execution ON inbox (session_id, execution_id) WHERE execution_id IS NOT NULL;
 CREATE INDEX inbox_request   ON inbox (request) WHERE request IS NOT NULL;
 CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL;
@@ -207,6 +209,12 @@ session, so a row is named by both.
   another vibestd), a plugin `{plugin}`, `"vibest"` (every notice) or `"user"` (a send or task with no session). The
   routing column `sender_session_id` is the session of a local agent sender, or a notice's `about`; a relay to the
   nearest living ancestor keeps the sender, so it stays right after the recipient changes.
+- A `request` repeats nothing: a send with the request of a row already queued for the same recipient returns that row;
+  for a plugin sender the match is the plugin and the request whatever the recipient, so a plugin's repeat that a
+  relay sends elsewhere is still one message.
+- The messages a session sent during an execution are the `send` rows with its `sender_session_id` queued between the
+  execution's start and end (a plugin's `ctx.session` reads them as `sent`); a send to another machine goes through
+  the outbox, whose rows go once acknowledged, so it is not counted.
 - An execution end writes no inbox row. The recipient of a `notice` is `parent_session_id` while it lives, then the entry
   session, then `origin_session` through the outbox; an undeliverable `send` notifies its sender.
 

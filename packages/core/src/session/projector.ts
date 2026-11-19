@@ -170,9 +170,9 @@ export const layer = Layer.effectDiscard(
       active((fact) => {
         const { data } = fact
 
-        return sql`INSERT INTO inbox (session_id, id, sender, sender_session_id, kind, content, request, peer_item, status)
+        return sql`INSERT INTO inbox (session_id, id, sender, sender_session_id, kind, content, request, peer_item, status, queued_at)
           VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${JSON.stringify(data.sender)}, ${localSessionOf(data.sender) ?? data.about ?? null}, ${data.kind}, ${data.content},
-            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`
+            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.at})`
       }),
     )
     yield* bus.project(

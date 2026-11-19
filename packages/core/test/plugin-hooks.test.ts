@@ -7,7 +7,7 @@ import { Duration, Deferred, Effect, Fiber, type Schema } from "effect"
 import { TestClock } from "effect/testing"
 
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryBus } from "./platform/bun.ts"
+import { memoryDb } from "./platform/bun.ts"
 
 const candidate = (
   source: string,
@@ -47,7 +47,7 @@ const host = <A, E>(
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
-    Effect.provide(memoryBus),
+    Effect.provide(memoryDb),
     Effect.provide(Hooks.layer),
   )
 

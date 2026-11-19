@@ -117,6 +117,19 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         return local === undefined ? sender : ((yield* remote.senderOf(local)) ?? sender)
       })
 
+    const pluginQueued = (plugin: string, request: string) =>
+      sql<{ session: string; id: number }>`SELECT session_id AS session, id FROM inbox
+        WHERE request = ${request} AND sender = ${JSON.stringify({ plugin })} ORDER BY id LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]),
+      )
+
+    const queuedAs = (recipient: string, request: string, sender: Sender) =>
+      Predicate.isObject(sender) && "plugin" in sender
+        ? pluginQueued(sender.plugin, request)
+        : reads
+            .queuedBy(recipient, request)
+            .pipe(Effect.map((id) => (id === undefined ? undefined : { session: recipient, id })))
+
     const queueSend = (recipient: string, sender: Sender, message: string, request?: string) =>
       Effect.gen(function* () {
         const id = yield* queueInbox({
@@ -235,6 +248,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       queueInbox,
       linkTask,
       queueSend,
+      queuedAs,
+      pluginQueued,
       liveRecipient,
       tellSender,
       insertInboxRow,
@@ -258,6 +273,8 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       findSend,
       moveInbox,
       queueSend,
+      queuedAs,
+      pluginQueued,
       liveRecipient,
       tellSender,
       insertInboxRow,
@@ -270,9 +287,9 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         (recipient: string, message: string, sender: Sender = "user", request?: string) =>
           tx(
             Effect.gen(function* () {
-              const before = request === undefined ? undefined : yield* reads.queuedBy(recipient, request)
+              const before = request === undefined ? undefined : yield* queuedAs(recipient, request, sender)
 
-              if (before !== undefined) return (yield* inboxIn(recipient, [before]))[0]
+              if (before !== undefined) return (yield* inboxIn(before.session, [before.id]))[0]
 
               if (!(yield* liveRecipient(recipient))) return undefined
 
@@ -283,6 +300,21 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
       insertNoticeTo: Effect.fn("Db.inbox.insertNoticeTo")((recipient: string, message: string) =>
         tx(tellSender(recipient, message)).pipe(Effect.orDie),
+      ),
+
+      pluginQueued: Effect.fn("Db.inbox.pluginQueued")((plugin: string, request: string) =>
+        pluginQueued(plugin, request).pipe(
+          Effect.map((row) => row !== undefined),
+          Effect.orDie,
+        ),
+      ),
+
+      sentDuring: Effect.fn("Db.inbox.sentDuring")((sessionId: string, from: number, to: number) =>
+        sql<{ sent: number }>`SELECT count(*) AS sent FROM inbox WHERE sender_session_id = ${sessionId}
+          AND kind = 'send' AND queued_at BETWEEN ${from} AND ${to}`.pipe(
+          Effect.map((rows) => rows[0]?.sent ?? 0),
+          Effect.orDie,
+        ),
       ),
 
       queuedBy: Effect.fn("Db.inbox.queuedBy")((sessionId: string, request: string) =>

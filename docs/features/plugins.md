@@ -94,3 +94,11 @@ without restarting vibestd.
 A plugin is identified by its declared id and the content of its files, not by where the folder is. Moving an unchanged
 plugin folder and updating `vibest.json` to the new path does not set it up again; `vibest plugins` lists it under the
 new path. Changing its declared id makes it a new plugin.
+
+## G17. A plugin reads sessions and sends a message
+
+`ctx.session.get` and `ctx.session.list` give a plugin a session's id, title, parent, status and its latest ended
+execution with how many messages the session sent during it: 0 for a subagent that only replied, 1 for one that ran
+`vibest send` once. `ctx.session.send` queues a message from the plugin itself: the recipient's model sees it in a
+`<vibest-message>` naming the plugin, and the inbox row's sender is the plugin. A repeat with the same `request` queues
+nothing more, and a message to an archived subagent goes to the session that started it.
