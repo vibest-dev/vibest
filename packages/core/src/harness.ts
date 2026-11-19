@@ -12,7 +12,7 @@ import { listModels, type Model } from "./models.ts"
 
 export * as Harness from "./harness.ts"
 
-export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
+export const cliEnv = (vibest: ReadonlyArray<string>) => (vibest.length === 1 ? { VIBEST_CLI: vibest[0]! } : {})
 
 export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
 

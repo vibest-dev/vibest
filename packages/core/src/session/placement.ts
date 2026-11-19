@@ -33,7 +33,7 @@ import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
-import { encodeCommand, Harness } from "../harness.ts"
+import { cliEnv, Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { definitionIn, withProcess, type Launch } from "../launch.ts"
@@ -131,7 +131,7 @@ export const make = Effect.gen(function* () {
     VIBEST_HARNESS: harnessIdOf(session),
     VIBEST_RUNTIME: runtimeEnv(runtimeOf(session), { machine: terminalOf(session).machine, id: "" }),
     VIBEST_HOME: layout.home,
-    VIBEST_COMMAND: encodeCommand(vibest),
+    ...cliEnv(vibest),
   })
 
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
@@ -142,7 +142,6 @@ export const make = Effect.gen(function* () {
       sharer: yield* db.session.earlierSharer(session.id),
       creator: yield* db.session.creatorLabel(session.id),
       projectDir: layout.project(session.projectId),
-      vibest,
       ...(yield* projectText(layout.project(session.projectId))),
     })
   }, provided)

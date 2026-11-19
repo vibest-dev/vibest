@@ -302,7 +302,7 @@ describe("restart in place", () => {
         "VIBEST_HARNESS",
         "VIBEST_RUNTIME",
         "VIBEST_HOME",
-        "VIBEST_COMMAND",
+        "VIBEST_CLI",
       ])
 
       for (const pair of entryRun.env) assert.ok(identity.has(pair.slice(0, pair.indexOf("="))), pair)

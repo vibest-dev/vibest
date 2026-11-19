@@ -114,7 +114,7 @@ const IDENTITY_ENV = [
   "VIBEST_HARNESS",
   "VIBEST_RUNTIME",
   "VIBEST_HOME",
-  "VIBEST_COMMAND",
+  "VIBEST_CLI",
 ] as const
 
 const identityPairs = (env: Readonly<Record<string, string>>) =>
@@ -127,6 +127,11 @@ const identityPairs = (env: Readonly<Record<string, string>>) =>
 const MESSAGE_FROM_FILE = 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"'
 
 const messageFromFile = (argv: ReadonlyArray<string>, file: string) => ["sh", "-c", MESSAGE_FROM_FILE, file, ...argv]
+
+const CLI_FIRST_ON_PATH = 'PATH=${VIBEST_CLI%/*}:$PATH exec "$@"'
+
+const cliFirstOnPath = (env: Readonly<Record<string, string>>, argv: ReadonlyArray<string>) =>
+  env.VIBEST_CLI === undefined ? argv : ["sh", "-c", CLI_FIRST_ON_PATH, "sh", ...argv]
 
 export const launchLine = Effect.fn("launchLine")(function* (launch: Launch) {
   const id = launch.env.VIBEST_SESSION_ID
@@ -141,7 +146,7 @@ export const launchLine = Effect.fn("launchLine")(function* (launch: Launch) {
 
   const prefix = identityPairs(launch.env)
 
-  return prefix.length === 0 ? argv : ["env", ...prefix, ...argv]
+  return prefix.length === 0 ? argv : ["env", ...prefix, ...cliFirstOnPath(launch.env, argv)]
 })
 
 const shellLine = (argv: ReadonlyArray<string>) => argv.map(shellQuote).join(" ")
