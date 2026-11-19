@@ -33,16 +33,20 @@ export const entryFlags = {
   ),
   harness: Flag.String("harness").pipe(
     Flag.withDescription(
-      "The harness for the entry session. Leave it out to keep the last one; a project's first start needs it",
+      "The harness for the entry session. Leave it out to keep the current one. On a project's first start, leave it out to use Claude when Claude can start",
     ),
     Flag.optional,
   ),
   provider: Flag.String("provider").pipe(
-    Flag.withDescription("The provider for --model. Leave it out to keep the last one"),
+    Flag.withDescription(
+      "The provider for --model. Used only when you pass it; leaving it out does not keep the previous one",
+    ),
     Flag.optional,
   ),
   model: Flag.String("model").pipe(
-    Flag.withDescription("The model for the entry session. Leave it out to keep the last one"),
+    Flag.withDescription(
+      "The model for the entry session. Used only when you pass it. Leaving it out, including with --new, does not keep the previous model",
+    ),
     Flag.optional,
   ),
   session: sessionFlag,
@@ -80,13 +84,13 @@ const daemon = Spec.make("daemon", {
 
 const run = Spec.make("run", {
   description:
-    "Start a session on a task and print its id. Only an agent in a session runs this; a person opens a session with bare vibest. Leave the harness out to use your own. An execution end sends nothing: the session messages with vibest send, and its latest reply is vibest result. Each session gets its own worktree, detached and on no branch; in a project of several repositories, one worktree of each, side by side. Do not tell the session to make its own worktree, clone or copy. A plugin's harness choice shows on the session in vibest ls",
+    "Start a session on a task and print its id. Only an agent in a session runs this; a person opens a session with bare vibest. Leave the harness out to use your own harness, provider and model. An execution end sends nothing: the session messages with vibest send, and its latest reply is vibest result. Each session gets its own worktree, detached and on no branch; in a project of several repositories, one worktree of each, side by side. Do not tell the session to make its own worktree, clone or copy. A plugin's harness choice shows on the session in vibest ls",
   params: {
     words: Argument.String("harness and prompt").pipe(
       Argument.between(1, 2),
       Argument.withMetavar("[<harness>] <prompt>"),
       Argument.withDescription(
-        "The harness, then the prompt. Leave the harness out to use yours. The prompt is literal text, or - for stdin. Put -- before a prompt that starts with -",
+        "The harness, then the prompt. Leave the harness out to use your harness, provider and model. Name a harness to switch; then leave --provider and --model out for that harness's default. The prompt is literal text, or - for stdin. Put -- before a prompt that starts with -",
       ),
     ),
     title: Flag.String("title").pipe(
@@ -96,11 +100,15 @@ const run = Spec.make("run", {
       Flag.optional,
     ),
     provider: Flag.String("provider").pipe(
-      Flag.withDescription("The provider for --model. A harness with no provider option refuses it"),
+      Flag.withDescription(
+        "The provider. With the harness left out, leave this out to use the caller's provider. With a harness named, leave it out for that harness's default. A harness with no provider option refuses it",
+      ),
       Flag.optional,
     ),
     model: Flag.String("model").pipe(
-      Flag.withDescription("The model. Leave it out for the harness default; see vibest models"),
+      Flag.withDescription(
+        "The model. With the harness left out, leave this out to use the caller's model. With a harness named, leave it out for that harness's default. See vibest models",
+      ),
       Flag.optional,
     ),
     env: Flag.KeyValuePair("env").pipe(
@@ -149,7 +157,7 @@ const run = Spec.make("run", {
 
 const send = Spec.make("send", {
   description:
-    "Queue a message for a session and print at once. It is delivered when the session is idle, and does not interrupt a running execution. A session whose terminal closed, or whose harness exited, resumes the same conversation in a new terminal",
+    "Queue a message for a session and print at once. It is delivered when the session is idle, and does not interrupt a running execution. For a resumable session started with vibest run, sending after its pane closes or its harness exits reopens the conversation in a new pane",
   params: { id, message: text("message") },
 })
 
@@ -158,7 +166,8 @@ const status = Spec.make("status", {
 })
 
 const result = Spec.make("result", {
-  description: "A session's latest result, as JSON. Null before the first one",
+  description:
+    "A session, as JSON. For an id that exists the object is always returned; reply is null until the first result. Test reply, not the object",
   params: { id },
 })
 
