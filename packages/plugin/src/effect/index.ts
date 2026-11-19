@@ -16,4 +16,4 @@ export { capture, type Captured } from "./capture.ts"
 
 export { reconnectSchedule } from "./reconnect.ts"
 
-export { launchLine, type Launch } from "./launch.ts"
+export { launchLine, typedLine, type Launch } from "./launch.ts"

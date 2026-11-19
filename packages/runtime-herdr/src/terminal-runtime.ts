@@ -1,7 +1,6 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { launchLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
-import { shellQuote } from "@vibest/schema/layout"
+import { typedLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import type { RuntimeLocation, RuntimeUnreachable } from "@vibest/schema/session"
 import {
   Cause,
@@ -351,13 +350,13 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return undefined
       })
 
-    const typeLine = (h: HerdrClient, paneId: string, argv: ReadonlyArray<string>) =>
-      failWith(h.call("pane.send_text", { pane_id: paneId, text: argv.map(shellQuote).join(" ") })).pipe(
+    const typeLine = (h: HerdrClient, paneId: string, text: string) =>
+      failWith(h.call("pane.send_text", { pane_id: paneId, text })).pipe(
         Effect.andThen(failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))),
       )
 
     const typed = (launch: VibestPlugin.Launch) =>
-      launchLine(launch).pipe(
+      typedLine(launch).pipe(
         Effect.mapError((e) => new RuntimeApi.RuntimeError({ code: "failed", message: e.message })),
         Effect.provide(NodeFileSystem.layer),
         Effect.provide(NodePath.layer),
@@ -436,7 +435,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             )
 
             const line =
-              input.launch.argv.length === 0 && input.launch.prompt === undefined ? [] : yield* typed(input.launch)
+              input.launch.argv.length === 0 && input.launch.prompt === undefined ? "" : yield* typed(input.launch)
 
             if (line.length > 0) yield* typeLine(h, paneId, line)
           }),
