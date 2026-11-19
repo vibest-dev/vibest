@@ -5,6 +5,7 @@ import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerIdentity, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
+import { MachineIncompatible } from "@vibest/schema/machine"
 import type { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
@@ -48,6 +49,7 @@ const peerScope = (method: string) =>
 const makeRouting = Effect.gen(function* () {
   const deps = yield* CallerChecks.Service
   const remote = yield* Remote.Service
+  const machines = yield* Machines.Service
   const db = yield* Db.Service
 
   const senderHere = (by: string) => (by === PEER_BY_USER ? Effect.succeed(undefined) : db.remote.senderOf(by))
@@ -109,7 +111,18 @@ const makeRouting = Effect.gen(function* () {
         ),
       Stop: <A, E, R2>(p: PayloadOf<"Stop">, local: Local<A, E, R2>) =>
         routed("Stop", p.id, local, (at, project, by) =>
-          remote.forward(at, project, by, (c, { id }, o) => c.Stop({ ...p, id }, o)),
+          machines.link(at.machine).pipe(
+            Effect.flatMap((link) =>
+              link.capabilities.stop === true
+                ? remote.forward(at, project, by, (c, { id }, o) => c.Stop({ ...p, id }, o))
+                : Effect.fail(
+                    new MachineIncompatible({
+                      machine: at.machine,
+                      message: `${at.machine} runs a vibest that has no vibest stop; run vibest update there`,
+                    }),
+                  ),
+            ),
+          ),
         ),
       Remove: <A, E, R2>(p: PayloadOf<"Remove">, local: Local<A, E, R2>) =>
         routed("Remove", p.id, local, (at, project, by) =>

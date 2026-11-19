@@ -23,8 +23,8 @@ import { errorMessage } from "../plugin/hooks.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
 import * as Remove from "../remove.ts"
-import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
-import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
+import { agentState, Runtimes, sessionState, stateOf, type Runtime } from "../runtimes.ts"
+import { busy, busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
@@ -169,7 +169,7 @@ export const make = Effect.gen(function* () {
     Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
   )
 
-  const stop = Effect.fn("Archive.stop")(function* (id: string, by: Sender) {
+  const stop = Effect.fn("Archive.stop")(function* (id: string, by: Sender, idleSince?: number) {
     const known = yield* getRow(id)
 
     return yield* locked(id)(
@@ -181,14 +181,21 @@ export const make = Effect.gen(function* () {
 
         if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
 
-        if (exitedAt(session) !== null) return { message: `${id} is not running; a message resumes it` }
+        if (exitedAt(session) !== null) return { stopped: false, message: `${id} is not running; a message resumes it` }
         const h = yield* live(session)
         const terminal = terminalOf(session)
-        const working = busyOf(yield* agentState(h, terminal))
-        const interrupted = working ? yield* interruptAgent(h, session, terminal) : false
         const execution = yield* db.session.openExecution(id)
+        const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
 
-        if (execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
+        if (
+          idleSince !== undefined &&
+          (session.lastActive > idleSince || execution !== undefined || busy(state) || (yield* db.inbox.waitingOn(id)))
+        )
+          return { stopped: false, message: `${id} is not idle; it keeps running` }
+        const working = busy(state) || (yield* db.session.executionAccepted(id))
+        const interrupted = working ? yield* interruptAgent(h, session, terminal) : false
+
+        if (interrupted && execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
 
         const failed = yield* h.close(terminal).pipe(
           Effect.as(undefined),
@@ -203,11 +210,14 @@ export const make = Effect.gen(function* () {
             id,
             message: `closing its terminal failed: ${failed.message}; it still runs`,
           })
+
+        if (execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
         yield* db.session.stopProcess(id, by)
         yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
         const before = working ? interruptNote(interrupted) : ""
 
         return {
+          stopped: true,
           message: `${id} stopped: ${before}its terminal closed; its worktree, branch and messages are kept, and the next message resumes its conversation`,
         }
       }),

@@ -65,9 +65,9 @@ const sessionsFor = (
       Effect.asVoid,
       Effect.mapError((e) => new VibestPlugin.SessionSendFailed({ message: e.message })),
     ),
-  stop: (id) =>
-    archive.stop(id, { plugin }).pipe(
-      Effect.asVoid,
+  stop: (id, options) =>
+    archive.stop(id, { plugin }, options?.idleSince).pipe(
+      Effect.map((out) => out.stopped),
       Effect.mapError((e) => new VibestPlugin.SessionStopFailed({ message: e.message })),
     ),
 })

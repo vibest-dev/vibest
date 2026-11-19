@@ -95,5 +95,9 @@ update` there.
 working session is interrupted first, as `vibest archive` does, and that execution ends interrupted. The session, its
 worktree and branch, and its messages stay: `vibest ls --all` lists it as exited, and the next `vibest send` to it
 resumes the same conversation in a new terminal, where the message is answered. A message already waiting for it when
-it stops resumes it at once. The ledger records the process's end as `stopped` and who stopped it. The entry session
-and an archived session are refused. A plugin stops a session with `ctx.session.stop(id)`, recorded as the plugin.
+it stops resumes it at once. If its terminal does not close, the stop fails and the session keeps running with its
+execution as it was. The ledger records the process's end as `stopped` and who stopped it. The entry session
+and an archived session are refused. A session on another machine is stopped the same way when that machine's vibest
+has `vibest stop`; an older one is refused with a hint to update it. A plugin stops a session with
+`ctx.session.stop(id)`, recorded as the plugin; with `{ idleSince }` it stops the session only if it has done nothing
+since then and nothing waits for it, and answers whether it stopped it.

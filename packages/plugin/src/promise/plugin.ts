@@ -7,6 +7,7 @@ import type {
   PluginOptions,
   PluginSession,
   SessionSend,
+  SessionStop,
   SubscriptionReport,
 } from "../domain.ts"
 import type { HarnessEditor } from "../effect/harness.ts"
@@ -40,7 +41,7 @@ export interface Context {
     readonly list: () => Promise<ReadonlyArray<PluginSession>>
     readonly get: (id: string) => Promise<PluginSession | undefined>
     readonly send: (input: SessionSend) => Promise<void>
-    readonly stop: (id: string) => Promise<void>
+    readonly stop: (id: string, options?: SessionStop) => Promise<boolean>
   }
 }
 

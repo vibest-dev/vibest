@@ -34,6 +34,10 @@ export interface SessionSend {
   readonly request?: string
 }
 
+export interface SessionStop {
+  readonly idleSince?: number
+}
+
 export interface SubscriptionReport {
   readonly harness: string
   readonly provider?: string

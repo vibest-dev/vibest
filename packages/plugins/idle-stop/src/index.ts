@@ -17,15 +17,16 @@ export default Plugin.define({
     const minutes = idleMinutesOf(ctx.options)
     const idle = Duration.minutes(minutes)
 
+    const tell = (session: PluginSession) =>
+      ctx.session.send({
+        to: session.parentId!,
+        message: `${session.title} (${session.id}) was idle for ${minutes} minutes and was stopped. Send it a message with vibest send to resume it; archive it with vibest archive when you no longer need it.`,
+        request: `${ID}:${session.id}:${session.lastActive}`,
+      })
+
     const stop = (session: PluginSession) =>
-      ctx.session.stop(session.id).pipe(
-        Effect.andThen(
-          ctx.session.send({
-            to: session.parentId!,
-            message: `${session.title} (${session.id}) was idle for ${minutes} minutes and was stopped. Send it a message with vibest send to resume it; archive it with vibest archive when you no longer need it.`,
-            request: `${ID}:${session.id}:${session.lastActive}`,
-          }),
-        ),
+      ctx.session.stop(session.id, { idleSince: session.lastActive }).pipe(
+        Effect.flatMap((stopped) => (stopped ? tell(session) : Effect.void)),
         Effect.catch((e) => Effect.logWarning(`${ID}: ${e.message}`)),
       )
 

@@ -839,7 +839,8 @@ place among the builtins, and `"-vibest.<name>"` turns it off again. Today that 
 subagent's execution completes without the subagent sending a message, it sends the subagent's creator one message
 (request `vibest.report-reminder:<session>:<execution>`), and on activation it checks each session's latest execution.
 `vibest.idle-stop` looks at the running sessions when it activates and then every few minutes (option `idleMinutes`,
-default 30): it stops each subagent idle that long with nothing waiting (`session.stop`) and tells its creator.
+default 30): it stops each subagent of a creator on this machine idle that long with nothing waiting
+(`session.stop` with `idleSince`, checked again under the session lock) and tells its creator when it stopped it.
 
 **Extension places and rules.** An extension is one of three kinds:
 

@@ -254,7 +254,7 @@ export const machineHooks = (
         list: () => Effect.succeed([]),
         get: () => Effect.succeed(undefined),
         send: () => Effect.void,
-        stop: () => Effect.void,
+        stop: () => Effect.succeed(false),
       },
     })
 

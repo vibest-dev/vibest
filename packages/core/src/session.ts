@@ -135,7 +135,11 @@ export interface Interface {
   readonly stop: (
     id: string,
     by: Sender,
-  ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
+    idleSince?: number,
+  ) => Effect.Effect<
+    { stopped: boolean; message: string },
+    NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable
+  >
   readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
   readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
   readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>

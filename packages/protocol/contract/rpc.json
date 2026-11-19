@@ -9,7 +9,8 @@
     "projects": true,
     "spawnRuntime": true,
     "spawnFiles": true,
-    "peerSpawnFiles": true
+    "peerSpawnFiles": true,
+    "stop": true
   },
   "methods": {
     "Agents.Outdated": {

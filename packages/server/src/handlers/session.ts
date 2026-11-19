@@ -185,7 +185,9 @@ export const make = Effect.gen(function* () {
                   ? yield* peerSender(caller, undefined)
                   : undefined
 
-              return { id, ...(yield* sessions.stop(id, by ?? "user")) }
+              const { message } = yield* sessions.stop(id, by ?? "user")
+
+              return { id, message }
             }),
           ),
         ),
