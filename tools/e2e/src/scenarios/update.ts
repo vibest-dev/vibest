@@ -439,7 +439,7 @@ const checks: ReadonlyArray<Check> = [
           "Downloading vibest 999.0.0…",
           "Verifying vibest 999.0.0…",
           "Installing vibest 999.0.0…",
-          `vibest 999.0.0 installed (was ${version})`,
+          `vibest 999.0.0 installed (current: ${version})`,
         ]
 
         const shown = out(through)
@@ -577,7 +577,7 @@ const checks: ReadonlyArray<Check> = [
         const said = out(updated)
         expect(updated.code === 0, `vibest update exited ${updated.code}: ${said}`)
         expect(
-          said.includes(`vibest ${buildVersion} installed (was ${version})`) &&
+          said.includes(`vibest ${buildVersion} installed (current: ${version})`) &&
             said.includes("vibestd handed over; agents kept running") &&
             said.includes("Restarting ") &&
             said.includes(agents.before.entry.id.slice(0, 8)) &&

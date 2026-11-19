@@ -145,7 +145,7 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
                 return yield* new UpdateError({
                   message: `installing vibest ${latest} failed (${installArgv.join(" ")}: ${failed}); vibestd not touched`,
                 })
-              yield* line.say(`vibest ${latest} installed (was ${VERSION})`)
+              yield* line.say(`vibest ${latest} installed (current: ${VERSION})`)
             }),
           )
           target = {
