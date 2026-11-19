@@ -2830,6 +2830,18 @@
                           "additionalProperties": true
                         },
                         {
+                          "type": "object",
+                          "properties": {
+                            "plugin": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "plugin"
+                          ],
+                          "additionalProperties": true
+                        },
+                        {
                           "type": "string",
                           "enum": [
                             "vibest"

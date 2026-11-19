@@ -32,6 +32,13 @@ describe("Pi delivery text", () => {
     )
   })
 
+  it("a plugin message names the plugin", () => {
+    assert.strictEqual(
+      deliveryText([{ sender: { plugin: "silent-execution" }, message: "w1 ended without a message" }]),
+      "Message from Vibest · silent-execution\nw1 ended without a message",
+    )
+  })
+
   it("a remote send shows the agent, the title and the machine", () => {
     assert.strictEqual(
       deliveryText([

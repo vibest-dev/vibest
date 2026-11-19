@@ -5,11 +5,12 @@ import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import type { SpawnInput, Session } from "@vibest/core/session"
 import { peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
+import { Sender } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import type { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
-import { Clock, Deferred, Effect, Layer, Predicate } from "effect"
+import { Clock, Deferred, Effect, Layer, Predicate, Schema } from "effect"
 import { RpcClient } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
@@ -251,18 +252,14 @@ export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: Te
     return { net, a, b, entryId, asEntry }
   })
 
+const decodeSender = Schema.decodeUnknownSync(Schema.fromJsonString(Sender))
+
 export const sendersTo = (recipient: string) =>
   Effect.flatMap(
     SqlClient.SqlClient,
     (sql) =>
-      sql<{
-        session: string | null
-        agent: string | null
-        title: string | null
-        machine: string | null
-      }>`SELECT from_session AS session, from_agent AS agent, from_title AS title, from_machine AS machine
-        FROM inbox WHERE session_id = ${recipient} AND kind = 'send' ORDER BY id`,
-  )
+      sql<{ sender: string }>`SELECT sender FROM inbox WHERE session_id = ${recipient} AND kind = 'send' ORDER BY id`,
+  ).pipe(Effect.map((rows) => rows.map((row) => decodeSender(row.sender))))
 
 export const inboxOf = (recipient: string) =>
   Effect.flatMap(

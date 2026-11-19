@@ -288,7 +288,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 yield* queueInbox({
                   recipient: row.id,
                   kind: "task",
-                  sender: parentSessionId ?? null,
+                  sender:
+                    parentSessionId === undefined
+                      ? "user"
+                      : ((yield* remote.senderOf(parentSessionId)) ?? { session: parentSessionId }),
                   content: task,
                   status: "delivered",
                   request,
@@ -482,7 +485,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   yield* queueInbox({
                     recipient: entryId,
                     kind: "task",
-                    sender: null,
+                    sender: "user",
                     content: start.firstInput,
                     status: "delivered",
                   })

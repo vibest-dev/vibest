@@ -108,19 +108,12 @@ export interface Interface {
     | PluginsNotActive
     | NoSuchSession
   >
-  readonly send: (
-    id: string,
-    message: string,
-    request?: string,
-    sender?: string,
-    from?: Sender,
-  ) => Effect.Effect<void, NoSuchSession>
+  readonly send: (id: string, message: string, sender?: Sender, request?: string) => Effect.Effect<void, NoSuchSession>
   readonly deliverTo: (
     id: string,
     message: string,
+    sender?: Sender,
     request?: string,
-    sender?: string,
-    from?: Sender,
   ) => Effect.Effect<void, NoSuchSession>
   readonly admit: (
     sender: { readonly sessionId: string; readonly projectId: string },

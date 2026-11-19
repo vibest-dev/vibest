@@ -7,7 +7,7 @@ import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
 import { Caller, type CallerIdentity, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
-import type { Sender } from "@vibest/schema/event"
+import type { AgentSender } from "@vibest/schema/event"
 import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Predicate, Stream } from "effect"
 
@@ -32,14 +32,14 @@ export const make = Effect.gen(function* () {
   const integration = yield* Integration.Service
   const seenLocked = yield* KeyedMutex.make<string>()
 
-  const peerSender = (caller: Extract<CallerIdentity, { readonly _tag: "Peer" }>, from: Sender | undefined) =>
+  const peerSender = (caller: Extract<CallerIdentity, { readonly _tag: "Peer" }>, from: AgentSender | undefined) =>
     Effect.gen(function* () {
       if (caller.session === undefined) return undefined
 
       const machine = yield* db.remote.nameForPeer(caller.peerId)
-      const record: Sender = from?.session === caller.session ? from : { session: caller.session }
+      const record: AgentSender = from?.session === caller.session ? from : { session: caller.session }
 
-      return { ...(machine !== undefined && { machine }), ...record } satisfies Sender
+      return { ...(machine !== undefined && { machine }), ...record } satisfies AgentSender
     })
 
   const startedByPeer = (
@@ -159,7 +159,7 @@ export const make = Effect.gen(function* () {
               message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
             })
           const from = Predicate.isTagged(caller, "Peer") ? yield* peerSender(caller, p.from) : undefined
-          yield* sessions.deliverTo(target, p.message, p.request, from?.session, from)
+          yield* sessions.deliverTo(target, p.message, from ?? "user", p.request)
 
           return { id: target }
         }),

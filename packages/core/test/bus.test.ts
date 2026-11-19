@@ -92,7 +92,14 @@ const story = Effect.gen(function* () {
       const task = yield* emit(Catalog["inbox.queued"], {
         sessionId: SUB,
         at: 301,
-        data: { kind: "task", recipient: SUB, sender: MAIN, content: "fix it", status: "delivered", request: "r-1" },
+        data: {
+          kind: "task",
+          recipient: SUB,
+          sender: { session: MAIN },
+          content: "fix it",
+          status: "delivered",
+          request: "r-1",
+        },
       })
 
       const subProcess = yield* emit(Catalog["process.started"], {
@@ -129,7 +136,7 @@ const story = Effect.gen(function* () {
       const result = yield* emit(Catalog["inbox.queued"], {
         sessionId: MAIN,
         at: 322,
-        data: { kind: "notice", recipient: MAIN, sender: SUB, content: "", status: "pending" },
+        data: { kind: "notice", recipient: MAIN, sender: "vibest", about: SUB, content: "", status: "pending" },
       })
 
       yield* emit(Catalog["inbox.moved"], { sessionId: MAIN, at: 323, data: { inbox: result, to: "delivering" } })
@@ -189,7 +196,14 @@ const story = Effect.gen(function* () {
       const notice = yield* emit(Catalog["inbox.queued"], {
         sessionId: MAIN,
         at: 530,
-        data: { kind: "notice", recipient: MAIN, content: "remote done", status: "pending", peerItem: ITEM },
+        data: {
+          kind: "notice",
+          recipient: MAIN,
+          sender: "vibest",
+          content: "remote done",
+          status: "pending",
+          peerItem: ITEM,
+        },
       })
 
       const typed = yield* emit(Catalog["execution.started"], {
@@ -560,7 +574,14 @@ describe("projectors", () => {
         .transaction(
           bus.publish(Catalog["inbox.queued"], {
             sessionId: MAIN,
-            data: { kind: "notice", recipient: MAIN, content: "again", status: "pending", peerItem: ITEM },
+            data: {
+              kind: "notice",
+              recipient: MAIN,
+              sender: "vibest",
+              content: "again",
+              status: "pending",
+              peerItem: ITEM,
+            },
           }),
         )
         .pipe(Effect.exit)
@@ -740,7 +761,7 @@ describe("bus", () => {
           })
           yield* bus.publish(Catalog["inbox.queued"], {
             sessionId: MAIN,
-            data: { kind: "send", sender: MAIN, content: "hi", status: "pending" },
+            data: { kind: "send", sender: { session: MAIN }, content: "hi", status: "pending" },
           })
           yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
           yield* bus.publish(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })

@@ -107,20 +107,26 @@ export const InboxKind = Schema.Literals(["task", "send", "notice"])
 
 export type InboxKind = typeof InboxKind.Type
 
-export const Sender = Schema.Struct({
+export const AgentSender = Schema.Struct({
   session: Schema.String,
   agent: optional(Schema.String),
   title: optional(Schema.String),
   machine: optional(Schema.String),
 })
 
+export type AgentSender = typeof AgentSender.Type
+
+export const PluginSender = Schema.Struct({ plugin: Text })
+
+export const Sender = Schema.Union([AgentSender, PluginSender, Schema.Literal("vibest"), Schema.Literal("user")])
+
 export type Sender = typeof Sender.Type
 
 export const InboxQueued = fact("inbox.queued", "session", {
   kind: InboxKind,
   recipient: optional(Text),
-  sender: optional(Text),
-  from: optional(Sender),
+  sender: Sender,
+  about: optional(Text),
   content: Schema.String,
   status: Schema.Literals(["pending", "delivered", "dropped"]),
   request: optional(Text),
@@ -146,7 +152,7 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
-  from: optional(Sender),
+  from: optional(AgentSender),
 })
 
 export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
@@ -185,7 +191,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 2
+export const CATALOG_VERSION = 3
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

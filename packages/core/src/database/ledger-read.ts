@@ -21,7 +21,7 @@ export const LOCAL_MACHINE = "local"
 const retried = (execution: { readonly outcome: string | null }) =>
   execution.outcome === "failed" || execution.outcome === "not_started"
 
-export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readonly sender: string | null }>) => {
+export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readonly sender: string }>) => {
   const last = rows.at(-1)
   let from = rows.length
 
@@ -149,10 +149,10 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
 export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
 
-type InboxColumns = FromSql & {
+type InboxColumns = {
   readonly id: number
   readonly sessionId: string
-  readonly senderSessionId: string | null
+  readonly sender: string
   readonly kind: string
   readonly content: string
   readonly status: string
@@ -177,7 +177,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_session_id, m.from_session, m.from_agent, m.from_title, m.from_machine, m.kind, m.content, m.status
+    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender, m.kind, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
   const briefs = (ids: ReadonlyArray<string>) =>
@@ -308,7 +308,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       const [linked] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM inbox
         WHERE session_id = ${id} AND execution_id IS NOT NULL`
 
-      const rows = yield* sql<{ content: string; sender: string | null }>`SELECT content, sender_session_id AS sender
+      const rows = yield* sql<{ content: string; sender: string }>`SELECT content, sender
         FROM inbox WHERE session_id = ${id} AND status = 'delivered'
           AND id > ${linked?.id ?? 0}
         ORDER BY id`

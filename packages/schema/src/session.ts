@@ -45,8 +45,7 @@ export type RuntimeMachine = typeof RuntimeMachine.Type
 
 export const InboxRow = Schema.Struct({
   id: Schema.Number,
-  sender: Schema.NullOr(Schema.String),
-  from: Schema.NullOr(Sender),
+  sender: Sender,
   recipient: Schema.NullOr(Schema.String),
   kind: InboxKind,
   message: Schema.String,
@@ -69,6 +68,7 @@ export const Detail = Schema.Struct({
       session: Schema.String,
     }),
     Schema.Struct({ address: Schema.String }),
+    Schema.Struct({ plugin: Schema.String }),
     Schema.Literal("vibest"),
     Schema.Literal("user"),
   ]),

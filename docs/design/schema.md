@@ -171,7 +171,8 @@ CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NU
 CREATE TABLE inbox (                                  -- id: the seq of its inbox.queued in the recipient session
   session_id        TEXT    NOT NULL,                 -- the recipient
   id                INTEGER NOT NULL,
-  sender_session_id TEXT,                             -- null: the user; notice: the session it is about
+  sender            TEXT    NOT NULL,                 -- the inbox.queued sender as JSON
+  sender_session_id TEXT,                             -- routing: the local session that sent it; notice: its about; else null
   kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
   content           TEXT    NOT NULL,
   request           TEXT,                             -- the request id of the `vibest send` or `vibest run` that queued it
@@ -202,6 +203,10 @@ session, so a row is named by both.
 | `send`   | a message from the user to any unfinished session of the project, or from a session to its creator or a session it started                         |
 | `notice` | something vibest tells the recipient about a session (`sender_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
 
+- `sender` is one of: an agent session `{session, agent?, title?, machine?}` (`machine` set when it was received from
+  another vibestd), a plugin `{plugin}`, `"vibest"` (every notice) or `"user"` (a send or task with no session). The
+  routing column `sender_session_id` is the session of a local agent sender, or a notice's `about`; a relay to the
+  nearest living ancestor keeps the sender, so it stays right after the recipient changes.
 - An execution end writes no inbox row. The recipient of a `notice` is `parent_session_id` while it lives, then the entry
   session, then `origin_session` through the outbox; an undeliverable `send` notifies its sender.
 
@@ -214,31 +219,31 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 `TraceEntry` (with `Change`) from `packages/schema/src/plugin.ts` are part of the catalog contract through
 `process.started.routing`: change them by the same rules as a fact.
 
-| type                                | data                                                                                                                   |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| project.created                     | directory?, repositories                                                                                               |
-| project.moved                       | from, to, repositories                                                                                                 |
-| project.repositories_changed        | repositories                                                                                                           |
-| project.entry_changed               | session? (none: the project has no entry session)                                                                      |
-| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}                                            |
-| session.renamed                     | name                                                                                                                   |
-| session.directory_changed           | directory                                                                                                              |
-| session.ended                       | reason: archived, replaced (vibest --new)                                                                              |
-| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (an entry session's launch)                    |
-| process.placed                      | process, terminal, pid?: the terminal of a process started before its terminal opened                                  |
-| process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                      |
-| process.pid                         | process, pid: a pid report that is not a ready report                                                                  |
-| process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                              |
-| process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                                   |
-| execution.started                   | process?, typed? (the text typed into the pane)                                                                        |
-| execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)            |
-| execution.ended                     | execution, outcome, failure? {message, kind?: limit}, conversation?, reply? (the harness's reply, when it reported)    |
-| inbox.queued                        | kind: task, send or notice, recipient?, sender?, content, status: pending, delivered or dropped, request?, peerItem?   |
-| inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                  |
-| machine.added, .connected, .removed | name (added: target, vibestd)                                                                                          |
-| peer.seen                           | id, name                                                                                                               |
-| outbox.queued                       | id, peer, session (the sender), recipient? (the session on the peer; else the sender's origin session), kind?, content |
-| outbox.acked                        | peer, ids                                                                                                              |
+| type                                | data                                                                                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| project.created                     | directory?, repositories                                                                                                                                        |
+| project.moved                       | from, to, repositories                                                                                                                                          |
+| project.repositories_changed        | repositories                                                                                                                                                    |
+| project.entry_changed               | session? (none: the project has no entry session)                                                                                                               |
+| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}                                                                                     |
+| session.renamed                     | name                                                                                                                                                            |
+| session.directory_changed           | directory                                                                                                                                                       |
+| session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                       |
+| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (an entry session's launch)                                                             |
+| process.placed                      | process, terminal, pid?: the terminal of a process started before its terminal opened                                                                           |
+| process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                                                               |
+| process.pid                         | process, pid: a pid report that is not a ready report                                                                                                           |
+| process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                       |
+| process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                                                                            |
+| execution.started                   | process?, typed? (the text typed into the pane)                                                                                                                 |
+| execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)                                                     |
+| execution.ended                     | execution, outcome, failure? {message, kind?: limit}, conversation?, reply? (the harness's reply, when it reported)                                             |
+| inbox.queued                        | kind: task, send or notice, recipient?, sender, about? (a notice: the session it is about), content, status: pending, delivered or dropped, request?, peerItem? |
+| inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                                                           |
+| machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                                                   |
+| peer.seen                           | id, name                                                                                                                                                        |
+| outbox.queued                       | id, peer, session (the sender), recipient? (the session on the peer; else the sender's origin session), kind?, content                                          |
+| outbox.acked                        | peer, ids                                                                                                                                                       |
 
 An execution's input is its typed text, or the inbox rows that moved to delivered with that execution. A delivery opens
 the execution before the rows move to delivered, so they get its id. A `task` is handed over with the spawn, before any

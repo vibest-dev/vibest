@@ -223,9 +223,8 @@ export const make = Effect.gen(function* () {
   const send = Effect.fn("Delivery.send")(function* (
     id: string,
     message: string,
+    sender: Sender = "user",
     request?: string,
-    sender?: string,
-    from?: Sender,
   ) {
     const session = yield* getRow(id)
 
@@ -234,14 +233,14 @@ export const make = Effect.gen(function* () {
 
     if (archived(session) || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
       return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-    const row = yield* db.inbox.insertSend(id, message, request, sender, from)
+    const row = yield* db.inbox.insertSend(id, message, sender, request)
 
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
 
-  const toEntry = (id: string, message: string, request?: string, sender?: string) =>
+  const toEntry = (id: string, message: string, sender: Sender, request?: string) =>
     Effect.gen(function* () {
-      if (!(yield* db.inbox.insertSend(id, message, request, sender)))
+      if (!(yield* db.inbox.insertSend(id, message, sender, request)))
         return yield* new NoSuchSession({
           id,
           message: `${id} is the entry session of this project and is not running`,
@@ -251,13 +250,12 @@ export const make = Effect.gen(function* () {
   const deliverTo = Effect.fn("Delivery.deliverTo")(function* (
     id: string,
     message: string,
+    sender: Sender = "user",
     request?: string,
-    sender?: string,
-    from?: Sender,
   ) {
-    if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, request, sender, from)
+    if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, sender, request)
 
-    return yield* toEntry(id, message, request)
+    return yield* toEntry(id, message, sender, request)
   })
 
   const admit = Effect.fn("Delivery.admit")(function* (
@@ -291,12 +289,13 @@ export const make = Effect.gen(function* () {
       })
     const session = yield* db.session.getSession(id)
     const stopped = !session || archived(session)
+    const from = { session: sender.sessionId }
 
     if (!(stopped && mine === id)) {
       if (stopped && !target.entry) return yield* new NoSuchSession({ id, message: `${id} was archived` })
 
-      if (target.entry) yield* toEntry(id, message, request, sender.sessionId)
-      else yield* send(id, message, request, sender.sessionId)
+      if (target.entry) yield* toEntry(id, message, from, request)
+      else yield* send(id, message, from, request)
 
       return { id }
     }
@@ -319,9 +318,8 @@ export const make = Effect.gen(function* () {
       return { id: heir.session }
     }
 
-    if ((yield* db.session.sessionIdentity(heir.local))?.entry)
-      yield* toEntry(heir.local, message, request, sender.sessionId)
-    else yield* send(heir.local, message, request, sender.sessionId)
+    if ((yield* db.session.sessionIdentity(heir.local))?.entry) yield* toEntry(heir.local, message, from, request)
+    else yield* send(heir.local, message, from, request)
 
     return { id: heir.local }
   })

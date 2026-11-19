@@ -1,4 +1,4 @@
-import { Sender } from "@vibest/schema/event"
+import { AgentSender } from "@vibest/schema/event"
 import { RequestId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
@@ -428,7 +428,7 @@ export class VibestRpcs extends RpcGroup.make(
           id: Schema.String,
           message: Schema.String,
           request: Schema.optional(RequestId),
-          from: Schema.optional(Sender),
+          from: Schema.optional(AgentSender),
         },
         success: Schema.Struct({ id: Schema.String }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),

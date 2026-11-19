@@ -1,8 +1,8 @@
-import { ExecutionOutcome, ProcessEndReason, type Sender } from "@vibest/schema/event"
+import { ExecutionOutcome, ProcessEndReason, type AgentSender, type Sender } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
 import { Routing } from "@vibest/schema/plugin"
 import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
 export const encodeAddress = Schema.encodeSync(AddressJson)
@@ -191,6 +191,9 @@ export const attemptsOf = (raw: string | null) => {
   return seen
 }
 
+export const localSessionOf = (sender: Sender) =>
+  Predicate.isString(sender) || "plugin" in sender || sender.machine !== undefined ? undefined : sender.session
+
 export type FromSql = {
   readonly fromSession: string | null
   readonly fromAgent: string | null
@@ -198,7 +201,7 @@ export type FromSql = {
   readonly fromMachine: string | null
 }
 
-export const fromOf = (row: FromSql): Sender | null =>
+export const fromOf = (row: FromSql): AgentSender | null =>
   row.fromSession === null
     ? null
     : {
@@ -208,11 +211,11 @@ export const fromOf = (row: FromSql): Sender | null =>
         ...(row.fromMachine !== null && { machine: row.fromMachine }),
       }
 
-export type InboxSql = FromSql & {
+export type InboxSql = {
   readonly id: number
   readonly sessionId: string
   readonly kind: string
-  readonly senderSessionId: string | null
+  readonly sender: string
   readonly content: string
   readonly status: string
 }
@@ -227,15 +230,18 @@ export type ExecutionEnd = {
 export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
   error === undefined || error === "" ? undefined : { message: error }
 
-export const toInbox = (row: InboxSql) => ({
-  id: row.id,
-  sender: row.senderSessionId,
-  from: fromOf(row),
-  recipient: row.sessionId,
-  kind: row.kind,
-  message: row.content,
-  status: row.status,
-})
+export const toInbox = (row: InboxSql) => {
+  const sender: unknown = JSON.parse(row.sender)
+
+  return {
+    id: row.id,
+    sender,
+    recipient: row.sessionId,
+    kind: row.kind,
+    message: row.content,
+    status: row.status,
+  }
+}
 
 export const isMessageStatus = Schema.is(MessageStatus)
 

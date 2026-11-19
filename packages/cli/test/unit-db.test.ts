@@ -7,7 +7,7 @@ import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { EXECUTIONS, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { session, place } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { Catalog, type FactType } from "@vibest/schema/event"
+import { Catalog, type FactType, type Sender } from "@vibest/schema/event"
 import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -116,22 +116,23 @@ describe("Db", () => {
           })
           yield* db.session.startObserved("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "typed", 1)
 
-          const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
+          const inbox = (kind: string, sender: Sender, content: string, status: string, about?: string) =>
             fact("inbox.queued", {
               sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
               data: {
                 kind,
                 recipient: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                ...(senderId !== null && { sender: senderId }),
+                sender,
+                ...(about !== undefined && { about }),
                 content,
                 status,
               },
             })
 
-          yield* inbox("send", parent.sessionId, "from parent", "delivered")
-          yield* inbox("send", null, "later send", "delivered")
-          yield* inbox("notice", parent.sessionId, "a notice", "delivered")
-          yield* inbox("send", null, "still pending", "pending")
+          yield* inbox("send", { session: parent.sessionId }, "from parent", "delivered")
+          yield* inbox("send", "user", "later send", "delivered")
+          yield* inbox("notice", "vibest", "a notice", "delivered", parent.sessionId)
+          yield* inbox("send", "user", "still pending", "pending")
           assert.deepStrictEqual(yield* db.session.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "typed",
             delivered: "a notice",
@@ -168,33 +169,27 @@ describe("Db", () => {
           yield* complete(db, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
           yield* db.session.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 5)
 
-          const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
+          const row = (kind: string, sender: Sender, content: string, status = "delivered") =>
             fact("inbox.queued", {
               sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-              data: {
-                kind,
-                recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-                ...(senderId !== null && { sender: senderId }),
-                content,
-                status,
-              },
+              data: { kind, recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", sender, content, status },
             })
 
-          yield* row("send", parent.sessionId, "from parent")
-          yield* row("send", null, "and docs")
+          yield* row("send", { session: parent.sessionId }, "from parent")
+          yield* row("send", "user", "and docs")
           assert.strictEqual(
             (yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
             "and docs",
           )
-          yield* row("send", null, "also types")
+          yield* row("send", "user", "also types")
           assert.deepStrictEqual(yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), {
             working: "",
             delivered: "and docs\n\nalso types",
             parentSessionId: parent.sessionId,
             since: 5,
           })
-          yield* row("send", null, "still pending", "pending")
-          yield* row("notice", parent.sessionId, "a notice", "pending")
+          yield* row("send", "user", "still pending", "pending")
+          yield* row("notice", "vibest", "a notice", "pending")
           assert.strictEqual(
             (yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
             "and docs\n\nalso types",

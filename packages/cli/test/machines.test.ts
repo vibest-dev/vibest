@@ -599,24 +599,13 @@ describe("another machine's vibestd runs agents here", () => {
         const sent = yield* b.run(
           Effect.flatMap(
             SqlClient.SqlClient,
-            (sql) =>
-              sql<{
-                sender: string | null
-                content: string
-              }>`SELECT sender_session_id AS sender, content FROM inbox WHERE kind = 'send' ORDER BY id`,
+            (sql) => sql<{ content: string }>`SELECT content FROM inbox WHERE kind = 'send' ORDER BY id`,
           ),
         )
 
-        assert.deepStrictEqual(
-          sent.map((row) => row.sender),
-          [A_ENTRY, null],
-        )
         assert.include(sent[0]!.content, `<agent-id>${A_ENTRY}</agent-id>`)
         assert.strictEqual(sent[1]!.content, "from the user")
-        assert.deepStrictEqual(yield* b.run(sendersTo(session)), [
-          { ...from, machine: "my-workstation" },
-          { session: null, agent: null, title: null, machine: null },
-        ])
+        assert.deepStrictEqual(yield* b.run(sendersTo(session)), [{ ...from, machine: "my-workstation" }, "user"])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

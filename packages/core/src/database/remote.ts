@@ -5,7 +5,7 @@ import {
   OutboxAcked,
   OutboxQueued,
   PeerSeen,
-  type Sender,
+  type AgentSender,
 } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Effect } from "effect"
@@ -39,7 +39,7 @@ export type OutboxRow = {
   readonly sessionId: string
   readonly content: string
   readonly kind: "send" | "notice"
-  readonly from: Sender | null
+  readonly from: AgentSender | null
   readonly createdAt: number
   readonly reportTo: string
 }
@@ -73,7 +73,7 @@ export const statements = Effect.gen(function* () {
       readonly sessionId: string
       readonly content: string
       readonly kind: "send" | "notice"
-      readonly from?: Sender | undefined
+      readonly from?: AgentSender | undefined
       readonly at?: number
       readonly request?: string | undefined
     },
@@ -103,7 +103,7 @@ export const statements = Effect.gen(function* () {
 
   const senderOf = (sessionId: string) =>
     sql<{ agent: string; name: string }>`SELECT agent, name FROM session WHERE id = ${sessionId}`.pipe(
-      Effect.map(([row]): Sender | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
+      Effect.map(([row]): AgentSender | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
     )
 
   return { ofPeer, origins, queueForPeer, senderOf }
@@ -173,7 +173,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           readonly recipient: string
           readonly kind: "send" | "notice"
           readonly sender: string
-          readonly from: Sender
+          readonly from: AgentSender
           readonly content: string
         }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
           tx(
@@ -196,8 +196,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 yield* inbox.queueInbox({
                   recipient: item.recipient,
                   kind: item.kind,
-                  sender: null,
-                  from: item.from,
+                  sender: item.kind === "send" ? item.from : "vibest",
                   content,
                   status: "dropped",
                   peerItem: item.id,
@@ -221,8 +220,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               yield* inbox.queueInbox({
                 recipient: target ?? item.recipient,
                 kind: item.kind,
-                sender: null,
-                from: item.from,
+                sender: item.kind === "send" ? item.from : "vibest",
                 content,
                 status: here ? "pending" : "dropped",
                 peerItem: item.id,

@@ -45,6 +45,8 @@ const head = (sender: Taken["detail"][number]["sender"]) => {
 
   if ("address" in sender) return remote(sender.address)
 
+  if ("plugin" in sender) return `Message from Vibest · ${sender.plugin}`
+
   return `Message from @${titled(sender.agent)} · ${sender.title} (${sender.session.slice(0, 8)})`
 }
 

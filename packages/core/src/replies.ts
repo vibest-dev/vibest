@@ -52,6 +52,14 @@ export const sessionEnvelope = (id: string, message: string) =>
 
 export const noticeEnvelope = (message: string) => envelope("vibest-message", [], ["message", message])
 
+export const envelopeFrom = (sender: Sender, message: string) => {
+  if (sender === "user") return message
+
+  return Predicate.isString(sender) || "plugin" in sender
+    ? noticeEnvelope(message)
+    : sessionEnvelope(sender.session, message)
+}
+
 const ENVELOPED =
   /^<(vibest-agent-message|vibest-message)>\n(?:<[a-z-]+>[^\n]*<\/[a-z-]+>\n)*<message>\n([\s\S]*)\n<\/message>\n<\/\1>$/
 
@@ -59,29 +67,25 @@ export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? 
 
 type Delivered = {
   readonly kind: string
-  readonly sender: string | null
-  readonly from: Sender | null
+  readonly sender: Sender
   readonly message: string
 }
 
-const shownSender = (row: Delivered): Detail["sender"] => {
-  if (row.kind === "notice") return "vibest"
-  const from = row.from ?? (row.sender === null ? undefined : { session: row.sender })
+const shownSender = (sender: Sender): Detail["sender"] => {
+  if (Predicate.isString(sender) || "plugin" in sender) return sender
 
-  if (from === undefined) return "user"
-
-  if (from.agent === undefined)
+  if (sender.agent === undefined)
     return {
-      address: from.machine === undefined ? shortId(from.session) : `${from.machine}/${shortId(from.session)}`,
+      address: sender.machine === undefined ? shortId(sender.session) : `${sender.machine}/${shortId(sender.session)}`,
     }
-  const agent = { agent: from.agent, title: from.title ?? "", session: from.session }
+  const agent = { agent: sender.agent, title: sender.title ?? "", session: sender.session }
 
-  return from.machine === undefined ? agent : { ...agent, machine: from.machine }
+  return sender.machine === undefined ? agent : { ...agent, machine: sender.machine }
 }
 
 export const detailOf = (batch: ReadonlyArray<Delivered>): ReadonlyArray<Detail> =>
   batch.map((row) => {
-    const sender = shownSender(row)
+    const sender = shownSender(row.sender)
 
     return { sender, message: sender === "user" ? row.message : unwrapped(row.message) }
   })
