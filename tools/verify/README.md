@@ -6,7 +6,7 @@ of every other gate.
 ```sh
 pnpm verify          # everything
 pnpm verify daemon integration   # install as a user, then only these areas of E2E checks
-pnpm verify --no-cache           # before a release: every check runs, the whole gate on both installs
+pnpm verify --no-cache           # before a release: every check runs, as in the Release workflow
 pnpm verify --elsewhere H4       # leave these checks to another machine's verify (the release's Linux job leaves the
                                  # macOS-only H4 to its macOS job, which runs pnpm verify H4 on the same commit)
 pnpm verify --keep-archive <dir> # build this platform's release archive into <dir> and keep it: the Release workflow
@@ -31,9 +31,10 @@ run fails at the end naming each failed leg:
 2. Both installs at the same time, `tools/e2e --strict` with `VIBEST_E2E_METHOD` (`curl` or `npm`) and
    `VIBEST_E2E_INSTALL`: every check drives the installed `vibest` on `PATH` and the plugins it ships, with real herdr
    and real harnesses; a skipped check fails. The curl install runs the whole gate. The npm install holds the same
-   binary bytes, so it runs the smoke set (I1, I2, U1, U9, U10, H1) while its file layout (paths and links) matches the
-   last one that passed the whole gate, and the whole gate when it changed. Checks whose key is unchanged are cache hits
-   (docs/testing/e2e-plan.md §3).
+   binary bytes, so it runs only the checks whose behaviour depends on how vibest is installed and launched
+   (`NPM_CHECKS` in `src/verify.ts`: the daemon start D1, harness and plugin lookup H1, H8, I1, I2, I3, I7, I9, I11,
+   the entry session typed into a terminal S10-launch, and `vibest update` U1, U2, U9 to U12); with areas or ids
+   given, both installs run those. Checks whose key is unchanged are cache hits (docs/testing/e2e-plan.md §3).
 3. Prints `verify: passed.` when every leg passed.
 
 Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `start`, `inbox`, `exits`, `restart`, `hc`,
