@@ -507,6 +507,7 @@ export const make = (deps: {
                 [LABEL.session]: entrySession,
                 [LABEL.space]: project,
                 [LABEL.tab]: entrySession,
+                [LABEL.typed]: String(Date.now()),
               },
             }),
           ),
