@@ -246,6 +246,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             [LABEL.space]: "project-1",
             [LABEL.tab]: "session-1",
           })
+          assert.isTrue((yield* runtime.process(main)).running)
           yield* runtime.run!(main, { argv: ["sleep", "1"], env: {} })
           yield* until(Ref.get(seen), (all) => all.includes(`exited:${main.id}`), "no exited event after sleep ended")
           assert.isFalse((yield* runtime.process(main)).running)
