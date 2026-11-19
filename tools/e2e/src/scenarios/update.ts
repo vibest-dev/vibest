@@ -218,7 +218,11 @@ const checks: ReadonlyArray<Check> = [
 
       if (method === "build")
         expect(r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout), said)
-      else expect(r.code === 0 && r.stdout.includes(`vibest is already up to date (v${buildVersion})`), said)
+      else
+        expect(
+          r.code === 0 && r.stdout === `Checking for a newer vibest…\nvibest ${buildVersion} is up to date\n`,
+          said,
+        )
       const version = await w.ok(["--version"])
       expect(version.trim() === `vibest v${buildVersion}`, `vibest --version after update: ${version}`)
 
@@ -259,9 +263,9 @@ const checks: ReadonlyArray<Check> = [
           return { code: u.code, said: `${u.stdout}${u.stderr}` }
         }
 
-        const upToDate = `vibest is already up to date (v${buildVersion}).`
-        const onStable = `${upToDate} The newest stable release is ${stable}.`
-        const onBeta = `${upToDate} The newest release is ${beta}.`
+        const upToDate = `vibest ${buildVersion} is up to date`
+        const onStable = `${upToDate} (the newest stable release is ${stable})`
+        const onBeta = `${upToDate} (the newest release is ${beta})`
         const pinned = await update(["--stable"])
         expect(pinned.code === 0 && pinned.said.includes(onStable), `update --stable: ${pinned.said}`)
         const any = await update(["--beta"])
@@ -309,6 +313,8 @@ const checks: ReadonlyArray<Check> = [
       expect(packed.code === 0, `tar: ${out(packed)}`)
       const installSh = path.join(checkout, "packages", "cli", "install.sh")
       let downloads = 0
+      const announced = Promise.withResolvers<boolean>()
+      const holdInstaller = { armed: false, announcedFirst: false }
 
       const server = Bun.serve({
         port: 0,
@@ -318,7 +324,14 @@ const checks: ReadonlyArray<Check> = [
 
           if (url === "/version") return new Response("999.0.0\n")
 
-          if (url === "/install.sh") return new Response(Bun.file(installSh))
+          if (url === "/install.sh")
+            return holdInstaller.armed
+              ? Promise.race([announced.promise, Bun.sleep(30_000).then(() => false)]).then((seen) => {
+                  holdInstaller.announcedFirst = seen
+
+                  return new Response(Bun.file(installSh))
+                })
+              : new Response(Bun.file(installSh))
 
           if (url === `/${archive}`) {
             downloads++
@@ -392,12 +405,52 @@ const checks: ReadonlyArray<Check> = [
           )),
           `the database is still there after ${moveAside}: ${out(moved)}`,
         )
-        const through = await vibest(["update"])
+        holdInstaller.armed = true
+
+        const watched = Bun.spawn([old, "update"], {
+          cwd: w.repository,
+          env: w.env(env),
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+          timeout: 120_000,
+        })
+
+        const printed = { stdout: "" }
+
+        const reading = (async () => {
+          for await (const chunk of watched.stdout.pipeThrough(new TextDecoderStream())) {
+            printed.stdout += chunk
+
+            if (printed.stdout.includes("Downloading vibest 999.0.0…")) announced.resolve(true)
+          }
+        })()
+
+        const stderr = await new Response(watched.stderr).text()
+        await reading
+        const through = { code: await watched.exited, stdout: printed.stdout, stderr }
         expect(
-          through.code === 0 && out(through).includes("vibest 999.0.0 is available"),
-          `vibest update after the way out exited ${through.code}: ${out(through)}`,
+          holdInstaller.announcedFirst,
+          `vibest update did not say it was downloading before the installer was answered: ${out(through)}`,
         )
-        expect(downloads === 3, `the release was downloaded ${downloads} times; one try, then one try and one install`)
+
+        const stages = [
+          "Checking for a newer vibest…",
+          "Downloading vibest 999.0.0…",
+          "Verifying vibest 999.0.0…",
+          "Installing vibest 999.0.0…",
+          `vibest 999.0.0 installed (was ${version})`,
+        ]
+
+        const shown = out(through)
+        expect(!shown.includes("%"), `a non-terminal update shows percent steps: ${shown}`)
+        const at = stages.map((s) => shown.indexOf(s))
+        expect(
+          through.code === 0 && at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1]!)),
+          `vibest update after the way out exited ${through.code}, its stages not shown in order: ${shown}`,
+        )
+
+        expect(downloads === 2, `the release was downloaded ${downloads} times; one try, then one that installs`)
         expect(
           (await fs.readFile(path.join(share, "current"), "utf8")).trim() === "999.0.0",
           "install.sh did not record 999.0.0 as current",
@@ -524,10 +577,9 @@ const checks: ReadonlyArray<Check> = [
         const said = out(updated)
         expect(updated.code === 0, `vibest update exited ${updated.code}: ${said}`)
         expect(
-          said.includes(`vibest ${buildVersion} is available (this is ${version})`) &&
-            /vibestd: handoff\./.test(said) &&
-            said.includes(`vibestd ${buildVersion} (pid`) &&
-            said.includes("vibest update has finished") &&
+          said.includes(`vibest ${buildVersion} installed (was ${version})`) &&
+            said.includes("vibestd handed over; agents kept running") &&
+            said.includes("Restarting ") &&
             said.includes(agents.before.entry.id.slice(0, 8)) &&
             said.includes(agents.before.sub.id.slice(0, 8)),
           `unexpected: ${said}`,
@@ -566,9 +618,8 @@ const checks: ReadonlyArray<Check> = [
         const said = out(updated)
         expect(updated.code === 0, `vibest update exited ${updated.code}: ${said}`)
         expect(
-          /vibestd: handoff\./.test(said) &&
-            said.includes(`vibestd ${buildVersion} (pid`) &&
-            said.includes("vibest update has finished") &&
+          said.includes("vibestd handed over; agents kept running") &&
+            said.includes("Restarting ") &&
             said.includes(agents.before.entry.id.slice(0, 8)) &&
             said.includes(agents.before.sub.id.slice(0, 8)),
           `unexpected: ${said}`,

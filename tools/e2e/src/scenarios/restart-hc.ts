@@ -94,7 +94,7 @@ const checks: ReadonlyArray<Check> = [
         const out = r.stdout.replace(/\r/g, "")
         expect(r.code === 0, `vibest daemon restart exited ${r.code}: ${out}${r.stderr}`)
         expect(
-          out.includes("vibest daemon restart has finished") && out.includes(before.id.slice(0, 8)),
+          out.includes("Restarting ") && out.includes(before.id.slice(0, 8)),
           `the entry session was not offered for a restart: ${out}`,
         )
         await until(

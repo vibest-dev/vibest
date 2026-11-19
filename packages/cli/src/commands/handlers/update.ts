@@ -8,8 +8,11 @@ import { Runtime } from "../../framework/runtime.ts"
 import { replaceAnyway, type Target, versionOf } from "../../replace.ts"
 import {
   daemonPlan,
+  download,
   extraVibests,
   handoffDaemon,
+  megabytes,
+  progressLine,
   replaceForUpdate,
   restartAgents,
   runInherit,
@@ -20,139 +23,187 @@ import { VERSION } from "../../version.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, restartAgentsAfter }) =>
-  Effect.gen(function* () {
-    yield* userOnly("update")
+  Effect.flatMap(progressLine, (line) =>
+    Effect.gen(function* () {
+      yield* userOnly("update")
 
-    if (beta && stable)
-      return yield* new UpdateError({ message: "--beta and --stable choose opposite channels; pass one" })
+      if (beta && stable)
+        return yield* new UpdateError({ message: "--beta and --stable choose opposite channels; pass one" })
 
-    if (Option.isSome(restartAgentsAfter))
-      return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
-    const self = yield* VibestCommand
-    const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
-    const layout = yield* Layout
+      if (Option.isSome(restartAgentsAfter))
+        return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
+      const self = yield* VibestCommand
+      const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
+      const layout = yield* Layout
 
-    let target: Target = {
-      version: VERSION,
-      command: self,
-    }
+      let target: Target = {
+        version: VERSION,
+        command: self,
+      }
 
-    let back: string | undefined
+      let back: string | undefined
 
-    if (method === undefined)
-      yield* Console.log(`this vibest (${self.join(" ")}) was not installed by npm or install.sh; nothing to install.`)
-    else {
-      const channel = beta ? "beta" : stable ? "stable" : channelOf(VERSION)
-      const found = yield* latestOf(method, channel)
-      const latest = found.version
-
-      if (compareVersions(VERSION, latest) >= 0)
+      if (method === undefined)
         yield* Console.log(
-          `vibest is already up to date (v${VERSION}).${latest === VERSION ? "" : ` The newest ${channel === "stable" ? "stable release" : "release"} is ${latest}.`}`,
+          `this vibest (${self.join(" ")}) was not installed by npm or install.sh; nothing to install.`,
         )
       else {
-        yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
-        yield* Console.log(`Downloading vibest ${latest} to try it before it replaces this one; this can take minutes.`)
-        const fs = yield* FileSystem.FileSystem
-        const real = yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!))
+        const channel = beta ? "beta" : stable ? "stable" : channelOf(VERSION)
+        yield* line.stage("Checking for a newer vibest…")
+        const found = yield* latestOf(method, channel)
+        const latest = found.version
 
-        const installSh = (releases: string, env: Record<string, string>) =>
-          [
-            ["sh", "-c", 'script=$(curl -fsSL "$0/install.sh") && printf \'%s\\n\' "$script" | sh', releases],
-            { VIBEST_DOWNLOAD_URL: releases, ...env },
-          ] as const
+        if (compareVersions(VERSION, latest) >= 0)
+          yield* line.say(
+            `vibest ${VERSION} is up to date${latest === VERSION ? "" : ` (the newest ${channel === "stable" ? "stable release" : "release"} is ${latest})`}`,
+          )
+        else {
+          const fs = yield* FileSystem.FileSystem
+          const real = yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!))
 
-        const cannot = yield* Effect.scoped(
-          Effect.gen(function* () {
-            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-update-" })
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-update-" })
+              const release = `${dir}/release`
+              const archive = `vibest-${process.platform}-${process.arch}.tar.gz`
 
-            const [argv, env] =
-              found.kind === "curl"
-                ? installSh(found.releases, { VIBEST_INSTALL: `${dir}/share`, VIBEST_BIN: `${dir}/bin` })
-                : [stageCommand(real, dir, latest), {}]
+              const stage = Effect.gen(function* () {
+                yield* line.stage(`Downloading vibest ${latest}…`)
 
-            const staged = [method.kind === "npm" ? `${dir}/node_modules/.bin/vibest` : `${dir}/bin/vibest`]
-            const fetched = yield* runCaptured(argv, Duration.minutes(5), env)
+                if (found.kind === "npm") {
+                  const argv = stageCommand(real, dir, latest)
+                  const failed = yield* runCaptured(argv, Duration.infinity)
 
-            if (fetched !== undefined) return `it could not be fetched to try it first (${argv.join(" ")}: ${fetched})`
-            const reported = yield* versionOf(staged)
+                  return failed === undefined ? undefined : `it could not be fetched (${argv.join(" ")}: ${failed})`
+                }
 
-            if (reported !== latest) return `the vibest fetched to try it reports ${reported}, not ${latest}`
+                const shown = { percent: -1 }
 
-            return yield* importCheck(staged)
-          }),
-        )
+                const downloading = (bytes: number, size: number | undefined) => {
+                  const label = `Downloading vibest ${latest}`
 
-        if (cannot !== undefined) {
-          const running = Option.getOrUndefined(yield* readPing(layout.socket))
+                  if (size === undefined) return Effect.void
+                  const percent = Math.floor((bytes * 100) / size)
 
-          const kept = running
-            ? `${described(running.version, running)} was not stopped and keeps working`
-            : "no vibestd was running, and none was started"
+                  if (percent === shown.percent) return Effect.void
+                  shown.percent = percent
 
-          return yield* new UpdateError({
-            message: `vibest ${latest} cannot take over: ${cannot}. Nothing was installed: vibest ${VERSION} stays, and ${kept}. ${running && /SchemaMismatch/.test(cannot) ? replaceAnyway(layout.socket, running.pid, "vibest update") : "Once that is fixed, run vibest update again"}`,
-          })
-        }
+                  return line.detail(`${label}… ${percent}% of ${megabytes(size)}`)
+                }
 
-        const [installArgv, installEnv] =
-          method.kind === "curl" && found.kind === "curl"
-            ? installSh(found.releases, { VIBEST_INSTALL: method.share })
-            : [upgradeCommand(real, latest), {}]
+                yield* fs.makeDirectory(`${dir}/stage`)
+                yield* fs.makeDirectory(release)
 
-        yield* runInherit(installArgv, installEnv).pipe(
-          Effect.mapError((e) => new UpdateError({ message: `${e.message}; vibestd not attempted` })),
-        )
-        target = {
-          version: latest,
-          command: method.kind === "curl" ? [`${method.share}/versions/${latest}/bin/vibest`] : self,
-        }
-        back =
-          method.kind === "npm"
-            ? upgradeCommand(real, VERSION).map(shellQuote).join(" ")
-            : `ln -sfn ${shellQuote(self[0]!)} "$(cat ${shellQuote(`${method.share}/bin`)} 2>/dev/null || echo ~/.local/bin)/vibest"`
-      }
-    }
+                const failed =
+                  (yield* download(`${found.releases}/install.sh`, `${release}/install.sh`)) ??
+                  (yield* download(`${found.releases}/${archive}`, `${release}/${archive}`, downloading)) ??
+                  (yield* runCaptured(
+                    ["tar", "-xzf", `${release}/${archive}`, "-C", `${dir}/stage`],
+                    Duration.infinity,
+                  ))
 
-    for (const f of yield* extraVibests)
-      yield* Console.log(
-        `${f.mark === "problem" ? "warning: " : ""}${f.text}${f.fix ? `; remove it with: ${f.fix}` : ""}`,
-      )
-    const running = Option.getOrUndefined(yield* readPing(layout.socket))
-    const plan = daemonPlan(running, target)
+                return failed === undefined ? undefined : `it could not be fetched (${failed})`
+              })
 
-    if (plan.action === "none") return
-    yield* Console.log(`vibestd: ${plan.action}. ${plan.reason}.`)
+              const staged = [found.kind === "npm" ? `${dir}/node_modules/.bin/vibest` : `${dir}/stage/bin/vibest`]
 
-    const failed = yield* Match.value(plan).pipe(
-      Match.when({ action: "handoff" }, () => handoffDaemon(running!, target)),
-      Match.when({ action: "restart" }, () => replaceForUpdate(target)),
-      Match.orElse(() => Effect.succeed(undefined)),
-    )
+              const tried = Effect.gen(function* () {
+                yield* line.stage(`Verifying vibest ${latest}…`)
+                const reported = yield* versionOf(staged)
 
-    if (failed !== undefined)
-      return yield* new UpdateError({
-        message: `vibest ${target.version}: ${failed}${back === undefined ? "" : `. To go back to vibest ${VERSION} instead: ${back}`}`,
-      })
-    const serving = Option.getOrUndefined(yield* readPing(layout.socket))
+                if (reported !== latest) return `the vibest fetched reports ${reported}, not ${latest}`
 
-    if (target.version !== VERSION && serving?.version === target.version)
-      return yield* runInherit([
-        ...target.command,
-        "update",
-        "--restart-agents-after",
-        String(process.pid),
-        ...(yes ? ["--yes"] : []),
-      ]).pipe(
-        Effect.mapError(
-          (e) =>
-            new UpdateError({
-              message: `${e.message}. vibest ${target.version} is installed and vibestd runs it; to restart the agents still on the old integration, run vibest update again`,
+                return yield* importCheck(staged)
+              })
+
+              const cannot = (yield* stage) ?? (yield* tried)
+
+              if (cannot !== undefined) {
+                const running = Option.getOrUndefined(yield* readPing(layout.socket))
+
+                const kept = running
+                  ? `${described(running.version, running)} was not stopped and keeps working`
+                  : "no vibestd was running, and none was started"
+
+                return yield* new UpdateError({
+                  message: `vibest ${latest} cannot take over: ${cannot}. Nothing was installed: vibest ${VERSION} stays, and ${kept}. ${running && /SchemaMismatch/.test(cannot) ? replaceAnyway(layout.socket, running.pid, "vibest update") : "Once that is fixed, run vibest update again"}`,
+                })
+              }
+
+              const [installArgv, installEnv] =
+                method.kind === "curl"
+                  ? [
+                      ["sh", `${release}/install.sh`],
+                      { VIBEST_DOWNLOAD_URL: encodeURI(`file://${release}`), VIBEST_INSTALL: method.share },
+                    ]
+                  : [upgradeCommand(real, latest), {}]
+
+              yield* line.stage(`Installing vibest ${latest}…`)
+              const failed = yield* runCaptured(installArgv, Duration.infinity, installEnv)
+
+              if (failed !== undefined)
+                return yield* new UpdateError({
+                  message: `installing vibest ${latest} failed (${installArgv.join(" ")}: ${failed}); vibestd not touched`,
+                })
+              yield* line.say(`vibest ${latest} installed (was ${VERSION})`)
             }),
-        ),
-      )
-    const agents = yield* restartAgents(target.version, yes, "vibest update")
+          )
+          target = {
+            version: latest,
+            command: method.kind === "curl" ? [`${method.share}/versions/${latest}/bin/vibest`] : self,
+          }
+          back =
+            method.kind === "npm"
+              ? upgradeCommand(real, VERSION).map(shellQuote).join(" ")
+              : `ln -sfn ${shellQuote(self[0]!)} "$(cat ${shellQuote(`${method.share}/bin`)} 2>/dev/null || echo ~/.local/bin)/vibest"`
+        }
+      }
 
-    if (agents !== undefined) return yield* new UpdateError({ message: agents })
-  }),
+      for (const f of yield* extraVibests)
+        if (f.mark === "problem") yield* line.say(`warning: ${f.text}; remove it with: ${f.fix}`)
+      const running = Option.getOrUndefined(yield* readPing(layout.socket))
+      const plan = daemonPlan(running, target)
+
+      if (plan.action === "none") return
+
+      const failed = yield* Match.value(plan).pipe(
+        Match.when({ action: "handoff" }, () =>
+          line.stage("Handing over vibestd…").pipe(
+            Effect.andThen(handoffDaemon(running!, target)),
+            Effect.tap((failure) =>
+              failure === undefined ? line.say("vibestd handed over; agents kept running") : Effect.void,
+            ),
+          ),
+        ),
+        Match.when({ action: "restart" }, () => line.clear.pipe(Effect.andThen(replaceForUpdate(target)))),
+        Match.orElse(() => Effect.succeed(undefined)),
+      )
+
+      if (failed !== undefined)
+        return yield* new UpdateError({
+          message: `vibest ${target.version}: ${failed}${back === undefined ? "" : `. To go back to vibest ${VERSION} instead: ${back}`}`,
+        })
+      const serving = Option.getOrUndefined(yield* readPing(layout.socket))
+      yield* line.clear
+
+      if (target.version !== VERSION && serving?.version === target.version)
+        return yield* runInherit([
+          ...target.command,
+          "update",
+          "--restart-agents-after",
+          String(process.pid),
+          ...(yes ? ["--yes"] : []),
+        ]).pipe(
+          Effect.mapError(
+            (e) =>
+              new UpdateError({
+                message: `${e.message}. vibest ${target.version} is installed and vibestd runs it; to restart the agents still on the old integration, run vibest update again`,
+              }),
+          ),
+        )
+      const agents = yield* restartAgents(target.version, yes, "vibest update")
+
+      if (agents !== undefined) return yield* new UpdateError({ message: agents })
+    }).pipe(Effect.ensuring(line.clear)),
+  ),
 )
