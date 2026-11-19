@@ -522,7 +522,9 @@ Rows are never deleted. `vibest ls` lists Agents that have not exited; `vibest l
 An archive marks the session archived before anything is closed, so from then no Send, check or resume brings it
 back. A session keeps at most one terminal, because a harness that exits leaves the terminal's shell running in the
 worktree: an archive closes the terminal the row records even when its harness already exited, a start that opens a new
-terminal for the session (a resume, a move) first closes the one its previous process left, and a start whose harness
+terminal for the session (a resume, a move) first closes the one its previous process left and stops if that close fails
+(a terminal already gone counts as closed), neither of them closes or interrupts a terminal whose live process belongs to
+another session (a newer entry session started in the same terminal), and a start whose harness
 has an integration but never reported ready fails like a launch that could not open (its terminal closed, a new session's
 worktree removed) instead of leaving a session that never ran. A spawn reserves its worktree name with an atomic `mkdir`; a
 start cut off before its terminal was recorded is undone as a failed launch (its worktree goes when nothing can be
