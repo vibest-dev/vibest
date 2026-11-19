@@ -95,8 +95,6 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
       "harnesses/claude/hooks/hooks.json",
       "harnesses/cursor/.cursor-plugin/plugin.json",
       "harnesses/cursor/hooks/hooks.json",
-      "harnesses/cursor/index.js",
-      "harnesses/agy/index.js",
       "harnesses/agy/.agents/plugins/vibest/hooks.json",
       "harnesses/agy/.agents/plugins/vibest/hook.sh",
       "harnesses/pi/extension.mjs",

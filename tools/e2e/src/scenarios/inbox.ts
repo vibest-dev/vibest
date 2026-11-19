@@ -188,13 +188,19 @@ const claudeEntry = async (
     await enter()
   }
 
-  const claudePid = async () => {
+  const processInfo = async () => {
     const r = await herdr(socket, "pane.process_info", { pane_id: pane() })
 
-    const info = (r.process_info ?? {}) as {
+    return (r.process_info ?? {}) as {
       shell_pid?: number
       foreground_processes?: Array<{ pid: number; name: string; argv0?: string | null; cmdline?: string | null }>
     }
+  }
+
+  const shellPid = async () => (await processInfo()).shell_pid
+
+  const claudePid = async () => {
+    const info = await processInfo()
 
     return (info.foreground_processes ?? []).find(
       (p) => p.pid !== info.shell_pid && path.basename(p.argv0 ?? p.cmdline?.split(" ")[0] ?? "") === "claude",
@@ -215,6 +221,7 @@ const claudeEntry = async (
     typeInShell,
     enter,
     claudePid,
+    shellPid,
     screen,
     close: async () => {
       anthropic.stop()
@@ -330,7 +337,7 @@ const checks: ReadonlyArray<Check> = [
       const go = path.join(w.root, "cmmid-go")
       const wait = `until [ -e ${go} ]; do sleep 1; done`
       let c: Awaited<ReturnType<typeof claudeEntry>> | undefined
-      let stopped: number | undefined
+      let stopped: Array<number> = []
 
       try {
         c = await claudeEntry(w, "cmtwo", model, (r): Step => {
@@ -438,9 +445,12 @@ const checks: ReadonlyArray<Check> = [
           180_000,
         )
 
-        stopped = await c.claudePid()
-        expect(stopped !== undefined, "no claude process in the entry session's pane")
-        process.kill(stopped!, "SIGSTOP")
+        const harness = await c.claudePid()
+        const shell = await c.shellPid()
+        expect(harness !== undefined && shell !== undefined, "no claude process or shell in the entry session's pane")
+        stopped = [shell!, harness!]
+
+        for (const pid of stopped) process.kill(pid, "SIGSTOP")
         const who = { entryId: c.entryId, projectId: c.projectId }
         const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
@@ -477,27 +487,8 @@ const checks: ReadonlyArray<Check> = [
           `an older protocol's take answered ${old.status}: ${JSON.stringify(old.body)}`,
         )
 
-        const ps = (pid: number) =>
-          Bun.spawnSync(["ps", "-o", "stat=,pgid=,tpgid=", "-p", String(pid)])
-            .stdout.toString()
-            .trim()
-            .split(/\s+/)
-
-        const [, pgid, tpgid] = ps(stopped!)
-
-        if (pgid === tpgid) process.kill(stopped!, "SIGCONT")
-        else await c.typeInShell("fg")
-        const resumed = stopped!
-        stopped = undefined
-        await until(
-          "the entry session running in the foreground again",
-          () => {
-            const [stat, pgid, tpgid] = ps(resumed)
-
-            return !stat?.startsWith("T") && pgid === tpgid
-          },
-          15_000,
-        )
+        for (const pid of stopped.reverse()) process.kill(pid, "SIGCONT")
+        stopped = []
 
         await until(
           "the batch nobody accepted ends not_started and its row fails",
@@ -510,7 +501,7 @@ const checks: ReadonlyArray<Check> = [
         await w.ok(["send", b, "--", ask("cmafter")], { cwd: c.repo })
         await c.result(b, "Answer probe beta", "cmafter", after)
       } finally {
-        if (stopped !== undefined) process.kill(stopped, "SIGCONT")
+        for (const pid of stopped.reverse()) process.kill(pid, "SIGCONT")
         model.stop()
         await c?.close()
       }

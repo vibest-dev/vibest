@@ -16,7 +16,6 @@ import {
   text,
 } from "../fake-model.ts"
 import { paneOf, compiled, expect, harnesses, herdr, row, rows, SESSIONS, Skip, until, type World } from "../world.ts"
-import { addCursorPlugin } from "../world/plugins.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
@@ -225,7 +224,6 @@ const checks: ReadonlyArray<Check> = [
         "claude/hooks/register.mjs",
         "cursor/.cursor-plugin/plugin.json",
         "cursor/hooks/hooks.json",
-        "cursor/index.js",
         ...["pi", "claude", "cursor"].flatMap((h) => [
           `${h}/skills/delegate/SKILL.md`,
           `${h}/skills/pipeline/SKILL.md`,
@@ -332,7 +330,6 @@ const checks: ReadonlyArray<Check> = [
 
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
-      await addCursorPlugin(w, harnesses)
       const repo = await newRepository(w, "cursor-execution")
       const projectHookLog = path.join(w.root, "project-hook.log")
       await fs.mkdir(path.join(repo, ".cursor"), { recursive: true })

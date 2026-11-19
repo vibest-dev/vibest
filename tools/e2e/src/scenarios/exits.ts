@@ -649,7 +649,7 @@ const checks: ReadonlyArray<Check> = [
         await until("the subagent idle", () => p.idle(sub), 90_000)
         const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
         expect(worktree !== "", `no worktree recorded for ${sub}`)
-        processOutsideThePane = Bun.spawn(["sleep", "600"], { cwd: worktree, stdio: ["ignore", "ignore", "ignore"] })
+        processOutsideThePane = Bun.spawn(["sleep", "120"], { cwd: worktree, stdio: ["ignore", "ignore", "ignore"] })
         const t0 = Date.now()
         const out = await w.vibest(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
         await recordMs(evidence, "S27", "archiveMs", Date.now() - t0)

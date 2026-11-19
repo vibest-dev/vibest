@@ -111,9 +111,9 @@ manages it. Items marked planned are not built.
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
 - **Harnesses registered by plugins**: a plugin adds a `HarnessDefinition` with
   `context.harness.transform((editor) => editor.add(definition))`, like a runtime with `context.runtime.transform`.
-  The two builtin harnesses are the plugins `harness-pi` and `harness-claude` in
-  `packages/plugin-harnesses`, loaded first (Cursor is the same kind of plugin, built to `harnesses/cursor/index.js`
-  and added by the user); their integration files stay in `packages/integration/*`. A harness id is
+  The shipped harnesses are the builtin plugins `harness-pi`, `harness-claude`, `harness-cursor` and `harness-agy` in
+  `packages/plugin-harnesses`, loaded first; registering one runs nothing, and whether a machine can start it is
+  checked only when it is asked for. Their integration files stay in `packages/integration/*`. A harness id is
   a plain string: a harness the database names but no plugin provides is unavailable ("no plugin provides harness
   X; loaded: …"), never a decode failure.
 - **One neutral integration event contract** (planned): every integration sends the same events over vibestd's
@@ -167,7 +167,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 | `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                   |
 | `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `archive-on-idle`, `harness-default`.                   |
 | `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.  |
-| `plugin-harnesses`      | The harness plugins `pi`, `claude` and the Cursor plugin file users add: one `HarnessDefinition` per CLI.                                                                                         |
+| `plugin-harnesses`      | The builtin harness plugins `pi`, `claude`, `cursor` and `agy`: one `HarnessDefinition` per CLI.                                                                                                  |
 | `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                             |
 | `runtime-herdr-core`    | The Runtime port on herdr-core (hc).                                                                                                                                                              |
 | `effect-herdr-sdk`      | Effect client for the herdr socket API.                                                                                                                                                           |
@@ -897,7 +897,7 @@ configure (skills are builtin, §4.2).
 herdr runs the process; the adapter knows how this CLI wants to be started and told things (launch side) and
 loads vibest's plugin into the CLI so its work comes back as events (integration side). The contract is
 `HarnessDefinition` in `@vibest/plugin` (`packages/plugin/src/effect/harness.ts`); `packages/plugin-harnesses` implements
-Claude Code and Pi as the builtin plugins `harness-claude` and `harness-pi` (Cursor as a plugin file users add), each adding its
+Claude Code, Pi, Cursor and agy as the builtin plugins `harness-claude`, `harness-pi`, `harness-cursor` and `harness-agy`, each adding its
 definition with `context.harness.transform`. Core and the CLI hold no adapter: vibestd answers `Harnesses.List` (each
 row with its `binary`) and `Integration.Guard` from the registered definitions. A user plugin may add a harness or
 `update` a builtin one the same way. Each CLI runs as installed on
@@ -906,16 +906,16 @@ works on day one.
 
 **Launch side:**
 
-| Capability     | Adapter provides                                                                                                      | Fallback                            |
-| -------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| Launch         | arguments for model, autonomy level, and initial prompt; startup dialogs to answer (trust prompts)                    | definition `arguments` as given     |
-| Instructions   | the native channel (system prompt flag, instruction file, skill or extension)                                         | sent as the first prompt            |
-| Command access | how `vibest` commands run without an approval prompt (`run`, `send`, … for the entry session; `report` for subagents) | the user approves once              |
-| Resume         | arguments to resume a conversation from herdr's `agent_session` reference                                             | start fresh with a handoff summary  |
-| Usage          | reads this CLI's usage windows into its Subscription                                                                  | none: plugins see only exits        |
-| Availability   | the CLI on PATH, login valid, its model list (cached 5 minutes); feeds `preflight` and `vibest harness list`          | none                                |
-| Read-only      | arguments that keep the CLI from editing files (plan or read-only sandbox modes)                                      | the instruction "do not edit files" |
-| Interrupt      | keys that stop the agent's current work                                                                               | `Escape`                            |
+| Capability     | Adapter provides                                                                                                                         | Fallback                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Launch         | arguments for model, autonomy level, and initial prompt; startup dialogs to answer (trust prompts)                                       | definition `arguments` as given     |
+| Instructions   | the native channel (system prompt flag, instruction file, skill or extension)                                                            | sent as the first prompt            |
+| Command access | how `vibest` commands run without an approval prompt (`run`, `send`, … for the entry session; `report` for subagents)                    | the user approves once              |
+| Resume         | arguments to resume a conversation from herdr's `agent_session` reference                                                                | start fresh with a handoff summary  |
+| Usage          | reads this CLI's usage windows into its Subscription                                                                                     | none: plugins see only exits        |
+| Availability   | the CLI on PATH, its plugin folder, its environment check; `preflight` adds its model list (a success cached 5 minutes, a failure never) | none                                |
+| Read-only      | arguments that keep the CLI from editing files (plan or read-only sandbox modes)                                                         | the instruction "do not edit files" |
+| Interrupt      | keys that stop the agent's current work                                                                                                  | `Escape`                            |
 
 **Integration side: plugins loaded at launch, never installed.** vibest's plugin for each harness ships with the binary
 (`harnesses/<harness>`, `scripts/build-harnesses.ts`): in each release archive beside `bin/vibest`, and in the
@@ -1149,8 +1149,9 @@ the authentication; roles prevent mistakes, not attackers.
 session never declares itself entry session), and `Admission` on methods that change something (see
 [drain admission](daemon.md#admission-while-draining)). Protocol-only methods take no caller: `Plugins`,
 `Harnesses.List` (each harness with `problem`, null when vibestd can start it, else why not, and the models it lists;
-the same preflight `Project.StartEntry` and `Spawn` route by, so the catalog and a start never disagree; `vibest models`
-and `vibest harness list` print it), `Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or restarted;
+the same preflight `Spawn` routes by, so the catalog and a run never disagree; `vibest models` and `vibest harness list`
+print it. `Project.StartEntry` routes by availability alone (binary on PATH, plugin folder, environment check) and lists
+no models, so entering a project waits on no harness CLI), `Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or restarted;
 answers how many), the hooks' `ExecutionEnd` and `Prompt` (verbatim harness JSON read with the adapter's `executionEnd` /
 `userPrompt`; unknown ids, another harness than the session's, and events the adapter ignores change nothing; a
 prompt from the entry session or from vibest's own delivery is ignored). Of the rest:
@@ -1174,6 +1175,10 @@ prompt from the entry session or from vibest's own delivery is ignored). Of the 
   `Project.RunningEntry` finds the entry session in another pane; `Project.StopEntry` sends SIGTERM to its
   recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
   longer there) or `unsupported` (with the reason).
+  Bare `vibest` makes these calls over the connection that answered its Ping (whose `update` also gives the update
+  notice): `Project.Open` with `Project.EntryPlace`, then `Project.StartEntry` with `Project.RunningEntry`, then
+  `Project.EntrySession`. Every call locates the project afresh, so a call made after a wait for the user sees a
+  project moved meanwhile.
 - `Watch` and `Session.Seen` (user only, `projects` capability) serve the desktop. A Watch session carries `finished` (the
   runtime's count of finished executions, null without `seen`) and `status` `done` when it is idle and its finished count is past
   the runtime's seen mark; a project carries `activity`, the first of blocked, done, working its live sessions show,

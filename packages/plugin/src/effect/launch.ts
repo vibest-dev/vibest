@@ -1,3 +1,4 @@
+import { shellQuote } from "@vibest/schema/layout"
 import { Config, Context, Data, Effect, FileSystem, Option, Path, Predicate, Random } from "effect"
 
 export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
@@ -141,4 +142,17 @@ export const launchLine = Effect.fn("launchLine")(function* (launch: Launch) {
   const prefix = identityPairs(launch.env)
 
   return prefix.length === 0 ? argv : ["env", ...prefix, ...argv]
+})
+
+const shellLine = (argv: ReadonlyArray<string>) => argv.map(shellQuote).join(" ")
+
+export const typedLine = Effect.fn("typedLine")(function* (launch: Launch) {
+  const line = shellLine(yield* launchLine(launch))
+  const id = launch.env.VIBEST_SESSION_ID
+
+  if (id === undefined) return line
+  const script = yield* promptFile(id, "launch.sh")
+  yield* writeAtomic(script, `exec ${line}\n`)
+
+  return shellLine(["sh", script])
 })

@@ -1,10 +1,9 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
-import { launchLine } from "@vibest/plugin/effect/launch"
+import { typedLine } from "@vibest/plugin/effect/launch"
 import { Host } from "@vibest/plugin/host"
 import { ID, shortId } from "@vibest/schema/id"
-import { shellQuote } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, Predicate, PubSub, type Scope, Schedule, Schema, Stream } from "effect"
 import { api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
@@ -318,13 +317,11 @@ export const make = (deps: {
         ),
       )
 
-    const typeLine = (hc: HcClient, address: string, argv: ReadonlyArray<string>) =>
-      failWith(hc.call("terminal.send", { terminal: address, text: argv.map(shellQuote).join(" ") })).pipe(
-        Effect.asVoid,
-      )
+    const typeLine = (hc: HcClient, address: string, text: string) =>
+      failWith(hc.call("terminal.send", { terminal: address, text })).pipe(Effect.asVoid)
 
     const typed = (launch: VibestPlugin.Launch) =>
-      launchLine(launch).pipe(
+      typedLine(launch).pipe(
         Effect.mapError((e) => new RuntimeApi.RuntimeError({ code: "failed", message: e.message })),
         Effect.provide(NodeFileSystem.layer),
         Effect.provide(NodePath.layer),
@@ -509,6 +506,7 @@ export const make = (deps: {
                 [LABEL.session]: entrySession,
                 [LABEL.space]: project,
                 [LABEL.tab]: entrySession,
+                [LABEL.typed]: String(Date.now()),
               },
             }),
           ),

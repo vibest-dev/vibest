@@ -272,7 +272,7 @@ const checks: ReadonlyArray<Check> = [
         }
 
         const no = await update("n")
-        expect(/vibestd: handoff\./.test(no), `vibestd was not handed over: ${no}`)
+        expect(no.includes("vibestd handed over; agents kept running"), `vibestd was not handed over: ${no}`)
         expect(no.includes("They keep the old integration"), `No did not keep the agent: ${no}`)
         const daemonAfter = await w.daemonPid()
         expect(daemonAfter !== undefined && daemonAfter !== daemonBefore, `vibestd ${daemonBefore} -> ${daemonAfter}`)
@@ -298,9 +298,7 @@ const checks: ReadonlyArray<Check> = [
 
         const yes = await update("y")
         expect(
-          yes.includes("vibest update has finished") &&
-            yes.includes(before.id.slice(0, 8)) &&
-            yes.includes(zero.slice(0, 8)),
+          yes.includes("Restarting ") && yes.includes(before.id.slice(0, 8)) && yes.includes(zero.slice(0, 8)),
           `the agents were not handed to vibestd for a restart: ${yes}`,
         )
         expect((await w.daemonPid()) === daemonAfter, `vibestd changed again on the second update: ${yes}`)
@@ -449,7 +447,7 @@ const checks: ReadonlyArray<Check> = [
           /Restart (it|these \d+ agents) in place and continue (its conversation|their conversations)\? \[Y\/n\]/.test(
             out,
           ) &&
-            out.includes("vibest daemon restart has finished") &&
+            out.includes("Restarting ") &&
             out.includes(id.slice(0, 8)),
           `the subagent was not offered for a restart: ${out}`,
         )
@@ -588,7 +586,7 @@ const checks: ReadonlyArray<Check> = [
         const out = r.stdout.replace(/\r/g, "")
         expect(r.code === 0, `vibest daemon restart exited ${r.code}: ${out}${r.stderr}`)
         expect(
-          out.includes("vibest daemon restart has finished") && out.includes(id.slice(0, 8)),
+          out.includes("Restarting ") && out.includes(id.slice(0, 8)),
           `the Claude subagent was not offered for a restart: ${out}`,
         )
 

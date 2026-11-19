@@ -8,5 +8,7 @@ import { piSubscription } from "./subscriptions/pi.ts"
 
 export const piPlugin = harnessPlugin(pi, piSubscription)
 export const claudePlugin = harnessPlugin(claude, claudeSubscription)
+export const cursorPlugin = harnessPlugin(cursor)
+export const agyPlugin = harnessPlugin(agy)
 
 export { agy, claude, cursor, pi }

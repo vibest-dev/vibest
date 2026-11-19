@@ -2,8 +2,8 @@ import type { HarnessOption } from "@vibest/plugin/effect"
 import { VibestCommand } from "@vibest/schema/layout"
 import type { HarnessChoice } from "@vibest/schema/session"
 import { HarnessUnavailable } from "@vibest/schema/session"
-import { Cache, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
-import { ChildProcessSpawner } from "effect/process"
+import { Cache, Clock, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -24,6 +24,8 @@ const decodeModelCacheKey = Schema.decodeSync(
     Schema.Tuple([Schema.String, Schema.String, Schema.Array(Schema.Tuple([Schema.String, Schema.String]))]),
   ),
 )
+
+const EXECUTABLE_ON_PATH = 'IFS=:; for d in $PATH; do [ -f "$d/$1" ] && [ -x "$d/$1" ] && exit 0; done; exit 1'
 
 const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Record<string, string>>) =>
   JSON.stringify([
@@ -73,22 +75,34 @@ export const make = Effect.gen(function* () {
   const plugins = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))) || beside
   const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
 
-  const cached = yield* Cache.makeWith(
-    (key: string) => {
-      const [id, providerName, entries] = decodeModelCacheKey(key)
-      const definition = harnesses.find(id)
+  const listOf = (key: string) => {
+    const [id, providerName, entries] = decodeModelCacheKey(key)
+    const definition = harnesses.find(id)
 
-      return definition === undefined
-        ? Effect.fail(unprovided(id, harnesses.all))
-        : listModels(definition, providerName === "" ? null : providerName, Object.fromEntries(entries)).pipe(
-            Effect.provide(pinned),
-          )
-    },
-    {
-      capacity: MODEL_CACHE_CAPACITY,
-      timeToLive: (exit) => (Exit.isSuccess(exit) ? MODELS_TTL : Duration.zero),
-    },
-  )
+    return definition === undefined
+      ? Effect.fail(unprovided(id, harnesses.all))
+      : listModels(definition, providerName === "" ? null : providerName, Object.fromEntries(entries)).pipe(
+          Effect.provide(pinned),
+          Effect.flatMap((models) => Effect.map(Clock.currentTimeMillis, (listedAt) => ({ models, listedAt }))),
+        )
+  }
+
+  const cached = yield* Cache.makeWith(listOf, {
+    capacity: MODEL_CACHE_CAPACITY,
+    timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
+  })
+
+  const refreshing = new Set<string>()
+  const scope = yield* Effect.scope
+
+  const refresh = (key: string) =>
+    listOf(key).pipe(
+      Effect.matchEffect({
+        onSuccess: (listed) => Cache.set(cached, key, listed),
+        onFailure: () => Cache.invalidate(cached, key),
+      }),
+      Effect.ensuring(Effect.sync(() => refreshing.delete(key))),
+    )
 
   return Service.of({
     available: Effect.fn("Harness.available")((id) =>
@@ -97,9 +111,18 @@ export const make = Effect.gen(function* () {
 
         return definition === undefined
           ? Effect.succeed(false)
-          : Effect.findFirst(searchPath, (dir) =>
-              fs.exists(path.join(dir, definition.binary)).pipe(Effect.orElseSucceed(() => false)),
-            ).pipe(Effect.map(Option.isSome))
+          : spawner
+              .exitCode(
+                ChildProcess.make("/bin/sh", ["-c", EXECUTABLE_ON_PATH, "sh", definition.binary], {
+                  stdin: "ignore",
+                  env: { PATH: searchPath.join(":") },
+                  extendEnv: false,
+                }),
+              )
+              .pipe(
+                Effect.map((code) => code === 0),
+                Effect.orElseSucceed(() => false),
+              )
       }),
     ),
     plugin: Effect.fn("Harness.plugin")(function* (id) {
@@ -122,7 +145,18 @@ export const make = Effect.gen(function* () {
 
       return dir
     }),
-    models: Effect.fn("Harness.models")((id, provider, env) => Cache.get(cached, modelCacheKey(id, provider, env))),
+    models: Effect.fn("Harness.models")(function* (id, provider, env) {
+      const key = modelCacheKey(id, provider, env)
+      const listed = yield* Cache.get(cached, key)
+      const stale = (yield* Clock.currentTimeMillis) - listed.listedAt >= Duration.toMillis(MODELS_TTL)
+
+      if (stale && !refreshing.has(key)) {
+        refreshing.add(key)
+        yield* Effect.forkIn(refresh(key), scope)
+      }
+
+      return listed.models
+    }),
   })
 })
 
@@ -134,12 +168,7 @@ export const node = LayerNode.make({
   deps: [Harnesses.node, PlatformNode.childProcessSpawner, PlatformNode.fileSystem, PlatformNode.path],
 })
 
-export const preflight = Effect.fn("Harness.preflight")(function* (
-  id: string,
-  provider: string | null,
-  model: string | null,
-  env?: Readonly<Record<string, string>>,
-) {
+export const startable = Effect.fn("Harness.startable")(function* (id: string, provider: string | null) {
   const harness = yield* Service
   const harnesses = yield* Harnesses.Service
   const adapter = harnesses.find(id)
@@ -152,6 +181,21 @@ export const preflight = Effect.fn("Harness.preflight")(function* (
 
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   yield* harness.plugin(id)
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
+  const problem = yield* adapter.checkEnvironment?.(home) ?? Effect.succeed(undefined)
+
+  if (problem) return yield* unavailable(problem)
+})
+
+export const preflight = Effect.fn("Harness.preflight")(function* (
+  id: string,
+  provider: string | null,
+  model: string | null,
+  env?: Readonly<Record<string, string>>,
+) {
+  yield* startable(id, provider)
+  const harness = yield* Service
+  const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
 
   const models = yield* harness
     .models(id, provider, env)
@@ -181,6 +225,20 @@ export const harnessCatalog = Effect.flatMap(Harnesses.Service, (harnesses) =>
         })),
         Effect.catchTag("HarnessUnavailable", (e) =>
           Effect.succeed<HarnessChoice>({ harness: id, binary, problem: e.message, models: [] }),
+        ),
+      ),
+    { concurrency: "unbounded" },
+  ),
+)
+
+export const startableOptions = Effect.flatMap(Harnesses.Service, (harnesses) =>
+  Effect.forEach(
+    harnesses.all,
+    ({ id }) =>
+      startable(id, null).pipe(
+        Effect.as<HarnessOption>({ harness: id, available: true }),
+        Effect.catchTag("HarnessUnavailable", (e) =>
+          Effect.succeed<HarnessOption>({ harness: id, available: false, problem: e.message }),
         ),
       ),
     { concurrency: "unbounded" },

@@ -180,7 +180,7 @@ const make = Effect.gen(function* () {
     ),
   )
 
-  const projectFact = (fact: Fact) => {
+  const projectFact = (fact: Fact): Effect.Effect<unknown, SqlError.SqlError | UnknownFact> => {
     const projector = projectors.get(fact.type)
 
     return projector === undefined
@@ -194,6 +194,20 @@ const make = Effect.gen(function* () {
         )
       : projector(fact)
   }
+
+  const replayFact = (fact: Fact): Effect.Effect<void, UnknownFact> =>
+    Effect.asVoid(projectFact(fact)).pipe(
+      Effect.mapError((error) =>
+        error instanceof UnknownFact
+          ? error
+          : new UnknownFact({
+              aggregate: fact.aggregate,
+              seq: fact.seq,
+              type: fact.type,
+              message: `event ${fact.aggregate} ${fact.seq}: ${fact.type} cannot be projected: ${error.message}`,
+            }),
+      ),
+    )
 
   const deliverTyped = (event: BusEvent) =>
     Effect.forEach(typed.get(event.type) ?? [], (subscriber) => PubSub.publish(subscriber, event), { discard: true })
@@ -375,7 +389,7 @@ const make = Effect.gen(function* () {
     readLog(sql, after).pipe(
       Effect.flatMap((rows) =>
         Effect.gen(function* () {
-          for (const row of rows) yield* projectFact(yield* decodeRow(row))
+          for (const row of rows) yield* replayFact(yield* decodeRow(row))
 
           if (rows.length === REPLAY_PAGE) yield* replayFrom(rows[rows.length - 1]!.position)
         }),
@@ -441,7 +455,7 @@ const firstDifference = (
   return undefined
 }
 
-const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
+export const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
   scratch.withTransaction(
     Effect.gen(function* () {
       for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)

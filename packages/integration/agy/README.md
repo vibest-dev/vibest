@@ -33,14 +33,14 @@ credentials are not read or changed by vibest.
   vibest accepts its trust dialog; the list grows by one entry per session, and vibest never reads or cleans it.
 - On herdr-core nothing shows agy blocked (sign-in, a plan waiting for approval), and an execution ended by Esc stays
   open until the next `Stop` or `vibest interrupt`.
-- Usage: vibest counts agy as limited only when every model group in `agy /usage` has an exhausted window; a session
-  that hits one model's limit ends at its `Stop` with agy's error.
+- Usage: vibest has no agy usage data (it never runs agy's print mode, which opens a browser sign-in when agy is
+  signed out); a session that hits a model's limit ends at its `Stop` with agy's error.
 
 Outside a vibest agent (no `VIBEST_SESSION_ID`) the hooks report nothing.
 
 ## Use
 
 Nothing to install. The plugin ships inside `@vibest/cli` (`harnesses/agy`, written by its build from `src/plugin.ts`).
-`harnesses/agy/index.js` provides the harness; add the folder to `plugins` in `~/.vibest/vibest.json`, like Cursor's.
+vibest loads the agy harness by default.
 To start agy through a wrapper such as agyx, add a plugin of your own that sets the definition's `binary` to the wrapper;
 vibest does not assume the binary is named `agy`.

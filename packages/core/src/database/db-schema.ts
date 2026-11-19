@@ -7,6 +7,11 @@ export const APPLICATION_ID = 0x76696265
 
 export const MIGRATION_TABLE = "migration"
 
+export const MIN_CATALOG = 2
+
+export const APPEND_ONLY_TRIGGER = `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
+    BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`
+
 export const LOG_SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,
   `CREATE TABLE event (
@@ -18,8 +23,7 @@ export const LOG_SCHEMA = [
     data      TEXT    NOT NULL,
     UNIQUE (aggregate, seq)
   ) STRICT`,
-  `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
-    BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`,
+  APPEND_ONLY_TRIGGER,
   `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`,
 ]
 
@@ -47,11 +51,8 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   override get message() {
     const file = this.file ?? "vibest.db"
 
-    if (this.catalog !== undefined && this.catalog > CATALOG_VERSION)
-      return `${file} was written by a newer vibest (event catalog ${this.catalog}, this vibest knows ${CATALOG_VERSION}): run vibest update`
-
     if (this.catalog !== undefined)
-      return `${file} holds event catalog ${this.catalog}, from before one sender type for every message (this vibest knows ${CATALOG_VERSION}): stop vibestd, run the one-time sender rewrite (ledger-rewrite-sender) on it, then start vibestd again`
+      return `${file} was written by a newer vibest (event catalog ${this.catalog}, this vibest knows ${CATALOG_VERSION}): run vibest update`
     const aside = `To start empty, with vibestd stopped, move it aside with its -wal and -shm files: for f in ${["", "-wal", "-shm"].map((suffix) => shellQuote(file + suffix)).join(" ")}; do [ -e "$f" ] && mv "$f" "$f.old"; done (the sessions, results and queued messages it holds are lost; agents still running keep running, but vibest no longer knows them)`
 
     if (this.oldEvents)
@@ -65,8 +66,6 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
     return `${file} is not this vibest's schema (application_id ${id}, v${this.version}${extra}). ${aside}`
   }
 }
-
-const SENDER_REWRITE_FROM = 2
 
 export const mismatch = (version: number, applicationId: number, detail?: string) =>
   new SchemaMismatch({ version, applicationId, ...(detail !== undefined && { detail }) })
@@ -102,15 +101,10 @@ export const inspectSchema = Effect.gen(function* () {
 
   if (catalog > CATALOG_VERSION) return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
 
-  if ((yield* ledgerOf(sql)) === undefined)
+  if (catalog < MIN_CATALOG || (yield* ledgerOf(sql)) === undefined)
     return yield* new SchemaMismatch({ version: userVersion, applicationId, oldEvents: true })
-
-  if (catalog === SENDER_REWRITE_FROM)
-    return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
-
-  if (catalog < CATALOG_VERSION)
-    return yield* new SchemaMismatch({ version: userVersion, applicationId, oldEvents: true })
-  const rebuilt = (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
+  const migrate = catalog < CATALOG_VERSION
+  const rebuilt = migrate || (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
 
   const absent = objectsOf(rebuilt ? LOG_SCHEMA : [...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find(
     (object) => !has(object.type, object.name),
@@ -118,7 +112,7 @@ export const inspectSchema = Effect.gen(function* () {
 
   if (absent !== undefined) return yield* mismatch(userVersion, applicationId, `missing ${absent.name}`)
 
-  return "ready" as const
+  return migrate ? ("migrate" as const) : ("ready" as const)
 })
 
 export const objectCount = SqlClient.SqlClient.pipe(

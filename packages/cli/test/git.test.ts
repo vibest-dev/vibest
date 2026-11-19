@@ -646,6 +646,21 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
     }),
   )
 
+  it.effect(
+    "a linked worktree of a bare repository is not in a project: the store holding the bare repository is no repository",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path
+        const repo = yield* makeRepository
+        const stores = yield* tempDirectory("vibest-stores-")
+        const bare = path.join(stores, "example.git")
+        yield* sh(stores, "clone", "-q", "--bare", repo, bare)
+        const worktree = path.join(yield* tempDirectory("vibest-bare-wt-"), "w")
+        yield* sh(bare, "worktree", "add", "-q", "--detach", worktree)
+        assert.strictEqual((yield* Effect.flip(locateProject(worktree)))._tag, "NotInRepository")
+      }),
+  )
+
   it.effect("a file is not a git cwd; a symlink to a directory still is", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

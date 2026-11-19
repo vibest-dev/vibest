@@ -676,6 +676,7 @@ describe("plugins: supervisor", () => {
       Subscriptions.Service,
       Subscriptions.Service.of({
         list: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as([])),
+        read: Effect.succeed([]),
         report: () => Effect.void,
         poll: Effect.void,
       }),

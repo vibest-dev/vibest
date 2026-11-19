@@ -23,6 +23,7 @@ import {
   Predicate,
   Schedule,
   Schema,
+  Scope,
   Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -197,16 +198,28 @@ export const hookCall = <A = void>(
   })
 }
 
+const pinged = (socket: string) =>
+  Effect.gen(function* () {
+    const own = yield* Scope.fork(yield* Effect.scope)
+
+    return yield* connect(socket).pipe(
+      Effect.flatMap((client) => Effect.map(client.Ping(undefined), (ping) => ({ client, ping }))),
+      Effect.timeout("1 second"),
+      Effect.option,
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>())
+          : Effect.failCause(cause),
+      ),
+      Scope.provide(own),
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit) && Option.isSome(exit.value) ? Effect.void : Scope.close(own, exit),
+      ),
+    )
+  })
+
 export const readPing = (socket: string) =>
-  connect(socket).pipe(
-    Effect.flatMap((client) => client.Ping(undefined)),
-    Effect.timeout("1 second"),
-    Effect.option,
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause) ? Effect.succeed(Option.none<Ping>()) : Effect.failCause(cause),
-    ),
-    Effect.scoped,
-  )
+  pinged(socket).pipe(Effect.map(Option.map(({ ping }) => ping)), Effect.scoped)
 
 export const probe = (socket: string) =>
   readPing(socket).pipe(
@@ -383,7 +396,7 @@ const withVibest =
   ) =>
     Effect.gen(function* () {
       const layout = yield* Layout
-      const up = yield* readPing(layout.socket)
+      const up = yield* pinged(layout.socket)
 
       if (Option.isNone(up)) {
         if (options?.start === false)
@@ -394,13 +407,15 @@ const withVibest =
         yield* startDaemon
       }
 
-      const ping = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* readPing(layout.socket))
+      const reached = Option.isSome(up) ? up.value : Option.getOrUndefined(yield* pinged(layout.socket))
 
-      if (ping === undefined)
+      if (reached === undefined)
         return yield* new DaemonUnavailable({
           socket: layout.socket,
           message: `vibestd did not answer Ping on ${layout.socket}`,
         })
+
+      const { client, ping } = reached
 
       const incompatible = incompatibleDaemon(
         layout.socket,
@@ -411,10 +426,7 @@ const withVibest =
 
       if (incompatible) return yield* incompatible
 
-      return yield* RpcClient.withHeaders(
-        connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
-        yield* claimHeaders(claim),
-      )
+      return yield* RpcClient.withHeaders(f(client, ping), yield* claimHeaders(claim))
     }).pipe(Effect.scoped)
 
 export interface ClientOptions {

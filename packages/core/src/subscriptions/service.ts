@@ -130,11 +130,17 @@ export const make = Effect.gen(function* () {
   const poll = Effect.gen(function* () {
     const home = yield* homeDir
 
-    for (const definition of harnesses.all)
-      if (definition.subscription && (yield* harness.available(definition.id))) yield* read(definition, home)
+    yield* Effect.forEach(
+      harnesses.all,
+      (definition) =>
+        definition.subscription
+          ? Effect.flatMap(harness.available(definition.id), (found) => (found ? read(definition, home) : Effect.void))
+          : Effect.void,
+      { concurrency: "unbounded", discard: true },
+    )
   })
 
-  return Service.of({ list, report, poll })
+  return Service.of({ list, read: list, report, poll })
 })
 
 export const testLayer = Layer.effect(Service, make)
@@ -148,6 +154,7 @@ export const layer = Layer.effect(
     const lock = yield* Semaphore.make(1)
     let polledAt = Number.NEGATIVE_INFINITY
     let running: Fiber.Fiber<void> | undefined
+    let first: Fiber.Fiber<void> | undefined
 
     const refresh = lock.withPermit(
       Effect.gen(function* () {
@@ -157,6 +164,7 @@ export const layer = Layer.effect(
         if (now - polledAt < Duration.toMillis(MINUTE) || harnesses.all.length === 0) return undefined
         polledAt = now
         running = yield* Effect.forkIn(service.poll, scope)
+        first ??= running
 
         return running
       }),
@@ -166,8 +174,9 @@ export const layer = Layer.effect(
 
     return Service.of({
       ...service,
-      list: refresh.pipe(
-        Effect.flatMap((fiber) => (fiber === undefined ? Effect.void : Fiber.await(fiber))),
+      list: Effect.andThen(refresh, service.list),
+      read: refresh.pipe(
+        Effect.andThen(Effect.suspend(() => (first === undefined ? Effect.void : Fiber.await(first)))),
         Effect.timeoutOption(CLI_TIMEOUT),
         Effect.andThen(service.list),
       ),

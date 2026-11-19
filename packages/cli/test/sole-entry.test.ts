@@ -17,13 +17,9 @@ const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
   const calls: Array<string> = []
 
-  const client = {
-    "Project.RunningEntry": () =>
-      Effect.sync(() => {
-        calls.push("RunningEntry")
+  const running = { harness: "claude", place: "herdr w1:p1", runtime: "herdr", address: "{}" }
 
-        return { harness: "claude" as const, place: "herdr w1:p1", runtime: "herdr", address: "{}" }
-      }),
+  const client = {
     "Project.StopEntry": () =>
       Effect.sync(() => {
         calls.push("StopEntry")
@@ -38,7 +34,7 @@ const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" =
     return "started"
   })
 
-  return { calls, run: soleEntry(client, "w1:p2", start) }
+  return { calls, run: soleEntry(client, running, start) }
 }
 
 describe("soleEntry while the entry session runs in another terminal", () => {
@@ -54,7 +50,7 @@ describe("soleEntry while the entry session runs in another terminal", () => {
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit))
         assert.include(String(exit), "the entry session (claude) runs in herdr w1:p1")
-        assert.deepStrictEqual(f.calls, ["RunningEntry"])
+        assert.deepStrictEqual(f.calls, [])
       }).pipe(Effect.provide(stdio(terminal, stdin))),
     )
 
@@ -64,7 +60,7 @@ describe("soleEntry while the entry session runs in another terminal", () => {
       const fiber = yield* Effect.forkChild(Effect.exit(f.run))
       yield* TestClock.adjust("2 minutes")
       assert.isTrue(Exit.isFailure(yield* Fiber.join(fiber)))
-      assert.deepStrictEqual(f.calls, ["RunningEntry"])
+      assert.deepStrictEqual(f.calls, [])
     }).pipe(Effect.provide(stdio(true, Stream.never))),
   )
 
@@ -76,7 +72,7 @@ describe("soleEntry while the entry session runs in another terminal", () => {
           const f = recordingClient(result)
           const exit = yield* Effect.exit(f.run)
           assert.isTrue(Exit.isFailure(exit), result)
-          assert.deepStrictEqual(f.calls, ["RunningEntry", "StopEntry"], result)
+          assert.deepStrictEqual(f.calls, ["StopEntry"], result)
 
           if (result === "unsupported") {
             assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")
