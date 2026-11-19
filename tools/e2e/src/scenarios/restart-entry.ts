@@ -12,7 +12,7 @@ const checks: ReadonlyArray<Check> = [
     id: "U6-claude-entry",
     covers: ["D7"],
     title:
-      "vibest daemon restart onto another vibest restarts an old Claude entry session in place with its subagent; afterwards the entry session runs on this integration and messages reach it: a send from the restarted subagent and a run through the entry session",
+      "vibest daemon restart onto another vibest restarts an old Claude entry session in place with its subagent; afterwards the entry session runs on this integration and messages reach it: a send from its subagent and a run through the entry session",
     run: async (w) => {
       for (const bin of ["claude", "pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -38,6 +38,16 @@ const checks: ReadonlyArray<Check> = [
         const sub = await c.start(TITLE, "cebefore")
         await c.result(sub, TITLE, "cebefore", 0)
         const before = entry()!
+
+        const address = async () =>
+          (
+            await w
+              .json<{ sessions: Array<{ id: string; address: unknown }> }>(["ls"], { cwd: c!.repo, env: install.env })
+              .then((l) => l.sessions)
+          ).find((e) => e.id === before.id)?.address
+
+        const addressBefore = await address()
+        expect(addressBefore != null, "the entry session has no terminal address before the restart")
 
         await install.point(binary)
 
@@ -71,6 +81,11 @@ const checks: ReadonlyArray<Check> = [
         expect(
           entry()?.harness_session_id === before.harness_session_id,
           `the conversation changed: ${before.harness_session_id} -> ${entry()?.harness_session_id}`,
+        )
+        const addressAfter = await address()
+        expect(
+          JSON.stringify(addressAfter) === JSON.stringify(addressBefore),
+          `the entry session's terminal changed: ${JSON.stringify(addressBefore)} -> ${JSON.stringify(addressAfter)}`,
         )
 
         const after = c.delivered(sub)
