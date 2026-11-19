@@ -309,6 +309,7 @@ describe("herdr plugin package", () => {
       fs.mkdirSync(path.join(stage, "bin"), { recursive: true })
       fs.writeFileSync(path.join(stage, "bin", "vibest"), "")
       fs.mkdirSync(path.join(stage, "harnesses"))
+      fs.mkdirSync(path.join(stage, "plugins"))
       copyHerdrPlugin(stage, path.join(import.meta.dirname, "../herdr-plugin"))
       const archive = path.join(stage, "vibest.tar.gz")
       childProcess.execFileSync("tar", ["-czf", archive, "-C", stage, ...ARCHIVE_ROOTS])
@@ -318,7 +319,7 @@ describe("herdr plugin package", () => {
       assert.match(listed, /^herdr-plugin\/README\.md$/m)
       const script = fs.readFileSync(path.join(import.meta.dirname, "../scripts/build-archive.ts"), "utf8")
       assert.match(script, /ARCHIVE_ROOTS/)
-      assert.deepStrictEqual([...ARCHIVE_ROOTS], ["bin", "harnesses", "herdr-plugin"])
+      assert.deepStrictEqual([...ARCHIVE_ROOTS], ["bin", "harnesses", "plugins", "herdr-plugin"])
     } finally {
       fs.rmSync(stage, { recursive: true, force: true })
     }

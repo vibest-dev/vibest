@@ -24,6 +24,8 @@ run(["bun", "scripts/build.ts", path.join(stage, "bin/vibest"), `bun-${target}`]
 
 run(["bun", "scripts/build-harnesses.ts", path.join(stage, "harnesses")])
 
+run(["bun", "scripts/build-plugins.ts", path.join(stage, "plugins")])
+
 copyHerdrPlugin(stage, path.join(app, "herdr-plugin"))
 
 fs.mkdirSync(outdir, { recursive: true })

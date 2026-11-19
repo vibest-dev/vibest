@@ -33,6 +33,7 @@ const target = () => {
       binary: path.join(modules, ".bin/vibest"),
       compiled: path.join(modules, "@vibest", `cli-${process.platform}-${process.arch}`, "bin/vibest"),
       harnesses: path.join(modules, "@vibest/cli/harnesses"),
+      plugins: path.join(modules, "@vibest/cli/plugins"),
     }
   }
 
@@ -47,15 +48,21 @@ const target = () => {
       binary: path.join(install, "bin/vibest"),
       compiled: path.join(version, "bin/vibest"),
       harnesses: path.join(version, "harnesses"),
+      plugins: path.join(version, "plugins"),
     }
   }
 
   const compiled = path.join(checkout, "packages/cli/dist/vibest")
 
-  return { binary: compiled, compiled, harnesses: path.join(checkout, "packages/cli/harnesses") }
+  return {
+    binary: compiled,
+    compiled,
+    harnesses: path.join(checkout, "packages/cli/harnesses"),
+    plugins: path.join(checkout, "packages/cli/plugins"),
+  }
 }
 
-export const { binary, compiled, harnesses } = target()
+export const { binary, compiled, harnesses, plugins } = target()
 
 export const buildVersion = (
   JSON.parse(fs.readFileSync(path.join(checkout, "packages/cli/package.json"), "utf8")) as { version: string }

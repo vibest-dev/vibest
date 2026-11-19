@@ -3,7 +3,7 @@
 # The newest stable release; with --beta (sh -s -- --beta), the newest release of either channel, beta or stable.
 #
 # Each version unpacks into its own directory, ~/.local/share/vibest/versions/<version>/ (bin/vibest, the harness
-# plugins, and herdr-plugin/ beside them; herdr-plugin is not linked), and ~/.local/bin/vibest links to the newest. A running vibestd and its sessions keep the version they
+# plugins, the opt-in plugins in plugins/, and herdr-plugin/ beside them; herdr-plugin is not linked), and ~/.local/bin/vibest links to the newest. A running vibestd and its sessions keep the version they
 # started from; the one before the newest and any a running process still uses are kept, older ones are removed. Nothing
 # outside these paths is written.
 #   VIBEST_DOWNLOAD_URL  the archives of one release, installed whatever the channel

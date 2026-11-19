@@ -20,6 +20,7 @@ import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machines from "./scenarios/machines.ts"
+import pluginSessions from "./scenarios/plugin-sessions.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
 import restartHc from "./scenarios/restart-hc.ts"
@@ -48,7 +49,7 @@ const areas = {
   agy,
   daemon,
   project,
-  plugins,
+  plugins: [...plugins, ...pluginSessions],
   harness,
   integration: [...integration, ...cursor],
   update,
