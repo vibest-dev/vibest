@@ -75,7 +75,7 @@ Every session runs as an agent definition: an id, a description and a system pro
 rules to the ones every agent has. Bare `vibest` opens the entry session as `coordinator`; `vibest run` starts a
 `general` session unless `--agent` names another registered id, and on another machine the same id is looked up there. An
 id that is not registered is refused with the registered ids listed, before any worktree or pane is made. A session may
-manage (send to, interrupt, peek at, remove) only the sessions it started.
+manage (send to, interrupt, peek at, archive) only the sessions it started.
 
 ## S57. Attaching files to a run
 

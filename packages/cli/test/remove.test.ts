@@ -98,7 +98,7 @@ const removeTimingCwd = (sessions: Session.Interface, id: string) =>
     return [yield* Fiber.join(fiber), (yield* Clock.currentTimeMillis) - started] as const
   })
 
-describe.concurrent("vibest rm: process proof", () => {
+describe.concurrent("vibest archive: process proof", () => {
   test(
     "the close's reply is lost: the record survives a vibestd restart, and the retry proves it gone",
     Effect.gen(function* () {
@@ -191,7 +191,7 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "a process still in the worktree: the archive finishes with the worktree and rules kept, Send refused; once it exits, vibest rm again removes them",
+    "a process still in the worktree: the archive finishes with the worktree and rules kept, Send refused; once it exits, vibest archive again removes them",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const fake = yield* FakeProcesses
@@ -300,7 +300,7 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "a terminal opened beside it while vibest rm runs stays: vibest closes only its own terminal",
+    "a terminal opened beside it while vibest archive runs stays: vibest closes only its own terminal",
     Effect.gen(function* () {
       const { id, pane, sessions, herdr } = yield* idleSession
       const workspace = pane.split(":")[0]!
