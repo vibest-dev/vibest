@@ -161,8 +161,7 @@ const interrupt = Spec.make("interrupt", {
 })
 
 const stop = Spec.make("stop", {
-  description:
-    "Stop a session you started: a working one is interrupted, then its terminal closed; its worktree, branch and messages stay, and the next vibest send resumes the same conversation (JSON)",
+  description: "End the session process and keep the session; the next vibest send resumes it",
   params: { id },
 })
 
