@@ -58,10 +58,9 @@ const NPM_CHECKS = [
   "S10-launch",
   "U1",
   "U2",
-  "U9",
   "U10",
-  "U11",
   "U12",
+  ...(process.platform === "darwin" ? ["H4"] : []),
 ]
 
 type Options = { cwd?: string; env?: NodeJS.ProcessEnv }

@@ -33,7 +33,7 @@ run fails at the end naming each failed leg:
    and real harnesses; a skipped check fails. The curl install runs the whole gate. The npm install holds the same
    binary bytes, so it runs only the checks whose behaviour depends on how vibest is installed and launched
    (`NPM_CHECKS` in `src/verify.ts`: the daemon start D1, harness and plugin lookup H1, H8, I1, I2, I3, I7, I9, I11,
-   the entry session typed into a terminal S10-launch, and `vibest update` U1, U2, U9 to U12); with areas or ids
+   the entry session typed into a terminal S10-launch, `vibest update` U1, U2, U10, U12, and on macOS H4); with areas or ids
    given, both installs run those. Checks whose key is unchanged are cache hits (docs/testing/e2e-plan.md §3).
 3. Prints `verify: passed.` when every leg passed.
 
