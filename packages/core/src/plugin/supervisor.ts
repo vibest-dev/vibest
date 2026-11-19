@@ -31,8 +31,8 @@ const removeMatching = (candidates: Array<Candidate>, target: string) => {
   }
 }
 
-const enabling = (candidate: Candidate, operations: ReadonlyArray<Operation>) =>
-  operations.findLast((op) => op.type === "add" && "id" in candidate.plugin && op.target === candidate.plugin.id)
+const lastNaming = (candidate: Candidate, operations: ReadonlyArray<Operation>) =>
+  operations.findLast((op) => "id" in candidate.plugin && op.target === candidate.plugin.id)
 
 const selects = (builtins: ReadonlyArray<Candidate>, op: Operation) =>
   builtins.some((b) => b.optional && "id" in b.plugin && b.plugin.id === op.target)
@@ -40,12 +40,12 @@ const selects = (builtins: ReadonlyArray<Candidate>, op: Operation) =>
 export const keptBuiltins = (builtins: ReadonlyArray<Candidate>, operations: ReadonlyArray<Operation>) => {
   const kept = builtins.flatMap((candidate) => {
     if (!candidate.optional) return [candidate]
-    const op = enabling(candidate, operations)
+    const op = lastNaming(candidate, operations)
 
     return op?.type === "add" ? [{ ...candidate, options: op.options }] : []
   })
 
-  for (const op of operations) if (op.type === "remove") removeMatching(kept, op.target)
+  for (const op of operations) if (op.type === "remove" && !selects(builtins, op)) removeMatching(kept, op.target)
 
   return kept
 }

@@ -25,9 +25,10 @@ const InboxQueued = Schema.Struct({
   kind: Schema.Literals(["task", "send", "notice"]),
   sender: optional(Schema.String),
   from: optional(Agent),
+  request: optional(Schema.String),
 })
 
-const OutboxQueued = Schema.Struct({ kind: optional(Schema.String), session: Schema.String })
+const OutboxQueued = Schema.Struct({ id: Schema.String, kind: optional(Schema.String), session: Schema.String })
 
 type Row = {
   readonly position: number
@@ -46,6 +47,8 @@ const ledger = (tx: SqlClient.SqlClient) => {
   const machines = new Map<string, string>()
   const peers = new Map<string, string>()
   const nameOf = (peer: string) => machines.get(peer) ?? peers.get(peer) ?? peer
+  const requests = new Set<string>()
+  const outboxIds = new Set<string>()
 
   const patch = (
     row: Row,
@@ -54,6 +57,7 @@ const ledger = (tx: SqlClient.SqlClient) => {
       readonly about?: string | null
       readonly from?: null
       readonly execution?: number | null
+      readonly request?: null
     },
   ) => tx`UPDATE event SET data = json_patch(data, ${JSON.stringify(changes)}) WHERE position = ${row.position}`
 
@@ -68,13 +72,28 @@ const ledger = (tx: SqlClient.SqlClient) => {
       : "user"
   }
 
+  const firstRequest = (sender: Agent | "user" | "vibest", request: string | undefined) => {
+    if (request === undefined) return true
+    const key = `${sender === "user" || sender === "vibest" ? sender : `${sender.machine ?? ""}/${sender.session}`}\n${request}`
+
+    if (requests.has(key)) return false
+    requests.add(key)
+
+    return true
+  }
+
   const inbox = (row: Row, data: typeof InboxQueued.Type) => {
-    if (data.kind === "notice") return patch(row, { sender: "vibest", about: data.sender ?? null })
-    const sender = senderOf(data, row.aggregate)
-    const local = sender !== "user" && sender.machine === undefined ? sender.session : undefined
+    const notice = data.kind === "notice"
+    const sender = notice ? "vibest" : senderOf(data, row.aggregate)
+    const local = sender !== "user" && sender !== "vibest" && sender.machine === undefined ? sender.session : undefined
     const execution = data.kind === "send" && local !== undefined ? open.get(local) : undefined
 
-    return patch(row, { sender, from: null, execution: execution ?? null })
+    return patch(row, {
+      sender,
+      from: null,
+      ...(notice ? { about: data.sender ?? null } : { execution: execution ?? null }),
+      ...(!firstRequest(sender, data.request) && { request: null }),
+    })
   }
 
   return (row: Row) =>
@@ -121,6 +140,9 @@ const ledger = (tx: SqlClient.SqlClient) => {
 
         case "outbox.queued": {
           const data = yield* decode(OutboxQueued, row)
+
+          if (outboxIds.has(data.id)) return yield* tx`DELETE FROM event WHERE position = ${row.position}`
+          outboxIds.add(data.id)
           const execution = data.kind === "send" ? open.get(data.session) : undefined
 
           if (execution !== undefined) yield* patch(row, { execution })
