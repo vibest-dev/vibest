@@ -355,7 +355,7 @@ type or key changes or removes rows, in the same pull request.
 4. A ledger migration is a module `packages/core/src/database/migration/<timestamp>_<name>.ts` with an `id` and an
    `up(tx)`, added to `migrations`. It changes only the ledger (`event` and `meta`): it rewrites a fact's `type` and
    `data`, or deletes a fact, and keeps its `position`, `aggregate`, `seq` and `at`; it reads fact JSON as plain data
-   and imports nothing from the catalog, which keeps changing under it. The read model never gets one
+   and imports only `effect`, never the catalog, which keeps changing under it (an oxlint rule on the folder). The read model never gets one
    (`PROJECTION_VERSION` rebuilds it), and an added optional key never gets one. It is deleted with its test, and
    `MIN_CATALOG` raised, once the machines that matter have passed it. There are no down migrations and no copy of the
    file is kept: before an update, import-check runs the same migrations on a copy in memory, and before a migration

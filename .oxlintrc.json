@@ -139,6 +139,22 @@
       }
     },
     {
+      "files": ["packages/core/src/database/migration/**"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(?!effect(/|$))",
+                "message": "A ledger migration reads fact JSON as plain data and imports only effect: the catalog and the rest of vibest keep changing under it."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": [
         "packages/core/src/effect/layer-node-erased.ts",
         "packages/schema/src/event-fact.ts",
