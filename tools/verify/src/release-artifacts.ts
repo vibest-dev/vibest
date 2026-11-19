@@ -105,7 +105,6 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
       "harnesses/cursor/skills/*/SKILL.md",
       "harnesses/agy/.agents/plugins/vibest/skills/*/SKILL.md",
       "harnesses/pi/skills/*/SKILL.md",
-      "plugins/silent-execution/index.js",
     ])
       has(f, "harness plugin file")
   }

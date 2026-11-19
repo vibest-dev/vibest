@@ -830,12 +830,13 @@ builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude,
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
-**Shipped opt-in plugins**: plugins vibest ships but does not load live in the `plugins/` folder of the install
-directory (`packages/cli/plugins` in a checkout, built by `packages/cli/scripts/build-plugins.ts` from
-`packages/builtins/src`); a user turns one on by adding its folder to `vibest.json` `plugins`, as with the agy harness.
-Today that is `silent-execution`: when a subagent's execution completes without the subagent sending a message, it
-sends the subagent's creator one message (request `silent-execution:<session>:<execution>`), and on activation it
-checks each session's latest execution.
+**Shipped opt-in plugins** (as OpenCode's `packages/plugins/<name>`, `@opencode/plugin-<name>`, id `opencode.<name>`):
+each is a package `packages/plugins/<name>` named `@vibest/plugin-<name>` with plugin id `vibest.<name>`, bundled into
+vibest through `pre` in `packages/builtins` but marked optional, so it is not loaded. A user turns one on by writing its
+id in `vibest.json` `plugins` (with options, `{ "package": "vibest.<name>", "options": { … } }`); it then loads in its
+place among the builtins, and `"-vibest.<name>"` turns it off again. Today that is `vibest.report-reminder`: when a
+subagent's execution completes without the subagent sending a message, it sends the subagent's creator one message
+(request `vibest.report-reminder:<session>:<execution>`), and on activation it checks each session's latest execution.
 
 **Extension places and rules.** An extension is one of three kinds:
 
@@ -843,7 +844,7 @@ checks each session's latest execution.
 | -------- | --------------------------------------------------------------- | ------------------------------------------------ |
 | provider | `transform` adds or changes a definition                        | harness and runtime definitions                  |
 | decider  | `hook`: core asks, waits up to 5 s, and uses the answer         | `agent.start.before` routing, `agent.fail` moves |
-| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `silent-execution`                               |
+| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `vibest.report-reminder`                         |
 
 1. Only core writes the ledger, through its commands. A plugin changes state only through what the context offers;
    a plugin send is recorded with the plugin as its sender (`{ plugin }`), filled in by vibestd, never chosen by the
@@ -868,7 +869,7 @@ a plugin send goes through the inbox like any other send.
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/` or `file://` (absolute, taken as is) or `./` or `../` (resolved from the vibest home)                                                                                                                                                                                      |
 | `{ "package": "…", "options": { … } }` | add a local plugin with options                                                                                                                                                                                                                                                                                                                               |
-| `"@scope/vibest-plugin-x"`             | any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                                                                                                                                                                                     |
+| `"vibest.report-reminder"`             | the id of a shipped opt-in plugin turns it on; any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                                                                                                                                      |
 | `"-check"`                             | remove the plugins added before it whose id matches, builtins included (a builtin only by exact id; `*` and `prefix.*` match user plugins only, `*` also failed ones). Builtins are kept or removed from the config text at every activation, so removing and restoring one needs no restart. Example: `"-harness-default"` drops the builtin default harness |
 
 Files and directories in `~/.vibest/plugins/` are added without an entry, before the entries. A plugin reads its

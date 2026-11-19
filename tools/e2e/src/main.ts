@@ -36,7 +36,6 @@ import {
   harnesses,
   ledgerSnapshot,
   method,
-  plugins as shippedPlugins,
   removeExpiredWorlds,
   removeWorldDir,
   Skip,
@@ -270,16 +269,7 @@ const print = (r: Result) =>
 
 const t0 = Date.now()
 const results = new Map<string, Result>()
-
-const keyOf = await cacheKeys({
-  login,
-  binaries: [binary, compiled],
-  harnesses,
-  plugins: shippedPlugins,
-  method,
-  userFiles: userFilesBefore,
-})
-
+const keyOf = await cacheKeys({ login, binaries: [binary, compiled], harnesses, method, userFiles: userFilesBefore })
 const keys = new Map(await Promise.all(selected.map(async (c) => [c.id, await keyOf(c.area, c.id)] as const)))
 const cacheable = (c: (typeof checks)[number]) => !noCache && (c.check.tier ?? "gate") !== "agent"
 

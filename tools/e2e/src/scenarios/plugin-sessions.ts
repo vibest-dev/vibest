@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { reply } from "../fake-model.ts"
-import { expect, plugins, rows, until, type World } from "../world.ts"
+import { expect, rows, until, type World } from "../world.ts"
 import { configurePlugins } from "../world/plugins.ts"
 import {
   entryIdOf,
@@ -178,12 +178,12 @@ const pluginSessionChecks: ReadonlyArray<Check> = [
   },
 ]
 
-const silentPlugin = path.join(plugins, "silent-execution")
+const REMINDER = "vibest.report-reminder"
 
 const reminders = (w: World, recipient: string, about: string) =>
   rows<{ content: string; status: string }>(
     w,
-    `SELECT content, status FROM inbox WHERE session_id = ? AND sender = '{"plugin":"silent-execution"}' AND content LIKE ? ORDER BY id`,
+    `SELECT content, status FROM inbox WHERE session_id = ? AND sender = '{"plugin":"vibest.report-reminder"}' AND content LIKE ? ORDER BY id`,
     recipient,
     `%(${about})%`,
   )
@@ -191,38 +191,38 @@ const reminders = (w: World, recipient: string, about: string) =>
 const completed = (w: World, id: string) =>
   until(`${id} completed`, () => lastExecution(w, id)?.status === "completed", 90_000)
 
-const silentChecks: ReadonlyArray<Check> = [
+const reminderChecks: ReadonlyArray<Check> = [
   {
     id: "G18",
     title:
-      "the shipped silent-execution plugin, once added to vibest.json, sends a subagent's creator one message from the plugin when an execution completes without the subagent sending; one that sent gets none; nothing is sent while it is not loaded, and an execution that ended then is reported once when it loads and once across a vibestd restart",
+      "the shipped report-reminder plugin, once its id vibest.report-reminder is added to vibest.json, sends a subagent's creator one message from the plugin when an execution completes without the subagent sending; one that sent gets none; nothing is sent while it is not loaded, and an execution that ended then is reported once when it loads and once across a vibestd restart",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))
       const quietModel = recordingModel(() => reply("done-quiet\nstatus: completed"))
       let entryId = ""
-      const sending = sendingModel(() => entryId, "hello-silent")
+      const sending = sendingModel(() => entryId, "hello-reminder")
       let session = ""
 
       const active = async (on: boolean) =>
         until(
-          `silent-execution ${on ? "active" : "unloaded"}`,
+          `report-reminder ${on ? "active" : "unloaded"}`,
           async () =>
             (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
-              (p) => p.id === "silent-execution" && p.status === "active",
+              (p) => p.id === REMINDER && p.status === "active",
             ) === on,
         )
 
       try {
-        const m = await piEntry(w, "silent", entryModel.url)
+        const m = await piEntry(w, "reminder", entryModel.url)
         session = m.session
         entryId = entryIdOf(w)
-        const before = await runSub(w, m.repo, session, quietModel.url, "pi-silent-before", "reply only")
+        const before = await runSub(w, m.repo, session, quietModel.url, "pi-reminder-before", "reply only")
         await completed(w, before)
         await Bun.sleep(2_000)
         expect(reminders(w, entryId, before).length === 0, "a reminder was sent without the plugin")
 
-        await configurePlugins(w, (list) => [...list, silentPlugin])
+        await configurePlugins(w, (list) => [...list, REMINDER])
         await active(true)
         await until(
           "the execution that ended before it loaded reported",
@@ -230,22 +230,22 @@ const silentChecks: ReadonlyArray<Check> = [
           60_000,
         )
 
-        const quiet = await runSub(w, m.repo, session, quietModel.url, "pi-silent-quiet", "reply only")
-        const sender = await runSub(w, m.repo, session, sending.url, "pi-silent-sender", "send to the entry session")
+        const quiet = await runSub(w, m.repo, session, quietModel.url, "pi-reminder-quiet", "reply only")
+        const sender = await runSub(w, m.repo, session, sending.url, "pi-reminder-sender", "send to the entry session")
         await completed(w, sender)
         await until("the quiet subagent reported", () => reminders(w, entryId, quiet).length > 0, 60_000)
         await until(
           "the entry session's model saw the reminder",
-          () => seen(entryModel).includes("<plugin>silent-execution</plugin>"),
+          () => seen(entryModel).includes(`<plugin>${REMINDER}</plugin>`),
           60_000,
         )
 
-        await configurePlugins(w, (list) => list.filter((p) => p !== silentPlugin))
+        await configurePlugins(w, (list) => list.filter((p) => p !== REMINDER))
         await active(false)
-        const gap = await runSub(w, m.repo, session, quietModel.url, "pi-silent-gap", "reply only")
+        const gap = await runSub(w, m.repo, session, quietModel.url, "pi-reminder-gap", "reply only")
         await completed(w, gap)
         await w.stopDaemon()
-        await configurePlugins(w, (list) => [...list, silentPlugin])
+        await configurePlugins(w, (list) => [...list, REMINDER])
         await w.ok(["daemon"], { cwd: m.repo })
         await active(true)
         await until(
@@ -266,7 +266,7 @@ const silentChecks: ReadonlyArray<Check> = [
             `${reminders(w, entryId, id).length} reminders about ${id}, expected ${count}: ${JSON.stringify(reminders(w, entryId, id))}`,
           )
         expect(
-          inboxRows(w, 'sender = \'{"plugin":"silent-execution"}\' AND session_id <> ?', entryId) === 0,
+          inboxRows(w, `sender = '{"plugin":"${REMINDER}"}' AND session_id <> ?`, entryId) === 0,
           "a reminder went to a session other than the entry session",
         )
       } finally {
@@ -279,4 +279,4 @@ const silentChecks: ReadonlyArray<Check> = [
   },
 ]
 
-export default [...pluginSessionChecks, ...silentChecks]
+export default [...pluginSessionChecks, ...reminderChecks]

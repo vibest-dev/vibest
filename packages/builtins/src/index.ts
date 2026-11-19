@@ -1,4 +1,5 @@
 import { claudePlugin, piPlugin } from "@vibest/plugin-harnesses"
+import reportReminder from "@vibest/plugin-report-reminder"
 import type { Plugin } from "@vibest/plugin/effect"
 import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
@@ -14,6 +15,7 @@ export interface Builtin {
   readonly revision: string
   readonly options: Schema.JsonObject
   readonly plugin: Plugin.Plugin
+  readonly optional?: boolean
 }
 
 const builtin = (plugin: Plugin.Plugin): Builtin => ({
@@ -35,6 +37,7 @@ export const pre = Effect.gen(function* () {
     builtin(runtimeHerdr),
     builtin(choicePlugin()),
     builtin(harnessDefaultPlugin()),
+    { ...builtin(reportReminder), optional: true },
   ]
 })
 

@@ -14,7 +14,6 @@
   "files": [
     "bin",
     "harnesses",
-    "plugins",
     "herdr-plugin",
     "LICENSE"
   ],
@@ -35,10 +34,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun scripts/build.ts && bun scripts/build-harnesses.ts && bun scripts/build-plugins.ts",
+    "build": "bun scripts/build.ts && bun scripts/build-harnesses.ts",
     "build:darwin-arm64": "bun scripts/build.ts ../../packages/cli-darwin-arm64/bin/vibest bun-darwin-arm64",
     "build:linux-x64": "bun scripts/build.ts ../../packages/cli-linux-x64/bin/vibest bun-linux-x64",
-    "prepack": "bun scripts/build-harnesses.ts && bun scripts/build-plugins.ts",
+    "prepack": "bun scripts/build-harnesses.ts",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/cli"
   },

@@ -15,5 +15,4 @@ packages/integration/cursor/.cursor-plugin/
 packages/integration/cursor/hooks/
 packages/integration/agy/.agents/
 packages/cli/harnesses/
-packages/cli/plugins/
 packages/integration/pi/dist/

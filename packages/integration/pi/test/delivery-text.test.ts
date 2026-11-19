@@ -34,8 +34,8 @@ describe("Pi delivery text", () => {
 
   it("a plugin message names the plugin", () => {
     assert.strictEqual(
-      deliveryText([{ sender: { plugin: "silent-execution" }, message: "w1 ended without a message" }]),
-      "Message from Vibest · silent-execution\nw1 ended without a message",
+      deliveryText([{ sender: { plugin: "vibest.report-reminder" }, message: "w1 ended without a message" }]),
+      "Message from Vibest · vibest.report-reminder\nw1 ended without a message",
     )
   })
 

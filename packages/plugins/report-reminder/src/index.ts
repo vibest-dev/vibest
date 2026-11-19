@@ -1,7 +1,7 @@
 import { Plugin, type PluginSession } from "@vibest/plugin/effect"
 import { Effect, Stream } from "effect"
 
-const ID = "silent-execution"
+const ID = "vibest.report-reminder"
 
 const sentNothing = (session: PluginSession, execution: number) =>
   session.parentId !== null &&

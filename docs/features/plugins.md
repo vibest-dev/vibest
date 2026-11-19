@@ -105,10 +105,10 @@ nothing more, and a message to an archived subagent goes to the session that sta
 
 ## G18. A reminder when a subagent's execution sends nothing
 
-vibest ships the plugin `silent-execution` in the `plugins/silent-execution` folder of the install directory, not
-loaded by default; adding that folder to `plugins` in `~/.vibest/vibest.json` turns it on. Then, when a subagent's
-execution completes without the subagent sending a message, the session that started it receives one message from
-the plugin ("Message from Vibest · silent-execution") naming the subagent and the execution. A subagent that sent a
+vibest ships the plugin `vibest.report-reminder`, not loaded by default; writing its id `"vibest.report-reminder"` in
+`plugins` of `~/.vibest/vibest.json` turns it on. Then, when a subagent's execution completes without the subagent
+sending a message, the session that started it receives one message from the plugin ("Message from Vibest ·
+vibest.report-reminder") naming the subagent and the execution. A subagent that sent a
 message during the execution, an entry session, and a failed or interrupted execution get nothing. An execution that
 ended while the plugin was not loaded, or while vibestd was restarting, is reported once when it loads: the plugin
 checks each session's latest execution then. Without the plugin, nothing is sent. A message the subagent sends to a
