@@ -52,7 +52,6 @@ const addressed = (machine: string, id: string) => `${machine}/${id}`
 const REFUSED = [
   ["env", "--env"],
   ["share", "--share"],
-  ["archive", "--archive-on-idle"],
   ["runtimeSession", "--session"],
 ] as const
 
@@ -186,7 +185,7 @@ const make = Effect.gen(function* () {
       input: PayloadOf<"Spawn">,
       from: { readonly project: string; readonly session: string },
     ) {
-      const refused = REFUSED.flatMap(([key, flag]) => (input[key] !== undefined && input[key] !== false ? [flag] : []))
+      const refused = REFUSED.flatMap(([key, flag]) => (input[key] !== undefined ? [flag] : []))
 
       if (refused.length > 0)
         return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })

@@ -104,12 +104,6 @@ const run = Spec.make("run", {
       ),
       Flag.optional,
     ),
-    archive: Flag.Boolean("archive-on-idle").pipe(
-      Flag.withDescription(
-        "Archive the session the first time it is idle after a completed execution with nothing it sent or was sent still waiting (as vibest archive: branch kept, worktree removed only when git loses nothing)",
-      ),
-      Flag.withDefault(false),
-    ),
     runtime: Flag.String("runtime").pipe(
       Flag.withDescription(
         "The terminal runtime for this session. Default: the --share session's, otherwise its parent's",

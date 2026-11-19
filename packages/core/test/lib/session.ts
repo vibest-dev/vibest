@@ -17,7 +17,6 @@ import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -43,7 +42,6 @@ import {
 import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
-import { ArchiveOnIdle, archiveOnIdlePlugin } from "../../../builtins/src/archive-on-idle.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
 import { Machines } from "../../../server/src/machine/machines.ts"
@@ -116,7 +114,7 @@ export const pluginsHost = (
   added: ReadonlyArray<PluginEntry> = [],
   options: { readonly timeout?: Duration.Input; readonly activateLate?: boolean } = {},
 ) => {
-  const candidates: ReadonlyArray<Candidate> = [
+  const loaded: ReadonlyArray<Candidate> = [
     { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
     { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
@@ -127,20 +125,6 @@ export const pluginsHost = (
     layer: Layer.effectContext(
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
-
-        const archivePlugin = yield* archiveOnIdlePlugin.pipe(
-          Effect.provideService(ArchiveOnIdle, yield* archiveOnIdle),
-        )
-
-        const loaded = [
-          ...candidates,
-          {
-            source: "builtin:archive-on-idle",
-            revision: "archive-on-idle",
-            options: {},
-            plugin: archivePlugin,
-          },
-        ]
 
         if (options.activateLate) {
           const release = host.holdNow()
@@ -156,7 +140,6 @@ export const pluginsHost = (
     ),
     deps: [
       Agents.node,
-      Archive.node,
       Bus.node,
       Db.node,
       Harnesses.node,

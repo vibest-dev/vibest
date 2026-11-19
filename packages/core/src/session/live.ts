@@ -18,7 +18,6 @@ export interface Tracked {
   readonly blockedNotified: Ref.Ref<boolean>
   readonly prompting: Ref.Ref<boolean>
   readonly stopping: Ref.Ref<boolean>
-  readonly archiveTold: Ref.Ref<boolean>
   readonly launchRechecked: Ref.Ref<boolean>
   readonly forgetOnRelease: Ref.Ref<boolean>
 }
@@ -28,7 +27,6 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
   stopping: Ref.make(false),
-  archiveTold: Ref.make(false),
   launchRechecked: Ref.make(false),
   forgetOnRelease: Ref.make(false),
 })
@@ -37,7 +35,6 @@ export const make = Effect.gen(function* () {
   const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
   const statuses = new Map<string, AgentStatus>()
   const integrations = new Map<string, Integration>()
-  const archiveOnIdle = new Set<string>()
   const restarting = new Set<string>()
   const restartOwners = new Map<string, Deferred.Deferred<Restarted>>()
 
@@ -114,16 +111,9 @@ export const make = Effect.gen(function* () {
     if (r !== undefined) yield* Ref.set(r.endedAt, undefined)
   })
 
-  const archiveWhenIdle = Effect.fn("SessionLive.archiveWhenIdle")((id: string) =>
-    Effect.sync(() => {
-      archiveOnIdle.add(id)
-    }),
-  )
-
   const ended = Effect.fn("SessionLive.ended")((id: string) =>
     Effect.sync(() => {
       integrations.delete(id)
-      archiveOnIdle.delete(id)
       statuses.delete(id)
     }),
   )
@@ -133,10 +123,6 @@ export const make = Effect.gen(function* () {
   )
 
   const integration = Effect.fn("SessionLive.integration")((id: string) => Effect.sync(() => integrations.get(id)))
-
-  const archivesOnIdle = Effect.fn("SessionLive.archivesOnIdle")((id: string) =>
-    Effect.sync(() => archiveOnIdle.has(id)),
-  )
 
   const isRestarting = Effect.fn("SessionLive.restarting.has")((id: string) => Effect.sync(() => restarting.has(id)))
 
@@ -187,8 +173,6 @@ export const make = Effect.gen(function* () {
     integration,
     setIntegration,
     forgetProcess,
-    archivesOnIdle,
-    archiveWhenIdle,
     ended,
     size,
     restarting: { has: isRestarting, mark: markRestarting, clear: clearRestarting, own: ownRestart },

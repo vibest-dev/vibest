@@ -45,7 +45,6 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           model: Option.getOrUndefined(o.model),
           env: Option.getOrUndefined(o.env),
           share: Option.getOrUndefined(o.share),
-          archive: o.archive || undefined,
           runtime: Option.getOrUndefined(o.runtime),
           machine: Option.getOrUndefined(o.machine),
           callerEnv: callerEnvOf(),

@@ -1,6 +1,6 @@
 import { InboxMoved, InboxQueued, type InboxKind, type Sender } from "@vibest/schema/event"
 import { InboxStatus } from "@vibest/schema/session"
-import { Clock, Effect, Predicate } from "effect"
+import { Clock, Effect } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { nextBatch } from "../batch.ts"
@@ -220,12 +220,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         yield* tellSendersOf(dropped, "the entry session is not running")
       })
 
-    const waitingOn = (id: string) =>
-      sql<{ id: number }>`SELECT id FROM inbox
-        WHERE ((session_id = ${id} OR sender_session_id = ${id}) AND status IN ('pending', 'delivering'))
-          OR (session_id = ${id} AND kind = 'task' AND execution_id IS NULL)
-        LIMIT 1`.pipe(Effect.map((rows) => rows.length > 0))
-
     return {
       inbox,
       inboxIn,
@@ -238,7 +232,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       tellSender,
       insertInboxRow,
       dropWaiting,
-      waitingOn,
     }
   })
 
@@ -298,19 +291,6 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
           return local(yield* creatorOf(sender)) === recipient || local(yield* creatorOf(recipient)) === sender
         }),
-      ),
-
-      inboxParties: Effect.fn("Db.inbox.inboxParties")((sessionId: string, inboxId: number) =>
-        sql<{
-          recipient: string
-          sender: string | null
-        }>`SELECT session_id AS recipient, sender_session_id AS sender FROM inbox
-          WHERE session_id = ${sessionId} AND id = ${inboxId}`.pipe(
-          Effect.map((rows) =>
-            [rows[0]?.recipient, rows[0]?.sender].filter((id): id is string => Predicate.isString(id)),
-          ),
-          Effect.orDie,
-        ),
       ),
 
       linkTask: Effect.fn("Db.inbox.linkTask")((id: string) =>
