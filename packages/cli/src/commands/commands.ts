@@ -140,7 +140,7 @@ const run = Spec.make("run", {
 
 const send = Spec.make("send", {
   description:
-    "Continue a session: queue a message, delivered once it is idle (never interrupts an execution); prints at once",
+    "Continue a session: queue a message, delivered once it is idle (never interrupts an execution); a session whose pane closed or whose harness exited resumes the same conversation in a new pane; prints at once",
   params: { id, message: text("message") },
 })
 
