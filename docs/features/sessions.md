@@ -35,8 +35,7 @@ reasons, and the archive is still finished: the session counts as ended, and not
 ## S7. Archive on idle
 
 `vibest run --archive-on-idle` archives the session the first time it is idle after a completed execution with nothing it sent
-or was sent still waiting, and sends no notice for a clean archive. The builtin plugin `archive-on-idle` does that;
-`"-archive-on-idle"` in `vibest.json` removes it, and a session started with the flag then stays until `vibest archive`.
+or was sent still waiting, and sends no notice for a clean archive.
 `--archive-on-completion` is a usage error.
 
 ## S9. A limit on sessions

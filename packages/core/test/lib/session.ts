@@ -17,7 +17,7 @@ import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
+import { Archive } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -43,7 +43,6 @@ import {
 import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
-import { ArchiveOnIdle, archiveOnIdlePlugin } from "../../../builtins/src/archive-on-idle.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
 import { Machines } from "../../../server/src/machine/machines.ts"
@@ -128,19 +127,7 @@ export const pluginsHost = (
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
 
-        const archivePlugin = yield* archiveOnIdlePlugin.pipe(
-          Effect.provideService(ArchiveOnIdle, yield* archiveOnIdle),
-        )
-
-        const loaded = [
-          ...candidates,
-          {
-            source: "builtin:archive-on-idle",
-            revision: "archive-on-idle",
-            options: {},
-            plugin: archivePlugin,
-          },
-        ]
+        const loaded = candidates
 
         if (options.activateLate) {
           const release = host.holdNow()

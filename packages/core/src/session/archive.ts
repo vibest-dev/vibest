@@ -1,8 +1,10 @@
+import { ExecutionEnded, InboxMoved, SessionEnded } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
+import { Bus } from "../bus.ts"
 import {
   type SessionRow,
   sessionEnded,
@@ -42,6 +44,7 @@ export const make = Effect.gen(function* () {
   const sessionLive = yield* SessionLive.Service
   const { notice, recount } = yield* Placement.Service
   const { interruptAgent, settleAfterInterrupt } = yield* Executions.Service
+  const reactor = yield* Reactor.make
   const archives = yield* FiberSet.make()
   const { locked } = locks
   const logged = Reactor.logFailure
@@ -265,7 +268,30 @@ export const make = Effect.gen(function* () {
     ),
   )
 
-  return { undoCutOffStart, abandonLaunch, remove, finishArchive, archiveSoon }
+  const optedIn = (ids: ReadonlyArray<string>) =>
+    Effect.filter(ids, sessionLive.archivesOnIdle).pipe(
+      Effect.flatMap((opted) => (opted.length === 0 ? Effect.void : archiveSoon(opted))),
+    )
+
+  yield* reactor.on([ExecutionEnded], (event) =>
+    event.data.outcome === "completed" ? optedIn([event.sessionId!]) : Effect.void,
+  )
+  yield* reactor.on([InboxMoved], (event) =>
+    event.data.to === "pending" || event.data.to === "delivering"
+      ? Effect.void
+      : db.inbox.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(optedIn)),
+  )
+  yield* reactor.on([SessionEnded], (event) =>
+    db.session
+      .creatorOf(event.sessionId!)
+      .pipe(
+        Effect.flatMap((creator) =>
+          creator !== undefined && "local" in creator ? optedIn([creator.local]) : Effect.void,
+        ),
+      ),
+  )
+
+  return { undoCutOffStart, abandonLaunch, remove, finishArchive }
 })
 
 export type Interface = Effect.Success<typeof make>
@@ -278,6 +304,7 @@ export const node = LayerNode.make({
   service: Service,
   layer,
   deps: [
+    Bus.node,
     Db.node,
     Drain.node,
     Executions.node,
@@ -292,20 +319,4 @@ export const node = LayerNode.make({
     PlatformNode.layout,
     PlatformNode.path,
   ],
-})
-
-export const archiveOnIdle = Effect.gen(function* () {
-  const archive = yield* Service
-  const db = yield* Db.Service
-  const live = yield* SessionLive.Service
-
-  return {
-    optedIn: live.archivesOnIdle,
-    consider: archive.archiveSoon,
-    parties: (sessionId: string, inbox: number) => db.inbox.inboxParties(sessionId, inbox),
-    localCreator: (sessionId: string) =>
-      db.session
-        .creatorOf(sessionId)
-        .pipe(Effect.map((creator) => (creator !== undefined && "local" in creator ? creator.local : undefined))),
-  }
 })
