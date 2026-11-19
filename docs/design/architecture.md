@@ -828,6 +828,35 @@ builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude,
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
+**Shipped opt-in plugins**: plugins vibest ships but does not load live in the `plugins/` folder of the install
+directory (`packages/cli/plugins` in a checkout, built by `packages/cli/scripts/build-plugins.ts` from
+`packages/builtins/src`); a user turns one on by adding its folder to `vibest.json` `plugins`, as with the agy harness.
+Today that is `silent-execution`: when a subagent's execution completes without the subagent sending a message, it
+sends the subagent's creator one message (request `silent-execution:<session>:<execution>`), and on activation it
+checks each session's latest execution.
+
+**Extension places and rules.** An extension is one of three kinds:
+
+| Kind     | How                                                             | Examples                                         |
+| -------- | --------------------------------------------------------------- | ------------------------------------------------ |
+| provider | `transform` adds or changes a definition                        | harness and runtime definitions                  |
+| decider  | `hook`: core asks, waits up to 5 s, and uses the answer         | `agent.start.before` routing, `agent.fail` moves |
+| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `silent-execution`                               |
+
+1. Only core writes the ledger, through its commands. A plugin changes state only through what the context offers;
+   a plugin send is recorded with the plugin as its sender (`{ plugin }`), filled in by vibestd, never chosen by the
+   plugin.
+2. An extension holds no authoritative memory. `event.subscribe` is live and best effort (no cursor, no durable
+   delivery, no plugin storage): a reaction covers reloads and restarts by a pass over current state when it activates,
+   and makes its sends idempotent with `request`.
+3. Core asks: a hook. Nobody asks: a reaction.
+4. A builtin gets nothing a user plugin cannot: builtins use the same context.
+5. Engine or policy: if removing an extension would make an accepted command silently do nothing, it is engine and
+   lives in core (`vibest run --archive-on-idle` is engine, in `Archive`); otherwise it is policy and may be a plugin.
+
+Core never awaits a plugin reaction while it holds a session lock: reactions run on the Bus after the fact commits, and
+a plugin send goes through the inbox like any other send.
+
 **Where plugins live**: only in the vibest home (`VIBEST_HOME`, by default `~/.vibest`), in `vibest.json` and the
 `plugins/` directory. There is no project tier: a Project directory adds no plugins and no configuration.
 
