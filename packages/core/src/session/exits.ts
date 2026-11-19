@@ -4,8 +4,9 @@ import { Context, Effect, Layer } from "effect"
 import { type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
+import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
-import type { Runtime, Terminal } from "../runtimes.ts"
+import { paneTail, type Runtime, type Terminal } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Move } from "./move.ts"
 import { Placement } from "./placement.ts"
@@ -21,6 +22,7 @@ export interface LimitedExecution {
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const inbox = yield* Inbox.Service
+  const harnesses = yield* Harnesses.Service
   const move = yield* Move.Service
   const { undoCutOffStart } = yield* Archive.Service
   const { notice, handTask, recount } = yield* Placement.Service
@@ -54,8 +56,19 @@ export const make = Effect.gen(function* () {
     return true
   })
 
-  const announceExit = (session: SessionRow, execution: number | undefined) =>
+  const startFailure = (h: Runtime, session: SessionRow) =>
     Effect.gen(function* () {
+      const reportsReady = harnesses.find(harnessIdOf(session))?.ready === "integration"
+
+      if (!reportsReady || (session.process?.readyAt ?? null) !== null) return { how: "", output: "" }
+      const tail = yield* paneTail(h, terminalOf(session), 10)
+
+      return { how: " before it was ready", output: tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}` }
+    })
+
+  const announceExit = (h: Runtime, session: SessionRow, execution: number | undefined) =>
+    Effect.gen(function* () {
+      const failed = yield* startFailure(h, session)
       const queued = yield* db.inbox.pendingInbox(session.id)
       const signed = queued.filter((r) => r.kind === "send" && r.sender)
       const unsigned = queued.filter((r) => !signed.includes(r))
@@ -69,7 +82,7 @@ export const make = Effect.gen(function* () {
       const lost = unsigned.map((r) => r.message).join("\n\n")
 
       const text = (how: string) =>
-        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${how}${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${failed.how}${how}${failed.output}${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
 
       if (
         execution !== undefined &&
@@ -97,7 +110,7 @@ export const make = Effect.gen(function* () {
     if (announce && session.entry) {
       if (execution !== undefined)
         yield* db.session.closeExecution(session.id, execution, "failed", { failure: "the harness exited" })
-    } else if (announce) yield* announceExit(session, execution)
+    } else if (announce) yield* announceExit(h, session, execution)
 
     if (
       exitedAt(session) === null &&
@@ -133,5 +146,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Archive.node, Db.node, Inbox.node, Move.node, Placement.node],
+  deps: [Archive.node, Db.node, Harnesses.node, Inbox.node, Move.node, Placement.node],
 })

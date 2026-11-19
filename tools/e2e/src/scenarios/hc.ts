@@ -27,6 +27,7 @@ type HcTerminal = {
   notify?: boolean
   state: string
   labels: Record<string, string>
+  foreground?: { name: string; argv: Array<string> } | null
 }
 
 export const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
@@ -567,6 +568,109 @@ const checks: ReadonlyArray<Check> = [
         model.stop()
         await w.stopDaemon()
         await restore()
+        await core.stop()
+      }
+    },
+  },
+  {
+    id: "S59",
+    title:
+      "herdr-core runtime: a subagent's harness starts after the user's shell rc; when it exits before it was ready, its terminal is back at the login shell and the creator is told at once with the terminal's last lines",
+    run: async (w) => {
+      for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = delegatingModel("pi")
+      w.ownRuntimes.add("hc")
+      await w.stopDaemon()
+      const piAgentDir = await piDir(w, "pi-hc-exit", model.url)
+      const core = await isolatedCore(w, piAgentDir, "hc-exit")
+      const broken = await piDir(w, "pi-hc-exit-broken", model.url)
+      await fs.rm(path.join(broken, "sessions"), { recursive: true, force: true })
+      await fs.writeFile(path.join(broken, "sessions"), "")
+      const zdotdir = path.join(w.root, "hc-exit-zdotdir")
+      await fs.mkdir(zdotdir, { recursive: true })
+      await fs.writeFile(path.join(zdotdir, ".zshrc"), "echo vbt-rc-ran\n")
+      const zsh = (Bun.env.SHELL ?? "").endsWith("/zsh")
+
+      try {
+        const repo = await project(w, "hc-exit")
+        await w.startEntry({
+          harness: "pi",
+          runtime: "hc",
+          cwd: repo,
+          env: { PI_CODING_AGENT_DIR: piAgentDir },
+          processEnv: { CLAUDE_CONFIG_DIR: undefined },
+          extra: ["--runtime", "hc"],
+          hc: { run: core.hc },
+          timeoutMs: 60_000,
+        })
+        await until(
+          "the entry session in vibest ls",
+          async () =>
+            (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).some(
+              (e) => e.agent === "coordinator",
+            ),
+          60_000,
+        )
+
+        const sub = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--runtime",
+                "hc",
+                "--env",
+                `PI_CODING_AGENT_DIR=${broken}`,
+                "--env",
+                `ZDOTDIR=${zdotdir}`,
+                "--title",
+                "Exit at once",
+                "--",
+                ask("never"),
+              ],
+              { cwd: repo, timeoutMs: 60_000 },
+            ),
+          ) as { id: string }
+        ).id
+
+        const started = Date.now()
+
+        const told = () =>
+          model.seen.find((m) => m.includes(sub.slice(0, 8)) && m.includes("exited before it was ready"))
+
+        await until(
+          "the creator told that the subagent exited before it was ready",
+          () => told() !== undefined,
+          30_000,
+        ).catch(async (e: Error) => {
+          throw new Error(
+            `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
+          )
+        })
+        const notice = told()!
+        expect(notice.includes("ENOTDIR"), `the notice does not carry the terminal's last lines: ${notice}`)
+        expect(Date.now() - started < 30_000, "the notice came only after the ready timeout")
+
+        const at = JSON.parse(
+          row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, sub)?.runtime ?? "{}",
+        ) as { id?: string }
+
+        const terminal = await core.get(addressOf(at.id!))
+        const shell = terminal.foreground?.name.replace(/^-/, "").replace(/^.*\//, "") ?? ""
+        expect(
+          terminal.state === "live" && ["sh", "bash", "zsh", "dash", "ksh", "fish"].includes(shell),
+          `the subagent's terminal is not back at a shell: ${JSON.stringify(terminal)}`,
+        )
+
+        if (zsh) {
+          const screen = (await core.hc("read", terminal.address)).stdout
+          const rc = screen.indexOf("vbt-rc-ran")
+          expect(rc >= 0 && rc < screen.indexOf("ENOTDIR"), `the harness did not start after the rc:\n${screen}`)
+        }
+      } finally {
+        model.stop()
+        await w.stopDaemon()
         await core.stop()
       }
     },

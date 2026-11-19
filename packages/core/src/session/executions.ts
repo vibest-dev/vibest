@@ -297,10 +297,26 @@ export const make = Effect.gen(function* () {
       return yield* db.session.executionAccepted(session.id)
     })
 
+    const exited = Effect.flatMap(bus.subscribe(), (subscription) =>
+      awaitOn(
+        subscription,
+        Effect.succeedNone,
+        (event) =>
+          Effect.succeed(
+            event.type === "terminal.exited" && sameTerminal(event.terminal, terminal)
+              ? Option.some(true)
+              : Option.none(),
+          ),
+        READY_TIMEOUT,
+        Effect.never,
+      ),
+    )
+
     const took = yield* taken.pipe(
       Effect.tap((done) => (done ? Effect.void : answer)),
       Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
       Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
+      Effect.raceFirst(exited),
     )
 
     if (took) return undefined
@@ -308,7 +324,7 @@ export const make = Effect.gen(function* () {
     yield* db.session.closeExecution(session.id, execution, "not_started")
 
     return `${sessionLabel(session)} did not start working on its first message (${adapter.binary} may be signed out: sign in with ${adapter.binary})`
-  })
+  }, Effect.scoped)
 
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
     yield* db.session.endExecution(
