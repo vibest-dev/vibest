@@ -57,7 +57,7 @@ esac
 
 mkdir -p "$share/versions" "$bin"
 tmp=$(mktemp -d "$share/versions/.download.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; rm -f "$bin/.vibest.new"' EXIT
 curl -fsSL "$url/vibest-$target.tar.gz" | tar -xzf - -C "$tmp"
 version=$("$tmp/bin/vibest" --version | sed 's/^vibest v//')
 case "$version" in ''|*/*|.*) echo "vibest: the downloaded binary reports no version" >&2; exit 1 ;; esac
@@ -74,15 +74,15 @@ else
   mv "$tmp" "$dir"
 fi
 
-# The records come first and the link last: until the link is replaced, a failure leaves the old install as it was.
+# The new link is prepared, then the records written, then the link replaced: until that last step, a failure leaves the
+# old install as it was.
+ln -sfn "$dir/bin/vibest" "$bin/.vibest.new"
 previous=$(cat "$share/current" 2>/dev/null || true)
 linked=$(readlink "$bin/vibest" 2>/dev/null || true)
 printf '%s\n' "$bin" > "$share/bin"
 printf '%s\n' "$version" > "$share/current"
 # Replace the link in one step: a vibest started meanwhile runs the old version or the new one, never neither.
-ln -sfn "$dir/bin/vibest" "$bin/.vibest.new"
 if ! mv -f "$bin/.vibest.new" "$bin/vibest"; then
-  rm -f "$bin/.vibest.new"
   printf '%s\n' "$previous" > "$share/current"
   echo "vibest: could not replace $bin/vibest; it is unchanged" >&2
   exit 1

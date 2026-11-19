@@ -159,6 +159,7 @@ const installOver = (prepare: (share: string) => void) => {
     }
   } finally {
     fs.chmodSync(path.join(share, "current"), 0o644)
+    fs.chmodSync(bin, 0o755)
     fs.rmSync(root, { recursive: true, force: true })
   }
 }
@@ -168,6 +169,13 @@ it("install.sh refuses an existing version directory that differs from the downl
 
   assert.strictEqual(r.status, 1)
   assert.include(r.stderr, "differs from the 9.9.9 download")
+  assert.deepInclude(r, { runs: "vibest v1.0.0", current: "1.0.0\n" })
+})
+
+it("install.sh that cannot write its link leaves the old install running and recorded", () => {
+  const r = installOver((share) => fs.chmodSync(path.join(share, "..", "bin"), 0o555))
+
+  assert.notStrictEqual(r.status, 0)
   assert.deepInclude(r, { runs: "vibest v1.0.0", current: "1.0.0\n" })
 })
 
