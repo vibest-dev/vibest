@@ -83,7 +83,8 @@ export const download = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const response = yield* HttpClient.get(url).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk))
-    const size = Number(response.headers["content-length"]) || undefined
+    const encoded = (response.headers["content-encoding"] ?? "identity") !== "identity"
+    const size = encoded ? undefined : Number(response.headers["content-length"]) || undefined
     const seen = { bytes: 0 }
     yield* onProgress(0, size)
 

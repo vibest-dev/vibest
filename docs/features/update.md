@@ -16,7 +16,8 @@ It says within a second that it is checking for a newer version. On a terminal e
 its percent when the source gives a size, verifying, installing, handing vibestd over) rewrites one line, and only the
 outcome stays: the version installed and the one it replaced, and that vibestd was handed over. Elsewhere it prints one
 line per stage and no percent. Errors are printed in full. It downloads the new version once: the copy it verified is
-the one it installs, and no stage has a time limit.
+the one it installs. The download has no total time limit. An install either
+links the new version, a complete copy that runs, or leaves the old install as it was.
 
 ## U2. Handing over with a Pi entry session mid-execution
 

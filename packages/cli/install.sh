@@ -63,24 +63,51 @@ version=$("$tmp/bin/vibest" --version | sed 's/^vibest v//')
 case "$version" in ''|*/*|.*) echo "vibest: the downloaded binary reports no version" >&2; exit 1 ;; esac
 
 dir="$share/versions/$version"
-if [ ! -d "$dir" ]; then mv "$tmp" "$dir"; fi
+# A version directory is never changed once it exists; one that differs from this download (files missing or changed;
+# files a harness added are fine) is refused, so nothing links to a copy that was not checked.
+if [ -d "$dir" ]; then
+  if diff -r "$tmp" "$dir" 2>&1 | grep -v -F "Only in $dir" | grep -q .; then
+    echo "vibest: $dir differs from the $version download; nothing was changed (remove it and install again)" >&2
+    exit 1
+  fi
+else
+  mv "$tmp" "$dir"
+fi
+
+# The records come first and the link last: until the link is replaced, a failure leaves the old install as it was.
+previous=$(cat "$share/current" 2>/dev/null || true)
+linked=$(readlink "$bin/vibest" 2>/dev/null || true)
+printf '%s\n' "$bin" > "$share/bin"
+printf '%s\n' "$version" > "$share/current"
 # Replace the link in one step: a vibest started meanwhile runs the old version or the new one, never neither.
 ln -sfn "$dir/bin/vibest" "$bin/.vibest.new"
-mv -f "$bin/.vibest.new" "$bin/vibest"
-
-printf '%s\n' "$bin" > "$share/bin"
+if ! mv -f "$bin/.vibest.new" "$bin/vibest"; then
+  rm -f "$bin/.vibest.new"
+  printf '%s\n' "$previous" > "$share/current"
+  echo "vibest: could not replace $bin/vibest; it is unchanged" >&2
+  exit 1
+fi
+if [ "$("$bin/vibest" --version 2>/dev/null)" != "vibest v$version" ]; then
+  printf '%s\n' "$previous" > "$share/current"
+  if [ -n "$linked" ]; then
+    ln -sfn "$linked" "$bin/vibest"
+    echo "vibest: $bin/vibest did not run $version; it links to $linked again" >&2
+  else
+    rm -f "$bin/vibest"
+    echo "vibest: $bin/vibest did not run $version and was removed" >&2
+  fi
+  exit 1
+fi
 
 # Keep this version, the one installed before it, and any a running process still uses: vibestd runs its bin/vibest, and
 # each agent loaded its harness plugin from there (a deleted --plugin-dir unloads Claude's hooks).
 # ponytail: processes of this machine only; agents on a remote machine are not seen.
-previous=$(cat "$share/current" 2>/dev/null || true)
-printf '%s\n' "$version" > "$share/current"
 running=$(ps -A -o args= 2>/dev/null || true)
 for old in "$share/versions"/*; do
   name=$(basename "$old")
   [ "$name" = "$version" ] || [ "$name" = "$previous" ] && continue
   case "$running" in *"$old/"*) continue ;; esac
-  rm -rf "$old"
+  rm -rf "$old" || true
 done
 
 echo "vibest $version installed: $bin/vibest"

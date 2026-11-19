@@ -313,6 +313,8 @@ const checks: ReadonlyArray<Check> = [
       expect(packed.code === 0, `tar: ${out(packed)}`)
       const installSh = path.join(checkout, "packages", "cli", "install.sh")
       let downloads = 0
+      const announced = Promise.withResolvers<boolean>()
+      const holdInstaller = { armed: false, announcedFirst: false }
 
       const server = Bun.serve({
         port: 0,
@@ -322,7 +324,14 @@ const checks: ReadonlyArray<Check> = [
 
           if (url === "/version") return new Response("999.0.0\n")
 
-          if (url === "/install.sh") return new Response(Bun.file(installSh))
+          if (url === "/install.sh")
+            return holdInstaller.armed
+              ? Promise.race([announced.promise, Bun.sleep(30_000).then(() => false)]).then((seen) => {
+                  holdInstaller.announcedFirst = seen
+
+                  return new Response(Bun.file(installSh))
+                })
+              : new Response(Bun.file(installSh))
 
           if (url === `/${archive}`) {
             downloads++
@@ -396,11 +405,38 @@ const checks: ReadonlyArray<Check> = [
           )),
           `the database is still there after ${moveAside}: ${out(moved)}`,
         )
-        const through = await vibest(["update"])
+        holdInstaller.armed = true
+
+        const watched = Bun.spawn([old, "update"], {
+          cwd: w.repository,
+          env: w.env(env),
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+          timeout: 120_000,
+        })
+
+        const printed = { stdout: "" }
+
+        const reading = (async () => {
+          for await (const chunk of watched.stdout.pipeThrough(new TextDecoderStream())) {
+            printed.stdout += chunk
+
+            if (printed.stdout.includes("Downloading vibest 999.0.0…")) announced.resolve(true)
+          }
+        })()
+
+        const stderr = await new Response(watched.stderr).text()
+        await reading
+        const through = { code: await watched.exited, stdout: printed.stdout, stderr }
+        expect(
+          holdInstaller.announcedFirst,
+          `vibest update did not say it was downloading before the installer was answered: ${out(through)}`,
+        )
 
         const stages = [
           "Checking for a newer vibest…",
-          "Downloading vibest 999.0.0 (",
+          "Downloading vibest 999.0.0…",
           "Verifying vibest 999.0.0…",
           "Installing vibest 999.0.0…",
           `vibest 999.0.0 installed (was ${version})`,

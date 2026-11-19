@@ -124,3 +124,68 @@ it("install.sh refuses to install a beta when there is no stable release, naming
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+const installOver = (prepare: (share: string) => void) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-install-"))
+  const share = path.join(root, "share")
+  const bin = path.join(root, "bin")
+  const pkg = path.join(root, "pkg")
+  const release = path.join(root, "release")
+  fs.mkdirSync(path.join(pkg, "bin"), { recursive: true })
+  fs.writeFileSync(path.join(pkg, "bin", "vibest"), "#!/bin/sh\necho 'vibest v9.9.9'\n", { mode: 0o755 })
+  fs.mkdirSync(release)
+  childProcess.spawnSync("tar", ["-czf", path.join(release, `vibest-${target}.tar.gz`), "-C", pkg, "bin"])
+  const old = path.join(share, "versions", "1.0.0", "bin", "vibest")
+  fs.mkdirSync(path.dirname(old), { recursive: true })
+  fs.writeFileSync(old, "#!/bin/sh\necho 'vibest v1.0.0'\n", { mode: 0o755 })
+  fs.mkdirSync(bin)
+  fs.symlinkSync(old, path.join(bin, "vibest"))
+  fs.writeFileSync(path.join(share, "current"), "1.0.0\n")
+  prepare(share)
+
+  try {
+    const out = childProcess.spawnSync("sh", [script], {
+      env: { ...process.env, VIBEST_DOWNLOAD_URL: `file://${release}`, VIBEST_INSTALL: share, VIBEST_BIN: bin },
+      encoding: "utf8",
+    })
+
+    const runs = childProcess.spawnSync(path.join(bin, "vibest"), ["--version"], { encoding: "utf8" }).stdout.trim()
+
+    return {
+      status: out.status,
+      stderr: out.stderr,
+      runs,
+      current: fs.readFileSync(path.join(share, "current"), "utf8"),
+    }
+  } finally {
+    fs.chmodSync(path.join(share, "current"), 0o644)
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+it("install.sh refuses an existing version directory that differs from the download and leaves the old install running", () => {
+  const r = installOver((share) => fs.mkdirSync(path.join(share, "versions", "9.9.9", "bin"), { recursive: true }))
+
+  assert.strictEqual(r.status, 1)
+  assert.include(r.stderr, "differs from the 9.9.9 download")
+  assert.deepInclude(r, { runs: "vibest v1.0.0", current: "1.0.0\n" })
+})
+
+it("install.sh that cannot record the new version leaves the old install running and recorded", () => {
+  const r = installOver((share) => fs.chmodSync(path.join(share, "current"), 0o444))
+
+  assert.notStrictEqual(r.status, 0)
+  assert.deepInclude(r, { runs: "vibest v1.0.0", current: "1.0.0\n" })
+})
+
+it("install.sh installs over an existing identical version directory a harness wrote into", () => {
+  const r = installOver((share) => {
+    const dir = path.join(share, "versions", "9.9.9")
+    fs.mkdirSync(path.join(dir, "bin"), { recursive: true })
+    fs.writeFileSync(path.join(dir, "bin", "vibest"), "#!/bin/sh\necho 'vibest v9.9.9'\n", { mode: 0o755 })
+    fs.writeFileSync(path.join(dir, "tsconfig.json"), "{}")
+  })
+
+  assert.strictEqual(r.status, 0, r.stderr)
+  assert.deepInclude(r, { runs: "vibest v9.9.9", current: "9.9.9\n" })
+})

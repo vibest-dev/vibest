@@ -68,8 +68,9 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
               const archive = `vibest-${process.platform}-${process.arch}.tar.gz`
 
               const stage = Effect.gen(function* () {
+                yield* line.stage(`Downloading vibest ${latest}…`)
+
                 if (found.kind === "npm") {
-                  yield* line.stage(`Downloading vibest ${latest}…`)
                   const argv = stageCommand(real, dir, latest)
                   const failed = yield* runCaptured(argv, Duration.infinity)
 
@@ -80,8 +81,6 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
 
                 const downloading = (bytes: number, size: number | undefined) => {
                   const label = `Downloading vibest ${latest}`
-
-                  if (bytes === 0) return line.stage(`${label}${size === undefined ? "" : ` (${megabytes(size)})`}…`)
 
                   if (size === undefined) return Effect.void
                   const percent = Math.floor((bytes * 100) / size)
