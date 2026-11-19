@@ -49,19 +49,19 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
 }
 
 const withoutDefaultHarness = async (w: World) => {
-  await configurePlugins(w, (plugins) => [...plugins, "-harness-default"])
+  await configurePlugins(w, (plugins) => [...plugins, "-vibest.harness-default"])
   await until(
-    "harness-default removed",
-    async () => (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "harness-default"),
+    "vibest.harness-default removed",
+    async () => (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "vibest.harness-default"),
     30_000,
   )
 }
 
 const withDefaultHarness = async (w: World) => {
-  await configurePlugins(w, (plugins) => plugins.filter((p) => p !== "-harness-default"))
+  await configurePlugins(w, (plugins) => plugins.filter((p) => p !== "-vibest.harness-default"))
   await until(
-    "harness-default back",
-    async () => (await w.json<Array<{ id: string }>>(["plugins"])).some((p) => p.id === "harness-default"),
+    "vibest.harness-default back",
+    async () => (await w.json<Array<{ id: string }>>(["plugins"])).some((p) => p.id === "vibest.harness-default"),
     30_000,
   )
 }
@@ -255,7 +255,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H6",
     title:
-      "`vibest` without `--harness`: a project's first start with the default deliberately removed (`-harness-default`) fails asking for it; with the default back, a Pi entry session that exits is restarted on Pi (the default does not override reuse)",
+      "`vibest` without `--harness`: a project's first start with the default deliberately removed (`-vibest.harness-default`) fails asking for it; with the default back, a Pi entry session that exits is restarted on Pi (the default does not override reuse)",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "reuse")
@@ -387,7 +387,7 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
         )
       }
 
-      await configurePlugins(w, () => ["-*", "-harness-default", ...users])
+      await configurePlugins(w, () => ["-*", "-vibest.harness-default", ...users])
       await w.daemon()
       const pid = await w.daemonPid()
 
@@ -403,11 +403,15 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
       )
       const ids = (await active()).map((p) => p.id)
       expect(
-        !ids.includes("harness-default") && ids.includes("runtime-choice"),
-        `after -* and -harness-default: ${ids}`,
+        !ids.includes("vibest.harness-default") && ids.includes("vibest.runtime-choice"),
+        `after -* and -vibest.harness-default: ${ids}`,
       )
       await configurePlugins(w, () => ["-*", ...users])
-      await until("harness-default back", async () => (await active()).some((p) => p.id === "harness-default"), 60_000)
+      await until(
+        "vibest.harness-default back",
+        async () => (await active()).some((p) => p.id === "vibest.harness-default"),
+        60_000,
+      )
       expect((await w.daemonPid()) === pid, "vibestd restarted")
     },
   },

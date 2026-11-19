@@ -367,7 +367,7 @@ const checks: ReadonlyArray<Check> = [
 
         const removed = JSON.parse(await s.okA(["machine", "rm", "mb"])) as { notes: Array<{ plugin: string }> }
         expect(
-          !removed.notes.some((note) => note.plugin === "runtime-herdr"),
+          !removed.notes.some((note) => note.plugin === "vibest.runtime-herdr"),
           `machine rm notes: ${JSON.stringify(removed)}`,
         )
         expect((await s.profiles()).length === 0, `A's herdr after machine rm: ${JSON.stringify(await s.profiles())}`)

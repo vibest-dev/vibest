@@ -51,10 +51,10 @@ const checks: ReadonlyArray<Check> = [
 
       try {
         await until(
-          "harness-cursor active",
+          "vibest.harness-cursor active",
           async () =>
             (await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })).some(
-              (p) => p.id === "harness-cursor" && p.status === "active",
+              (p) => p.id === "vibest.harness-cursor" && p.status === "active",
             ),
           30_000,
         )
@@ -102,7 +102,9 @@ const checks: ReadonlyArray<Check> = [
       try {
         const plugins = await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })
         expect(
-          ["harness-cursor", "harness-agy"].every((id) => plugins.some((p) => p.id === id && p.status === "active")),
+          ["vibest.harness-cursor", "vibest.harness-agy"].every((id) =>
+            plugins.some((p) => p.id === id && p.status === "active"),
+          ),
           `plugins: ${JSON.stringify(plugins)}`,
         )
         const missing = await w.json<Array<Listed>>(["harness", "list"], { env, timeoutMs: 120_000 })

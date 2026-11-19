@@ -5,7 +5,7 @@ export const DEFAULT_HARNESS = "claude"
 
 export const harnessDefaultPlugin = () =>
   Plugin.define({
-    id: "harness-default",
+    id: "vibest.harness-default",
     effect: (context) =>
       context.agent.hook("start.before", (event) =>
         Effect.sync(() => {

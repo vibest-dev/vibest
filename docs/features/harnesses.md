@@ -29,14 +29,14 @@ does not carry SSH session settings into a home it switches to.
 
 `vibest run` without a harness takes the caller's harness, provider and model: from the session that runs it. Naming a
 harness drops the provider and model. With nothing to inherit and nothing choosing a harness (the builtin default removed
-with `"-harness-default"`, or Claude not available, and no plugin picking one), it fails saying there is no harness to
+with `"-vibest.harness-default"`, or Claude not available, and no plugin picking one), it fails saying there is no harness to
 inherit; otherwise the default applies (H7).
 
 ## H6. `vibest` reuses the entry session's last harness
 
 `vibest` without `--harness` starts the harness the project's entry session last used. A project's first start without
 `--harness` runs on Claude when Claude is available, and fails asking for `--harness` when it is not or when
-`"-harness-default"` is in `vibest.json`'s `plugins`.
+`"-vibest.harness-default"` is in `vibest.json`'s `plugins`.
 
 Entering a project checks only that a harness can start there (its binary on `PATH`, vibest's plugin folder for it) and
 lists no models, so it waits on no harness CLI; a harness that is installed but cannot answer (for example signed out)
@@ -54,7 +54,7 @@ harness to inherit.
 
 Claude, Pi, Cursor and agy are loaded without any line in `~/.vibest/vibest.json`, and `vibest harness list` lists
 each. Whether this machine can start one is checked only when it is asked for: a harness whose binary is not on
-`PATH` is listed as unavailable saying so, and vibestd starts as usual. `"-harness-cursor"` (or another
+`PATH` is listed as unavailable saying so, and vibestd starts as usual. `"-vibest.harness-cursor"` (or another
 `-harness-<id>`) in `plugins` removes one.
 
 ## H9. Antigravity (agy)
