@@ -23,6 +23,7 @@ import {
   Predicate,
   Schedule,
   Schema,
+  Scope,
   Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -198,16 +199,24 @@ export const hookCall = <A = void>(
 }
 
 const pinged = (socket: string) =>
-  connect(socket).pipe(
-    Effect.flatMap((client) => Effect.map(client.Ping(undefined), (ping) => ({ client, ping }))),
-    Effect.timeout("1 second"),
-    Effect.option,
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>())
-        : Effect.failCause(cause),
-    ),
-  )
+  Effect.gen(function* () {
+    const own = yield* Scope.fork(yield* Effect.scope)
+
+    return yield* connect(socket).pipe(
+      Effect.flatMap((client) => Effect.map(client.Ping(undefined), (ping) => ({ client, ping }))),
+      Effect.timeout("1 second"),
+      Effect.option,
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>())
+          : Effect.failCause(cause),
+      ),
+      Scope.provide(own),
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit) && Option.isSome(exit.value) ? Effect.void : Scope.close(own, exit),
+      ),
+    )
+  })
 
 export const readPing = (socket: string) =>
   pinged(socket).pipe(Effect.map(Option.map(({ ping }) => ping)), Effect.scoped)
