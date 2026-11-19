@@ -9,7 +9,7 @@ import { callerEnvOf, caller, userOnly } from "../../caller.ts"
 import { withVibest } from "../../client.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Host } from "../../host.ts"
-import { updateNotice } from "../../update.ts"
+import { noticeFrom } from "../../update.ts"
 import { Commands } from "../commands.ts"
 
 const ENTRY_AGENT = "coordinator"
@@ -51,7 +51,6 @@ export default Runtime.handler(Commands, (o) =>
   Effect.gen(function* () {
     const { exec } = yield* Host
     yield* userOnly("")
-    yield* updateNotice
     const harness = Option.getOrUndefined(o.harness)
     const provider = Option.getOrUndefined(o.provider)
     const model = Option.getOrUndefined(o.model)
@@ -79,8 +78,10 @@ export default Runtime.handler(Commands, (o) =>
         }),
     })
 
-    const entered = yield* withVibest(claim, (client) =>
+    const entered = yield* withVibest(claim, (client, ping) =>
       Effect.gen(function* () {
+        yield* noticeFrom(Effect.succeed(Option.some(ping)))
+
         const [, placed] = yield* Effect.all(
           [
             client["Project.Open"]({}),

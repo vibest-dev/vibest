@@ -222,11 +222,11 @@ export const projectRoot = Effect.fn("Project.projectRoot")(function* (directory
 
       if (nested && nestedMains) return { root: linkedParent }
 
-      return { root: yield* mainCheckout(linkedParent) }
+      return { root: yield* mainCheckout(linkedParent), checkout: true }
     }
   }
 
-  return { root: yield* mainCheckout(directory) }
+  return { root: yield* mainCheckout(directory), checkout: true }
 })
 
 export interface RepositoryPlace {
@@ -248,10 +248,14 @@ export const projectRepositories = Effect.fn("Project.projectRepositories")(func
     const path = yield* fs.realPath(checkout)
 
     if (places.some((place) => place.path === path)) continue
-    places.push({ path, remote: yield* Git.Service.use((git) => git.originUrl(path)) })
+    places.push(yield* repositoryPlace(path))
   }
 
   return places
+})
+
+export const repositoryPlace = Effect.fn("Project.repositoryPlace")(function* (path: string) {
+  return { path, remote: yield* Git.Service.use((git) => git.originUrl(path)) } satisfies RepositoryPlace
 })
 
 const removeWorktrees = (

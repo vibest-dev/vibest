@@ -3,13 +3,14 @@ import { MoveRefused } from "@vibest/schema/session"
 import { Effect, FileSystem, Path } from "effect"
 
 import type { Db } from "../database/db.ts"
-import { projectRepositories, projectRoot } from "./create.ts"
+import { projectRepositories, projectRoot, repositoryPlace } from "./create.ts"
 
 export const locateProject = Effect.fn("Project.locateProject")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem
-  const root = yield* fs.realPath((yield* projectRoot(directory)).root)
+  const found = yield* projectRoot(directory)
+  const root = yield* fs.realPath(found.root)
 
-  return { root, repositories: yield* projectRepositories(root) }
+  return { root, repositories: found.checkout ? [yield* repositoryPlace(root)] : yield* projectRepositories(root) }
 })
 
 export type Located = Effect.Success<ReturnType<typeof locateProject>>
