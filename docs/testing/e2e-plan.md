@@ -47,8 +47,8 @@ vibestd, herdr and herdr-core are never touched.
 **L0, already automated, no keys.** `pnpm test`;
 `pnpm verify` runs build, typecheck and test, installs vibest as a user does (install.sh from a release archive, and npm
 from the packed `@vibest/cli`, both while the unit tests run), then runs the gate on the curl install and, at the same
-time, a smoke set (I1, I2, U1, U9, U10, H1) on the npm install; the npm install gets the full gate when its file layout
-differs from the last one that passed it. A skip fails the run (tools/verify/README.md).
+time, the install and launch checks on the npm install (`NPM_CHECKS` in tools/verify/src/verify.ts). A skip fails the
+run (tools/verify/README.md).
 
 **L1, real herdr, no model.** Every command whose effect does not need a model execution.
 
@@ -109,8 +109,7 @@ and `integration stop` ends cleanly. Pi only: the entry session TUI (tool groups
   and every file it imports by a relative path, recursively, the herdr, hc, claude, pi, cursor-agent, bun and node version numbers, the
   install method, the hashes of the user settings the shadows read, and the login `PATH`. Passes are kept under
   `<git-common-dir>/vibest-e2e/cache`, shared by every worktree. Agent-tier checks are never cached; `--no-cache` runs
-  everything; `pnpm verify --no-cache` passes it to both legs and runs the whole gate on both installs, the run before a
-  release. Turborepo's `e2e` task (`turbo run e2e`) skips the whole suite when neither the build nor `tools/e2e`
+  everything; `pnpm verify --no-cache` passes it to both legs, the run before a release. Turborepo's `e2e` task (`turbo run e2e`) skips the whole suite when neither the build nor `tools/e2e`
   changed, but it cannot see tool versions or the user's settings, so `pnpm verify` runs the runner and its cache.
 - **Invariants.** After each check: no terminal outside its herdr sessions, no herdr session left. After the run: the
   user files the shadows read are unchanged, no line of the user's shell history files (`~/.zsh_history`, `~/.bash_history`,

@@ -23,17 +23,18 @@
    the release gate on that tree: the whole of `pnpm verify --no-cache`,
    the single entry for all verification, whose stages run as parallel jobs on GitHub-hosted runners. `build` packs once
    (`--stage build,archive,pack`): the linux-x64 curl archive and every npm tarball, checks the tarballs, records the
-   SHA-256 of every file and keeps them. `typecheck` and `test` are jobs of their own. `e2e` runs every E2E check on the
-   curl install of that archive and on the npm install of those tarballs (`--stage e2e --leg curl|npm --shard k/n`),
-   each leg split into shards balanced by the measured durations in `tools/e2e/src/runner/shard-weights.ts`
-   (`tools/e2e/test/shard.test.ts` proves the shards cover every check exactly once; refresh the weights when checks are
-   added or change a lot). `ubuntu-latest` runs them with `--elsewhere H4`, and `macos-latest` runs
+   SHA-256 of every file and keeps them. `typecheck` and `test` are jobs of their own. `e2e-curl` runs every E2E check on
+   the curl install of that archive (`--stage e2e --leg curl --shard k/n`), split into shards balanced by the measured
+   durations in `tools/e2e/src/runner/shard-weights.ts` (`tools/e2e/test/shard.test.ts` proves the shards cover every
+   check exactly once; refresh the weights when checks are added or change a lot), with `--elsewhere H4`; `e2e-npm`
+   runs the install and launch checks (`NPM_CHECKS` in `tools/verify/src/verify.ts`) on the npm install of those
+   tarballs (`--stage e2e --leg npm`). `ubuntu-latest` runs both, and `macos-latest` runs
    `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version, installing build's tarballs.
    Nothing is repacked, and `--no-cache` also forces turbo (`TURBO_FORCE`), so every check runs on every release. It
    keeps what verify installed and checked, then waits for the owner's approval (environment
    `release`). Only after the approval does it check those hashes, tag that commit `v<version>` (with
-   `GITHUB_TOKEN`), publish exactly those tarballs to npm, make the GitHub Release from exactly those archives, and check
-   every package's dist-tag. Nothing is rebuilt or repacked after verify checked it. The release notes are
+   `GITHUB_TOKEN`), publish exactly those tarballs to npm under the channel's dist-tag, and make the GitHub Release from exactly
+   those archives. Nothing reads npm back after publishing (its reads lag behind a publish). Nothing is rebuilt or repacked after verify checked it. The release notes are
    `release_notes` when given, else the CHANGELOG.md section of the version, else (a beta only) GitHub's generated
    notes.
 
@@ -45,8 +46,7 @@
    it uploads the missing assets of a draft, compares every asset with the checked file, then publishes it. Anything
    else (a tag on another commit, a different tarball, a different or extra asset) fails the job. Never start a new run
    to finish a release: it builds new bytes, and it refuses a version that is already tagged or on npm. Changed code
-   needs a new version. A dist-tag that does not point at the version is reported, not moved: move it by hand only when
-   no newer release owns it.
+   needs a new version.
 4. **Channels: beta and stable.** The version decides the channel: `x.y.z-beta.n` is a beta, a plain `x.y.z` is
    stable, and the workflow refuses any other shape. A stable release is published under npm's `latest` and is a
    regular GitHub Release marked Latest; a beta is published under npm's `beta` (never moving `latest`) and is a GitHub
