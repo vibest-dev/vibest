@@ -15,13 +15,11 @@ import { Commands } from "../commands.ts"
 const ENTRY_AGENT = "coordinator"
 
 export const soleEntry = <A, E, R>(
-  client: Pick<VibestClient, "Project.RunningEntry" | "Project.StopEntry">,
-  terminal: string,
+  client: Pick<VibestClient, "Project.StopEntry">,
+  running: Effect.Success<ReturnType<VibestClient["Project.RunningEntry"]>>,
   start: Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const running = yield* client["Project.RunningEntry"]({ terminal })
-
     if (running) {
       const where = `the entry session (${running.harness}) runs in ${running.place}`
       const question = `The entry session (${running.harness}) runs in ${running.place}. Move it here and continue? [y/N]: `
@@ -71,14 +69,7 @@ export default Runtime.handler(Commands, (o) =>
     const claim = (yield* caller).claim
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem
-    yield* withVibest(claim, (client) => client["Project.Open"]({}))
-
-    const placed = yield* withVibest(claim, (client) =>
-      client["Project.EntryPlace"]({
-        callerEnv: callerEnvOf(),
-        ...(runtimeKind !== undefined && { runtime: runtimeKind }),
-      }),
-    )
+    const here = yield* fs.realPath(path.resolve("."))
 
     const foreignSession = Option.match(o.session, {
       onNone: () => undefined,
@@ -88,67 +79,87 @@ export default Runtime.handler(Commands, (o) =>
         }),
     })
 
-    if (placed.place.in === "launch") {
-      const opened = yield* withVibest(claim, (client) =>
-        client.Launch({
-          argv: again,
-          agent: ENTRY_AGENT,
-          focus: !o.headless,
-          runtime: placed.place.runtime,
-          callerEnv: callerEnvOf(),
-          ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
-        }),
-      )
+    const entered = yield* withVibest(claim, (client) =>
+      Effect.gen(function* () {
+        const [, placed] = yield* Effect.all(
+          [
+            client["Project.Open"]({}),
+            client["Project.EntryPlace"]({
+              callerEnv: callerEnvOf(),
+              ...(runtimeKind !== undefined && { runtime: runtimeKind }),
+            }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
-      if (opened.routing !== undefined) yield* Console.error(`entry session: ${opened.routing}`)
-      yield* Console.log(`the entry session is starting in ${opened.place}`)
+        if (placed.place.in === "launch") {
+          const opened = yield* client.Launch({
+            argv: again,
+            agent: ENTRY_AGENT,
+            focus: !o.headless,
+            runtime: placed.place.runtime,
+            callerEnv: callerEnvOf(),
+            ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+          })
 
-      if (o.headless || !opened.attach) return
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const [file, ...args] = opened.attach
-      yield* spawner.exitCode(
-        ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }),
-      )
+          return { launched: opened } as const
+        }
 
-      return
-    }
+        if (foreignSession !== undefined) return yield* foreignSession
 
-    if (foreignSession !== undefined) return yield* foreignSession
+        if (here !== placed.directory) yield* Effect.sync(() => process.chdir(placed.directory))
+        const terminal = placed.place.terminal
 
-    if ((yield* fs.realPath(path.resolve("."))) !== placed.directory)
-      yield* Effect.sync(() => process.chdir(placed.directory))
-    const terminal = placed.place.terminal
+        const [chosen, running] = yield* Effect.all(
+          [
+            client["Project.StartEntry"]({
+              harness,
+              agent: ENTRY_AGENT,
+              provider,
+              model,
+              runtime: placed.place.runtime,
+            }),
+            client["Project.RunningEntry"]({ terminal }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
-    const chosen = yield* withVibest(claim, (client) =>
-      client["Project.StartEntry"]({
-        harness,
-        agent: ENTRY_AGENT,
-        provider,
-        model,
-        runtime: placed.place.runtime,
+        if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`entry session: ${describeSpawn(chosen)}`)
+
+        const started = yield* soleEntry(
+          client,
+          running,
+          client["Project.EntrySession"]({
+            harness: chosen.harness,
+            agent: ENTRY_AGENT,
+            fresh: o.fresh,
+            terminal,
+            runtime: chosen.runtime,
+            provider: chosen.provider,
+            model: chosen.model,
+            routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
+            pid: process.pid,
+          }),
+        )
+
+        return { started } as const
       }),
     )
 
-    if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`entry session: ${describeSpawn(chosen)}`)
+    if ("started" in entered) {
+      const { command } = entered.started
 
-    const started = yield* withVibest(claim, (client) =>
-      soleEntry(
-        client,
-        terminal,
-        client["Project.EntrySession"]({
-          harness: chosen.harness,
-          agent: ENTRY_AGENT,
-          fresh: o.fresh,
-          terminal,
-          runtime: chosen.runtime,
-          provider: chosen.provider,
-          model: chosen.model,
-          routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
-          pid: process.pid,
-        }),
-      ),
-    )
+      return yield* Effect.sync(() => exec(command.file, command.args, command.env))
+    }
 
-    return yield* Effect.sync(() => exec(started.command.file, started.command.args, started.command.env))
+    const opened = entered.launched
+
+    if (opened.routing !== undefined) yield* Console.error(`entry session: ${opened.routing}`)
+    yield* Console.log(`the entry session is starting in ${opened.place}`)
+
+    if (o.headless || !opened.attach) return
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const [file, ...args] = opened.attach
+    yield* spawner.exitCode(ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }))
   }),
 )

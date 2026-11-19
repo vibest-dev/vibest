@@ -1,7 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { projectRoot } from "@vibest/core/project/create"
-import { FakeRuntime, makeRepository, until, projectOf } from "@vibest/platform-bun/test/lib/fakes"
+import { FakeGit, FakeRuntime, makeRepository, until, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { test, client, asCli, asEntry } from "@vibest/platform-bun/test/lib/rpc-helpers"
 import { Plugin } from "@vibest/plugin/effect"
 import { Effect, Fiber, Path, Predicate, Ref } from "effect"
@@ -9,6 +9,27 @@ import { SqlClient } from "effect/sql"
 
 describe("vibest.sock", () => {
   const seenDirectory = { project: "" }
+
+  test(
+    "a connection locates its directory once; the next connection sees what changed meanwhile",
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const repo = yield* makeRepository
+
+      const remote = Effect.map(
+        sql<{ remoteUrl: string | null }>`SELECT remote_url FROM project_repository`,
+        (rows) => rows[0]?.remoteUrl,
+      )
+
+      const first = asCli(yield* client, repo)
+      yield* first["Project.Open"]({})
+      yield* (yield* FakeGit).update(repo, { origin: "git@example.com:moved.git" })
+      yield* first["Project.Open"]({})
+      assert.isNull(yield* remote)
+      yield* asCli(yield* client, repo)["Project.Open"]({})
+      assert.strictEqual(yield* remote, "git@example.com:moved.git")
+    }),
+  )
   test(
     "Project.StartEntry schedules with the project directory, not its key; with no harness it fails until an entry session exists, then takes its harness",
     Effect.gen(function* () {

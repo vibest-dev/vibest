@@ -37,6 +37,8 @@ import { PROTOCOL } from "@vibest/schema/version"
 import { Data, Effect, Layer, Option, Predicate } from "effect"
 import * as Headers from "effect/http/Headers"
 
+import { ConnectionLocations, connectionLocations } from "./handlers/caller.ts"
+
 const SETTLEMENTS: ReadonlySet<string> = new Set(["ExecutionEnd", "Prompt"])
 
 export type Read = (name: string) => string | undefined
@@ -265,9 +267,14 @@ export const CallerGateLive = Layer.effect(
   Effect.gen(function* () {
     const db = yield* Db.Service
 
-    return CallerGate.of((effect, { headers, rpc }) =>
+    return CallerGate.of((effect, { headers, rpc, client }) =>
       resolveCaller(db, headers, rpc._tag).pipe(
-        Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),
+        Effect.flatMap((caller) =>
+          effect.pipe(
+            Effect.provideService(Caller, caller),
+            Effect.provideService(ConnectionLocations, connectionLocations(client)),
+          ),
+        ),
       ),
     )
   }),

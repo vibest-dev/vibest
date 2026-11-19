@@ -1143,6 +1143,10 @@ prompt from the entry session or from vibest's own delivery is ignored). Of the 
   `Project.RunningEntry` finds the entry session in another pane; `Project.StopEntry` sends SIGTERM to its
   recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
   longer there) or `unsupported` (with the reason).
+  Bare `vibest` makes these calls over one connection with one Ping: `Project.Open` with `Project.EntryPlace`, then
+  `Project.StartEntry` with `Project.RunningEntry`, then `Project.EntrySession`. vibestd locates a directory's repositories
+  (git) once per connection and reads the database on every call, so the next command sees a project moved or created
+  meanwhile.
 - `Watch` and `Session.Seen` (user only, `projects` capability) serve the desktop. A Watch session carries `finished` (the
   runtime's count of finished executions, null without `seen`) and `status` `done` when it is idle and its finished count is past
   the runtime's seen mark; a project carries `activity`, the first of blocked, done, working its live sessions show,

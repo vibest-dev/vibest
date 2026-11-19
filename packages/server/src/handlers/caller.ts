@@ -4,8 +4,8 @@ import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type ACCESS, Caller, type CallerIdentity, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, Layer, Predicate } from "effect"
-import type { RpcGroup } from "effect/rpc"
+import { Context, Effect, Layer, Option, Predicate } from "effect"
+import type { Rpc, RpcGroup } from "effect/rpc"
 
 type Access = typeof ACCESS
 
@@ -18,6 +18,31 @@ export type MethodOf<A> = {
 export type Handlers = Partial<RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof VibestRpcs>>>
 
 export type Agent = Extract<CallerIdentity, { _tag: "Cli" | "Session" }>
+
+type Locate = ReturnType<typeof locateProject>
+
+export class ConnectionLocations extends Context.Service<ConnectionLocations, Map<string, Locate>>()(
+  "vibest/ConnectionLocations",
+) {}
+
+export const connectionLocations = (client: Rpc.ServerClient) => {
+  const known = Context.getOption(client.annotations, ConnectionLocations)
+
+  if (Option.isSome(known)) return known.value
+  const fresh = new Map<string, Locate>()
+  client.annotate(ConnectionLocations, fresh)
+
+  return fresh
+}
+
+const locateOncePerConnection = (directory: string) =>
+  Effect.flatMap(Effect.serviceOption(ConnectionLocations), (locations) => {
+    if (Option.isNone(locations)) return locateProject(directory)
+    const seen = locations.value.get(directory) ?? Effect.runSync(Effect.cached(locateProject(directory)))
+    locations.value.set(directory, seen)
+
+    return seen
+  })
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
@@ -36,7 +61,7 @@ export const make = Effect.gen(function* () {
     })
 
   const atProject = (directory: string) =>
-    locateProject(directory).pipe(
+    locateOncePerConnection(directory).pipe(
       Effect.catchIf(
         (error) => !Predicate.isTagged(error, "NotInRepository"),
         (error) => Effect.die(error),
