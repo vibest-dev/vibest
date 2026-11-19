@@ -12,7 +12,16 @@ import { listModels, type Model } from "./models.ts"
 
 export * as Harness from "./harness.ts"
 
-export const cliEnv = (vibest: ReadonlyArray<string>) => (vibest.length === 1 ? { VIBEST_CLI: vibest[0]! } : {})
+export const cliEnv = (vibest: ReadonlyArray<string>, harness: string) =>
+  vibest.length === 1
+    ? Effect.succeed({ VIBEST_CLI: vibest[0]! })
+    : Effect.fail(
+        new HarnessUnavailable({
+          harness,
+          message:
+            "sessions start only from a compiled vibest (pnpm build, then packages/cli/dist/vibest), not from source",
+        }),
+      )
 
 export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
 

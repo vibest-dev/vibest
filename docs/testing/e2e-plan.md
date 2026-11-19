@@ -173,8 +173,8 @@ What the checks that drive real herdr panes rely on:
   request, so every retry fails too (U5, U8).
 - The user-file invariant hashes only the keys the shadows read: the user's own Claude and Pi sessions rewrite other
   keys of the same files while a run goes on, and cursor-agent rewrites `~/.cursor/cli-config.json`.
-- cursor-agent's hook shell rebuilds `PATH`, so I5 names its recording `vibest` wrapper through `VIBEST_CLI`, which
-  is how an agent vibest starts names its own binary.
+- cursor-agent's hook shell rebuilds `PATH`, so I5 records hook calls by wrapping the Cursor hook script itself and
+  pointing `VIBEST_HARNESSES` at that integration; the hooks still call the built vibest through `VIBEST_CLI`.
 - I9's Claude has no Glob or Grep tool and finds and searches with Bash (guard.test covers those tools). Its session
   rules say not to run herdr, and the model sometimes keeps to them: the check asks once more, for that call alone.
 - Pi renames its process to `pi` within a second of starting, and herdr then shows no argv for it: the S10 and S12 checks

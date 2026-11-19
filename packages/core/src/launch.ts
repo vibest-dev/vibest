@@ -71,7 +71,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   const env = {
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
-    ...cliEnv(vibest),
+    ...(yield* cliEnv(vibest, input.harness)),
   }
 
   const saved = yield* input.session

@@ -131,7 +131,6 @@ export const make = Effect.gen(function* () {
     VIBEST_HARNESS: harnessIdOf(session),
     VIBEST_RUNTIME: runtimeEnv(runtimeOf(session), { machine: terminalOf(session).machine, id: "" }),
     VIBEST_HOME: layout.home,
-    ...cliEnv(vibest),
   })
 
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
@@ -152,7 +151,7 @@ export const make = Effect.gen(function* () {
     const pluginDir = yield* harness.plugin(adapter.id)
     const id = session.process?.conversation ?? null
     const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
-    const env = vibestEnv(session)
+    const env = { ...vibestEnv(session), ...(yield* cliEnv(vibest, adapter.id)) }
 
     return {
       harness: adapter.id,
