@@ -25,7 +25,8 @@ appending facts.
 
 - Record only facts vibest alone knows and cannot read back later: decisions, events it saw, inputs, times. Read
   git, files, the runtime and the configuration when they are needed.
-- Every change is a fact appended to the `event` log; the log is never updated. Only the projectors and the import
+- Every change is a fact appended to the `event` log; the log is never updated, except by a ledger migration at open,
+  in the transaction that also rebuilds the read model. Only the projectors and the import
   write the read model (oxlint rule `vibest/projector-writes`), and no query reads into a fact's payload
   (oxlint rule `vibest/no-payload-sql`).
 - `--env` values are never stored: not in the database, logs or telemetry. They reach the terminal only when it
@@ -267,10 +268,9 @@ end, for example): it neither closes that execution nor opens another, and its r
 execution they decided about is still open, so an end the harness reported first is the one that stands.
 
 Changing the catalog: the catalog holds only the types and keys vibestd writes now. Adding an optional key raises
-`CATALOG_VERSION` by one. A type or key that changes meaning or structure, or is no longer written, is retired: it
-leaves the catalog, vibestd refuses a file of the older catalog as one from an older vibest and points to the
-CHANGELOG, and no old definition stays in the catalog and no projector reads one. A one-time rewrite of existing
-ledgers is a manual script kept outside this repository, never part of it. Changing the read model (a column, table,
+`CATALOG_VERSION` by one; a file of the older catalog then opens as it is. A type or key that changes meaning or
+structure, or is no longer written, is retired: it leaves the catalog, no old definition stays in the catalog and no
+projector reads one, and a ledger migration (below) rewrites the facts of the old shape in place. Changing the read model (a column, table,
 index or projector rule) raises `PROJECTION_VERSION` instead; a database with another projection version is rebuilt by replaying
 its log when it opens, so the read model needs no migration. `packages/schema/test/event-rows.json` holds fixed sample
 rows that must keep decoding and re-encoding to the same bytes: add rows to it; only a catalog change that retires a
@@ -320,24 +320,34 @@ type or key changes or removes rows, in the same pull request.
    file that is not empty and has no `migration` table (any shape from before the ledger, v1 included), or one missing
    objects it needs is refused (`SchemaMismatch`) without changing its bytes; the message gives the way out, moving it aside with its `-wal` and `-shm` files while vibestd is
    stopped. A file whose `meta.catalog` is newer than this vibest's catalog is refused with "was written by a newer
-   vibest …: run vibest update"; this vibest never skips a fact type it does not know. A file of an older catalog, or
-   one with no `meta.ledger` (the event shape before aggregates: one global `seq`, `project_id` and `session_id`
-   columns), is refused as a file from an older vibest, with a pointer to the CHANGELOG and the way to start empty.
+   vibest …: run vibest update"; this vibest never skips a fact type it does not know. A file whose catalog is below
+   `MIN_CATALOG` (the oldest catalog the retained migrations lift), or one with no `meta.ledger` (the event shape
+   before aggregates: one global `seq`, `project_id` and `session_id` columns), is refused as a file from an older
+   vibest, with a pointer to the CHANGELOG and the way to start empty. A file of an older catalog from `MIN_CATALOG`
+   on is to migrate.
 2. An empty file gets the current schema in one write transaction that checks again under the write lock (so of two
    empty opens at once one installs and the other sees it), with every migration marked applied.
-3. Each migration in `migrations` that the `migration` table does not list runs in its own transaction, in order, and
-   its id is recorded (`applyOnly`). A migration is a module `packages/core/src/database/migration/<timestamp>_<name>.ts`
-   with an `id` and an `up(tx)`, added to `migrations`. The ledger as described here is the baseline, so the list
-   starts empty and every later change to the tables is a new migration. `user_version` is not read.
-4. In one transaction: when `meta.projection` differs from `PROJECTION_VERSION`, the read model is dropped and rebuilt
-   by replaying the log; then `meta.catalog` is set to this vibest's catalog version.
+3. One write transaction: the migrations in `migrations` that the `migration` table does not list run in order with
+   the `event_no_update` trigger lifted, each id recorded, and the trigger is restored; when any ran, or
+   `meta.catalog` or `meta.projection` differs from this vibest's, the read model is dropped and rebuilt by replaying
+   the log, which decodes every fact with the current catalog; then `meta.catalog` is set to this vibest's catalog
+   version. Any failure rolls all of it back, trigger included, and names the failing fact's aggregate and `seq`; the
+   file keeps its bytes. Only this runner lifts the trigger.
+4. A ledger migration is a module `packages/core/src/database/migration/<timestamp>_<name>.ts` with an `id` and an
+   `up(tx)`, added to `migrations`. It changes only the ledger (`event` and `meta`): it rewrites a fact's `type` and
+   `data`, or deletes a fact, and keeps its `position`, `aggregate`, `seq` and `at`; it reads fact JSON as plain data
+   and imports nothing from the catalog, which keeps changing under it. The read model never gets one
+   (`PROJECTION_VERSION` rebuilds it), and an added optional key never gets one. It is deleted with its test, and
+   `MIN_CATALOG` raised, once the machines that matter have passed it. There are no down migrations and no copy of the
+   file is kept: before an update, import-check runs the same migrations on a copy in memory, and before a migration
+   is merged, the new build's import-check runs on a `.backup` copy of a real database. `user_version` is not read.
 5. `journal_mode = WAL` writes the header, so it is set only after the file is accepted: a refused file keeps its
    database and WAL bytes (its `-shm` may change). `synchronous = NORMAL` cannot corrupt a WAL database; a power loss
    may drop only the last commits, and it saves an fsync per commit.
 
 `vibest update` and `vibest daemon restart` run the new binary's `vibest daemon import-check` (read-only, no lock) before
-they change anything. On a ledger it replays the log into a `:memory:` database and, when the projection versions
-match, compares every read-model table with the replay; a difference or a fact that does not decode fails it, naming
+they change anything. On a ledger it copies the log into a `:memory:` database, runs there the migrations the file has
+not had and replays it; when no migration is pending and the catalog and projection versions match, it compares every read-model table with the replay; a difference or a fact that does not decode fails it, naming
 the first differing row or the fact's aggregate and `seq`. A database from before the ledger, or in the old event
 shape, is refused with the same message vibestd gives.
 E2E runs it on every world's database at the end of each check.

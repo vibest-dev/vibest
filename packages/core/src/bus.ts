@@ -441,7 +441,7 @@ const firstDifference = (
   return undefined
 }
 
-const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
+export const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
   scratch.withTransaction(
     Effect.gen(function* () {
       for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
