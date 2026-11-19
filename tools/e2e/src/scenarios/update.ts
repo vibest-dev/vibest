@@ -220,9 +220,7 @@ const checks: ReadonlyArray<Check> = [
         expect(r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout), said)
       else
         expect(
-          r.code === 0 &&
-            r.stdout.startsWith(`Checking for a newer vibest (this is ${buildVersion})…`) &&
-            r.stdout.includes(`vibest is already up to date (v${buildVersion})`),
+          r.code === 0 && r.stdout === `Checking for a newer vibest…\nvibest ${buildVersion} is up to date\n`,
           said,
         )
       const version = await w.ok(["--version"])
@@ -265,9 +263,9 @@ const checks: ReadonlyArray<Check> = [
           return { code: u.code, said: `${u.stdout}${u.stderr}` }
         }
 
-        const upToDate = `vibest is already up to date (v${buildVersion}).`
-        const onStable = `${upToDate} The newest stable release is ${stable}.`
-        const onBeta = `${upToDate} The newest release is ${beta}.`
+        const upToDate = `vibest ${buildVersion} is up to date`
+        const onStable = `${upToDate} (the newest stable release is ${stable})`
+        const onBeta = `${upToDate} (the newest release is ${beta})`
         const pinned = await update(["--stable"])
         expect(pinned.code === 0 && pinned.said.includes(onStable), `update --stable: ${pinned.said}`)
         const any = await update(["--beta"])
@@ -401,16 +399,15 @@ const checks: ReadonlyArray<Check> = [
         const through = await vibest(["update"])
 
         const stages = [
-          `Checking for a newer vibest (this is ${version})…`,
-          "vibest 999.0.0 is available",
+          "Checking for a newer vibest…",
           "Downloading vibest 999.0.0 (",
-          "  100%",
-          "Checking that vibest 999.0.0 runs here and opens the database…",
+          "Verifying vibest 999.0.0…",
           "Installing vibest 999.0.0…",
-          "vibest 999.0.0 installed:",
+          `vibest 999.0.0 installed (was ${version})`,
         ]
 
         const shown = out(through)
+        expect(!shown.includes("%"), `a non-terminal update shows percent steps: ${shown}`)
         const at = stages.map((s) => shown.indexOf(s))
         expect(
           through.code === 0 && at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1]!)),
@@ -544,10 +541,9 @@ const checks: ReadonlyArray<Check> = [
         const said = out(updated)
         expect(updated.code === 0, `vibest update exited ${updated.code}: ${said}`)
         expect(
-          said.includes(`vibest ${buildVersion} is available (this is ${version})`) &&
-            /vibestd: handoff\./.test(said) &&
-            said.includes(`vibestd ${buildVersion} (pid`) &&
-            said.includes("vibest update has finished") &&
+          said.includes(`vibest ${buildVersion} installed (was ${version})`) &&
+            said.includes("vibestd handed over; agents kept running") &&
+            said.includes("Restarting ") &&
             said.includes(agents.before.entry.id.slice(0, 8)) &&
             said.includes(agents.before.sub.id.slice(0, 8)),
           `unexpected: ${said}`,
@@ -586,9 +582,8 @@ const checks: ReadonlyArray<Check> = [
         const said = out(updated)
         expect(updated.code === 0, `vibest update exited ${updated.code}: ${said}`)
         expect(
-          /vibestd: handoff\./.test(said) &&
-            said.includes(`vibestd ${buildVersion} (pid`) &&
-            said.includes("vibest update has finished") &&
+          said.includes("vibestd handed over; agents kept running") &&
+            said.includes("Restarting ") &&
             said.includes(agents.before.entry.id.slice(0, 8)) &&
             said.includes(agents.before.sub.id.slice(0, 8)),
           `unexpected: ${said}`,

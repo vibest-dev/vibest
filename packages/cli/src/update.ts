@@ -18,6 +18,7 @@ import {
   Option,
   Path,
   Schedule,
+  Stdio,
   Stream,
 } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
@@ -72,37 +73,61 @@ export const stageCommand = (
     : [owner?.kind === "npm" ? `${owner.prefix}/bin/npm` : "npm", "install", "--prefix", dir, `@vibest/cli@${version}`]
 }
 
-const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
+export const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
 
-const QUARTERS = 4
-
-export const download = (url: string, to: string, label?: string) =>
+export const download = (
+  url: string,
+  to: string,
+  onProgress: (bytes: number, size: number | undefined) => Effect.Effect<void> = () => Effect.void,
+) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const response = yield* HttpClient.get(url).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk))
     const size = Number(response.headers["content-length"]) || undefined
+    const seen = { bytes: 0 }
+    yield* onProgress(0, size)
 
-    if (label !== undefined)
-      yield* Console.log(`Downloading ${label}${size === undefined ? "" : ` (${megabytes(size)})`}…`)
-    const seen = { bytes: 0, quarter: 0 }
+    yield* response.stream.pipe(
+      Stream.tap((chunk) => {
+        seen.bytes += chunk.length
 
-    const progress = (chunk: Uint8Array) => {
-      seen.bytes += chunk.length
-
-      if (label === undefined || size === undefined) return Effect.void
-      const quarter = Math.min(QUARTERS, Math.floor((seen.bytes * QUARTERS) / size))
-
-      if (quarter <= seen.quarter) return Effect.void
-      seen.quarter = quarter
-
-      return Console.log(`  ${(quarter * 100) / QUARTERS}%`)
-    }
-
-    yield* response.stream.pipe(Stream.tap(progress), Stream.run(fs.sink(to)))
+        return onProgress(seen.bytes, size)
+      }),
+      Stream.run(fs.sink(to)),
+    )
   }).pipe(
     Effect.as(undefined),
     Effect.catch((e) => Effect.succeed(`${url}: ${messageOf(e)}`)),
   )
+
+const CLEAR_LINE = "\r\x1b[2K"
+
+export const progressLine = Effect.gen(function* () {
+  const stdio = yield* Stdio.Stdio
+  const terminal = yield* stdio.stdoutIsTerminal
+  const shown = { line: false }
+  const write = (text: string) => Stream.run(Stream.make(text), stdio.stdout()).pipe(Effect.ignore)
+
+  const live = (text: string) =>
+    Effect.sync(() => {
+      shown.line = true
+    }).pipe(Effect.andThen(write(`${CLEAR_LINE}${text}`)))
+
+  const clear = Effect.suspend(() => {
+    if (!shown.line) return Effect.void
+    shown.line = false
+
+    return write(CLEAR_LINE)
+  })
+
+  return {
+    terminal,
+    stage: (text: string) => (terminal ? live(text) : Console.log(text)),
+    detail: (text: string) => (terminal ? live(text) : Effect.void),
+    clear,
+    say: (text: string) => clear.pipe(Effect.andThen(Console.log(text))),
+  }
+})
 
 export const removeCommand = (link: string, real: string) => {
   return Match.value(ownerOf(real)).pipe(
@@ -254,8 +279,6 @@ export const handoffDaemon = (
     )
 
     if (Option.isSome(now)) {
-      yield* Console.log(`vibestd ${now.value.version} (pid ${now.value.pid}) took over; agents kept running.`)
-
       return undefined
     }
 
@@ -281,7 +304,8 @@ export const restartAgents = (
 
     const outdated = yield* ask((client) => client["Agents.Outdated"]())
 
-    if (outdated.length === 0) return yield* Console.log("No agent runs an old integration.")
+    if (outdated.length === 0)
+      return command === "vibest update" ? undefined : yield* Console.log("No agent runs an old integration.")
     const working = outdated.filter((a) => a.working).map((a) => shortId(a.id))
     const ids = outdated.map((a) => shortId(a.id)).join(", ")
     const busy = working.length === 0 ? "" : `; ${working.join(", ")} ${working.length === 1 ? "is" : "are"} working`
@@ -313,6 +337,6 @@ export const restartAgents = (
 
     yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after }))
     yield* Console.log(
-      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited; one that was working continues its execution (outcomes in ${(yield* Layout).home}/vibestd.log).`,
+      `Restarting ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command exits (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )
   })

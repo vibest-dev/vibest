@@ -12,10 +12,11 @@ newest stable release, a beta (any other version) the newest release of either c
 running one, it says vibest is up to date, names the newest release of that channel when it differs, and installs
 nothing. A build from source says it cannot update and installs nothing.
 
-It says within a second that it is checking for a newer version, then one line per stage as it happens: downloading
-(with the size and progress when the source gives a size), checking that the new version runs and opens the database,
-installing, and handing vibestd over or restarting it. It downloads the new version once: the copy it checked is the
-one it installs, and no stage has a time limit.
+It says within a second that it is checking for a newer version. On a terminal each stage (checking, downloading with
+its percent when the source gives a size, verifying, installing, handing vibestd over) rewrites one line, and only the
+outcome stays: the version installed and the one it replaced, and that vibestd was handed over. Elsewhere it prints one
+line per stage and no percent. Errors are printed in full. It downloads the new version once: the copy it verified is
+the one it installs, and no stage has a time limit.
 
 ## U2. Handing over with a Pi entry session mid-execution
 
