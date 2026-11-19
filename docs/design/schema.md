@@ -331,8 +331,10 @@ type or key changes or removes rows, in the same pull request.
    the `event_no_update` trigger lifted, each id recorded, and the trigger is restored; when any ran, or
    `meta.catalog` or `meta.projection` differs from this vibest's, the read model is dropped and rebuilt by replaying
    the log, which decodes every fact with the current catalog; then `meta.catalog` is set to this vibest's catalog
-   version. Any failure rolls all of it back, trigger included, and names the failing fact's aggregate and `seq`; the
-   file keeps its bytes. Only this runner lifts the trigger.
+   version. Any failure rolls all of it back, trigger included, and names the failing fact's aggregate and `seq`
+   (whether the fact does not decode or its projector fails): the rollback is logical, every table keeps its rows,
+   while the database and WAL bytes may change (SQLite may checkpoint the WAL meanwhile). Only this runner lifts the
+   trigger.
 4. A ledger migration is a module `packages/core/src/database/migration/<timestamp>_<name>.ts` with an `id` and an
    `up(tx)`, added to `migrations`. It changes only the ledger (`event` and `meta`): it rewrites a fact's `type` and
    `data`, or deletes a fact, and keeps its `position`, `aggregate`, `seq` and `at`; it reads fact JSON as plain data
@@ -346,8 +348,8 @@ type or key changes or removes rows, in the same pull request.
    may drop only the last commits, and it saves an fsync per commit.
 
 `vibest update` and `vibest daemon restart` run the new binary's `vibest daemon import-check` (read-only, no lock) before
-they change anything. On a ledger it copies the log into a `:memory:` database, runs there the migrations the file has
-not had and replays it; when no migration is pending and the catalog and projection versions match, it compares every read-model table with the replay; a difference or a fact that does not decode fails it, naming
+they change anything. On a ledger it copies the log and its `meta` into a `:memory:` database, runs there the migrations the file has
+not had and replays it; when no migration is pending and the catalog and projection versions match, it compares every read-model table with the replay; a difference, or a fact that does not decode or whose projector fails, fails it, naming
 the first differing row or the fact's aggregate and `seq`. A database from before the ledger, or in the old event
 shape, is refused with the same message vibestd gives.
 E2E runs it on every world's database at the end of each check.

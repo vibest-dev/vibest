@@ -113,6 +113,12 @@ export const open = (input: ReadonlyArray<Migration> = migrations) =>
     yield* openLedger(sql, input)
   })
 
+const copyMeta = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    for (const row of yield* stored<{ key: string; value: string }>`SELECT key, value FROM meta`)
+      yield* scratch`INSERT INTO meta (key, value) VALUES (${row.key}, ${row.value})`
+  })
+
 export const checkLedger = (stored: SqlClient.SqlClient, input: ReadonlyArray<Migration> = migrations) =>
   Effect.gen(function* () {
     const pending = yield* pendingIn(stored, input)
@@ -122,6 +128,7 @@ export const checkLedger = (stored: SqlClient.SqlClient, input: ReadonlyArray<Mi
     yield* scratch.withTransaction(
       Effect.gen(function* () {
         yield* copyWholeLog(stored, scratch)
+        yield* copyMeta(stored, scratch)
         yield* runMigrations(scratch, pending, () => Effect.void)
         yield* (yield* Bus.Service).rebuild
       }),

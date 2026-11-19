@@ -140,9 +140,33 @@ describe("Db", () => {
 
   const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
 
+  const ledgerOf = (file: string) =>
+    Effect.flatMap(SqlClient.SqlClient, (sql) =>
+      Effect.all([
+        sql`SELECT * FROM event ORDER BY position`,
+        sql`SELECT * FROM meta ORDER BY key`,
+        sql`SELECT id FROM migration ORDER BY id`,
+        sql`SELECT * FROM project ORDER BY id`,
+      ]),
+    ).pipe(Effect.provide(Platform.sqlite(file)))
+
+  const checkOn = (file: string, steps: ReadonlyArray<Migration>) =>
+    Effect.gen(function* () {
+      const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
+        Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
+      )
+
+      return yield* Effect.exit(
+        checkLedger(stored, steps).pipe(
+          Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))),
+        ),
+      )
+    }).pipe(Effect.scoped)
+
+  const failureOf = (exit: Exit.Exit<unknown, unknown>) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "")
+
   it.effect("pending migrations run in order at open, each once and recorded; a failing one changes nothing", () =>
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
       const file = yield* fileAt(yield* tempDirectory("vibest-migrations-"), "vibest.db")
       yield* Effect.void.pipe(Effect.provide(database(file)))
       const ran: Array<string> = []
@@ -171,14 +195,50 @@ describe("Db", () => {
       yield* open(steps).pipe(Effect.provide(runner(file)))
       yield* open(steps).pipe(Effect.provide(runner(file)))
       assert.deepStrictEqual(ran, ["20270101000000_a", "20270102000000_b"])
-      const before = yield* fs.readFile(file)
+      const before = yield* ledgerOf(file)
       const failing = open([...steps, marking("20270103000000_c", "later_c", true)])
       assert.isTrue(Exit.isFailure(yield* Effect.exit(failing.pipe(Effect.provide(runner(file))))))
-      assert.deepStrictEqual(yield* fs.readFile(file), before, "the failed open left the file byte-identical")
+      assert.deepStrictEqual(yield* ledgerOf(file), before, "the failed open rolled everything back")
       assert.deepStrictEqual(yield* state.pipe(Effect.provide(Platform.sqlite(file))), {
         ids: ["20270101000000_a", "20270102000000_b"],
         marks: ["later_a", "later_b"],
       })
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("import-check runs a migration against the file's meta as open does, so a collision fails both", () =>
+    Effect.gen(function* () {
+      const file = yield* fileAt(yield* tempDirectory("vibest-migration-meta-"), "vibest.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+
+      const colliding: Migration = {
+        id: "20270101000000_ledger_again",
+        up: (tx) => tx`INSERT INTO meta (key, value) VALUES ('ledger', 'again')`,
+      }
+
+      assert.include(failureOf(yield* checkOn(file, [colliding])), "meta.key")
+      assert.include(failureOf(yield* Effect.exit(open([colliding]).pipe(Effect.provide(runner(file))))), "meta.key")
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("a fact whose projector fails at open is named by its aggregate and seq", () =>
+    Effect.gen(function* () {
+      const file = yield* fileAt(yield* tempDirectory("vibest-replay-projector-"), "vibest.db")
+      const twice = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+      yield* writeSql(
+        file,
+        [1, 2].map(
+          (seq) =>
+            `INSERT INTO event (aggregate, seq, at, type, data) VALUES ('${twice}', ${seq}, 5, 'project.created', '{"directory":"/twice-${seq}","repositories":[]}')`,
+        ),
+      )
+      const nothing: Migration = { id: "20270101000000_nothing", up: () => Effect.void }
+
+      assert.include(
+        failureOf(yield* Effect.exit(open([nothing]).pipe(Effect.provide(runner(file))))),
+        `event ${twice} 2: project.created cannot be projected`,
+      )
     }).pipe(Effect.provide(Platform.services)),
   )
 
@@ -201,34 +261,23 @@ describe("Db", () => {
               WHERE type = 'project.created' AND json_extract(data, '$.repositories') IS NULL`,
         }
 
-        const check = (steps: ReadonlyArray<Migration>) =>
-          Effect.gen(function* () {
-            const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
-              Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
-            )
-
-            return yield* Effect.exit(
-              checkLedger(stored, steps).pipe(
-                Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))),
-              ),
-            )
-          }).pipe(Effect.scoped)
+        const check = (steps: ReadonlyArray<Migration>) => checkOn(file, steps)
 
         const directories = Effect.flatMap(
           SqlClient.SqlClient,
           (sql) => sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${old}`,
         ).pipe(Effect.provide(Platform.sqlite(file)))
 
-        const failureOf = (exit: Exit.Exit<unknown, unknown>) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "")
         const nothing: Migration = { id: "20270101000000_nothing", up: () => Effect.void }
-        const before = yield* fs.readFile(file)
+        const ledger = yield* ledgerOf(file)
         assert.include(failureOf(yield* check([])), `event ${old} 1`)
         assert.include(
           failureOf(yield* Effect.exit(open([nothing]).pipe(Effect.provide(runner(file))))),
           `event ${old} 1`,
         )
-        assert.deepStrictEqual(yield* fs.readFile(file), before, "a refused open leaves the file byte-identical")
+        assert.deepStrictEqual(yield* ledgerOf(file), ledger, "a refused open rolled everything back")
 
+        const before = yield* fs.readFile(file)
         assert.isTrue(Exit.isSuccess(yield* check([fill])))
         assert.deepStrictEqual(yield* fs.readFile(file), before, "import-check migrates only its copy")
 
