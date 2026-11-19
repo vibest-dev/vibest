@@ -16,7 +16,7 @@ import * as CallerChecks from "./caller.ts"
 import type { Handlers } from "./caller.ts"
 import { group } from "./group.ts"
 
-type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
+type Routed = "Send" | "Interrupt" | "Stop" | "Remove" | "Get" | "Peek"
 
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
@@ -106,6 +106,10 @@ const makeRouting = Effect.gen(function* () {
       Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
         routed("Interrupt", p.id, local, (at, project, by) =>
           remote.forward(at, project, by, (c, { id }, o) => c.Interrupt({ ...p, id }, o)),
+        ),
+      Stop: <A, E, R2>(p: PayloadOf<"Stop">, local: Local<A, E, R2>) =>
+        routed("Stop", p.id, local, (at, project, by) =>
+          remote.forward(at, project, by, (c, { id }, o) => c.Stop({ ...p, id }, o)),
         ),
       Remove: <A, E, R2>(p: PayloadOf<"Remove">, local: Local<A, E, R2>) =>
         routed("Remove", p.id, local, (at, project, by) =>

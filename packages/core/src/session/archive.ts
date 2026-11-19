@@ -1,6 +1,7 @@
+import type { Sender } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
-import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
+import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
 import {
@@ -18,7 +19,7 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
 import { Inbox } from "../inbox.ts"
-import { errorMessage } from "../plugin.ts"
+import { errorMessage } from "../plugin/hooks.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
 import * as Remove from "../remove.ts"
@@ -29,6 +30,11 @@ import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 
 export * as Archive from "./archive.ts"
+
+const interruptNote = (stopped: boolean) =>
+  stopped
+    ? "it was working: interrupted, then "
+    : `it did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; `
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
@@ -163,6 +169,55 @@ export const make = Effect.gen(function* () {
     Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
   )
 
+  const stop = Effect.fn("Archive.stop")(function* (id: string, by: Sender) {
+    const known = yield* getRow(id)
+
+    return yield* locked(id)(
+      Effect.gen(function* () {
+        const session = yield* getRow(id)
+
+        if (session.entry)
+          return yield* new NoSuchSession({ id, message: `${id} is an entry session; stop it in its terminal` })
+
+        if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+
+        if (exitedAt(session) !== null) return { message: `${id} is not running; a message resumes it` }
+        const h = yield* live(session)
+        const terminal = terminalOf(session)
+        const working = busyOf(yield* agentState(h, terminal))
+        const interrupted = working ? yield* interruptAgent(h, session, terminal) : false
+        const execution = yield* db.session.openExecution(id)
+
+        if (execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
+
+        const failed = yield* h.close(terminal).pipe(
+          Effect.as(undefined),
+          Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.code === "not_found" ? undefined : error)),
+        )
+
+        if (failed?.code === "unreachable")
+          return yield* new RuntimeUnreachable({ session: runtimeOf(session), message: failed.message })
+
+        if (failed !== undefined)
+          return yield* new SessionBusy({
+            id,
+            message: `closing its terminal failed: ${failed.message}; it still runs`,
+          })
+        yield* db.session.stopProcess(id, by)
+        yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
+        const before = working ? interruptNote(interrupted) : ""
+
+        return {
+          message: `${id} stopped: ${before}its terminal closed; its worktree, branch and messages are kept, and the next message resumes its conversation`,
+        }
+      }),
+    ).pipe(
+      Effect.catchTag("RuntimeError", (e) =>
+        Effect.fail(new RuntimeUnreachable({ session: runtimeOf(known), message: e.message })),
+      ),
+    )
+  })
+
   const archiveIfIdle = (id: string) =>
     Effect.gen(function* () {
       if (!(yield* sessionLive.archivesOnIdle(id))) return
@@ -265,7 +320,7 @@ export const make = Effect.gen(function* () {
     ),
   )
 
-  return { undoCutOffStart, abandonLaunch, remove, finishArchive, archiveSoon }
+  return { undoCutOffStart, abandonLaunch, remove, stop, finishArchive, archiveSoon }
 })
 
 export type Interface = Effect.Success<typeof make>

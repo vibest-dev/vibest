@@ -6,6 +6,7 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Bus } from "@vibest/core/bus"
 import { SQL_NAMES } from "@vibest/core/database/db"
+import { Archive } from "@vibest/core/session/archive"
 import { Sends } from "@vibest/core/session/sends"
 import { Summaries } from "@vibest/core/session/summaries"
 import { UserPlatform } from "@vibest/core/system-prompt"
@@ -42,5 +43,13 @@ export const memoryPluginHost = Layer.mergeAll(
     deliverTo: () => noSessions,
     admit: () => noSessions,
     relay: () => noSessions,
+  }),
+  Layer.succeed(Archive.Service, {
+    undoCutOffStart: () => noSessions,
+    abandonLaunch: () => noSessions,
+    remove: () => noSessions,
+    stop: () => noSessions,
+    finishArchive: () => noSessions,
+    archiveSoon: () => noSessions,
   }),
 )

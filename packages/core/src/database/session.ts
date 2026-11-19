@@ -8,6 +8,7 @@ import {
   SessionCreated,
   SessionDirectoryChanged,
   SessionEnded,
+  type Sender,
 } from "@vibest/schema/event"
 import type { Routing } from "@vibest/schema/plugin"
 import {
@@ -627,6 +628,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       endProcess: Effect.fn("Db.session.endProcess")((id: string, reason: ProcessEndReason, process?: number) =>
         tx(endProcess(id, reason, undefined, process)).pipe(Effect.orDie),
+      ),
+
+      stopProcess: Effect.fn("Db.session.stopProcess")((id: string, by: Sender) =>
+        tx(endProcess(id, "stopped", undefined, undefined, by)).pipe(Effect.orDie),
       ),
 
       endExited: Effect.fn("Db.session.endExited")(

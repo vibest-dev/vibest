@@ -596,6 +596,7 @@ describe("vibest.sock", () => {
         ["Project.Search", c["Project.Search"]({ query: "x" })],
         ["Send", c.Send({ id, message: "x" })],
         ["Interrupt", c.Interrupt({ id })],
+        ["Stop", c.Stop({ id })],
         ["Peek", c.Peek({ id })],
         ["Remove", c.Remove({ id })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],

@@ -42,6 +42,7 @@ import { type AnyPlugin, type Candidate, keyOf, openSources, PluginLoader, plugi
 import { supervise } from "./plugin/supervisor.ts"
 import { logFailure } from "./reactor.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
+import { Archive } from "./session/archive.ts"
 import { Sends } from "./session/sends.ts"
 import { Summaries } from "./session/summaries.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -575,6 +576,7 @@ export const node = LayerNode.make({
     pluginLoaderNode,
     Runtimes.node,
     Sends.node,
+    Archive.node,
     Subscriptions.node,
     Summaries.node,
     PlatformNode.crypto,

@@ -88,3 +88,12 @@ session removes `<project folder>/sessions/<session id>/`. A file over 10 MiB, o
 not a regular file refuses the run. With `--machine`, the files go with the run and the vibestd there copies them into its own project folder, so
 the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest
 update` there.
+
+## S58. Stopping a session
+
+`vibest stop <id>`, run by the session that started it, ends the session's harness process and closes its terminal; a
+working session is interrupted first, as `vibest archive` does, and that execution ends interrupted. The session, its
+worktree and branch, and its messages stay: `vibest ls --all` lists it as exited, and the next `vibest send` to it
+resumes the same conversation in a new terminal, where the message is answered. A message already waiting for it when
+it stops resumes it at once. The ledger records the process's end as `stopped` and who stopped it. The entry session
+and an archived session are refused. A plugin stops a session with `ctx.session.stop(id)`, recorded as the plugin.

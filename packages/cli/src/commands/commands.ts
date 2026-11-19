@@ -160,6 +160,12 @@ const interrupt = Spec.make("interrupt", {
   params: { id },
 })
 
+const stop = Spec.make("stop", {
+  description:
+    "Stop a session you started: a working one is interrupted, then its terminal closed; its worktree, branch and messages stay, and the next vibest send resumes the same conversation (JSON)",
+  params: { id },
+})
+
 const peek = Spec.make("peek", {
   description:
     "Print the last lines on a session's terminal, read now (plain text). Results never carry screen text: look here when one says the execution ended without a reply or did not start",
@@ -392,6 +398,7 @@ export const Commands = Spec.make("vibest", {
     status,
     result,
     interrupt,
+    stop,
     peek,
     archive,
     ls,

@@ -5,6 +5,7 @@ import {
   ProcessConversation,
   ProcessEnded,
   type ProcessEndReason,
+  type Sender,
   ProcessPlaced,
   ProcessStarted,
   SessionEnded,
@@ -191,7 +192,7 @@ export const statements = Effect.gen(function* () {
   const fromOldProcess = (id: string, process: number | undefined) =>
     Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
 
-  const endProcess = (id: string, reason: ProcessEndReason, at?: number, process?: number) =>
+  const endProcess = (id: string, reason: ProcessEndReason, at?: number, process?: number, by?: Sender) =>
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
 
@@ -200,7 +201,7 @@ export const statements = Effect.gen(function* () {
       yield* publish(ProcessEnded, {
         sessionId: id,
         ...(at !== undefined && { at }),
-        data: { process: current.id, reason },
+        data: { process: current.id, reason, ...(by !== undefined && { by }) },
       })
       yield* afterCommitLive(sessionLive.forgetProcess(id))
 

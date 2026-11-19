@@ -27,6 +27,7 @@ const Handlers = Runtime.handlers(Commands, {
   status: () => import("./commands/handlers/status.ts"),
   result: () => import("./commands/handlers/result.ts"),
   interrupt: () => import("./commands/handlers/interrupt.ts"),
+  stop: () => import("./commands/handlers/stop.ts"),
   peek: () => import("./commands/handlers/peek.ts"),
   archive: () => import("./commands/handlers/archive.ts"),
   ls: () => import("./commands/handlers/ls.ts"),

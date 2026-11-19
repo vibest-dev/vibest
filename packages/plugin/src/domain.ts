@@ -9,6 +9,10 @@ export class SessionSendFailed extends Schema.TaggedError<SessionSendFailed>()("
   message: Schema.String,
 }) {}
 
+export class SessionStopFailed extends Schema.TaggedError<SessionStopFailed>()("SessionStopFailed", {
+  message: Schema.String,
+}) {}
+
 export interface PluginSession {
   readonly id: string
   readonly title: string

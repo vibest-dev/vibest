@@ -172,6 +172,25 @@ export const make = Effect.gen(function* () {
         ),
       ),
 
+    Stop: (p) =>
+      routed.Stop(p, (id) =>
+        managed("Stop", id).pipe(
+          Effect.flatMap((id) =>
+            Effect.gen(function* () {
+              const caller = yield* Caller
+
+              const by = Predicate.isTagged(caller, "Session")
+                ? yield* db.remote.senderOf(caller.sessionId)
+                : Predicate.isTagged(caller, "Peer")
+                  ? yield* peerSender(caller, undefined)
+                  : undefined
+
+              return { id, ...(yield* sessions.stop(id, by ?? "user")) }
+            }),
+          ),
+        ),
+      ),
+
     Remove: (p) =>
       routed.Remove(p, (id) =>
         managed("Remove", id).pipe(
@@ -319,6 +338,7 @@ export const layer = group([
   "Republish",
   "Send",
   "Interrupt",
+  "Stop",
   "Remove",
   "Get",
   "Peek",

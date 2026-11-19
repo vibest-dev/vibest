@@ -11,6 +11,7 @@ import type {
   PluginSession,
   SessionSend,
   SessionSendFailed,
+  SessionStopFailed,
   SubscriptionReport,
 } from "../domain.ts"
 import type { EventDomain } from "./event.ts"
@@ -35,6 +36,7 @@ export interface SessionDomain {
   readonly list: () => Effect.Effect<ReadonlyArray<PluginSession>>
   readonly get: (id: string) => Effect.Effect<PluginSession | undefined>
   readonly send: (input: SessionSend) => Effect.Effect<void, SessionSendFailed>
+  readonly stop: (id: string) => Effect.Effect<void, SessionStopFailed>
 }
 
 interface SubscriptionDomain {

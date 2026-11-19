@@ -145,7 +145,12 @@ const fakeMachine = (options: {
         harness: { transform: (edit) => Effect.sync(() => (edit(editor), registration)) },
         subscription: { report: () => Effect.void },
         event: { subscribe: () => Stream.never },
-        session: { list: () => Effect.succeed([]), get: () => Effect.succeed(undefined), send: () => Effect.void },
+        session: {
+          list: () => Effect.succeed([]),
+          get: () => Effect.succeed(undefined),
+          send: () => Effect.void,
+          stop: () => Effect.void,
+        },
       }
 
       yield* plugin.effect(ctx)

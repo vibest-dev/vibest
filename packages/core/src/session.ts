@@ -132,6 +132,10 @@ export interface Interface {
     RemoveOutcome | undefined,
     NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable | RuntimeError
   >
+  readonly stop: (
+    id: string,
+    by: Sender,
+  ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
   readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
   readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
   readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
@@ -164,7 +168,7 @@ export const make = Effect.gen(function* () {
   const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery.Service
   const reconcile = yield* Reconcile.Service
   const { spawn } = yield* Spawn.Service
-  const { remove } = yield* Archive.Service
+  const { remove, stop } = yield* Archive.Service
   const { outdated, restart, restartLater } = yield* Restart.Service
 
   const getRow = (id: string) =>
@@ -272,6 +276,7 @@ export const make = Effect.gen(function* () {
     interrupt,
     peek,
     remove,
+    stop,
     get,
     list,
     check: reconcile.check,

@@ -6,6 +6,7 @@ import { Agents } from "../agents.ts"
 import { Bus } from "../bus.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Runtimes } from "../runtimes.ts"
+import { Archive } from "../session/archive.ts"
 import { Sends } from "../session/sends.ts"
 import { Summaries } from "../session/summaries.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
@@ -54,6 +55,7 @@ const factsFor =
 const sessionsFor = (
   summaries: Summaries.Interface,
   sends: Sends.Interface,
+  archive: Archive.Interface,
   plugin: string,
 ): VibestPlugin.SessionDomain => ({
   list: summaries.list,
@@ -62,6 +64,11 @@ const sessionsFor = (
     sends.relay(input.to, input.message, { plugin }, input.request).pipe(
       Effect.asVoid,
       Effect.mapError((e) => new VibestPlugin.SessionSendFailed({ message: e.message })),
+    ),
+  stop: (id) =>
+    archive.stop(id, { plugin }).pipe(
+      Effect.asVoid,
+      Effect.mapError((e) => new VibestPlugin.SessionStopFailed({ message: e.message })),
     ),
 })
 
@@ -81,6 +88,7 @@ export const make = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const summaries = yield* Summaries.Service
   const sends = yield* Sends.Service
+  const archive = yield* Archive.Service
 
   return ({ plugin, activation, options, stats }: Input): VibestPlugin.Context => {
     const register = <N extends Hooks.Name>(
@@ -125,7 +133,7 @@ export const make = Effect.gen(function* () {
       harness: { transform: harnesses.transform },
       subscription: { report: (input) => subscriptions.report(input) },
       event: { subscribe: factsFor(bus, plugin) },
-      session: sessionsFor(summaries, sends, plugin),
+      session: sessionsFor(summaries, sends, archive, plugin),
     }
   }
 })

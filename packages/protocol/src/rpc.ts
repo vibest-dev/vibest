@@ -454,6 +454,23 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     admitted(
+      Rpc.make("Stop", {
+        payload: { id: Schema.String },
+        success: Schema.Struct({ id: Schema.String, message: Schema.String }),
+        error: Schema.Union([
+          Forbidden,
+          NoSuchSession,
+          AmbiguousSession,
+          SessionBusy,
+          RuntimeUnreachable,
+          NoRuntime,
+          ...LINE_ERRORS,
+        ]),
+      }),
+    ),
+  ),
+  scoped(
+    admitted(
       Rpc.make("Remove", {
         payload: { id: Schema.String, keepWorktree: Schema.optional(Schema.Boolean) },
         success: Schema.NullOr(RemoveOutcome),
@@ -878,6 +895,7 @@ export const ACCESS = {
   "Project.Search": "agent",
   Send: ["owner", "session", "peer"],
   Interrupt: ["owner", "peer"],
+  Stop: ["owner", "peer"],
   Peek: ["owner", "peer"],
   Remove: ["owner", "peer"],
   "Daemon.Stop": "cli",
