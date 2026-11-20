@@ -212,4 +212,22 @@ describe("Peer.Spawn for a project of several repositories", () => {
         assert.lengthOf(b.spawns, 0)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
+
+  it.effect(
+    "a project folder holding one checkout is sent as the single-repository request an older B takes, pinned at that checkout's commit",
+    () =>
+      Effect.gen(function* () {
+        const { a, b } = yield* twoMachines()
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* tempDirectory("vibest-a-one-child-")
+        const child = `${root}/shop`
+        yield* fs.makeDirectory(child)
+        yield* (yield* a.run(FakeGit)).repository(child, { ...REPOSITORY, origin: REMOTE })
+        const project = yield* a.db.project.createProject(root, [{ path: child, remote: REMOTE }])
+        const { asEntry } = yield* entryOn({ ...a, project, directory: root })
+        yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {} }))
+        assert.strictEqual(b.spawns.at(-1)!.commit, COMMIT)
+        assert.isUndefined(b.spawns.at(-1)!.folders)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
 })
