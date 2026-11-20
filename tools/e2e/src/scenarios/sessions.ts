@@ -740,6 +740,10 @@ const checks: ReadonlyArray<Check> = [
           90_000,
         )
 
+        const bucket = path.dirname(live.worktree)
+        await fs.writeFile(path.join(path.dirname(bucket), ".DS_Store"), "")
+        await fs.writeFile(path.join(bucket, ".DS_Store"), "")
+        await fs.symlink("dead", path.join(bucket, "dead"))
         const listed = await w.json<Listed>(["worktree", "list"], { cwd: p.repo, env: p.env })
 
         const expectTree = (id: string, title: string, sessionState: string, repo: (repository: Repo) => boolean) => {
@@ -840,6 +844,22 @@ const checks: ReadonlyArray<Check> = [
         expect(missing.code !== 0 && missing.stderr.includes("no project"), missing.stderr)
         const fromAgent = await w.okViaEntry(["worktree", "list"], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
         expect(fromAgent.includes(live.id), "an agent cannot list worktrees")
+
+        const index = await git(w, kept.worktree, "rev-parse", "--path-format=absolute", "--git-path", "index")
+        await fs.rename(index, `${index}.ok`)
+        await fs.writeFile(index, "bad")
+
+        try {
+          const unreadable = await w.json<Listed>(["worktree", "list"], { cwd: p.repo, env: p.env })
+          const keptRepos = find(unreadable, kept.id)?.worktree.repositories ?? []
+          expect(
+            keptRepos.length === 1 && keptRepos[0]!.state === "unknown",
+            `a worktree git cannot read: ${JSON.stringify(keptRepos)}`,
+          )
+          expect(find(unreadable, live.id) !== undefined, "an unreadable worktree hid the others")
+        } finally {
+          await fs.rename(`${index}.ok`, index)
+        }
       } finally {
         await dropHerdrSession(w, multi)
         await p.close()

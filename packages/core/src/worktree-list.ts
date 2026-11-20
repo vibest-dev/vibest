@@ -15,21 +15,18 @@ const real = (file: string) =>
 
 const namesIn = (dir: string) =>
   Effect.flatMap(FileSystem.FileSystem, (fs) =>
-    fs.readDirectory(dir).pipe(
-      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed<ReadonlyArray<string>>([])),
-      Effect.orDie,
-    ),
+    fs.readDirectory(dir).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => [])),
   )
 
 const repositoryAt = Effect.fn("Worktree.repository")(function* (folder: string) {
   const git = yield* Git.Service
-  const known = yield* git.state(folder).pipe(Effect.orDie)
+  const known = yield* git.state(folder).pipe(Effect.orElseSucceed(() => undefined))
 
   if (known === undefined) return { folder, state: "unknown" as const } satisfies WorktreeRepository
 
   const changed = yield* git.uncommitted(folder).pipe(
     Effect.map((lines) => lines.length),
-    Effect.catchTag("GitError", () => Effect.succeed(0)),
+    Effect.orElseSucceed(() => undefined),
   )
 
   const commit =
@@ -38,13 +35,21 @@ const repositoryAt = Effect.fn("Worktree.repository")(function* (folder: string)
   const head = known.branch !== "" ? { branch: known.branch } : commit !== "" ? { commit } : undefined
 
   const state =
-    changed > 0 ? "dirty" : known.why === "commits not on any branch" ? "unsaved" : known.saved ? "clean" : "unknown"
+    changed === undefined
+      ? "unknown"
+      : changed > 0
+        ? "dirty"
+        : known.why === "commits not on any branch"
+          ? "unsaved"
+          : known.saved
+            ? "clean"
+            : "unknown"
 
   return {
     folder,
     ...(head !== undefined && head),
     state,
-    ...(changed > 0 && { changed }),
+    ...(changed !== undefined && changed > 0 && { changed }),
   } satisfies WorktreeRepository
 })
 
@@ -55,7 +60,7 @@ const checkoutOf = (dir: string) =>
   )
 
 const placesOf = Effect.fn("Worktree.places")(function* (dir: string) {
-  const children = yield* listProjectRepositories(dir).pipe(Effect.orDie)
+  const children = yield* listProjectRepositories(dir).pipe(Effect.orElseSucceed(() => undefined))
 
   if (children) {
     const places: Array<{ readonly folder: string; readonly main: string }> = []
@@ -161,10 +166,7 @@ export const list = Effect.fn("Worktree.list")(function* (project: string | unde
       if (!ALLOCATION_LEAF.test(leaf)) continue
       const dir = path.join(parent, leaf)
 
-      const info = yield* fs.stat(dir).pipe(
-        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
-        Effect.orDie,
-      )
+      const info = yield* fs.stat(dir).pipe(Effect.orElseSucceed(() => undefined))
 
       if (info === undefined || info.type !== "Directory") continue
       const at = yield* real(dir)
