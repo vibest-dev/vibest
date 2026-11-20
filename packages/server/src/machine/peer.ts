@@ -187,7 +187,9 @@ const make = Effect.gen(function* () {
       const candidates =
         legacy === undefined
           ? scope
-          : scope.filter((p) => p.own.some(rows.some(exactly(legacy)) ? exactly(legacy) : alike(legacy)))
+          : scope.filter((p) =>
+              p.own.some(scope.some((q) => q.own.some(exactly(legacy))) ? exactly(legacy) : alike(legacy)),
+            )
 
       if (legacy !== undefined && candidates.length > 1)
         return yield* new NoProject({

@@ -251,4 +251,31 @@ describe("Peer.Spawn for a project of several repositories", () => {
         assert.isUndefined(b.spawns.at(-1)!.folders)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
+
+  it.effect(
+    "--project chooses before any matching: an exact URL in another project does not veto the named project that has the repository under another URL",
+    () =>
+      Effect.gen(function* () {
+        const x = "https://host/o/x"
+        const b = yield* repoStack(undefined, {}, x)
+        const root = yield* tempDirectory("vibest-b-named-")
+        yield* (yield* b.run(FakeGit)).repository(root, { ...REPOSITORY, origin: `${x}.git` })
+        const project = yield* b.db.project.createProject(root, [{ path: root, remote: `${x}.git` }])
+        const call = yield* b.as(randomId(), "aproj")
+
+        const spawned = yield* call(
+          b.raw["Peer.Spawn"]({
+            agent: "general",
+            repository: x,
+            identity: "host/o/x",
+            commit: COMMIT,
+            project,
+            prompt: "x",
+            request: randomId(),
+          }),
+        )
+
+        assert.strictEqual(spawned.directory, root)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
 })
