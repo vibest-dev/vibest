@@ -419,17 +419,6 @@ describe.concurrent("an exited session", () => {
   })
 
   plainTest(
-    "archive leaves its pane open, and says so, when a program was started in its leftover shell",
-    Effect.gen(function* () {
-      const w = yield* exitedSession
-      yield* w.herdr.updateAgent(w.id, (a) => ({ ...a, alive: true }))
-      const out = (yield* w.sessions.remove(w.id))!
-      assert.deepStrictEqual(yield* w.herdr.callsTo("close"), [])
-      assert.include(out.reasons.join("\n"), "left open: a program other than its shell runs in it")
-    }),
-  )
-
-  plainTest(
     "archive leaves its pane open, and says so, when another live session now runs at that terminal",
     Effect.gen(function* () {
       const w = yield* exitedSession

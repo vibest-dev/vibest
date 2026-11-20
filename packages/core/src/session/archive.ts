@@ -80,23 +80,14 @@ export const make = Effect.gen(function* () {
     yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
   })
 
-  const leftOpenBecause = (h: Runtime, session: SessionRow, terminal: Terminal) =>
-    Effect.gen(function* () {
-      const others = (yield* db.session.processesAt(runtimeOf(session), terminal)).filter(
-        (p) => p.sessionId !== session.id,
-      )
+  const otherSessionAt = (session: SessionRow, terminal: Terminal) =>
+    db.session.processesAt(runtimeOf(session), terminal).pipe(
+      Effect.map((processes) => {
+        const others = processes.filter((p) => p.sessionId !== session.id).map((p) => p.sessionId)
 
-      if (others.length > 0) return `session ${others.map((p) => p.sessionId).join(", ")} runs in it`
-
-      return yield* h.process(terminal).pipe(
-        Effect.map((p) => (p.running ? "a program other than its shell runs in it" : undefined)),
-        Effect.catchTag("RuntimeError", (error) =>
-          Effect.succeed(
-            error.code === "not_found" ? undefined : `vibest could not tell what runs in it: ${error.message}`,
-          ),
-        ),
-      )
-    })
+        return others.length > 0 ? `session ${others.join(", ")} runs in it` : undefined
+      }),
+    )
 
   const release = (id: string) =>
     db.session.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
@@ -146,7 +137,7 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.ignore)
 
       const notOurs =
-        exitedAt(session) !== null && terminal.id !== "" ? yield* leftOpenBecause(h, session, terminal) : undefined
+        exitedAt(session) !== null && terminal.id !== "" ? yield* otherSessionAt(session, terminal) : undefined
 
       if (notOurs !== undefined) reasons.push(`terminal ${terminal.id} left open: ${notOurs}`)
 
