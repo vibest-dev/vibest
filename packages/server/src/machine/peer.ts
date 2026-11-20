@@ -4,6 +4,7 @@ import type { OutboxRow } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
+import { safeRepositoryDirectory } from "@vibest/core/paths"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { defaultSessionName, Session } from "@vibest/core/session"
 import type { PayloadOf } from "@vibest/protocol/rpc"
@@ -22,6 +23,27 @@ import { Context, Effect, Layer, Option, Queue, Stream } from "effect"
 export * as Peer from "./peer.ts"
 
 export const OUTBOX_PAGE = 100
+
+type Wanted = {
+  readonly folder?: string | undefined
+  readonly repository: string
+  readonly identity?: string | undefined
+  readonly commit: string
+}
+
+type Checkout = Effect.Success<Db.Interface["remote"]["remoteProjects"]>[number]
+
+type Paired = { readonly wanted: Wanted; readonly row: Checkout }
+
+const wantedOf = (input: PayloadOf<"Peer.Spawn">): ReadonlyArray<Wanted> =>
+  input.repositories ??
+  (input.repository === undefined || input.commit === undefined
+    ? []
+    : [{ repository: input.repository, identity: input.identity, commit: input.commit }])
+
+const named = (wanted: ReadonlyArray<Wanted>) => wanted.map((w) => w.repository).join(", ")
+
+const pinned = ({ wanted, row }: Paired) => ({ name: wanted.folder ?? "", path: row.path, commit: wanted.commit })
 
 const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = {
@@ -56,38 +78,86 @@ const make = Effect.gen(function* () {
       const bytes = new TextEncoder().encode(input.prompt).length
 
       if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
+      const wanted = wantedOf(input)
+
+      if (wanted.length === 0) return yield* new NoProject({ message: `${self.name} got no repository to run in` })
+      const folders = wanted.flatMap((w) => (w.folder === undefined ? [] : [w.folder]))
+
+      if (!folders.every(safeRepositoryDirectory) || new Set(folders).size !== folders.length)
+        return yield* new NoProject({ message: `${self.name} refuses the folder names ${folders.join(", ")}` })
       const rows = yield* db.remote.remoteProjects
-      const exact = rows.filter((row) => row.remote === input.repository)
-      const { identity } = input
+      const exact = (w: Wanted) => rows.filter((row) => row.remote === w.repository)
+      const byIdentity = wanted.some((w) => w.identity !== undefined && exact(w).length === 0)
 
-      const matched =
-        exact.length > 0 || identity === undefined
-          ? exact
-          : (yield* Effect.forEach(
+      const identities = new Map(
+        byIdentity
+          ? yield* Effect.forEach(
               rows,
-              (row) => Effect.map(repositoryIdentity(row.remote), (id) => (id === identity ? [row] : [])),
-              { concurrency: 8 },
-            )).flat()
+              (row) => Effect.map(repositoryIdentity(row.remote), (id) => [row, id] as const),
+              {
+                concurrency: 8,
+              },
+            )
+          : [],
+      )
 
-      const found = matched.filter((row, i) => matched.findIndex((other) => other.id === row.id) === i)
-      const here = `${self.name} has no checkout of ${input.repository}: clone it there and run vibest project add in it`
+      const holds = (w: Wanted) => (row: Checkout) =>
+        exact(w).length > 0
+          ? row.remote === w.repository
+          : w.identity !== undefined && identities.get(row) === w.identity
 
-      if (found.length === 0) return yield* new NoProject({ message: here })
+      const lacking = wanted.filter((w) => !rows.some(holds(w)))
+
+      if (lacking.length > 0)
+        return yield* new NoProject({
+          message:
+            input.repositories === undefined
+              ? `${self.name} has no checkout of ${named(lacking)}: clone it there and run vibest project add in it`
+              : `${self.name} has no checkout of ${named(lacking)}: clone ${lacking.length === 1 ? "it" : "them"} there beside the project's other repositories and run vibest project add in that folder`,
+        })
+
+      const pairedIn = (own: ReadonlyArray<Checkout>) => {
+        const left = [...own]
+        const pairs: Array<Paired> = []
+
+        for (const w of wanted) {
+          const at = left.findIndex(holds(w))
+
+          if (at === -1) return undefined
+          pairs.push({ wanted: w, row: left.splice(at, 1)[0]! })
+        }
+
+        return pairs
+      }
+
+      const found = [...new Set(rows.map((row) => row.id))].flatMap((id) => {
+        const own = rows.filter((row) => row.id === id)
+        const { directory, repositories } = own[0]!
+
+        if (directory === null || repositories !== wanted.length) return []
+        const pairs = pairedIn(own)
+
+        return pairs === undefined ? [] : [{ id, directory, pairs }]
+      })
+
+      if (found.length === 0)
+        return yield* new NoProject({
+          message: `${self.name} has no project whose repositories are exactly ${named(wanted)}: add one there with vibest project add`,
+        })
 
       if (found.length > 1)
         return yield* new NoProject({
-          message: `${self.name} has several projects for ${input.repository}: ${found.map((p) => p.directory ?? p.id).join(", ")}`,
+          message: `${self.name} has several projects for ${named(wanted)}: ${found.map((p) => p.directory).join(", ")}`,
         })
       const target = found[0]!
 
-      if (target.repositories !== 1 || target.directory === null)
-        return yield* new NoProject({
-          message: `${self.name}'s project for ${input.repository} has several repositories; another machine runs agents only in a single-repository project`,
-        })
+      const missing = (yield* Effect.forEach(target.pairs, (pair) =>
+        Effect.map(git.hasCommit(pair.row.path, pair.wanted.commit), (has) => (has ? [] : [pair])),
+      )).flat()
 
-      if (!(yield* git.hasCommit(target.directory, input.commit)))
+      if (missing.length > 0)
         return yield* new NoCommit({
-          message: `${self.name}'s checkout ${target.directory} does not have ${input.commit}: push it and fetch it there`,
+          message: `${missing.map(({ wanted, row }) => `${self.name}'s checkout ${row.path} does not have ${wanted.commit}`).join("; ")}: push ${missing.length === 1 ? "it" : "them"} and fetch ${missing.length === 1 ? "it" : "them"} there`,
         })
 
       const spawned = yield* sessions
@@ -103,7 +173,9 @@ const make = Effect.gen(function* () {
           model: input.model,
           runtime: input.runtime,
           request: input.request,
-          commit: input.commit,
+          ...(input.repositories === undefined
+            ? { commit: target.pairs[0]!.wanted.commit }
+            : { folders: target.pairs.map(pinned) }),
           origin: { peer, project, reportTo },
           files: input.files,
         })

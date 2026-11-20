@@ -19,6 +19,7 @@ import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
+import machinesRepositories from "./scenarios/machines-repositories.ts"
 import machines from "./scenarios/machines.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
@@ -61,7 +62,7 @@ const areas = {
   delivery,
   routing,
   entry: entrySession,
-  machines: [...machines, ...machinesHerdr],
+  machines: [...machines, ...machinesRepositories, ...machinesHerdr],
   "terminal-status": terminalStatus,
 } satisfies Record<string, ReadonlyArray<Check>>
 

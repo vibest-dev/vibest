@@ -33,6 +33,7 @@ import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
   listProjectRepositories,
+  type PinnedFolder,
   projectRoot,
 } from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
@@ -56,6 +57,7 @@ export type LaunchOptions = {
   readonly splitFrom?: string | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
   readonly commit?: string | undefined
+  readonly folders?: ReadonlyArray<PinnedFolder> | undefined
 }
 
 export const make = Effect.gen(function* () {
@@ -330,9 +332,9 @@ export const make = Effect.gen(function* () {
     session: SessionRow,
     root: string,
     firstPrompt: string,
-    { splitFrom, env, commit }: LaunchOptions,
+    { splitFrom, env, commit, folders: pinned }: LaunchOptions,
   ) {
-    const folders = yield* listProjectRepositories(root)
+    const folders = pinned ?? (yield* listProjectRepositories(root))
     const sharedFrom = splitFrom !== undefined ? yield* shareRow(session, splitFrom) : undefined
     const near = sharedFrom === undefined ? undefined : terminalOf(sharedFrom)
     yield* fs.makeDirectory(layout.artifacts(session.projectId), { recursive: true })

@@ -90,11 +90,19 @@ notifies nobody.
 
 ## B: agents for another machine
 
-`Peer.Spawn` (peer caller, with `vibest-peer-project` naming A's project) finds the one project whose repository
-`remote_url` equals `repository` or has the same repository identity as `identity` (a multi-repository project is
-refused), checks that the checkout has `commit`
-(`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
-and fetch it there"), and runs `Session.spawn` with the worktree detached at that commit. B learns a checkout with
+`Peer.Spawn` (peer caller, with `vibest-peer-project` naming A's project) carries either one repository
+(`repository`, `identity`, `commit`: a single-repository project) or `repositories`, one entry per repository of a
+multi-repository project (`folder`, its folder name inside A's project, `repository`, `identity`, `commit`). A
+multi-repository project is just a folder holding several git repositories, on both machines. B finds the one project
+whose repositories are exactly that set, one to one, no extra and no missing repository: a repository matches when its
+`remote_url` equals `repository`, or, only when no checkout on B has that URL, when it has the same repository
+identity as `identity`. A repository no project of B holds is refused naming it ("<B> has no checkout of <url>: …
+run vibest project add …"); no project of exactly that set and several such projects are refused, the second listing
+them. Then B checks every commit before creating anything (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`;
+"<B>'s checkout <dir> does not have <sha>: push it and fetch it there", one clause per missing commit), and runs
+`Session.spawn`: a single repository gets the worktree detached at its commit; a list gets the multi-repository
+layout, one detached worktree per repository at A's commit under A's folder name, so paths in the task stay valid.
+Folder names that are not safe directory names, or repeat, are refused. B never clones, fetches or pulls. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
 `origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
@@ -139,7 +147,11 @@ their case; either gives `NoProject`.
 
 `vibest run --machine <name>` (a session, the entry session included) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
-calling session as `vibest-peer-by`, which B records as the creator; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
+calling session as `vibest-peer-by`; a multi-repository project sends one such entry per repository folder of the
+project directory, with its folder name. A repository without a remote is refused on A, naming it. A B whose Ping
+does not have the `peerSpawnRepositories` capability is refused on A for a multi-repository project ("<B> runs a
+vibest that does not take a project of several repositories; run vibest update on <B>"), never downgraded to one
+repository, which B records as the creator; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
 `--env`, `--share`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
