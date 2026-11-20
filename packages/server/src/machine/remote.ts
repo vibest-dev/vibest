@@ -284,7 +284,7 @@ const make = Effect.gen(function* () {
       const directory = yield* db.project.projectDirectory(from.project)
 
       const folders =
-        repositories.length > 1 && directory !== undefined
+        directory !== undefined
           ? yield* listProjectRepositories(directory).pipe(
               provided,
               Effect.mapError((e) => new MachineFailed({ message: `cannot read ${directory}: ${e.message}` })),
@@ -309,7 +309,7 @@ const make = Effect.gen(function* () {
       const only = repositories[0]
 
       const sent =
-        folders !== undefined
+        folders !== undefined && folders.length > 0
           ? {
               repositories: yield* Effect.forEach(folders, (folder) =>
                 git.remoteUrl(folder.path).pipe(
@@ -318,7 +318,7 @@ const make = Effect.gen(function* () {
                 ),
               ),
             }
-          : repositories.length === 1 && only !== undefined
+          : folders === undefined && repositories.length === 1 && only !== undefined
             ? yield* pin(only.path, yield* git.remoteUrl(only.path))
             : yield* new MachineFailed({ message: "the project has no repository another machine can run in" })
 
