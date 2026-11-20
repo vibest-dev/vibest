@@ -4,4 +4,4 @@ export { capture, type Captured } from "./effect/capture.ts"
 
 export { reconnectSchedule } from "./effect/reconnect.ts"
 
-export { exhaustedText, isLimited, stillLimited } from "./limits.ts"
+export { isLimited } from "./limits.ts"

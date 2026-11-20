@@ -240,7 +240,7 @@ describe("plugins: spawn hook", () => {
           ["vibest.archive-on-idle", "active"],
         ],
       )
-      const supported = "agent.start.before, agent.fail"
+      const supported = "agent.start.before"
       assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
       assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
       assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
@@ -414,7 +414,6 @@ const event = {
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   harnesses: [
     { harness: "pi", available: true },
     { harness: "claude", available: true },

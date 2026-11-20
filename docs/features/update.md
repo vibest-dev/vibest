@@ -1,6 +1,6 @@
 # Update and restart
 
-How vibest updates itself and moves running agents onto a new version or another login. Each capability below says what
+How vibest updates itself and moves running agents onto a new version. Each capability below says what
 it is and when it counts as working.
 
 ## U1. Where the latest version comes from
@@ -35,21 +35,17 @@ vibestd keeps serving as before.
 `vibest update` run by a session, the entry session included, is refused as the user's command; nothing is installed or
 restarted and the session keeps running.
 
-## U5. Moving past a usage limit
+## U5. A usage limit fails the execution
 
-When a harness hits its usage limit, only that harness ends, and the next login runs in the same pane and session; the
-old process is gone, the limited execution ends failed, and the next login gets the same input in a new execution that completes
-the work.
+When a harness hits its usage limit, that execution ends failed with failure kind `limit` and, when the harness's
+usage reading reports one, the time the limit resets. The creator gets one notice naming the limit and its reset time.
+Nothing else starts: the same harness process stays in its pane, and the next message to the session resumes it on
+the same harness. Moving the work to another harness or login is the creator's decision, or a plugin's.
 
 ## U6. Restarting agents on an old integration
 
 `vibest daemon restart` onto another vibest offers to restart the agents still on an old integration, and restarts them
 in place: the same pane and conversation, a new harness process, and the new integration version.
-
-## U8. Each login at most once for one input
-
-A usage-limit move tries each login at most once for one input, across the executions its limits moved it through, whatever
-its usage reading says. When none is left, an execution of its own ends failed with one notice saying no harness is left, and nothing starts a third time in the pane.
 
 ## U9. Update to a version that cannot open the database
 

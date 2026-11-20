@@ -25,9 +25,11 @@ import { Bus } from "../bus.ts"
 import { type ObservedEnd } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
-  attemptsOf,
   failureOf,
+  limitFailure,
+  limitText,
   type ExecutionEnd,
+  type ExecutionFailure,
   type Integration,
   type NewSession,
   type ProcessStart,
@@ -533,15 +535,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(session.placeProcess(id, terminal, pid)).pipe(Effect.orDie),
       ),
 
-      attempts: Effect.fn("Db.session.attempts")((id: string) =>
-        sql<{ attempts: string | null }>`SELECT json_group_array(json_object('harness', harness, 'provider', provider,
-            'at', ended_at)) AS attempts
-          FROM (SELECT * FROM process WHERE session_id = ${id} AND end_reason = 'limited' ORDER BY id)`.pipe(
-          Effect.map((rows) => attemptsOf(rows[0]?.attempts ?? null)),
-          Effect.orDie,
-        ),
-      ),
-
       noteIntegration: Effect.fn("Db.session.noteIntegration")(
         (id: string, integration: Integration, process?: number) =>
           Effect.gen(function* () {
@@ -743,13 +736,15 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           id: string,
           execution: number,
           status: Exclude<ExecutionState, "none" | "open">,
-          options: { readonly failure?: string; readonly notice?: string } = {},
+          options: { readonly failure?: ExecutionFailure | undefined; readonly notice?: string } = {},
         ) =>
           tx(
             Effect.gen(function* () {
               if ((yield* openExecution(id)) !== execution) return false
-              const failure = failureOf(options.failure)
-              yield* endExecution(id, { outcome: status, ...(failure !== undefined && { failure }) })
+              yield* endExecution(id, {
+                outcome: status,
+                ...(options.failure !== undefined && { failure: options.failure }),
+              })
 
               if (options.notice !== undefined && !(yield* isEntry(id)))
                 yield* insertInboxRow({ sessionId: id, message: options.notice })
@@ -770,32 +765,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
           return row?.taken === 1
         }).pipe(Effect.orDie),
-      ),
-
-      limitedSince: Effect.fn("Db.session.limitedSince")((sessionId: string, at: number) =>
-        sql<{ harness: string; provider: string | null }>`SELECT harness, provider FROM process
-          WHERE session_id = ${sessionId} AND end_reason = 'limited' AND ended_at >= ${at}
-          ORDER BY id`.pipe(Effect.orDie),
-      ),
-
-      rescheduleSource: Effect.fn("Db.session.rescheduleSource")((id: string) =>
-        reads.rescheduleSource(id).pipe(Effect.orDie),
-      ),
-
-      limitSource: Effect.fn("Db.session.limitSource")((id: string, limited: number) =>
-        tx(
-          Effect.gen(function* () {
-            if ((yield* openExecution(id)) !== undefined) return undefined
-
-            const [newest] = yield* sql<{
-              id: number | null
-            }>`SELECT max(id) AS id FROM execution WHERE session_id = ${id}`
-
-            if ((newest?.id ?? 0) > limited) return undefined
-
-            return yield* reads.rescheduleSource(id)
-          }),
-        ).pipe(Effect.orDie),
       ),
 
       startObserved: Effect.fn("Db.session.startObserved")(
@@ -829,9 +798,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             if (open !== undefined && (yield* acceptedAt(id, open)) === null) return "unaccepted" as const
 
-            const failure = end.limited
-              ? { message: end.failure ?? "", kind: "limit" as const }
-              : failureOf(end.failure)
+            const failure = end.limited ? limitFailure(end.failure ?? "", end.resetAt) : failureOf(end.failure)
 
             yield* endExecution(
               id,
@@ -846,11 +813,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             )
             yield* setStatus(id, "idle")
 
-            if (end.status === "failed" && !end.limited && !(yield* isEntry(id)))
+            if (end.status === "failed" && !(yield* isEntry(id)))
               yield* insertInboxRow(
                 {
                   sessionId: id,
-                  message: `${yield* session.labelOf(id)} ended its execution with an error: ${end.failure}`,
+                  message:
+                    failure?.kind === "limit"
+                      ? `${yield* session.labelOf(id)} (${end.harness}) hit a usage limit: ${limitText(failure, end)}`
+                      : `${yield* session.labelOf(id)} ended its execution with an error: ${end.failure}`,
                 },
                 end.at,
               )
@@ -881,27 +851,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           endedAt: number
         }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
           WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.orDie,
-        ),
-      ),
-
-      endedAtLimit: sql<{
-        id: string
-        runtime: string
-      }>`SELECT s.id, p.runtime FROM session s
-        JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-        JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
-        WHERE s.ended_at IS NULL AND p.ended_at IS NOT NULL AND t.failure_kind = 'limit'`.pipe(Effect.orDie),
-
-      limitedExecution: Effect.fn("Db.session.limitedExecution")((sessionId: string) =>
-        sql<{
-          execution: number
-          process: number | null
-          failure: string
-        }>`SELECT id AS execution, process_id AS process, failure FROM execution
-          WHERE session_id = ${sessionId} AND failure_kind = 'limit'
-            AND id = (SELECT max(id) FROM execution WHERE session_id = ${sessionId})`.pipe(
           Effect.map((rows) => rows[0]),
           Effect.orDie,
         ),

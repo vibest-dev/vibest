@@ -10,21 +10,18 @@ export * as Hooks from "./hooks.ts"
 
 export interface Events {
   readonly "agent.start.before": VibestPlugin.AgentStartBefore
-  readonly "agent.fail": VibestPlugin.AgentFail
   readonly "machine.connect": VibestPlugin.MachineEvent
   readonly "machine.remove": VibestPlugin.MachineEvent
 }
 
 export interface Results extends Record<keyof Events, unknown> {
   readonly "agent.start.before": void
-  readonly "agent.fail": void
   readonly "machine.connect": ReadonlyArray<VibestPlugin.MachineNote>
   readonly "machine.remove": ReadonlyArray<VibestPlugin.MachineNote>
 }
 
 interface Failures extends Record<keyof Events, unknown> {
   readonly "agent.start.before": VibestPlugin.AgentRefused
-  readonly "agent.fail": never
   readonly "machine.connect": never
   readonly "machine.remove": never
 }
@@ -82,7 +79,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("vibest/PluginHooks") {}
 
 export const layer = Layer.sync(Service, () => {
-  let table: Table = { "agent.start.before": [], "agent.fail": [], "machine.connect": [], "machine.remove": [] }
+  let table: Table = { "agent.start.before": [], "machine.connect": [], "machine.remove": [] }
 
   const register: Interface["register"] = (name, entry) =>
     Effect.gen(function* () {
@@ -155,7 +152,7 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
 
 export type Stopped = { readonly plugin: string; readonly reason: string }
 
-type AgentName = "agent.start.before" | "agent.fail"
+type AgentName = "agent.start.before"
 
 export const dispatch = Effect.fnUntraced(function* <N extends AgentName>(
   name: N,

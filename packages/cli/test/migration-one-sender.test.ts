@@ -232,7 +232,7 @@ describe("ledger migration 20261119000000_one_sender", () => {
               sql`SELECT (SELECT value FROM meta WHERE key = 'catalog') AS catalog,
                 (SELECT count(*) FROM migration WHERE id = ${MIGRATION}) AS applied`,
           ),
-          [{ catalog: "3", applied: 1 }],
+          [{ catalog: "4", applied: 1 }],
         )
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

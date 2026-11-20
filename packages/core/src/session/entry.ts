@@ -115,7 +115,6 @@ const make = Effect.gen(function* () {
         provider: input.provider,
         model: input.model,
         harnesses: yield* withHarness(startableOptions),
-        attempts: [],
         machine: { id: input.machine },
         runtime: input.runtime,
         parentRuntime: input.current === undefined ? undefined : placedTerminal(input.current)?.runtime,

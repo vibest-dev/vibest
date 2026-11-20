@@ -1,4 +1,5 @@
 import type { SubscriptionReport } from "@vibest/plugin/effect"
+import { isLimited } from "@vibest/plugin/host"
 import type { HarnessId } from "@vibest/schema/session"
 import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscription"
 import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Predicate, Ref, Semaphore } from "effect"
@@ -49,6 +50,22 @@ const wrote = (
   const error = usage && "error" in usage ? usage.error : undefined
 
   return { harness, provider, machine: MACHINE, account, limits, updatedAt: now, ...(error && { error }) }
+}
+
+const representable = (time: number | null): time is number => time !== null && !Number.isNaN(new Date(time).getTime())
+
+export const limitSeen = (rows: ReadonlyArray<Row>, harness: string, provider: string, now: number) => {
+  const exhausted = (rows.find((row) => row.harness === harness && row.provider === provider)?.limits ?? []).filter(
+    (limit) => isLimited({ limits: [limit] }, now),
+  )
+
+  const resets = exhausted.map((limit) => limit.resetTime).filter(representable)
+
+  return {
+    windows: exhausted.map((limit) => limit.window),
+    ...(provider !== "" && { provider }),
+    ...(resets.length > 0 && { resetAt: Math.min(...resets) }),
+  }
 }
 
 export type Interface = SubscriptionsDomain

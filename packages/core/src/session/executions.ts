@@ -357,15 +357,7 @@ export const make = Effect.gen(function* () {
     })
   }, Effect.scoped)
 
-  const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
-    yield* db.session.endExecution(
-      session.id,
-      { outcome: end, failure: { message: error } },
-      `${sessionLabel(session)} ended its execution with an error: ${error}`,
-    )
-  })
-
-  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, openFirst, launched, finish }
+  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, openFirst, launched }
 })
 
 export type Interface = Effect.Success<typeof make>

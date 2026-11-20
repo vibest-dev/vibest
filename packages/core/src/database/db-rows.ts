@@ -172,25 +172,6 @@ export type ProcessStart = {
 
 export type Integration = { readonly version: string; readonly protocol: number }
 
-const decodeAttempts = Schema.decodeSync(
-  Schema.fromJsonString(
-    Schema.Array(Schema.Struct({ harness: Schema.String, provider: Schema.NullOr(Schema.String), at: Schema.Number })),
-  ),
-)
-
-export const attemptsOf = (raw: string | null) => {
-  const seen: Array<{ harness: string; provider?: string; outcome: "limited"; at: number }> = []
-
-  for (const a of decodeAttempts(raw ?? "[]")) {
-    const provider = a.provider ?? undefined
-
-    if (seen.some((s) => s.harness === a.harness && s.provider === provider)) continue
-    seen.push({ harness: a.harness, ...(provider !== undefined && { provider }), outcome: "limited", at: a.at })
-  }
-
-  return seen
-}
-
 export const senderKey = (sender: Sender) => {
   if (sender.type === "plugin") return `plugin:${sender.plugin}`
 
@@ -254,13 +235,36 @@ export type InboxSql = SenderSql & {
 
 export type ExecutionEnd = {
   readonly outcome: typeof ExecutionOutcome.Type
-  readonly failure?: { readonly message: string; readonly kind?: "limit" }
+  readonly failure?: ExecutionFailure
   readonly conversation?: string
   readonly reply?: string
 }
 
-export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
+export type ExecutionFailure = { readonly message: string; readonly kind?: "limit"; readonly resetAt?: number }
+
+export const failureOf = (error: string | undefined): ExecutionFailure | undefined =>
   error === undefined || error === "" ? undefined : { message: error }
+
+export const limitFailure = (message: string, resetAt: number | undefined): ExecutionFailure => ({
+  message,
+  kind: "limit",
+  ...(resetAt !== undefined && { resetAt }),
+})
+
+export type LimitAbout = {
+  readonly provider?: string | undefined
+  readonly windows?: ReadonlyArray<string> | undefined
+}
+
+export const limitText = (failure: ExecutionFailure, about: LimitAbout = {}) => {
+  const details = [
+    ...(about.provider === undefined ? [] : [`provider ${about.provider}`]),
+    ...(about.windows === undefined || about.windows.length === 0 ? [] : [`${about.windows.join(", ")} exhausted`]),
+    failure.resetAt === undefined ? "no reset time reported" : `resets ${new Date(failure.resetAt).toISOString()}`,
+  ]
+
+  return `${failure.message} (${details.join("; ")})`
+}
 
 export const toInbox = (row: InboxSql) => {
   return {

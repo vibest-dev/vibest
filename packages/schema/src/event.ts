@@ -75,7 +75,6 @@ export const ProcessConversation = fact("process.conversation", "session", { pro
 
 export const ProcessEndReason = Schema.Literals([
   "exited",
-  "limited",
   "restart",
   "move",
   "archived",
@@ -100,7 +99,9 @@ export type ExecutionOutcome = typeof ExecutionOutcome.Type
 export const ExecutionEnded = fact("execution.ended", "session", {
   execution: Seq,
   outcome: ExecutionOutcome,
-  failure: optional(Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")) })),
+  failure: optional(
+    Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")), resetAt: optional(Schema.Number) }),
+  ),
   conversation: optional(Text),
   reply: optional(Schema.String),
 })
@@ -204,7 +205,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 3
+export const CATALOG_VERSION = 4
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {
