@@ -18,6 +18,7 @@ import {
   archived,
   limitFailure,
   limitText,
+  type ExecutionFailure,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -168,6 +169,17 @@ export const make = Effect.gen(function* () {
   const taskInput = (session: SessionRow, task: string) =>
     Effect.map(firstText(session, task), (text): FirstInput => ({ text, onHandover: db.inbox.linkTask(session.id) }))
 
+  const limitOf = (session: SessionRow, error: string): Effect.Effect<ExecutionFailure | undefined> =>
+    Effect.gen(function* () {
+      if (!isUsageLimitError(error)) return undefined
+      const now = yield* Clock.currentTimeMillis
+
+      return limitFailure(
+        error,
+        resetOf(yield* subscriptions.list, harnessIdOf(session), session.process?.provider ?? "", now),
+      )
+    })
+
   const launching = Effect.fn("Placement.launching")(function* (
     session: SessionRow,
     resume: boolean,
@@ -187,11 +199,18 @@ export const make = Effect.gen(function* () {
         opened === undefined ? Effect.succeed(undefined) : launched(h, row, terminal, opened),
       )
 
-    const abandoned = Effect.flatMap(Ref.get(execution), (opened) =>
-      opened === undefined ? Effect.void : db.session.closeExecution(session.id, opened, "not_started"),
-    )
+    const abandoned = (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const opened = yield* Ref.get(execution)
 
-    const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError(() => abandoned))
+        if (opened === undefined) return
+        const failure = yield* limitOf(session, messageOf(Cause.squash(cause)))
+        yield* db.session.closeExecution(session.id, opened, failure === undefined ? "not_started" : "failed", {
+          failure,
+        })
+      })
+
+    const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError((cause) => abandoned(cause)))
 
     return { launch, beforeStart, starting, deliver, opened: Ref.get(execution) }
   }, provided)
@@ -364,19 +383,7 @@ export const make = Effect.gen(function* () {
     cause: Cause.Cause<unknown>,
   ) {
     const error = messageOf(Cause.squash(cause))
-
-    const failure = isUsageLimitError(error)
-      ? limitFailure(
-          error,
-          resetOf(
-            yield* subscriptions.list,
-            harnessIdOf(session),
-            session.process?.provider ?? "",
-            yield* Clock.currentTimeMillis,
-          ),
-        )
-      : undefined
-
+    const failure = yield* limitOf(session, error)
     const execution = yield* db.session.openExecution(session.id)
 
     if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "failed", { failure })
