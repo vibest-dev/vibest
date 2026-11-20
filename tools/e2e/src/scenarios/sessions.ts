@@ -449,7 +449,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S9",
     title:
-      "with concurrency [{ max: 2 }] in vibest.json and the entry session running, two subagents given tasks in one entry execution: both vibest run calls return at once, the first starts and the second waits to start with no terminal (vibest ls shows waitingToStart) even after the first has replied, and starts once the first is archived; doctor reports the limit and a filtered rule as not supported",
+      "with concurrency [{ max: 2 }] in vibest.json and the entry session running, two subagents given tasks in one entry execution: both vibest run calls return at once, the first starts and the second waits to start with no terminal (vibest ls shows waitingToStart with its harness and runtime) even after the first has replied, and starts once the first is archived; doctor reports the limit and a filtered rule as not supported",
     run: async (w) => {
       const p = await piProject(w, "s9")
       const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
@@ -497,7 +497,7 @@ const checks: ReadonlyArray<Check> = [
         const [one, two] = [...started.matchAll(/"id":\s*"([0-9a-f-]{36})"/g)].map((m) => m[1]!)
         expect(one !== undefined && two !== undefined, `two runs: ${started}`)
 
-        const listed = async () => (await ls(w, p)) as Array<Listed & { waitingToStart?: true }>
+        const listed = async () => (await ls(w, p)) as Array<Listed & { waitingToStart?: true; runtime: string }>
         const rowOf = async (id: string) => (await listed()).find((r) => r.id === id)
         await until("the first subagent to work", () => p.model.asked("one") === 1, 90_000)
         await until(
@@ -507,6 +507,10 @@ const checks: ReadonlyArray<Check> = [
         )
         const waiting = (await rowOf(two!))!
         expect(waiting.address.id === "", `the waiting subagent already has a terminal: ${JSON.stringify(waiting)}`)
+        expect(
+          waiting.harness === "pi" && waiting.runtime !== "",
+          `the waiting subagent does not show its launch choice: ${JSON.stringify(waiting)}`,
+        )
         expect((await rowOf(one!))?.waitingToStart === undefined, "the running subagent is listed as waiting")
 
         p.model.releaseOne()

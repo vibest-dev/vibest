@@ -4,6 +4,7 @@ import {
   executionStateOf,
   exitedAt,
   harnessIdOf,
+  type ProcessStart,
   runtimeOf,
   type SessionBrief,
   terminalOf,
@@ -25,19 +26,19 @@ const LS_TASK = 500
 const taskForLs = (task: string | null) =>
   task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
 
-export const toInfo = (session: SessionView, brief?: SessionBrief, waiting = false): SessionInfo => ({
+export const toInfo = (session: SessionView, brief?: SessionBrief, waiting?: ProcessStart): SessionInfo => ({
   id: session.id,
   name: session.name,
   agent: session.agent,
-  harness: harnessIdOf(session),
-  provider: session.process?.provider ?? null,
-  model: session.process?.model ?? null,
+  harness: session.process === null && waiting !== undefined ? waiting.harness : harnessIdOf(session),
+  provider: session.process?.provider ?? waiting?.provider ?? null,
+  model: session.process?.model ?? waiting?.model ?? null,
   status: session.status,
   startedAt: session.process?.placedAt ?? null,
   exitedAt: exitedAt(session),
   executionState: executionStateOf(session),
   projectId: session.projectId,
-  runtime: runtimeOf(session),
+  runtime: session.process === null && waiting !== undefined ? waiting.runtime : runtimeOf(session),
   address: terminalOf(session),
   worktree: session.worktree,
   repositoryRoot: session.repositoryRoot ?? null,
@@ -47,7 +48,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief, waiting = fal
   lastActive: session.lastActive,
   task: brief?.task ?? null,
   latest: brief?.latest ?? null,
-  ...(waiting && { waitingToStart: true as const }),
+  ...(waiting !== undefined && { waitingToStart: true as const }),
 })
 
 export const sessionListing = (deps: {
@@ -61,12 +62,12 @@ export const sessionListing = (deps: {
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
     Effect.gen(function* () {
       const briefs = yield* db.session.sessionBriefs(rows.map((row) => row.id))
-      const waiting = yield* starts.waiting
+      const waiting = yield* starts.choices
 
       return rows.map((row) => {
         const brief = briefs.get(row.id)
 
-        return { ...toInfo(row, brief, waiting.includes(row.id)), task: taskForLs(brief?.task ?? null) }
+        return { ...toInfo(row, brief, waiting.get(row.id)), task: taskForLs(brief?.task ?? null) }
       })
     })
 

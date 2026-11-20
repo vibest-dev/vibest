@@ -77,6 +77,7 @@ export const make = Effect.gen(function* () {
     wait,
     remove,
     waiting: Effect.sync(() => list.map((queued) => queued.id)),
+    choices: Effect.sync(() => new Map(list.map((queued) => [queued.id, queued.start]))),
     isWaiting: (id: string) => Effect.sync(() => list.some((queued) => queued.id === id)),
   }
 })

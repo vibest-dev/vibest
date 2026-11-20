@@ -128,6 +128,7 @@ const parkedAdmission = () => {
 }
 
 const parked = parkedAdmission()
+const parkedForArchive = parkedAdmission()
 
 const exitOn = (repo: string, runtime: string) =>
   Effect.gen(function* () {
@@ -520,6 +521,45 @@ describe("a cap on live harness processes", () => {
       const listed = (yield* db.session.listSessions({ projectId, waiting: yield* waiting })).map((row) => row.id)
       assert.include(listed, a)
       assert.notInclude(listed, b)
+    }),
+    hooked,
+  )
+  test(
+    "an archive dropped while it waits for an admission can be asked again",
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      yield* limitTo([{ max: 1 }])
+      yield* spawnSome(repo, 2)
+      const [a, b] = yield* until(waiting, (keys) => keys.length === 2)
+      yield* parkedForArchive.park(a!)
+
+      yield* Effect.forkChild(limitTo([{ max: 2 }]))
+      yield* parkedForArchive.reached
+      const dropped = yield* Effect.forkChild(sessions.remove(b!))
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
+      yield* Fiber.interrupt(dropped)
+      yield* parkedForArchive.release
+
+      assert.strictEqual((yield* sessions.remove(b!))?.id, b)
+      assert.deepStrictEqual(yield* waiting, [])
+    }),
+    parkedForArchive.options,
+  )
+
+  test(
+    "vibest ls shows the harness and runtime chosen for a waiting run",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      yield* limitTo([{ max: 1 }])
+      const [b] = yield* spawnSome(repo, 1)
+      yield* until(waiting, (keys) => keys.includes(b!))
+      const start = (yield* Effect.flatMap(Starts.Service, (starts) => starts.choices)).get(b!)
+
+      assert.strictEqual(start?.harness, "pi")
+      assert.strictEqual(start?.runtime, "herdr")
     }),
     hooked,
   )

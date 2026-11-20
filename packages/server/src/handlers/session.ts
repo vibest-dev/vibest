@@ -201,7 +201,7 @@ export const make = Effect.gen(function* () {
           const session = Listing.toInfo(
             row,
             (yield* db.session.sessionBriefs([id])).get(id),
-            (yield* starts.waiting).includes(id),
+            (yield* starts.choices).get(id),
           )
 
           return {

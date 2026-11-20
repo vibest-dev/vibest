@@ -147,13 +147,18 @@ export const make = Effect.gen(function* () {
   const remove = Effect.fn("Archive.remove")(
     function* (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) {
       yield* getRow(id)
-      const { already } = yield* sessionLive.stop(id)
 
-      if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
-      yield* starts.remove(id)
-      const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(release(id))))!
+      return yield* Effect.acquireUseRelease(
+        sessionLive.stop(id),
+        ({ already }) =>
+          Effect.gen(function* () {
+            if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
+            yield* starts.remove(id)
 
-      return out
+            return (yield* locked(id)(removeLocked(id, options)))!
+          }),
+        ({ already }) => (already ? Effect.void : release(id)),
+      )
     },
     Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
   )
