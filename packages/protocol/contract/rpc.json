@@ -11,6 +11,7 @@
     "spawnFiles": true,
     "peerSpawnFiles": true,
     "peerSpawnRepositories": true,
+    "peerSpawnProject": true,
     "load": true,
     "agents": true
   },
@@ -7660,6 +7661,16 @@
               }
             ]
           },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "repositories": {
             "anyOf": [
               {
@@ -14471,6 +14482,16 @@
             ]
           },
           "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project": {
             "anyOf": [
               {
                 "type": "string"

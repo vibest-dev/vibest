@@ -48,6 +48,7 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           archive: o.archive || undefined,
           runtime: Option.getOrUndefined(o.runtime),
           machine: Option.getOrUndefined(o.machine),
+          project: Option.getOrUndefined(o.project),
           callerEnv: callerEnvOf(),
           ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
           ...(files.length !== 0 && { files }),

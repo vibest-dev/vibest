@@ -41,7 +41,7 @@ const wantedOf = (input: PayloadOf<"Peer.Spawn">): ReadonlyArray<Wanted> =>
     ? []
     : [{ repository: input.repository, identity: input.identity, commit: input.commit }])
 
-const named = (wanted: ReadonlyArray<Wanted>) => wanted.map((w) => w.repository).join(", ")
+const repositoriesNamed = (wanted: ReadonlyArray<Wanted>) => wanted.map((w) => w.repository).join(", ")
 
 const pinned = ({ wanted, row }: Paired) => ({ name: wanted.folder ?? "", path: row.path, commit: wanted.commit })
 
@@ -112,8 +112,8 @@ const make = Effect.gen(function* () {
         return yield* new NoProject({
           message:
             input.repositories === undefined
-              ? `${self.name} has no checkout of ${named(lacking)}: clone it there and run vibest project add in it`
-              : `${self.name} has no checkout of ${named(lacking)}: clone ${lacking.length === 1 ? "it" : "them"} there beside the project's other repositories and run vibest project add in that folder`,
+              ? `${self.name} has no checkout of ${repositoriesNamed(lacking)}: clone it there and run vibest project add in it`
+              : `${self.name} has no checkout of ${repositoriesNamed(lacking)}: clone ${lacking.length === 1 ? "it" : "them"} there beside the project's other repositories and run vibest project add in that folder`,
         })
 
       const pairedIn = (own: ReadonlyArray<Checkout>) => {
@@ -130,24 +130,55 @@ const make = Effect.gen(function* () {
         return pairs
       }
 
-      const found = [...new Set(rows.map((row) => row.id))].flatMap((id) => {
+      const projects = [...new Set(rows.map((row) => row.id))].flatMap((id) => {
         const own = rows.filter((row) => row.id === id)
         const { directory, repositories } = own[0]!
 
-        if (directory === null || repositories !== wanted.length) return []
-        const pairs = pairedIn(own)
-
-        return pairs === undefined ? [] : [{ id, directory, pairs }]
+        return directory === null ? [] : [{ id, directory, repositories, own }]
       })
+
+      const shown = (list: ReadonlyArray<{ readonly id: string; readonly directory: string }>) =>
+        list.map((p) => `${p.id} (${p.directory})`).join(", ")
+
+      const holding = (list: typeof projects) =>
+        list.flatMap((p) => {
+          const pairs = p.repositories === wanted.length ? pairedIn(p.own) : undefined
+
+          return pairs === undefined ? [] : [{ id: p.id, directory: p.directory, pairs }]
+        })
+
+      const { project: asked } = input
+
+      const scope =
+        asked === undefined
+          ? projects
+          : projects.filter(
+              (p) =>
+                p.id === asked ||
+                (asked.length >= 8 && p.id.startsWith(asked)) ||
+                p.directory.slice(p.directory.lastIndexOf("/") + 1) === asked,
+            )
+
+      if (asked !== undefined && scope.length !== 1)
+        return yield* new NoProject({
+          message:
+            scope.length === 0
+              ? `${self.name} has no project ${asked}; its projects: ${shown(projects)}`
+              : `${asked} names several projects of ${self.name}: ${shown(scope)}`,
+        })
+      const found = holding(scope)
 
       if (found.length === 0)
         return yield* new NoProject({
-          message: `${self.name} has no project whose repositories are exactly ${named(wanted)}: add one there with vibest project add`,
+          message:
+            asked === undefined
+              ? `${self.name} has no project whose repositories are exactly ${repositoriesNamed(wanted)}: add one there with vibest project add`
+              : `${self.name}'s project ${shown(scope)} does not hold exactly ${repositoriesNamed(wanted)}`,
         })
 
       if (found.length > 1)
         return yield* new NoProject({
-          message: `${self.name} has several projects for ${named(wanted)}: ${found.map((p) => p.directory).join(", ")}`,
+          message: `${self.name} has several projects for ${repositoriesNamed(wanted)}: ${shown(found)}; pass --project <id> to choose one`,
         })
       const target = found[0]!
 

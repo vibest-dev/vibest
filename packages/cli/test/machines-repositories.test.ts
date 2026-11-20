@@ -8,7 +8,7 @@ import * as Platform from "#platform"
 
 describe("Peer.Spawn for a project of several repositories", () => {
   it.effect(
-    "Peer.Spawn with a repository list: the one project of exactly those repositories, worktrees under A's folder names; a missing repository, a missing commit and two such projects are refused",
+    "Peer.Spawn with a repository list: the one project of exactly those repositories, worktrees under A's folder names; a missing repository, a missing commit and two such projects without --project are refused; --project picks one by id prefix and still checks its repositories",
     () =>
       Effect.gen(function* () {
         const b = yield* repoStack()
@@ -24,16 +24,27 @@ describe("Peer.Spawn for a project of several repositories", () => {
             yield* git.repository(paths[0], { ...REPOSITORY, origin: x })
             yield* git.repository(paths[1], { ...REPOSITORY, origin: y })
 
-            yield* b.db.project.createProject(dir, [
+            const id = yield* b.db.project.createProject(dir, [
               { path: paths[0], remote: x },
               { path: paths[1], remote: y },
             ])
 
-            return { dir, paths }
+            return { id, dir, paths }
           })
 
-        const spawn = (repositories: ReadonlyArray<{ folder: string; repository: string; commit: string }>) =>
-          call(b.raw["Peer.Spawn"]({ agent: "general", repositories, prompt: "x", request: randomId() }))
+        const spawn = (
+          repositories: ReadonlyArray<{ folder: string; repository: string; commit: string }>,
+          project?: string,
+        ) =>
+          call(
+            b.raw["Peer.Spawn"]({
+              agent: "general",
+              repositories,
+              ...(project !== undefined && { project }),
+              prompt: "x",
+              request: randomId(),
+            }),
+          )
 
         const wanted = [
           { folder: "y", repository: y, commit: COMMIT },
@@ -64,7 +75,16 @@ describe("Peer.Spawn for a project of several repositories", () => {
         const second = yield* project("second")
         const several = yield* Effect.flip(spawn(wanted))
         assert.strictEqual(several._tag, "NoProject")
-        assert.include(several.message, `several projects for ${y}, ${x}: ${first.dir}, ${second.dir}`)
+        assert.include(
+          several.message,
+          `several projects for ${y}, ${x}: ${first.id} (${first.dir}), ${second.id} (${second.dir}); pass --project`,
+        )
+        assert.strictEqual((yield* spawn(wanted, second.id.slice(0, 8))).directory, second.dir)
+
+        const notHolding = yield* Effect.flip(spawn([wanted[0]!], second.id))
+        assert.include(notHolding.message, `project ${second.id} (${second.dir}) does not hold exactly ${y}`)
+        const unknown = yield* Effect.flip(spawn(wanted, "nosuch"))
+        assert.include(unknown.message, "has no project nosuch; its projects:")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

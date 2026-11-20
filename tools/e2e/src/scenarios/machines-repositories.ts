@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { ask } from "../fake-model.ts"
 import { binary, compiled, expect, harnesses, until, type World } from "../world.ts"
 import { setup, type Setup } from "./machines.ts"
 
@@ -128,6 +129,46 @@ const checks: ReadonlyArray<Check> = [
         await s.refusedOnA("mold", "run vibest update on mb")
         const started = s.bDb<{ n: number }>("SELECT count(*) AS n FROM session")?.n
         expect(started === 0, `B has ${started} sessions`)
+      } finally {
+        await s?.stop()
+      }
+    },
+  },
+  {
+    id: "M13",
+    title:
+      "B with two projects of A's repository: run --machine is refused listing both with their ids and folders and saying to pass --project; --project with the second's folder name runs there",
+    run: async (w) => {
+      let s: Setup | undefined
+
+      try {
+        s = await setup(w)
+        const second = path.join(s.b, "shop-two")
+        await git(w, w.root, "clone", "-q", w.origin, second)
+        await git(w, second, "remote", "set-url", "origin", "https://example.com/o/shop")
+        const added = await s.onB(["project", "add"], second)
+        expect(added.code === 0, `B: vibest project add in ${second}: ${added.stderr}${added.stdout}`)
+        const secondId = (JSON.parse(added.stdout) as { projectId: string }).projectId
+        await s.okA(["machine", "add", "mb", "b-host"])
+        await s.refusedOnA("mtwo", "has several projects for", `${secondId} (`, "shop-two)", "pass --project")
+
+        const address = (
+          JSON.parse(
+            await w.okViaEntry(["run", "--machine", "mb", "--project", "shop-two", "pi", "--", ask("mchosen")], {
+              env: s.aEnv,
+              asIs: true,
+            }),
+          ) as { id: string }
+        ).id.slice(0, "mb/".length + 8)
+
+        await until("the message on A", () => s!.notices(address, "mchosen") === 1, 120_000)
+        const got = JSON.parse(await s.okA(["result", address])) as { worktree: string }
+        const common = await git(w, got.worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        expect(
+          common === path.join(await fs.realpath(second), ".git"),
+          `the session on B runs in ${got.worktree} of ${common}`,
+        )
+        await s.okA(["archive", address])
       } finally {
         await s?.stop()
       }

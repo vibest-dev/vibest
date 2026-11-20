@@ -265,7 +265,14 @@ const make = Effect.gen(function* () {
             ? yield* pin(only.path, only.remote)
             : yield* new MachineFailed({ message: "the project has no repository another machine can run in" })
 
-      if ("repositories" in sent && (yield* machines.link(machine)).capabilities.peerSpawnRepositories !== true)
+      const capabilities = (yield* machines.link(machine)).capabilities
+
+      if (input.project !== undefined && capabilities.peerSpawnProject !== true)
+        return yield* new MachineFailed({
+          message: `${machine} runs a vibest that does not take --project; run vibest update on ${machine}`,
+        })
+
+      if ("repositories" in sent && capabilities.peerSpawnRepositories !== true)
         return yield* new MachineFailed({
           message: `${machine} runs a vibest that does not take a project of several repositories; run vibest update on ${machine}`,
         })
@@ -282,6 +289,7 @@ const make = Effect.gen(function* () {
         client["Peer.Spawn"](
           {
             ...sent,
+            ...(input.project !== undefined && { project: input.project }),
             agent: input.agent,
             prompt: input.prompt,
             ...(input.harness !== undefined && { harness: input.harness }),

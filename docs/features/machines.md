@@ -48,6 +48,12 @@ for a refused run. A single-repository project runs as in M1.
 A `vibest run --machine` from a project of several repositories to a B whose vibest does not take a repository list is
 refused on A with `run vibest update on <B>`; B starts nothing.
 
+## M13. Choosing B's project
+
+When B has several projects holding A's repositories, `vibest run --machine` is refused listing each with its id and
+folder and saying to pass `--project`. `vibest run --machine <B> --project <id, id prefix or folder name>` runs in
+that project, which must still hold exactly A's repositories at A's commits.
+
 ## M9. Listing another machine's harnesses
 
 `vibest harness ls --machine <name>` prints the harnesses of that machine in the shape of the local list, asked of that

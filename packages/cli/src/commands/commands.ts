@@ -128,6 +128,12 @@ const run = Spec.make("run", {
       ),
       Flag.optional,
     ),
+    project: Flag.String("project").pipe(
+      Flag.withDescription(
+        "With --machine: the project of that machine to run in, by its id (or a unique prefix of at least 8 characters) or its folder name; it must still hold this project's repositories at these commits. Needed when that machine has several such projects",
+      ),
+      Flag.optional,
+    ),
     agent: Flag.String("agent").pipe(
       Flag.withDescription(
         "The agent definition the session runs as: its system prompt and tool rules. The registered ids are listed when one is unknown",

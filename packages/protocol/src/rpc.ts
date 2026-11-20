@@ -331,6 +331,7 @@ export class VibestRpcs extends RpcGroup.make(
           runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),
           machine: Schema.optional(Schema.String),
+          project: Schema.optional(Schema.String),
           files: Attachments,
         },
         success: Schema.Struct({
@@ -792,6 +793,7 @@ export class VibestRpcs extends RpcGroup.make(
           repository: Schema.optional(Schema.String),
           identity: Schema.optional(Schema.String),
           commit: Schema.optional(Schema.String),
+          project: Schema.optional(Schema.String),
           repositories: Schema.optional(
             Schema.Array(
               Schema.Struct({
@@ -958,6 +960,7 @@ export const CAPABILITIES = {
   spawnFiles: true,
   peerSpawnFiles: true,
   peerSpawnRepositories: true,
+  peerSpawnProject: true,
   load: true,
   agents: true,
 } as const

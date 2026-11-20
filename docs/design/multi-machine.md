@@ -98,7 +98,11 @@ whose repositories are exactly that set, one to one, no extra and no missing rep
 `remote_url` equals `repository`, or, only when no checkout on B has that URL, when it has the same repository
 identity as `identity`. A repository no project of B holds is refused naming it ("<B> has no checkout of <url>: …
 run vibest project add …"); no project of exactly that set and several such projects are refused, the second listing
-them. Then B checks every commit before creating anything (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`;
+them with their ids and folders and a hint to pass `--project`. `vibest run --machine <B> --project <p>` sends
+`project`: B takes the one project whose id is `p`, whose id starts with `p` (at least 8 characters) or whose folder
+is named `p`, refuses when none or several are, and still checks that its repositories are exactly A's; A refuses
+`--project` without `--machine`, and a B without the `peerSpawnProject` capability ("run vibest update on <B>").
+Then B checks every commit before creating anything (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`;
 "<B>'s checkout <dir> does not have <sha>: push it and fetch it there", one clause per missing commit), and runs
 `Session.spawn`: a single repository gets the worktree detached at its commit; a list gets the multi-repository
 layout, one detached worktree per repository at A's commit under A's folder name, so paths in the task stay valid.
