@@ -1,4 +1,5 @@
 import { Bus } from "@vibest/core/bus"
+import { atLimit, Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
@@ -27,6 +28,7 @@ export const make = Effect.gen(function* () {
   const sessions = yield* Session.Service
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
+  const concurrency = yield* Concurrency.Service
   const watchFeed = yield* WatchFeed.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
@@ -195,7 +197,12 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const id = yield* db.session.resolveSession(input, (yield* reach("Get")).scope)
           const row = yield* sessions.get(id)
-          const session = Listing.toInfo(row, (yield* db.session.sessionBriefs([id])).get(id))
+
+          const session = Listing.toInfo(
+            row,
+            (yield* db.session.sessionBriefs([id])).get(id),
+            atLimit(yield* concurrency.limit, yield* db.session.workingExecutions()),
+          )
 
           return {
             ...session,

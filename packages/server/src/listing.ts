@@ -1,4 +1,5 @@
 import { type BusEvent } from "@vibest/core/bus"
+import { atLimit, Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import {
   executionStateOf,
@@ -24,7 +25,7 @@ const LS_TASK = 500
 const taskForLs = (task: string | null) =>
   task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
 
-export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo => ({
+export const toInfo = (session: SessionView, brief?: SessionBrief, full = false): SessionInfo => ({
   id: session.id,
   name: session.name,
   agent: session.agent,
@@ -45,6 +46,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   createdAt: session.createdAt,
   lastActive: session.lastActive,
   task: brief?.task ?? null,
+  ...(full && brief?.queued === true && executionStateOf(session) !== "open" && { waitingForSlot: true as const }),
   latest: brief?.latest ?? null,
 })
 
@@ -52,17 +54,21 @@ export const sessionListing = (deps: {
   readonly db: Db.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
+  readonly concurrency: Concurrency.Interface
 }) => {
-  const { db, sessions, runtimes } = deps
+  const { db, sessions, runtimes, concurrency } = deps
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
-    Effect.map(db.session.sessionBriefs(rows.map((row) => row.id)), (briefs) =>
-      rows.map((row) => {
+    Effect.gen(function* () {
+      const briefs = yield* db.session.sessionBriefs(rows.map((row) => row.id))
+      const full = atLimit(yield* concurrency.limit, yield* db.session.workingExecutions())
+
+      return rows.map((row) => {
         const brief = briefs.get(row.id)
 
-        return { ...toInfo(row, brief), task: taskForLs(brief?.task ?? null) }
-      }),
-    )
+        return { ...toInfo(row, brief, full), task: taskForLs(brief?.task ?? null) }
+      })
+    })
 
   const listed = (scope: ListScope, stopped: boolean) =>
     Effect.gen(function* () {
@@ -212,6 +218,7 @@ export const layer = Layer.effect(
       db: yield* Db.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
+      concurrency: yield* Concurrency.Service,
     })
   }),
 )

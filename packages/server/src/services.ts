@@ -1,4 +1,5 @@
 import { Bus } from "@vibest/core/bus"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -32,6 +33,7 @@ import { Remote } from "./machine/remote.ts"
 
 export const services = LayerNode.group([
   Bus.node,
+  Concurrency.node,
   SessionLive.node,
   Drain.node,
   Harnesses.node,

@@ -186,9 +186,12 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         outcome: string | null
         endedAt: number | null
         reply: string | null
+        queued: number
       }>`SELECT s.id,
           (SELECT i.content FROM inbox i WHERE i.session_id = s.id AND i.kind = 'task'
             ORDER BY i.id LIMIT 1) AS task,
+          EXISTS (SELECT 1 FROM inbox i WHERE i.session_id = s.id
+            AND ((i.kind != 'task' AND i.status = 'pending') OR (i.kind = 'task' AND i.execution_id IS NULL))) AS queued,
           t.id AS execution_id, t.outcome, t.ended_at, t.reply
         FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
         WHERE ${sql.in("s.id", ids)}`
@@ -200,6 +203,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         const status = raw !== undefined && isMessageStatus(raw) ? raw : undefined
         found.set(row.id, {
           task: row.task === null ? null : unwrapped(row.task),
+          queued: row.queued === 1,
           latest:
             status === undefined
               ? null

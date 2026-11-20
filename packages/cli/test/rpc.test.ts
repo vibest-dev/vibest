@@ -649,6 +649,7 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* db.session.getSession(id))!.process?.pid, 4242)
 
       yield* bare.Plugins(undefined, { headers: protocolHeaders() })
+      yield* bare.Concurrency(undefined, { headers: protocolHeaders() })
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
       yield* bare.Republish(undefined, { headers: protocolHeaders() })
@@ -666,6 +667,7 @@ describe("vibest.sock", () => {
         ...protectedCalls(bare).map(([method]) => method),
         "Ping",
         "Plugins",
+        "Concurrency",
         "Harnesses.List",
         "Runtimes.Doctor",
         "Subscriptions",

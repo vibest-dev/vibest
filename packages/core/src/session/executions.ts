@@ -3,8 +3,10 @@ import { NotReady } from "@vibest/schema/session"
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, PubSub, Ref, Schedule } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
+import { Concurrency } from "../concurrency.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
+import type { Slot } from "../database/session.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
@@ -39,6 +41,8 @@ export const Pickup = Data.taggedEnum<Pickup>()
 export const notStartedMessage = (pickup: Pickup) =>
   Predicate.isTagged(pickup, "NotStarted") ? pickup.message : undefined
 
+export type Gate = "slot" | "first"
+
 export const busy = (state: AgentState) => state === "working" || state === "blocked"
 
 export const busyOf = (seen: AgentSeen) => {
@@ -56,6 +60,12 @@ export const make = Effect.gen(function* () {
   const harnesses = yield* Harnesses.Service
   const bus = yield* Bus.Service
   const { track } = yield* SessionLive.Service
+  const concurrency = yield* Concurrency.Service
+
+  const slotOf = (gate: Gate | undefined) =>
+    Effect.map(concurrency.limit, (limit): Slot | undefined =>
+      gate === undefined || limit === undefined ? undefined : { limit, alone: gate === "first" },
+    )
 
   const reportedStatus = (id: string) =>
     Effect.map(db.session.getSession(id), (session) => session?.status ?? "unknown")
@@ -200,6 +210,7 @@ export const make = Effect.gen(function* () {
     terminal: Terminal,
     text: string,
     onHandover: Effect.Effect<void> = Effect.void,
+    gate?: Gate,
   ) {
     const kept = yield* db.session.openExecution(session.id)
     const adapter = yield* harnesses.get(harnessIdOf(session))
@@ -210,10 +221,12 @@ export const make = Effect.gen(function* () {
 
     const begun =
       open === undefined
-        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(session.id, at))
+        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) =>
+            Effect.flatMap(slotOf(gate), (slot) => db.session.startExecutionWithin(session.id, at, slot)),
+          )
         : { execution: open, opened: true }
 
-    if (!begun.opened) return undefined
+    if (begun === undefined || !begun.opened) return undefined
     const execution = begun.execution
 
     const standing = Effect.map(db.session.openExecution(session.id), (now) =>
@@ -276,11 +289,18 @@ export const make = Effect.gen(function* () {
     return `${sessionLabel(session)} did not start working on the message`
   }, Effect.scoped)
 
-  const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
-    const { execution } = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(id, at))
+  const openFirst = Effect.fn("Executions.openFirst")(function* (
+    id: string,
+    onHandover: Effect.Effect<void>,
+    gate?: Gate,
+  ) {
+    const slot = yield* slotOf(gate)
+    const begun = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecutionWithin(id, at, slot))
+
+    if (begun === undefined) return undefined
     yield* onHandover
 
-    return execution
+    return begun.execution
   })
 
   const launched = Effect.fn("Executions.launched")(function* (
@@ -377,5 +397,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
+  deps: [Concurrency.node, Db.node, Harnesses.node, Bus.node, SessionLive.node],
 })

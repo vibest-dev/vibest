@@ -187,6 +187,7 @@ CREATE TABLE inbox (                                  -- id: the seq of its inbo
   peer_item         TEXT,                             -- a notice from another vibestd: its outbox item id
   status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
   execution_id      INTEGER,                          -- delivered: the execution that took it
+  queued_at         INTEGER NOT NULL,                 -- the at of its inbox.queued: the order of the concurrency queue across sessions
   PRIMARY KEY (session_id, id)
 ) STRICT;
 CREATE INDEX inbox_status    ON inbox (status, session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'

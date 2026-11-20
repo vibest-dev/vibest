@@ -39,10 +39,16 @@ or was sent still waiting, and sends no notice for a clean archive. The builtin 
 `"-vibest.archive-on-idle"` in `vibest.json` removes it, and a session started with the flag then stays until `vibest archive`.
 `--archive-on-completion` is a usage error.
 
-## S9. A limit on sessions
+## S9. A limit on working executions
 
-`VIBEST_MAX_SESSIONS` limits how many sessions run at once, not counting the entry session: one more `vibest run` by the
-entry session fails naming the limit, and starts once a session is archived.
+`"concurrency": [{ "max": N }]` in `~/.vibest/vibest.json` lets at most N executions work at once on this machine, across
+all projects and the entry sessions included; without the key there is no limit, and a change to it applies without a
+restart. `vibest run` still starts the session and its harness at once; only its input waits. While the limit is
+reached, a session's waiting task or messages stay queued and `vibest ls` and `vibest result` show it with
+`"waitingForSlot": true`; when an execution ends, the oldest waiting input is delivered first. Text a user types into a
+pane is never held back, and its execution counts. `vibest doctor` shows the limit; a rule with `harness` or `agent`
+is reported as not supported yet and is not applied, and a rule with an unknown field or a `max` that is not a
+positive integer is reported as a problem and is not applied.
 
 ## S20. Ids and peek
 

@@ -272,7 +272,19 @@ export const make = (session: Session.Statements, inbox: Statements) =>
     const sql = yield* SqlClient.SqlClient
     const { transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, acceptedAt, observable, fromOldProcess, startExecution, creatorOf, labelOf } = session
+
+    const {
+      reads,
+      openExecution,
+      workingExecutions,
+      waitingSessions,
+      acceptedAt,
+      observable,
+      fromOldProcess,
+      startExecution,
+      creatorOf,
+      labelOf,
+    } = session
 
     const {
       inbox: inboxWhere,
@@ -355,6 +367,8 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       untakenTask: Effect.fn("Db.inbox.untakenTask")((id: string) => reads.untakenTask(id).pipe(Effect.orDie)),
+
+      waitingSessions: Effect.fn("Db.inbox.waitingSessions")(() => waitingSessions.pipe(Effect.orDie)),
 
       hasQueued: Effect.fn("Db.inbox.hasQueued")((id: string) =>
         sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${id}
@@ -452,12 +466,14 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         ).pipe(Effect.orDie),
       ),
 
-      takeInbox: Effect.fn("Db.inbox.takeInbox")((sessionId: string, process: number | undefined) =>
+      takeInbox: Effect.fn("Db.inbox.takeInbox")((sessionId: string, process: number | undefined, limit?: number) =>
         tx(
           Effect.gen(function* () {
             if (!(yield* observable(sessionId)) || (yield* fromOldProcess(sessionId, process))) return undefined
 
             if ((yield* openExecution(sessionId)) !== undefined) return undefined
+
+            if (limit !== undefined && (yield* workingExecutions) >= limit) return undefined
             const pending = yield* findSend(sessionId, "pending")
 
             if (pending.length === 0) return undefined

@@ -2,8 +2,18 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel, reply, sseHeaders, text, toolCall, type Message } from "../fake-model.ts"
-import { alive, expect, expectReplied, expectFacts, row, until, type World } from "../world.ts"
+import {
+  ask,
+  entryRunMessage,
+  heldModel,
+  nextEntryRun,
+  reply,
+  sseHeaders,
+  text,
+  toolCall,
+  type Message,
+} from "../fake-model.ts"
+import { alive, expect, row, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
 
@@ -439,53 +449,74 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S9",
     title:
-      "with VIBEST_MAX_SESSIONS=2 in vibestd, the entry session is not counted: two subagents start, the third vibest run fails LimitReached naming the limit, and starts once one is archived",
+      "with concurrency [{ max: 1 }] in vibest.json, two subagents given tasks in one entry execution both start at once; the second's task waits for a slot (vibest ls shows waitingForSlot) while the first works, and starts once the first ends; doctor reports the limit and a filtered rule as not supported",
     run: async (w) => {
       const p = await piProject(w, "s9")
+      const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
+
+      const subagent = (task: string) =>
+        [
+          '"$VIBEST_CLI"',
+          "run",
+          "pi",
+          "--session",
+          `${w.herdrSession}-s9`,
+          "--env",
+          `PI_CODING_AGENT_DIR=${w.root}/pi-s9`,
+          "--",
+          ask(task),
+        ]
+          .map((word, i) => (i === 0 ? word : quote(word)))
+          .join(" ")
 
       try {
+        await fs.writeFile(
+          path.join(w.vibestHome, "vibest.json"),
+          JSON.stringify({ concurrency: [{ max: 1 }, { agent: "general", max: 5 }] }),
+        )
+        let doctor = ""
+        await until(
+          "vibest doctor to report the limit",
+          async () =>
+            (doctor = (await w.vibest(["doctor"], { cwd: p.repo, env: p.env })).stdout).includes(
+              "at most 1 working executions on this machine",
+            ),
+          30_000,
+        )
+        expect(doctor.includes("rules with harness or agent are not supported yet"), `doctor: ${doctor}`)
+
+        const entry = await w.entryOf(p.repo)
+        const run = nextEntryRun()
+        const out = path.join(w.root, `entry-run-${run}`)
+        const both = `${subagent("one")} && ${subagent("two")}`
+        const command = `{ ${both}; } > ${quote(out)} 2>&1; echo $? > ${quote(`${out}.tmp`)} && mv ${quote(`${out}.tmp`)} ${quote(`${out}.exit`)}`
+        await w.ok(["send", entry!, "--", entryRunMessage(run, command)], { cwd: p.repo, env: p.env })
+        await until("the entry session to run both subagents", () => exists(`${out}.exit`), 180_000)
+        const started = await fs.readFile(out, "utf8")
+        expect((await fs.readFile(`${out}.exit`, "utf8")).trim() === "0", `the runs: ${started}`)
+        const [one, two] = [...started.matchAll(/"id":\s*"([0-9a-f-]{36})"/g)].map((m) => m[1]!)
+        expect(one !== undefined && two !== undefined, `two runs: ${started}`)
+
+        const listed = async () => (await ls(w, p)) as Array<Listed & { waitingForSlot?: true }>
+        const rowOf = async (id: string) => (await listed()).find((r) => r.id === id)
+        await until("the first subagent to work", () => p.model.asked("one") === 1, 90_000)
+        await until(
+          "the second subagent to wait for a slot",
+          async () => (await rowOf(two!))?.waitingForSlot === true,
+          30_000,
+        )
+        const waiting = (await rowOf(two!))!
+        expect(waiting.address.id !== "", `the waiting subagent has no terminal: ${JSON.stringify(waiting)}`)
+        expect((await rowOf(one!))?.waitingForSlot === undefined, "the working subagent is listed as waiting")
+        await Bun.sleep(3_000)
+        expect(p.model.asked("two") === 0, "the second subagent's task reached the model while the first worked")
+
+        p.model.releaseOne()
+        await answered(w, p, one!, "one")
+        await until("the second subagent to work", () => p.model.asked("two") === 1, 90_000)
+        expect((await rowOf(two!))?.waitingForSlot === undefined, "the second subagent is still listed as waiting")
         p.model.release()
-        Object.assign(p.env, { VIBEST_MAX_SESSIONS: "2" })
-        await w.stopDaemon()
-        await p.startDaemon()
-        const first = await p.runSub("one")
-        await p.runSub("two")
-
-        const third = await w.viaEntry(
-          [
-            "run",
-            "pi",
-            "--session",
-            `${w.herdrSession}-s9`,
-            "--env",
-            `PI_CODING_AGENT_DIR=${w.root}/pi-s9`,
-            "--",
-            ask("three"),
-          ],
-          { cwd: p.repo, env: p.env, timeoutMs: 90_000 },
-        )
-
-        const said = `${third.stdout}${third.stderr}`
-        expect(
-          third.code !== 0 && said.includes("LimitReached") && said.includes("VIBEST_MAX_SESSIONS=2"),
-          `third run exited ${third.code}: ${said}`,
-        )
-        await archive(w, p, first)
-        expectFacts(w, first, ["session.created", "session.ended", "process.ended"])
-
-        const archived = row<{ ended: number | null; reason: string | null }>(
-          w,
-          "SELECT s.ended_at AS ended, p.end_reason AS reason FROM session s JOIN process p ON p.session_id = s.id WHERE s.id = ?",
-          first,
-        )
-
-        expect(
-          archived?.ended != null && archived.reason === "archived",
-          `the archived session: ${JSON.stringify(archived)}`,
-        )
-        const three = await p.runSub("three")
-        await answered(w, p, three, "three")
-        await expectReplied(w, three)
+        await answered(w, p, two!, "two")
       } finally {
         await p.close()
       }

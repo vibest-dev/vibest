@@ -361,9 +361,9 @@ below it and subscribing to the events it handles itself:
 | `archive.ts` (`Archive`)       | remove, the idle-archive check, finishing an archive vibestd stopped in                          |
 | `sends.ts` (`Sends`)           | send, admit, and relay to the nearest living ancestor; what plugins send through                 |
 | `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins          |
-| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts                   |
+| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, the slot queue, interrupt, typed prompts   |
 | `exits.ts` (`Exits`)           | recording a harness exit and what a usage limit leaves behind                                    |
-| `spawn.ts` (`Spawn`)           | admitting and starting a session, `VIBEST_MAX_SESSIONS`                                          |
+| `spawn.ts` (`Spawn`)           | admitting and starting a session                                                                 |
 | `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`       |
 | `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                          |
 | `entry.ts` (`EntrySession`)    | starting and resuming the entry session                                                          |
@@ -393,6 +393,15 @@ How these modules keep the rules:
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
   runs twice. A refused text undoes the execution unless the integration wrote a result anyway or a usage-limit move
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
+- A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) is checked in the same
+  transaction that opens a delivered execution (`db.session.startExecutionWithin`, `db.inbox.takeInbox`), counting
+  every open execution in this vibestd's catalog, so two deliveries cannot both take the last slot. A refused delivery
+  leaves its rows pending and its task untaken; a refused first task starts the harness without it. The queue is
+  those rows, so nothing about it is stored. With a limit set, an execution end (and a raised or removed limit) drains
+  the queue in one fiber, oldest waiting row first, until the limit is reached; a session that cannot take its input
+  for another reason is passed over. Typed input and the rerun of a usage-limit move are not gated. A pulling harness
+  takes a free slot when it next asks, outside the queue's order, so first come first served holds for pushed
+  deliveries only.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the

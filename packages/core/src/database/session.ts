@@ -37,6 +37,8 @@ import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
 import type * as Session from "./session-statements.ts"
 
+export type Slot = { readonly limit: number; readonly alone: boolean }
+
 export type SessionFilter = {
   readonly projectId?: string
   readonly stopped?: boolean
@@ -55,13 +57,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       afterCommitLive,
       moving,
       running,
-      selectRaw,
       selectSessions,
       findSession,
       currentProcess,
       currentProcessId,
       findEntrySessions,
       openExecution,
+      workingExecutions,
+      waitingSessions,
       startExecution,
       acceptedAt,
       accept,
@@ -201,7 +204,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           row: Omit<NewSession, "projectId">,
           project: string,
           {
-            max,
             cwd = "",
             task,
             parentSessionId,
@@ -209,7 +211,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             origin,
             archiveOnIdle: archives = false,
           }: {
-            readonly max?: number | undefined
             readonly cwd?: string
             readonly task?: string
             readonly parentSessionId?: string | undefined
@@ -217,7 +218,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly origin?: Remote.PeerStart | undefined
             readonly archiveOnIdle?: boolean
           } = {},
-        ): Effect.Effect<boolean | SpawnedBefore | "parent-ended"> =>
+        ): Effect.Effect<true | SpawnedBefore | "parent-ended"> =>
           tx(
             Effect.gen(function* () {
               if (request !== undefined) {
@@ -231,15 +232,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 (yield* sql`SELECT 1 FROM session WHERE id = ${parentSessionId} AND ended_at IS NOT NULL`).length > 0
               )
                 return "parent-ended" as const
-
-              if (max !== undefined) {
-                const n = (yield* selectRaw(
-                  [sql`s.ended_at IS NULL`, sql`NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`],
-                  running,
-                )).length
-
-                if (n >= max) return false
-              }
 
               yield* publish(SessionCreated, {
                 sessionId: row.id,
@@ -710,6 +702,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ).pipe(Effect.orDie),
       ),
 
+      workingExecutions: Effect.fn("Db.session.workingExecutions")(() => workingExecutions.pipe(Effect.orDie)),
+
       startExecution: Effect.fn("Db.session.startExecution")((id: string, at: number) =>
         tx(
           Effect.gen(function* () {
@@ -720,6 +714,23 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             return { execution: yield* startExecution(id, at), opened: true }
           }),
         ).pipe(Effect.orDie),
+      ),
+
+      startExecutionWithin: Effect.fn("Db.session.startExecutionWithin")(
+        (id: string, at: number, slot: Slot | undefined) =>
+          tx(
+            Effect.gen(function* () {
+              const open = yield* openExecution(id)
+
+              if (open !== undefined) return { execution: open, opened: false }
+
+              if (slot !== undefined && (yield* workingExecutions) >= slot.limit) return undefined
+
+              if (slot?.alone === true && (yield* waitingSessions).some((other) => other !== id)) return undefined
+
+              return { execution: yield* startExecution(id, at), opened: true }
+            }),
+          ).pipe(Effect.orDie),
       ),
 
       acceptExecution: Effect.fn("Db.session.acceptExecution")((id: string, execution: number) =>

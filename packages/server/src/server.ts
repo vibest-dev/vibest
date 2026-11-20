@@ -1,6 +1,7 @@
 import { Agents } from "@vibest/core/agents"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -88,6 +89,7 @@ export const node = LayerNode.make({
     services,
     Agents.node,
     Bus.node,
+    Concurrency.node,
     Db.node,
     Drain.node,
     Git.node,

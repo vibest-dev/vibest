@@ -4,6 +4,7 @@ import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
+import { Concurrency } from "./concurrency.ts"
 import { type NewInboxRow, type SessionRow, harnessIdOf, localSessionOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { Drain } from "./drain.ts"
@@ -55,6 +56,7 @@ export const layer = Layer.effect(
     const db = yield* Db.Service
     const drain = yield* Drain.Service
     const harnesses = yield* Harnesses.Service
+    const concurrency = yield* Concurrency.Service
     const reactor = yield* Reactor.make
 
     const pulls = (harnessId: string) => harnesses.find(harnessId)?.delivery === "pull"
@@ -104,7 +106,11 @@ export const layer = Layer.effect(
       const session = yield* db.session.getSession(sessionId)
 
       if (session === undefined || !pulls(harnessIdOf(session))) return undefined
-      const taken = yield* drain.work(`take inbox of ${sessionId}`, db.inbox.takeInbox(sessionId, process))
+
+      const taken = yield* drain.work(
+        `take inbox of ${sessionId}`,
+        Effect.flatMap(concurrency.limit, (limit) => db.inbox.takeInbox(sessionId, process, limit)),
+      )
 
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
@@ -163,5 +169,5 @@ export const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Bus.node, Db.node, Drain.node, Harnesses.node],
+  deps: [Bus.node, Concurrency.node, Db.node, Drain.node, Harnesses.node],
 })

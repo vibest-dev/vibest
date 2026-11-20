@@ -47,7 +47,7 @@ import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
 import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
-import { Executions, notStartedMessage, Pickup } from "./executions.ts"
+import { Executions, type Gate, notStartedMessage, Pickup } from "./executions.ts"
 
 export * as Placement from "./placement.ts"
 
@@ -59,6 +59,7 @@ class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message
 export interface FirstInput {
   readonly text: string
   readonly onHandover: Effect.Effect<void>
+  readonly gate?: Gate
 }
 
 export type LaunchOptions = {
@@ -183,8 +184,12 @@ export const make = Effect.gen(function* () {
       : task
   }, provided)
 
-  const taskInput = (session: SessionRow, task: string) =>
-    Effect.map(firstText(session, task), (text): FirstInput => ({ text, onHandover: db.inbox.linkTask(session.id) }))
+  const taskInput = (session: SessionRow, task: string, gate?: Gate) =>
+    Effect.map(firstText(session, task), (text): FirstInput => ({
+      text,
+      onHandover: db.inbox.linkTask(session.id),
+      ...(gate !== undefined && { gate }),
+    }))
 
   const launching = Effect.fn("Placement.launching")(function* (
     session: SessionRow,
@@ -192,13 +197,17 @@ export const make = Effect.gen(function* () {
     first?: FirstInput,
   ) {
     const base = yield* launchOf(session, resume, first?.text)
-    const launch = (process: number | undefined) => withProcess(base, process)
+    const withoutInput = first?.gate === undefined ? base : yield* launchOf(session, resume)
+    let inputTaken = true
+    const launch = (process: number | undefined) => withProcess(inputTaken ? base : withoutInput, process)
     const execution = yield* Ref.make<number | undefined>(undefined)
 
     const beforeStart =
       first === undefined
         ? Effect.void
-        : Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
+        : Effect.flatMap(openFirst(session.id, first.onHandover, first.gate), (opened) =>
+            opened === undefined ? Effect.sync(() => void (inputTaken = false)) : Ref.set(execution, opened),
+          )
 
     const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
       Effect.flatMap(Ref.get(execution), (opened) =>
@@ -386,7 +395,7 @@ export const make = Effect.gen(function* () {
 
     if (!folders) yield* copyIncluded(root, worktree)
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
-    const plan = yield* launching(session, false, yield* taskInput(session, firstPrompt))
+    const plan = yield* launching(session, false, yield* taskInput(session, firstPrompt, "first"))
 
     const terminal = yield* openOrMove(
       plan.starting(

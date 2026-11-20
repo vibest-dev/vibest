@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf } from "@vibest/core/database/db-rows"
 import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugin"
@@ -395,6 +396,7 @@ const loaded = (dir: string) =>
     Layer.provide(Agents.layer),
     Layer.provide(memoryPluginHost),
     Layer.provide(Hooks.layer),
+    Layer.provide(Concurrency.layer),
     Layer.build,
     Effect.map(Context.get(Plugins.Service)),
   )

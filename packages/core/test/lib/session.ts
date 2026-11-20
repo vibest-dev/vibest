@@ -20,7 +20,6 @@ import { Session } from "@vibest/core/session"
 import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sends } from "@vibest/core/session/sends"
-import { Spawn } from "@vibest/core/session/spawn"
 import { Summaries } from "@vibest/core/session/summaries"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
@@ -196,8 +195,6 @@ const defaultSsh = Layer.succeed(RepositoryUrl.Service, { hostName: (alias) => E
 
 const defaultTransport = Layer.succeed(Machines.MachineTransport, noTransport)
 
-const defaultSpawn = Spawn.configured({ maxSessions: undefined })
-
 const sessionsDecorated = (decorate: (sessions: Session.Interface, db: Db.Interface) => Session.Interface) =>
   Session.node.replace(
     LayerNode.make({
@@ -286,7 +283,6 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
       Plugins.node.replace(plugins),
-      Spawn.node.replace(defaultSpawn),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),
       Runtimes.hostEnvNode.replace(noHostEnv),
@@ -307,7 +303,6 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly hooked?: ReadonlyArray<string>
   readonly unusable?: ReadonlyArray<string>
   readonly models?: ReadonlyArray<string>
-  readonly maxSessions?: number
   readonly plugins?: ReadonlyArray<
     VibestPlugin.Plugin.Plugin | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Schema.JsonObject }
   >
@@ -366,7 +361,6 @@ export const sessionFrom = (options: TestOptions = {}) =>
       runtimeNode.replace(FakeRuntime.layer(options)),
       Harness.node.replace(harnessLayer(harnessStandIn(options))),
       Harnesses.node.replace(harnessesLayer(options.harnesses)),
-      Spawn.node.replace(Spawn.configured({ maxSessions: options.maxSessions })),
       ...(options.version === undefined
         ? []
         : [App.node.replace(Layer.succeed(App.Service, { version: options.version }))]),
@@ -411,7 +405,6 @@ export const restartSessions = Effect.gen(function* () {
     PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
     App.node.replace(Layer.succeed(App.Service, yield* App.Service)),
     PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
-    Spawn.node.replace(defaultSpawn),
   ]
 
   const fresh = yield* Layer.build(
