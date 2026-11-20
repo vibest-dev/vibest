@@ -47,7 +47,7 @@ export const make = Effect.gen(function* () {
   const removal = yield* Remove.make
   const locks = yield* SessionLocks.Service
   const sessionLive = yield* SessionLive.Service
-  const { notice, recount } = yield* Placement.Service
+  const { notice, recount, ownTerminal, terminalLocked } = yield* Placement.Service
   const starts = yield* Starts.Service
   const { interruptAgent, settleAfterInterrupt } = yield* Executions.Service
   const archives = yield* FiberSet.make()
@@ -100,24 +100,25 @@ export const make = Effect.gen(function* () {
   const release = (id: string) =>
     db.session.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
 
-  const removeLocked = (
+  const removeOwned = (
     id: string,
     options: { readonly keepWorktree?: boolean | undefined; readonly unlessPending?: boolean },
   ) =>
     Effect.gen(function* () {
       let session = yield* getRow(id)
       const h = session.process === null ? undefined : yield* live(session)
-      const terminal = terminalOf(session)
-      const seen = h === undefined ? ("absent" as const) : yield* agentState(h, terminal)
+      const recorded = terminalOf(session)
+      const owned = yield* ownTerminal(session)
       const reasons: Array<string> = []
+      const seen = owned === undefined || h === undefined ? ("absent" as const) : yield* agentState(h, owned)
       const working = busyOf(seen)
       const execution = yield* db.session.openExecution(id)
 
       if (working || execution !== undefined) {
         if (options.unlessPending) return undefined
 
-        if (working && h !== undefined) {
-          const stopped = yield* interruptAgent(h, session, terminal)
+        if (working && h !== undefined && owned !== undefined) {
+          const stopped = yield* interruptAgent(h, session, owned)
           reasons.push(
             stopped
               ? "it was working: interrupted, then its terminal closed"
@@ -145,15 +146,21 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.ignore)
 
       const notOurs =
-        exitedAt(session) !== null && terminal.id !== "" ? yield* otherSessionAt(session, terminal) : undefined
+        recorded.id === ""
+          ? undefined
+          : owned === undefined
+            ? ((yield* otherSessionAt(session, recorded)) ?? "a newer session was recorded at it")
+            : exitedAt(session) !== null
+              ? yield* otherSessionAt(session, recorded)
+              : undefined
 
-      if (notOurs !== undefined) reasons.push(`terminal ${terminal.id} left open: ${notOurs}`)
+      if (notOurs !== undefined) reasons.push(`terminal ${recorded.id} left open: ${notOurs}`)
 
       const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(id)) ?? ""))(
         removal.release({
           h,
           session,
-          terminal: notOurs === undefined ? terminal : undefined,
+          terminal: notOurs === undefined ? owned : undefined,
           keepWorktree: options.keepWorktree,
           reasons,
         }),
@@ -163,6 +170,11 @@ export const make = Effect.gen(function* () {
 
       return out
     })
+
+  const removeLocked = (
+    id: string,
+    options: { readonly keepWorktree?: boolean | undefined; readonly unlessPending?: boolean },
+  ) => Effect.flatMap(getRow(id), (session) => terminalLocked(session)(removeOwned(id, options)))
 
   const remove = Effect.fn("Archive.remove")(
     function* (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) {

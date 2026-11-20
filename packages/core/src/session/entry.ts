@@ -29,6 +29,7 @@ import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
+import { SessionLocks, terminalLock } from "./locks.ts"
 import { runtimeEnv } from "./placement.ts"
 
 export * as EntrySession from "./entry.ts"
@@ -79,6 +80,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const projectLocked = yield* KeyedMutex.make<string>()
+  const locks = yield* SessionLocks.Service
 
   const withHarness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -397,20 +399,22 @@ const make = Effect.gen(function* () {
             provider: input.provider ?? null,
             model: input.model ?? null,
             session: Effect.gen(function* () {
-              const saved = yield* db.session.startEntry(
-                projectId,
-                input.harness,
-                input.fresh,
-                { runtime: kind, address },
-                {
-                  provider: input.provider,
-                  model: input.model,
-                  routing: input.routing,
-                  pid: input.pid,
-                  projectDirectory: directory,
-                  agent,
-                  firstInput: firstInputOf(input.harness),
-                },
+              const saved = yield* locks.withLock(terminalLock(kind, address))(
+                db.session.startEntry(
+                  projectId,
+                  input.harness,
+                  input.fresh,
+                  { runtime: kind, address },
+                  {
+                    provider: input.provider,
+                    model: input.model,
+                    routing: input.routing,
+                    pid: input.pid,
+                    projectDirectory: directory,
+                    agent,
+                    firstInput: firstInputOf(input.harness),
+                  },
+                ),
               )
 
               claimed = { ...saved, runtime: runtimeEnv(kind, address) }
@@ -511,6 +515,7 @@ export const node = LayerNode.make({
     Processes.node,
     Runtimes.node,
     SessionLive.node,
+    SessionLocks.node,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,

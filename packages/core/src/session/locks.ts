@@ -8,6 +8,8 @@ export * as SessionLocks from "./locks.ts"
 
 export const directoryLock = (directory: string) => `directory:${directory}`
 
+export const terminalLock = (runtime: string, terminal: { readonly id: string }) => `terminal:${runtime}:${terminal.id}`
+
 export const make = Effect.gen(function* () {
   const drain = yield* Drain.Service
   const locks = yield* KeyedMutex.make<string>()
