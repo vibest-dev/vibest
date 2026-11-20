@@ -455,7 +455,7 @@ const LOADING_TIMEOUT = 120_000
 
 describe("plugins: loading", () => {
   it.live(
-    "P1: plugins/ first in path order, then vibest.json in its order (a configured entry must be a folder); -x removes",
+    "P1: plugins/ first in path order, then vibest.json in its order (a file entry loads); -x removes",
     () =>
       Effect.gen(function* () {
         const { dir, plugins, path, config } = yield* loadingFixture
@@ -469,13 +469,14 @@ describe("plugins: loading", () => {
             ["x", "active"],
             ["y", "active"],
             ["vibest-plugin-npm@1.0.0", "failed"],
+            ["f", "active"],
           ],
         )
         const listed = yield* first.list
         assert.include(listed.find((p) => p.id.endsWith("broken.ts"))!.error, "Plugin.define")
         assert.include(listed.find((p) => p.id.startsWith("vibest-plugin-npm"))!.error, "not supported yet")
         assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
-        assert.strictEqual((yield* first.start(event)).model, "from-y")
+        assert.strictEqual((yield* first.start(event)).model, "from-f")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     LOADING_TIMEOUT,
   )

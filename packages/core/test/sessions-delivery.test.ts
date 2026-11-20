@@ -1,11 +1,11 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
+import { executionStateOf, exitedAt, terminalOf } from "@vibest/core/database/db-rows"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
-import { Clock, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
+import { Clock, Deferred, Effect, Exit, Fiber, PubSub, Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -176,6 +176,50 @@ describe.concurrent("Session", () => {
       const notStarted = (yield* sqlNotices(id)).filter((message) => message.includes("did not start"))
       assert.strictEqual(notStarted.length, 1)
       assert.include(notStarted[0], "(pi may be signed out: sign in with pi)")
+    }),
+    { promptsIgnored: true, hooked: ["pi"] },
+  )
+
+  test(
+    "a harness that exits after it was seen running, before it took its first message, is reported as an exit without waiting for the ready timeout",
+    Effect.gen(function* () {
+      const runtime = yield* FakeRuntime
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository))
+      yield* until(runtime.callsTo("process"), (calls) => calls.length > 0)
+      const terminal = terminalOf((yield* db.session.getSession(id))!).id
+      yield* runtime.updateAgent(id, (agent) => ({ ...agent, alive: false }))
+      yield* PubSub.publish(runtime.events, { type: "exited", terminal: { id: terminal } })
+
+      const notices = yield* until(sqlNotices(id), (all) =>
+        all.some((message) => message.includes("exited before it started working")),
+      )
+
+      assert.isUndefined(notices.find((message) => message.includes("did not start working")))
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
+    }),
+    { promptsIgnored: true, hooked: ["pi"] },
+  )
+
+  test(
+    "a typed start whose command has not left the shell yet is not an exit: the harness starts later and takes its first message",
+    Effect.gen(function* () {
+      const runtime = yield* FakeRuntime
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      yield* Ref.set(runtime.onStarted, (session) =>
+        runtime.updateAgent(session, (agent) => ({ ...agent, alive: false })),
+      )
+      const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository))
+      yield* until(runtime.callsTo("process"), (calls) => calls.length > 0)
+      yield* yieldToIo
+      yield* runtime.updateAgent(id, (agent) => ({ ...agent, alive: true, status: "working" }))
+      yield* TestClock.adjust("1 second")
+      yield* settled
+      const row = (yield* db.session.getSession(id))!
+      assert.isNull(exitedAt(row))
+      assert.strictEqual(executionStateOf(row), "open")
     }),
     { promptsIgnored: true, hooked: ["pi"] },
   )

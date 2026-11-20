@@ -5,9 +5,8 @@ is and when it counts as working.
 
 ## G1. Listing plugins
 
-`vibest plugins` lists a plugin from the plugins folder, one folder named in `vibest.json`, and one named there by a `file://`
-URL whose path has an escaped space, all active with zero counters. A single file named in `vibest.json` is not loaded; vibestd logs a warning that the path
-must be a directory.
+`vibest plugins` lists a plugin from the plugins folder, one folder named in `vibest.json`, one named there by a `file://`
+URL whose path has an escaped space, and one single file named there, all active with zero counters.
 
 ## G2. Reloading an edited plugin
 
@@ -113,3 +112,9 @@ message during the execution, an entry session, and a failed or interrupted exec
 ended while the plugin was not loaded, or while vibestd was restarting, is reported once when it loads: the plugin
 checks each session's latest execution then. Without the plugin, nothing is sent. A message the subagent sends to a
 session it started on another machine does not count as sending: it is not a report to the session that started it.
+
+## G19. A config file created after vibestd started
+
+Creating `vibest.json` after vibestd is already running loads the plugin file it names, outside the plugins folder,
+without a restart: `vibest doctor` lists that plugin as active, and vibestd is the same process. Editing that file
+reloads it the same way, and `vibest doctor` lists the new plugin.

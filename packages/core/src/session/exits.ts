@@ -6,13 +6,14 @@ import {
   harnessIdOf,
   localSessionOf,
   runtimeOf,
+  terminalOf,
   exitedAt,
   executionStateOf,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Inbox } from "../inbox.ts"
-import type { Runtime } from "../runtimes.ts"
+import { paneTail, type Runtime } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Placement } from "./placement.ts"
 
@@ -24,8 +25,17 @@ export const make = Effect.gen(function* () {
   const { undoCutOffStart } = yield* Archive.Service
   const { notice, recount } = yield* Placement.Service
 
-  const announceExit = (session: SessionRow, execution: number | undefined) =>
+  const startFailure = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
+      if (execution === undefined || (yield* db.session.executionTaken(session.id))) return { how: "", output: "" }
+      const tail = yield* paneTail(h, terminalOf(session), 10)
+
+      return { how: " before it started working", output: tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}` }
+    })
+
+  const announceExit = (h: Runtime, session: SessionRow, execution: number | undefined) =>
+    Effect.gen(function* () {
+      const failed = yield* startFailure(h, session, execution)
       const queued = yield* db.inbox.pendingInbox(session.id)
       const signed = queued.filter((r) => r.kind === "send" && localSessionOf(r.sender) !== undefined)
       const unsigned = queued.filter((r) => !signed.includes(r))
@@ -39,7 +49,7 @@ export const make = Effect.gen(function* () {
       const lost = unsigned.map((r) => r.message).join("\n\n")
 
       const text = (how: string) =>
-        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${how}${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${failed.how}${how}${failed.output}${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
 
       if (
         execution !== undefined &&
@@ -69,7 +79,7 @@ export const make = Effect.gen(function* () {
         yield* db.session.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
         })
-    } else if (announce) yield* announceExit(session, execution)
+    } else if (announce) yield* announceExit(h, session, execution)
 
     if (
       exitedAt(session) === null &&

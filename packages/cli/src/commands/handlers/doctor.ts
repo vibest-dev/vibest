@@ -11,6 +11,24 @@ import { Commands } from "../commands.ts"
 
 const MARKS = { ok: "✓", problem: "✗", note: "·" } as const
 
+export const plainHarnessProblem = (harness: string, problem: string) => {
+  const failed = `${harness} model discovery failed: `
+  const discovered = problem.startsWith(failed) ? problem.slice(failed.length) : problem
+  const reported = discovered.replace(/^\S+ gave no model list: /, "").replace(/^\S+ did not list its models: /, "")
+
+  return reported === "" ? problem : reported
+}
+
+export const doctorVerdict = (findings: ReadonlyArray<Finding>) => {
+  const problems = findings.filter((f) => f.mark === "problem")
+
+  if (problems.length === 0) return "Ready."
+
+  const word = `${problems.length} problem${problems.length === 1 ? "" : "s"}`
+
+  return problems.some((f) => f.fix) ? `${word}; run the fix lines above.` : `${word}.`
+}
+
 export default Runtime.handler(Commands.commands.doctor, () =>
   Effect.gen(function* () {
     const layout = yield* Layout
@@ -19,7 +37,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
 
     const installs = yield* extraVibests
 
-    if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
+    if (installs.length > 0) sections.push({ title: "Installs (vibest on PATH)", findings: installs })
 
     const daemon: Array<Finding> = []
     let ping = Option.getOrUndefined(yield* readPing(layout.socket))
@@ -56,7 +74,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         daemon.push({ mark: "note", text: `this vibest is ${VERSION}; to run it instead: vibest daemon restart` })
     }
 
-    sections.push({ title: "vibestd (the background service)", findings: daemon })
+    sections.push({ title: "Background service (vibestd)", findings: daemon })
 
     const harnessNote = (why: string): Finding => ({ mark: "note", text: `not checked: vibestd ${why}` })
     let usable: Array<string> = []
@@ -76,14 +94,18 @@ export default Runtime.handler(Commands.commands.doctor, () =>
 
       const harnesses: Array<Finding> = Option.isNone(listed)
         ? [harnessNote("did not answer")]
-        : listed.value.map((row) =>
-            row.problem
-              ? { mark: "problem" as const, text: `${row.harness.padEnd(width)}  ${row.problem}` }
-              : {
-                  mark: "ok" as const,
-                  text: `${row.harness.padEnd(width)}  ${row.models.length} models, default ${row.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
-                },
-          )
+        : listed.value.map((row) => {
+            if (row.problem === null)
+              return {
+                mark: "ok" as const,
+                text: `${row.harness.padEnd(width)}  ${row.models.length} models, default ${row.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
+              }
+
+            return {
+              mark: "problem" as const,
+              text: `${row.harness.padEnd(width)}  ${plainHarnessProblem(row.harness, row.problem)}`,
+            }
+          })
 
       if (Option.isSome(listed)) usable = listed.value.filter((row) => row.problem === null).map((row) => row.harness)
       sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
@@ -168,11 +190,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
       }
     }
 
-    const problems = sections.flatMap((x) => x.findings).filter((f) => f.mark === "problem").length
-    lines.push(
-      "",
-      problems === 0 ? "Ready." : `${problems} problem${problems === 1 ? "" : "s"}; run the fix lines above.`,
-    )
+    lines.push("", doctorVerdict(sections.flatMap((section) => section.findings)))
     yield* Console.log(lines.join("\n"))
     yield* updateNotice
   }),
