@@ -227,7 +227,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             parentSessionId,
             request,
             origin,
-            archiveOnIdle: archives = false,
             max,
           }: {
             readonly cwd?: string
@@ -235,7 +234,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly parentSessionId?: string | undefined
             readonly request?: string | undefined
             readonly origin?: Remote.PeerStart | undefined
-            readonly archiveOnIdle?: boolean
             readonly max?: number | undefined
           } = {},
         ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended"> =>
@@ -272,7 +270,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 },
               })
 
-              if (archives) yield* afterCommitLive(sessionLive.archiveWhenIdle(row.id))
               const processAt = row.startedAt ?? row.createdAt
               const admitted = yield* roomFor(max)
 
@@ -697,28 +694,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       canResumeConversation,
-
-      archiveIfNoPending: Effect.fn("Db.session.archiveIfNoPending")((id: string) =>
-        tx(
-          Effect.gen(function* () {
-            const s = yield* findSession(id)
-
-            if (s === undefined) return false
-
-            if (yield* inbox.waitingOn(id)) return false
-
-            const children =
-              yield* sql`SELECT 1 FROM session WHERE parent_session_id = ${id} AND ended_at IS NULL LIMIT 1`
-
-            if (children.length > 0) return false
-
-            if ((yield* openExecution(id)) !== undefined) return false
-            yield* session.archive(id)
-
-            return true
-          }),
-        ).pipe(Effect.orDie),
-      ),
 
       openExecution: Effect.fn("Db.session.openExecution")((id: string) => openExecution(id).pipe(Effect.orDie)),
       workingExecutions: Effect.fn("Db.session.workingExecutions")(() => workingExecutions.pipe(Effect.orDie)),

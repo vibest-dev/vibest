@@ -17,7 +17,7 @@ import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
+import { Archive } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sends } from "@vibest/core/session/sends"
 import { Summaries } from "@vibest/core/session/summaries"
@@ -44,7 +44,6 @@ import {
 import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
-import { ArchiveOnIdle, archiveOnIdlePlugin } from "../../../builtins/src/archive-on-idle.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
 import { Load } from "../../../server/src/machine/load.ts"
@@ -118,7 +117,7 @@ export const pluginsHost = (
   added: ReadonlyArray<PluginEntry> = [],
   options: { readonly timeout?: Duration.Input; readonly activateLate?: boolean } = {},
 ) => {
-  const candidates: ReadonlyArray<Candidate> = [
+  const loaded: ReadonlyArray<Candidate> = [
     { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
     { source: "test:vibest.runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
@@ -129,20 +128,6 @@ export const pluginsHost = (
     layer: Layer.effectContext(
       Effect.gen(function* () {
         const host = yield* makeHost(options.timeout === undefined ? {} : { timeout: options.timeout })
-
-        const archivePlugin = yield* archiveOnIdlePlugin.pipe(
-          Effect.provideService(ArchiveOnIdle, yield* archiveOnIdle),
-        )
-
-        const loaded = [
-          ...candidates,
-          {
-            source: "builtin:vibest.archive-on-idle",
-            revision: "vibest.archive-on-idle",
-            options: {},
-            plugin: archivePlugin,
-          },
-        ]
 
         if (options.activateLate) {
           const release = host.holdNow()

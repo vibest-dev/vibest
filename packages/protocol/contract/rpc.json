@@ -1,5 +1,5 @@
 {
-  "protocol": 13,
+  "protocol": 14,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -14945,16 +14945,6 @@
             "anyOf": [
               {
                 "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "archive": {
-            "anyOf": [
-              {
-                "type": "boolean"
               },
               {
                 "type": "null"

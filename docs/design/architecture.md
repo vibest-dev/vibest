@@ -129,7 +129,7 @@ manages it. Items marked planned are not built.
 The coordinator mode is the configuration of the default plugin `@vibest/plugin-coordinator` (planned as its own
 package; today the same behaviour is built into core and the builtin skills): a `coordinator` definition (spawn,
 message children, inspect tools), a `general` definition, the `delegate` and `pipeline` skills,
-archive-on-idle, and the notice policy. A session reports to the session that started it; a message never falls back to
+and the notice policy. A session reports to the session that started it; a message never falls back to
 the entry session.
 
 Every other mode is configuration of the same engine (planned):
@@ -165,7 +165,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 | `core`                  | The agent engine: persistence and the ledger, the Bus, sessions and their executions, the inbox, the plugin host, harness, runtime and agent catalogs.                                            |
 | `server`                | vibestd: the RPC handlers, admission, the service graph roots (`services.ts`, `app.ts`), the socket and HTTP listeners, other machines (`machine/`), the hourly update check (`update-check.ts`). |
 | `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                   |
-| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `vibest.archive-on-idle`, `vibest.harness-default`.     |
+| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `vibest.harness-default`, `vibest.agent-files`.         |
 | `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.  |
 | `plugin-harnesses`      | The builtin harness plugins `pi`, `claude`, `cursor` and `agy`: one `HarnessDefinition` per CLI.                                                                                                  |
 | `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                             |
@@ -285,7 +285,7 @@ or change values.
 is `kept`). An Agent is reused by its id; one that may be needed again should be `kept` from the start:
 
 - `once`: the Agent ends `completed` when its execution ended normally (`completed`), it is idle, and no Message it sent or was
-  sent is pending (`--archive-on-idle`; a message that ended dropped or failed no longer waits); a `failed` execution
+  sent is pending (a message that ended dropped or failed no longer waits); a `failed` execution
   (the harness or execution reported an error) keeps it. Ending closes the pane and releases its Workspace (§3.3).
 - `kept`: when the Agent answers, it stays `idle` with its pane open. `vibest send` continues the conversation,
   and every new reply is readable with `vibest result`. `vibest stop <agent>` ends it, closes the pane, and releases
@@ -351,21 +351,21 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 Session work lives in `packages/core/src/session/`, one `Context.Service` per module, each depending only on the ones
 below it and subscribing to the events it handles itself:
 
-| Module                         | Holds                                                                                            |
-| ------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `locks.ts` (`SessionLocks`)    | the per-session and per-directory locks                                                          |
-| `live.ts` (`SessionLive`)      | per-session memory: tracked flags, restarting, statuses, integrations, `--archive-on-idle` marks |
-| `executions.ts` (`Executions`) | typing a prompt, waiting for ready, interrupting a harness, closing an execution                 |
-| `placement.ts` (`Placement`)   | the worktree, environment, system prompt and argv of a start; opening the terminal; notices      |
-| `archive.ts` (`Archive`)       | remove, the idle-archive check, finishing an archive vibestd stopped in                          |
-| `sends.ts` (`Sends`)           | send, admit, and relay to the nearest living ancestor; what plugins send through                 |
-| `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins          |
-| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts                   |
-| `exits.ts` (`Exits`)           | recording a harness exit                                                                         |
-| `spawn.ts` (`Spawn`)           | admitting and starting a session                                                                 |
-| `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`       |
-| `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                          |
-| `entry.ts` (`EntrySession`)    | starting and resuming the entry session                                                          |
+| Module                         | Holds                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------- |
+| `locks.ts` (`SessionLocks`)    | the per-session and per-directory locks                                                     |
+| `live.ts` (`SessionLive`)      | per-session memory: tracked flags, restarting, statuses, integrations                       |
+| `executions.ts` (`Executions`) | typing a prompt, waiting for ready, interrupting a harness, closing an execution            |
+| `placement.ts` (`Placement`)   | the worktree, environment, system prompt and argv of a start; opening the terminal; notices |
+| `archive.ts` (`Archive`)       | remove, finishing an archive vibestd stopped in                                             |
+| `sends.ts` (`Sends`)           | send, admit, and relay to the nearest living ancestor; what plugins send through            |
+| `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins     |
+| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts              |
+| `exits.ts` (`Exits`)           | recording a harness exit                                                                    |
+| `spawn.ts` (`Spawn`)           | admitting and starting a session                                                            |
+| `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`  |
+| `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                     |
+| `entry.ts` (`EntrySession`)    | starting and resuming the entry session                                                     |
 
 `packages/core/src/session.ts` (`Session`) is the facade the server and the CLI call: it delegates to these modules and
 itself only reads (`get`, `list`, `peek`, and `view`, which adds a session's directory and git state).
@@ -449,9 +449,7 @@ How these modules keep the rules:
   environment, so a caller's `--env` cannot point that shell at another vibestd.
 - On start: subscribe before writing anything, settle the deliveries a stop cut off, label terminals again (the
   runtime does not keep labels), then check every live session once. The same reconcile runs when a runtime
-  registers or comes back, and finishes archives a stop cut off. It does not archive `--archive-on-idle` sessions: that
-  flag lives only in the memory of the vibestd that started them, so after a restart they stay until archived by hand
-  (schema.md, Memory).
+  registers or comes back, and finishes archives a stop cut off.
 
 How an execution ends:
 
@@ -539,9 +537,6 @@ has an integration but never reported ready fails like a launch that could not o
 worktree removed) instead of leaving a session that never ran. A spawn reserves its worktree name with an atomic `mkdir`; a
 start cut off before its terminal was recorded is undone as a failed launch (its worktree goes when nothing can be
 lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
-`--archive-on-idle` decides under the session's lock, at a completed execution end and whenever a row it sent or was sent leaves
-`pending`/`delivering`: a session with work again (a queued Message, a row still waiting in either direction, or a newer execution) stays, and a clean archive sends no notice, since each notice is a entry session execution.
-The builtin plugin `vibest.archive-on-idle` subscribes to those facts and calls that check; `"-vibest.archive-on-idle"` removes the plugin, and the flag then archives nothing.
 
 ## 4. Patterns
 
@@ -836,7 +831,8 @@ See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module
 
 ```
 builtin plugins         `@vibest/builtins` `pre`: vibest.harness-pi, vibest.harness-claude,
-                        vibest.runtime-herdr-core, vibest.runtime-herdr, vibest.runtime-choice, vibest.archive-on-idle, vibest.harness-default
+                        vibest.runtime-herdr-core, vibest.runtime-herdr, vibest.runtime-choice, vibest.harness-default,
+                        vibest.agent-files
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
@@ -1147,8 +1143,7 @@ answers how many), the hooks' `ExecutionEnd` and `Prompt` (verbatim harness JSON
 prompt from the entry session or from vibest's own delivery is ignored). Of the rest:
 
 - `Spawn`: `harness` is optional when a routing plugin picks it; `agent` defaults to general and may not be the
-  entry session; `machine` defaults to `local`; `share` shares that session's worktree in a split of its pane;
-  `archive` archives the session once a completed result reached its entry session.
+  entry session; `machine` defaults to `local`; `share` shares that session's worktree in a split of its pane.
 - `Send` queues and returns; vibestd delivers once the session is idle, and failures reach its entry session as
   notices. An `id` is a session id or a unique prefix of at least 8 characters, and the answer names the full id.
 - `Remove`: only the session's own entry session or the user's command line. `Get` never waits. `Peek` reads the last
@@ -1294,7 +1289,7 @@ and are the acceptance for each part.
 | Starting an Agent                          | `session/spawn.ts`, `session/placement.ts`, `worktree.ts`, `harness.ts` (the `Harnesses` registry; the adapters are `packages/plugin-harnesses`) | session → Agent in a Run; Workspace types                                       | `sessions.test.ts`, `worktree-group.test.ts`                                                               |
 | Delivery and outcomes                      | `session/executions.ts` (prompt), `session/delivery.ts`, `inbox.ts`                                                                              | execution state → Message `outcome`; coordinator → entry session                | `sessions.test.ts`, `self-heal.test.ts`                                                                    |
 | Results                                    | `replies.ts`                                                                                                                                     | add Run id                                                                      | —                                                                                                          |
-| Interrupt and stop                         | `session/delivery.ts`, `session/archive.ts`, `remove.ts`, `processes.ts`                                                                         | archive → `stop`; `--archive-on-idle` → `once`                                  | `remove.test.ts`, `stop-entry.test.ts`                                                                     |
+| Interrupt and stop                         | `session/delivery.ts`, `session/archive.ts`, `remove.ts`, `processes.ts`                                                                         | archive → `stop`                                                                | `remove.test.ts`, `stop-entry.test.ts`                                                                     |
 | Entry session launch and resume            | `launch.ts`, `session/entry.ts`, `session/restart.ts`                                                                                            | coordinator → entry session of a Project                                        | `stop-entry.test.ts`                                                                                       |
 | Rules                                      | `rules.ts`                                                                                                                                       | subagent rules; entry session rules become builtin skills                       | —                                                                                                          |
 | Knowledge                                  | `project.ts`                                                                                                                                     | directory realpath → Project id                                                 | `project.test.ts`                                                                                          |

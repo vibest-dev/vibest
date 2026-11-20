@@ -10,7 +10,6 @@ import { Effect, type Schema } from "effect"
 
 import { agentFilesPlugin } from "./agent-files.ts"
 import { agentPlugin } from "./agent.ts"
-import { archiveOnIdlePlugin } from "./archive-on-idle.ts"
 import { harnessDefaultPlugin } from "./harness-default.ts"
 
 export interface Builtin {
@@ -35,7 +34,6 @@ export const pre = (home: string) =>
     const claude = yield* claudePlugin
     const cursor = yield* cursorPlugin
     const agy = yield* agyPlugin
-    const archiveOnIdle = yield* archiveOnIdlePlugin
     const agentFiles = yield* agentFilesPlugin(home)
 
     return [
@@ -47,7 +45,6 @@ export const pre = (home: string) =>
       builtin(runtimeHerdrCore),
       builtin(runtimeHerdr),
       builtin(choicePlugin()),
-      builtin(archiveOnIdle),
       builtin(harnessDefaultPlugin()),
       { ...builtin(agentFiles.plugin), revise: agentFiles.revise },
       { ...builtin(reportReminder), optional: true },

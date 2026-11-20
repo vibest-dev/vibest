@@ -42,7 +42,7 @@ Session level. `vibest archive <id>` ends the session for good. It closes the te
 
 The user, or a session for a session it started.
 
-`vibest run --archive-on-idle` is a flag, not a fourth verb. It archives that session the first time it is idle after a completed execution, with nothing it sent or was sent still waiting.
+`vibest run --archive-on-idle` is not a flag. It used to archive that session the first time it was idle after a completed execution. An old `--archive-on-idle` is an unknown flag. A session is archived only with `vibest archive <id>`.
 
 ## Commands
 

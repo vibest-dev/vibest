@@ -896,7 +896,6 @@ describe("vibest run --machine and remote sessions", () => {
         Effect.flip(asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {}, ...more })))
 
       assert.include((yield* run({ env: { A: "1" } })).message, "--env is not sent to another machine")
-      assert.include((yield* run({ archive: true })).message, "--archive-on-idle")
       assert.include((yield* run({ runtimeSession: "s1" })).message, "--session is not sent to another machine")
       assert.include((yield* run({ prompt: "x".repeat(PROMPT_MAX + 1) })).message, "at most 1048576 bytes (1 MiB)")
       const big = yield* run({ prompt: "x".repeat(PROMPT_MAX + 1) })

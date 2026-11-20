@@ -53,6 +53,5 @@ export const memoryPluginHost = Layer.mergeAll(
     remove: () => noSessions,
     stop: () => noSessions,
     finishArchive: () => noSessions,
-    archiveSoon: () => noSessions,
   }),
 )

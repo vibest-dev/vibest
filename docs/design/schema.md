@@ -319,7 +319,7 @@ type or key changes or removes rows, in the same pull request.
   with its transaction, so a fiber forked inside one must not append.
 - `createProject` looks the directory up inside its transaction and creates the project only when none has it: two
   first requests can both miss a lookup made outside it.
-- `insertSend` and `archiveIfNoPending` each run in one transaction: a Send accepted before an archive wins, one after
+- `insertSend` and `archive` each run in one transaction: a Send accepted before an archive wins, one after
   it is refused. A repeat of a request id returns the row it queued, checked before the archive (it was accepted).
 - An entry session moving to another terminal has no place, but its rows wait for it. Rows for an absent entry session are
   dropped only while it still has no place, so a launch that landed in between keeps them.
@@ -408,11 +408,6 @@ E2E runs it on every world's database at the end of each check.
   gets it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - An entry session moving to another terminal (`vibest` answered y): its rows keep waiting for it.
-- `vibest run --archive-on-idle`: the flag is kept only in the memory of the vibestd that started the session (set at
-  the spawn, cleared when the session ends), never in a fact or the read model. A session started with it is archived
-  the first time it is idle after a completed execution with nothing waiting; once that vibestd stops (a restart,
-  `vibest update`), nothing archives it on its own. The builtin plugin `vibest.archive-on-idle` is what archives it;
-  `"-vibest.archive-on-idle"` in `vibest.json` removes the plugin and the flag then does nothing.
 
 ## Not stored
 

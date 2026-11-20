@@ -5,7 +5,7 @@ Implementation notes for the [plugin architecture](architecture.md#7-plugin-arch
 ## Order and boundary
 
 Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`vibest.harness-pi`, `vibest.harness-claude`,
-`vibest.runtime-herdr-core`, `vibest.runtime-herdr`, `vibest.runtime-choice`, `vibest.archive-on-idle`, `vibest.harness-default`,
+`vibest.runtime-herdr-core`, `vibest.runtime-herdr`, `vibest.runtime-choice`, `vibest.harness-default`,
 `vibest.agent-files`, then the optional `vibest.report-reminder` and `vibest.idle-stop` when `vibest.json` names their ids), then the plugins
 directory, then
 `vibest.json` in the order written. Registration order is detection order for runtime callers (herdr-core before

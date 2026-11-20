@@ -1,6 +1,6 @@
 import { InboxMoved, InboxQueued, type InboxKind, type Sender } from "@vibest/schema/event"
 import { InboxStatus } from "@vibest/schema/session"
-import { Clock, Effect, Predicate } from "effect"
+import { Clock, Effect } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { nextBatch } from "../batch.ts"
@@ -330,19 +330,6 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
           return local(yield* creatorOf(sender)) === recipient || local(yield* creatorOf(recipient)) === sender
         }),
-      ),
-
-      inboxParties: Effect.fn("Db.inbox.inboxParties")((sessionId: string, inboxId: number) =>
-        sql<{
-          recipient: string
-          sender: string | null
-        }>`SELECT session_id AS recipient, coalesce(CASE WHEN sender_machine IS NULL THEN sender_session_id END, about_session_id) AS sender FROM inbox
-          WHERE session_id = ${sessionId} AND id = ${inboxId}`.pipe(
-          Effect.map((rows) =>
-            [rows[0]?.recipient, rows[0]?.sender].filter((id): id is string => Predicate.isString(id)),
-          ),
-          Effect.orDie,
-        ),
       ),
 
       linkTask: Effect.fn("Db.inbox.linkTask")((id: string) =>

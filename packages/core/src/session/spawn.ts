@@ -88,7 +88,6 @@ export interface SpawnInput {
   readonly env?: Record<string, string> | undefined
   readonly agent: string
   readonly share?: string | undefined
-  readonly archive?: boolean | undefined
   readonly runtime?: string | undefined
   readonly parentSessionId?: string | undefined
   readonly request?: string | undefined
@@ -448,7 +447,6 @@ export const make = Effect.gen(function* () {
                   parentSessionId: input.parentSessionId,
                   request: input.request,
                   origin: input.origin,
-                  archiveOnIdle: input.archive === true,
                 })
 
                 if (inserted === "parent-ended")

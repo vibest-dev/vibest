@@ -13,7 +13,7 @@ Plan → the user agrees → implement → review until the reviewer approves �
 vibest run [<harness>] --title 'Plan <topic>' -- 'Write an implementation plan for: <goal, paths, constraints>. Read the code. Send me the approach, the files to change, the steps, how to verify, and open questions. Do not modify files.'
 ```
 
-Its id is <planner id>. Tell the user the plan is being written and end your execution. Do not pass `--archive-on-idle`: the user has not agreed yet, and a completed execution would archive the session before they can answer.
+Its id is <planner id>. Tell the user the plan is being written and end your execution.
 
 ## 2. Agree
 
@@ -27,7 +27,7 @@ Save the agreed plan, verbatim, with your file tool as `$VIBEST_PROJECT_DIR/arti
 vibest run [<harness>] --title 'Implement <topic>' --file <absolute plan path> -- 'Implement the attached plan exactly. Run the tests and typecheck, commit on a branch, push, and send me the branch and hash. Do not open a pull request.'
 ```
 
-Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name; vibest copies the file for the session and ends its task with a line naming the copy. Do not pass `--archive-on-idle`: this session stays for review and the pull request. When it sends its message, check the diff and the tests yourself before review.
+Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name; vibest copies the file for the session and ends its task with a line naming the copy. When it sends its message, check the diff and the tests yourself before review.
 
 ## 4. Review
 
@@ -38,7 +38,7 @@ Read-only here is the prompt you pass, plus the shared-worktree git rule the ses
 vibest run [<harness>] --title 'Review <topic>' --share <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Send me a message that starts with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
 ```
 
-Its id is <reviewer id>. Do not pass `--archive-on-idle`: later reviews go to this reviewer with `vibest send`.
+Its id is <reviewer id>.
 
 ## 5. Until approval
 

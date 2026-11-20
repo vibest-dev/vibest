@@ -238,7 +238,6 @@ describe("plugins: spawn hook", () => {
           ["typo", "failed"],
           ["proto", "failed"],
           ["current", "active"],
-          ["vibest.archive-on-idle", "active"],
         ],
       )
       const supported = "agent.start.before"
