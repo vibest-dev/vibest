@@ -169,7 +169,7 @@ What the checks that drive real herdr panes rely on:
 - Pi can open more than one model stream for one execution: a check that holds the model releases every stream held at
   that moment before the next execution starts.
 - A fake usage limit is an error inside the stream: Pi reports its message as the execution's error, and retries a failed
-  request, so every retry fails too (U5, U8).
+  request, so every retry fails too (U5).
 - The user-file invariant hashes only the keys the shadows read: the user's own Claude and Pi sessions rewrite other
   keys of the same files while a run goes on, and cursor-agent rewrites `~/.cursor/cli-config.json`.
 - cursor-agent's hook shell rebuilds `PATH`, so I5 records hook calls by wrapping the Cursor hook script itself and

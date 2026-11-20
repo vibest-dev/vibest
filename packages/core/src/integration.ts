@@ -9,9 +9,10 @@ import { PlatformNode } from "./effect/platform.ts"
 import * as Guard from "./guard.ts"
 import { Harnesses } from "./harnesses.ts"
 import type { HarnessDefinition } from "./plugin/domains.ts"
-import { jsonObject, promptOf, executionEndOf } from "./replies.ts"
+import { jsonObject, promptOf, executionEndOf, type ObservedEnd } from "./replies.ts"
 import { alive, Runtimes } from "./runtimes.ts"
 import { Session } from "./session.ts"
+import { resetOf, Subscriptions } from "./subscriptions/service.ts"
 
 export * as Integration from "./integration.ts"
 
@@ -28,6 +29,7 @@ const make = Effect.gen(function* () {
   const harnesses = yield* Harnesses.Service
   const agents = yield* Agents.Service
   const runtimes = yield* Runtimes.Service
+  const subscriptions = yield* Subscriptions.Service
   const layout = yield* Layout
   const vibest = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
@@ -57,6 +59,14 @@ const make = Effect.gen(function* () {
       return Option.isSome(runtime) && !(yield* alive(runtime.value, terminalOf(session)))
     })
 
+  const withReset = (who: HookCaller, end: ObservedEnd) =>
+    Effect.gen(function* () {
+      const provider = (yield* db.session.getSession(who.id))?.process?.provider ?? ""
+      const now = yield* Clock.currentTimeMillis
+
+      return { ...end, resetAt: resetOf(yield* subscriptions.list, end.harness, provider, now) }
+    })
+
   const executionEnd = Effect.fn("Integration.executionEnd")(function* (who: HookCaller, raw: string) {
     const definition = harnesses.find(who.harness)
 
@@ -71,7 +81,7 @@ const make = Effect.gen(function* () {
       return yield* sessions.check(who.id, who.process)
     }
 
-    const written = yield* db.session.endObserved(who.id, end, who.process)
+    const written = yield* db.session.endObserved(who.id, end.limited ? yield* withReset(who, end) : end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })
 
@@ -149,6 +159,7 @@ export const node = LayerNode.make({
     Harnesses.node,
     Runtimes.node,
     Session.node,
+    Subscriptions.node,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,

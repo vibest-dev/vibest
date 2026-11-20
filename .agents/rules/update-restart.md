@@ -7,7 +7,7 @@
 5. An installed version directory is not deleted while a running session uses it.
 6. A restart in place: mark the session restarting in its row, SIGTERM to the harness pid only (never its process group; the integration reports the pid with its ready report), then the runtime's optional `run` starts the harness again in the same terminal once its shell is idle. A subagent gets its harness argv on its conversation; vibestd types the entry session's harness command into its shell, prefixed with the identity variables. The pane shell does not keep them, including a pane vibestd opened, because the user types vibest there again after the agent quits. Subagents still get identity from the runtime open. The mark is cleared when the integration reports ready, and however else the restart ends (failed, timed out after 60 s, vibestd stopping), followed by one check of what the mark made the session's checks skip. The harness is the terminal's foreground program, as for a first start: no wrapper loop.
 7. Core checks only that `run` exists. An agent whose runtime has no `run`, whose harness never reported its pid, or whose harness has no integration that reports its pid and readiness (Cursor) is not restarted; the update names it and says to restart it by hand. A harness with no integration is never listed as outdated.
-8. A usage-limit move takes the same path: only the limited harness ends and the next harness runs in the same terminal.
+8. A usage limit restarts nothing: its execution ends failed and the harness keeps running in its terminal.
 9. An entry session moved from another terminal (`vibest` there, answered y) ends the same way: SIGTERM to the pid it last reported, its terminal and shell kept, then it starts in the new terminal. While a restart is between its harnesses, that start is refused and nothing is signalled.
 
 Status: decided, planned in the update-restart pipeline plan (`pipeline-update-restart-plan.md` in the project artifacts). 1 to 9 are built on `feat/update-restart-agents-v3` (runtime-herdr implements `run`; core in `packages/core/src/session/restart.ts`); `vibest daemon restart` offers it too since `feat/multi-install-daemon-restart`.
@@ -15,7 +15,6 @@ Status: decided, planned in the update-restart pipeline plan (`pipeline-update-r
 Known limits:
 
 - A pane with no shell, a remote herdr, another vibest earlier on PATH, and typing in the terminal while `run` types.
-- A usage-limit move whose runtime has no `run` or whose harness reported no pid still closes the pane and opens another.
 - `run`'s idle check counts `sh` as a shell, so in an entry session's pane typing can start between the harness exit and `exec $SHELL` (the tty keeps the text).
 - On the first update from a version before this branch, subagents on the old integration have reported no pid and are listed as "restart it yourself".
 - A subagent result the interrupted execution wrote between `executionPromptedAt` and the restart is overwritten by the continue execution.

@@ -19,25 +19,6 @@ import type { MachineRow, OutboxRow } from "./remote.ts"
 
 export const LOCAL_MACHINE = "local"
 
-const retried = (execution: { readonly outcome: string | null }) =>
-  execution.outcome === "failed" || execution.outcome === "not_started"
-
-export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readonly sender: string }>) => {
-  const last = rows.at(-1)
-  let from = rows.length
-
-  if (last !== undefined) {
-    from = rows.length - 1
-
-    while (from > 0 && rows[from - 1]!.sender === last.sender) from--
-  }
-
-  return rows
-    .slice(from)
-    .map((row) => row.content)
-    .join("\n\n")
-}
-
 export type SessionColumns = {
   readonly id: string
   readonly project: string
@@ -264,55 +245,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       ),
     )
 
-  const rescheduleSource = (id: string) =>
-    Effect.gen(function* () {
-      const [head] = yield* sql<{
-        parentSessionId: string | null
-      }>`SELECT parent_session_id FROM session WHERE id = ${id}`
-
-      if (head === undefined) return { working: "", delivered: "", parentSessionId: undefined, since: 0 }
-
-      const executions = yield* sql<{
-        id: number
-        typed: string | null
-        outcome: string | null
-        startedAt: number
-        taken: number
-      }>`SELECT t.id, t.typed, t.outcome, t.started_at,
-          EXISTS (SELECT 1 FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id) AS taken
-        FROM execution t WHERE session_id = ${id} ORDER BY id DESC`
-
-      const execution = executions.find(
-        (t, i) => (t.typed !== null || t.taken === 1) && executions.slice(0, i).every(retried),
-      )
-
-      let working = ""
-
-      if (execution !== undefined) {
-        const taken = yield* sql<{ content: string }>`SELECT content FROM inbox
-          WHERE session_id = ${id} AND execution_id = ${execution.id} ORDER BY id`
-
-        working = execution.typed ?? taken.map((row) => row.content).join("\n\n")
-      }
-
-      const [linked] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM inbox
-        WHERE session_id = ${id} AND execution_id IS NOT NULL`
-
-      const rows = yield* sql<{ content: string; sender: string }>`SELECT content, sender_key AS sender
-        FROM inbox WHERE session_id = ${id} AND status = 'delivered'
-          AND id > ${linked?.id ?? 0}
-        ORDER BY id`
-
-      return {
-        working,
-        delivered: latestRun(rows),
-        parentSessionId: head.parentSessionId ?? undefined,
-        since: (execution ?? executions[0])?.startedAt ?? 0,
-      }
-    })
-
   return {
-    rescheduleSource,
     briefs,
     hadTerminal,
     untakenTask,
