@@ -4,7 +4,6 @@ import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
-import { Concurrency } from "./concurrency.ts"
 import { type NewInboxRow, type SessionRow, harnessIdOf, localSessionOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { Drain } from "./drain.ts"
@@ -43,7 +42,6 @@ export interface Interface {
   readonly pulls: (harnessId: string) => boolean
   readonly take: (sessionId: string, process: number | undefined) => Effect.Effect<Taken | undefined>
   readonly stream: (sessionId: string) => Stream.Stream<null>
-  readonly wake: (sessionId: string) => Effect.Effect<void>
   readonly claimRetype: (sessionId: string, execution: number) => Effect.Effect<boolean>
   readonly undelivered: (session: SessionRow, rows: Undelivered, reason: string) => Effect.Effect<void>
   readonly dropQueue: (session: SessionRow, reason: string) => Effect.Effect<void>
@@ -57,7 +55,6 @@ export const layer = Layer.effect(
     const db = yield* Db.Service
     const drain = yield* Drain.Service
     const harnesses = yield* Harnesses.Service
-    const concurrency = yield* Concurrency.Service
     const reactor = yield* Reactor.make
 
     const pulls = (harnessId: string) => harnesses.find(harnessId)?.delivery === "pull"
@@ -107,11 +104,7 @@ export const layer = Layer.effect(
       const session = yield* db.session.getSession(sessionId)
 
       if (session === undefined || !pulls(harnessIdOf(session))) return undefined
-
-      const taken = yield* drain.work(
-        `take inbox of ${sessionId}`,
-        Effect.flatMap(concurrency.admission, (admission) => db.inbox.takeInbox(sessionId, process, admission)),
-      )
+      const taken = yield* drain.work(`take inbox of ${sessionId}`, db.inbox.takeInbox(sessionId, process))
 
       if (taken === undefined) return undefined
       handedOver.add(handedKey(sessionId, taken.execution))
@@ -163,12 +156,12 @@ export const layer = Layer.effect(
       Effect.sync(() => handedOver.delete(handedKey(sessionId, execution))),
     )
 
-    return Service.of({ enqueue: db.inbox.insertInbox, pulls, take, stream, wake, claimRetype, undelivered, dropQueue })
+    return Service.of({ enqueue: db.inbox.insertInbox, pulls, take, stream, claimRetype, undelivered, dropQueue })
   }),
 )
 
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Bus.node, Concurrency.node, Db.node, Drain.node, Harnesses.node],
+  deps: [Bus.node, Db.node, Drain.node, Harnesses.node],
 })

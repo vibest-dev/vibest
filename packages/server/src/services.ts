@@ -25,6 +25,7 @@ import { Placement } from "@vibest/core/session/placement"
 import { Reconcile } from "@vibest/core/session/reconcile"
 import { Restart } from "@vibest/core/session/restart"
 import { Spawn } from "@vibest/core/session/spawn"
+import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 
 import { Machines } from "./machine/machines.ts"
@@ -34,6 +35,7 @@ import { Remote } from "./machine/remote.ts"
 export const services = LayerNode.group([
   Bus.node,
   Concurrency.node,
+  Starts.node,
   SessionLive.node,
   Drain.node,
   Harnesses.node,

@@ -449,7 +449,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S9",
     title:
-      "with concurrency [{ max: 1 }] in vibest.json, two subagents given tasks in one entry execution both start at once; the second's task waits for a slot (vibest ls shows waitingForSlot) while the first works, and starts once the first ends; doctor reports the limit and a filtered rule as not supported",
+      "with concurrency [{ max: 2 }] in vibest.json and the entry session running, two subagents given tasks in one entry execution: both vibest run calls return at once, the first starts and the second waits to start with no terminal (vibest ls shows waitingToStart) even after the first has replied, and starts once the first is archived; doctor reports the limit and a filtered rule as not supported",
     run: async (w) => {
       const p = await piProject(w, "s9")
       const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
@@ -472,14 +472,14 @@ const checks: ReadonlyArray<Check> = [
       try {
         await fs.writeFile(
           path.join(w.vibestHome, "vibest.json"),
-          JSON.stringify({ concurrency: [{ max: 1 }, { agent: "general", max: 5 }] }),
+          JSON.stringify({ concurrency: [{ max: 2 }, { agent: "general", max: 5 }] }),
         )
         let doctor = ""
         await until(
           "vibest doctor to report the limit",
           async () =>
             (doctor = (await w.vibest(["doctor"], { cwd: p.repo, env: p.env })).stdout).includes(
-              "at most 1 working executions on this machine",
+              "at most 2 live harness processes on this machine",
             ),
           30_000,
         )
@@ -497,24 +497,27 @@ const checks: ReadonlyArray<Check> = [
         const [one, two] = [...started.matchAll(/"id":\s*"([0-9a-f-]{36})"/g)].map((m) => m[1]!)
         expect(one !== undefined && two !== undefined, `two runs: ${started}`)
 
-        const listed = async () => (await ls(w, p)) as Array<Listed & { waitingForSlot?: true }>
+        const listed = async () => (await ls(w, p)) as Array<Listed & { waitingToStart?: true }>
         const rowOf = async (id: string) => (await listed()).find((r) => r.id === id)
         await until("the first subagent to work", () => p.model.asked("one") === 1, 90_000)
         await until(
-          "the second subagent to wait for a slot",
-          async () => (await rowOf(two!))?.waitingForSlot === true,
+          "the second subagent to wait to start",
+          async () => (await rowOf(two!))?.waitingToStart === true,
           30_000,
         )
         const waiting = (await rowOf(two!))!
-        expect(waiting.address.id !== "", `the waiting subagent has no terminal: ${JSON.stringify(waiting)}`)
-        expect((await rowOf(one!))?.waitingForSlot === undefined, "the working subagent is listed as waiting")
-        await Bun.sleep(3_000)
-        expect(p.model.asked("two") === 0, "the second subagent's task reached the model while the first worked")
+        expect(waiting.address.id === "", `the waiting subagent already has a terminal: ${JSON.stringify(waiting)}`)
+        expect((await rowOf(one!))?.waitingToStart === undefined, "the running subagent is listed as waiting")
 
         p.model.releaseOne()
         await answered(w, p, one!, "one")
+        await Bun.sleep(3_000)
+        expect((await rowOf(two!))?.waitingToStart === true, "the second subagent started while the first still ran")
+        expect(p.model.asked("two") === 0, "the second subagent's task reached the model while the first still ran")
+
+        await w.ok(["archive", one!], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
         await until("the second subagent to work", () => p.model.asked("two") === 1, 90_000)
-        expect((await rowOf(two!))?.waitingForSlot === undefined, "the second subagent is still listed as waiting")
+        expect((await rowOf(two!))?.waitingToStart === undefined, "the second subagent is still listed as waiting")
         p.model.release()
         await answered(w, p, two!, "two")
       } finally {

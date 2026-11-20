@@ -59,7 +59,6 @@ class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message
 export interface FirstInput {
   readonly text: string
   readonly onHandover: Effect.Effect<void>
-  readonly gated?: boolean
 }
 
 export type LaunchOptions = {
@@ -184,12 +183,8 @@ export const make = Effect.gen(function* () {
       : task
   }, provided)
 
-  const taskInput = (session: SessionRow, task: string, gated = false) =>
-    Effect.map(firstText(session, task), (text): FirstInput => ({
-      text,
-      onHandover: db.inbox.linkTask(session.id),
-      gated,
-    }))
+  const taskInput = (session: SessionRow, task: string) =>
+    Effect.map(firstText(session, task), (text): FirstInput => ({ text, onHandover: db.inbox.linkTask(session.id) }))
 
   const launching = Effect.fn("Placement.launching")(function* (
     session: SessionRow,
@@ -197,17 +192,13 @@ export const make = Effect.gen(function* () {
     first?: FirstInput,
   ) {
     const base = yield* launchOf(session, resume, first?.text)
-    const withoutInput = first?.gated === true ? yield* launchOf(session, resume) : base
-    let inputTaken = true
-    const launch = (process: number | undefined) => withProcess(inputTaken ? base : withoutInput, process)
+    const launch = (process: number | undefined) => withProcess(base, process)
     const execution = yield* Ref.make<number | undefined>(undefined)
 
     const beforeStart =
       first === undefined
         ? Effect.void
-        : Effect.flatMap(openFirst(session.id, first.onHandover, first.gated), (opened) =>
-            opened === undefined ? Effect.sync(() => void (inputTaken = false)) : Ref.set(execution, opened),
-          )
+        : Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
 
     const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
       Effect.flatMap(Ref.get(execution), (opened) =>
@@ -395,7 +386,7 @@ export const make = Effect.gen(function* () {
 
     if (!folders) yield* copyIncluded(root, worktree)
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
-    const plan = yield* launching(session, false, yield* taskInput(session, firstPrompt, true))
+    const plan = yield* launching(session, false, yield* taskInput(session, firstPrompt))
 
     const terminal = yield* openOrMove(
       plan.starting(

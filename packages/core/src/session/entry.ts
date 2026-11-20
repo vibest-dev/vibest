@@ -14,7 +14,6 @@ import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schem
 
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
-import { Concurrency } from "../concurrency.ts"
 import { AddressJson, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
@@ -30,6 +29,7 @@ import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 import { runtimeEnv } from "./placement.ts"
+import { Starts } from "./starts.ts"
 
 export * as EntrySession from "./entry.ts"
 
@@ -69,7 +69,7 @@ const make = Effect.gen(function* () {
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
   const processes = yield* Processes.Service
-  const concurrency = yield* Concurrency.Service
+  const starts = yield* Starts.Service
   const layout = yield* Layout
   const vibestCommand = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
@@ -215,7 +215,9 @@ const make = Effect.gen(function* () {
             ),
     )
 
-    return yield* Effect.gen(function* () {
+    const newEntry = current === undefined || fresh
+
+    const launched = Effect.gen(function* () {
       const command = yield* withHarness(
         Launch.entryCommand({
           harness: chosen,
@@ -258,7 +260,6 @@ const make = Effect.gen(function* () {
                     projectDirectory: root,
                     agent,
                     firstInput: firstInputOf(chosen),
-                    admission: yield* concurrency.admission,
                     ...((existing === undefined || fresh) && { sessionId }),
                   },
                 )
@@ -302,6 +303,8 @@ const make = Effect.gen(function* () {
         ...(routing !== undefined && { routing }),
       }
     }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeLaunched)))
+
+    return yield* newEntry ? starts.run(undefined, launched) : launched
   })
 
   const start = Effect.fn("EntrySession.start")(function* (input: {
@@ -353,8 +356,9 @@ const make = Effect.gen(function* () {
     const kind = input.runtime ?? (yield* onlyRuntime)
 
     if (kind === undefined) return yield* new NoRuntime({ message: "the entry session's runtime is not named" })
+    const newEntry = input.fresh || (yield* db.session.entryOf(projectId)) === undefined
 
-    return yield* projectLocked.withLock(projectId)(
+    const claiming = projectLocked.withLock(projectId)(
       Effect.gen(function* () {
         yield* notRunning(projectId, terminal)
         const address = { machine: "local", id: terminal }
@@ -390,7 +394,6 @@ const make = Effect.gen(function* () {
                   projectDirectory: directory,
                   agent,
                   firstInput: firstInputOf(input.harness),
-                  admission: yield* concurrency.admission,
                 },
               )
 
@@ -429,6 +432,8 @@ const make = Effect.gen(function* () {
         }
       }),
     )
+
+    return yield* newEntry ? starts.run(undefined, claiming) : claiming
   })
 
   const focus = Effect.fn("EntrySession.focus")(function* (projectId: string) {
@@ -485,7 +490,6 @@ export const node = LayerNode.make({
   deps: [
     Agents.node,
     Bus.node,
-    Concurrency.node,
     Db.node,
     Harness.node,
     Harnesses.node,
@@ -493,6 +497,7 @@ export const node = LayerNode.make({
     Processes.node,
     Runtimes.node,
     SessionLive.node,
+    Starts.node,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,

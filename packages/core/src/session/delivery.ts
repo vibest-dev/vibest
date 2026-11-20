@@ -1,18 +1,9 @@
-import {
-  ExecutionEnded,
-  ExecutionStarted,
-  InboxMoved,
-  InboxQueued,
-  ProcessPlaced,
-  ProcessReady,
-  SessionEnded,
-} from "@vibest/schema/event"
+import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, Ref, Stream } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
-import { atLimit, Concurrency } from "../concurrency.ts"
 import {
   type SessionRow,
   harnessIdOf,
@@ -45,6 +36,7 @@ import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
 import { Sends } from "./sends.ts"
+import { Starts } from "./starts.ts"
 
 export * as Delivery from "./delivery.ts"
 
@@ -62,10 +54,9 @@ export const make = Effect.gen(function* () {
   const exits = yield* Exits.Service
   const { notice, resume, taskInput } = yield* Placement.Service
   const { send, deliverTo, admit } = yield* Sends.Service
-  const concurrency = yield* Concurrency.Service
+  const starts = yield* Starts.Service
   const reactor = yield* Reactor.make
   const { locked } = locks
-  const full = Effect.zipWith(concurrency.limit, db.session.workingExecutions(), atLimit)
   const { undelivered } = inbox
 
   const deliverQueued = Effect.fn("Delivery.deliverQueued")(function* (
@@ -81,7 +72,7 @@ export const make = Effect.gen(function* () {
     >,
   ) {
     const into =
-      hand ?? ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover, true))
+      hand ?? ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover))
 
     const task = yield* db.inbox.untakenTask(session.id)
 
@@ -176,6 +167,9 @@ export const make = Effect.gen(function* () {
         ),
       )
 
+  const redeliver = (id: string): Effect.Effect<void> =>
+    Effect.suspend(() => deliverWoken(id, { rows: new Set(), ended: true }))
+
   const deliver = Effect.fn("Delivery.deliver")(function* (id: string) {
     const session = yield* getRow(id)
 
@@ -199,7 +193,7 @@ export const make = Effect.gen(function* () {
     if (state === undefined && !(yield* alive(h, terminal))) {
       if (exitedAt(session) === null) return yield* exits.settle(h, id, session.process?.id)
 
-      if ((yield* db.inbox.pendingInbox(id)).length === 0 || (yield* full)) return
+      if ((yield* db.inbox.pendingInbox(id)).length === 0) return
 
       if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && !(session.process?.conversation ?? null))
         return yield* new NoSuchSession({
@@ -207,8 +201,10 @@ export const make = Effect.gen(function* () {
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
 
-      return yield* deliverQueued(h, session, terminal, (text, onHandover) =>
-        resume(h, session, { text, onHandover, gated: true }),
+      return yield* starts.startOrQueue(
+        id,
+        deliverQueued(h, session, terminal, (text, onHandover) => resume(h, session, { text, onHandover })),
+        redeliver(id),
       )
     }
 
@@ -256,38 +252,6 @@ export const make = Effect.gen(function* () {
     drain: deliverWoken,
     merge: (pending, next) => ({ rows: new Set([...pending.rows, ...next.rows]), ended: pending.ended || next.ended }),
   })
-
-  const offer = (id: string, ready: boolean) =>
-    Effect.gen(function* () {
-      const session = yield* db.session.getSession(id)
-
-      if (session === undefined) return
-
-      if (inbox.pulls(harnessIdOf(session)) && (yield* db.inbox.untakenTask(id)) === undefined)
-        return yield* inbox.wake(id)
-
-      if (!ready) return
-      const rows = new Set((yield* db.inbox.pendingInbox(id)).map((r) => r.id))
-      yield* deliverWoken(id, { rows, ended: true })
-      yield* concurrency.pass(id, (yield* db.inbox.waitingSessions()).includes(id))
-    })
-
-  const offerReady = Effect.gen(function* () {
-    const ready = yield* db.inbox.readyWaiting()
-
-    for (const id of yield* db.inbox.waitingSessions()) {
-      if (yield* full) return
-      yield* offer(id, ready.includes(id))
-    }
-  })
-
-  const queue = yield* RunCoordinator.make<"queue", void>({ drain: () => offerReady, merge: () => undefined })
-
-  const wakeEvery = Effect.flatMap(db.inbox.waitingSessions(), (ids) =>
-    Effect.forEach(ids, (id) => Effect.andThen(inbox.wake(id), wakes.wake(id, { rows: new Set(), ended: true })), {
-      discard: true,
-    }),
-  )
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
@@ -360,26 +324,11 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  const limited = (unlimited: Effect.Effect<void>) =>
-    Effect.flatMap(concurrency.limit, (limit) => (limit === undefined ? unlimited : queue.wake("queue", undefined)))
-
   yield* reactor.on([ExecutionEnded], (event) =>
-    limited(
-      event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
-    ),
+    event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
   )
   yield* reactor.on([InboxQueued], (event) =>
-    limited(wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false })),
-  )
-  yield* reactor.on([ExecutionStarted, InboxMoved, ProcessPlaced, ProcessReady, SessionEnded], () =>
-    limited(Effect.void),
-  )
-  yield* concurrency.limits.pipe(
-    Stream.zipWithPrevious,
-    Stream.runForEach(([before, limit]) =>
-      limit !== undefined ? queue.wake("queue", undefined) : Option.isSome(before) ? wakeEvery : Effect.void,
-    ),
-    Effect.forkScoped,
+    wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),
   )
 
   yield* db.inbox.recoverDelivering(
@@ -401,7 +350,6 @@ export const node = LayerNode.make({
   layer,
   deps: [
     Bus.node,
-    Concurrency.node,
     Db.node,
     Executions.node,
     Exits.node,
@@ -412,5 +360,6 @@ export const node = LayerNode.make({
     SessionLive.node,
     SessionLocks.node,
     Sends.node,
+    Starts.node,
   ],
 })

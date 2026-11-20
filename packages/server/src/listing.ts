@@ -1,5 +1,4 @@
 import { type BusEvent } from "@vibest/core/bus"
-import { atLimit, Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import {
   executionStateOf,
@@ -12,6 +11,7 @@ import {
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
+import { Starts } from "@vibest/core/session/starts"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import type { RuntimeAddress } from "@vibest/schema/session"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
@@ -25,7 +25,7 @@ const LS_TASK = 500
 const taskForLs = (task: string | null) =>
   task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
 
-export const toInfo = (session: SessionView, brief?: SessionBrief, full = false): SessionInfo => ({
+export const toInfo = (session: SessionView, brief?: SessionBrief, waiting = false): SessionInfo => ({
   id: session.id,
   name: session.name,
   agent: session.agent,
@@ -46,27 +46,27 @@ export const toInfo = (session: SessionView, brief?: SessionBrief, full = false)
   createdAt: session.createdAt,
   lastActive: session.lastActive,
   task: brief?.task ?? null,
-  ...(full && brief?.queued === true && executionStateOf(session) !== "open" && { waitingForSlot: true as const }),
   latest: brief?.latest ?? null,
+  ...(waiting && { waitingToStart: true as const }),
 })
 
 export const sessionListing = (deps: {
   readonly db: Db.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
-  readonly concurrency: Concurrency.Interface
+  readonly starts: Starts.Interface
 }) => {
-  const { db, sessions, runtimes, concurrency } = deps
+  const { db, sessions, runtimes, starts } = deps
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
     Effect.gen(function* () {
       const briefs = yield* db.session.sessionBriefs(rows.map((row) => row.id))
-      const full = atLimit(yield* concurrency.limit, yield* db.session.workingExecutions())
+      const waiting = yield* starts.waiting
 
       return rows.map((row) => {
         const brief = briefs.get(row.id)
 
-        return { ...toInfo(row, brief, full), task: taskForLs(brief?.task ?? null) }
+        return { ...toInfo(row, brief, waiting.includes(row.id)), task: taskForLs(brief?.task ?? null) }
       })
     })
 
@@ -218,7 +218,7 @@ export const layer = Layer.effect(
       db: yield* Db.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
-      concurrency: yield* Concurrency.Service,
+      starts: yield* Starts.Service,
     })
   }),
 )

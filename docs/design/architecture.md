@@ -361,7 +361,7 @@ below it and subscribing to the events it handles itself:
 | `archive.ts` (`Archive`)       | remove, the idle-archive check, finishing an archive vibestd stopped in                          |
 | `sends.ts` (`Sends`)           | send, admit, and relay to the nearest living ancestor; what plugins send through                 |
 | `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins          |
-| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, the slot queue, interrupt, typed prompts   |
+| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts                   |
 | `exits.ts` (`Exits`)           | recording a harness exit and what a usage limit leaves behind                                    |
 | `spawn.ts` (`Spawn`)           | admitting and starting a session                                                                 |
 | `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`       |
@@ -393,20 +393,15 @@ How these modules keep the rules:
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
   runs twice. A refused text undoes the execution unless the integration wrote a result anyway or a usage-limit move
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
-- A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) has one door:
-  `admits` in `session-statements.ts`, checked in the transaction that opens an execution from an inbox row (a push,
-  a resume, a launch's first task, a pull take, an entry's generated first input). It admits a session while open
-  executions of live sessions are below the limit and no session that can take input now holds an older waiting row
-  (`min(inbox.rowid)`, the commit order, which a read-model rebuild replays). A session can take input now when it
-  is live, its process is ready and not ended, and its last offer did not fail (the `passed` set in `Concurrency`,
-  kept in memory). So a child that never becomes ready, a closed session or an unreachable runtime does not hold the
-  line, and once able it competes again by its original row. A refused input stays queued (pending rows, an untaken
-  task), and a refused first input starts the harness without it; the queue is those rows, so nothing about it is
-  stored. A pull take waits while its session's first task is untaken. With a limit set, every change that can free
-  a slot or move the order (an execution started or ended, a row queued or moved, a process placed or ready, a
-  session ended, a new limit) wakes one fiber in `Delivery` that walks the waiting sessions in order: it wakes a
-  pulling recipient's inbox stream, pushes to a ready one, and marks a push that did not land as passed until its next
-  offer. Removing the limit wakes every waiting session. Typed input and the rerun of a usage-limit move are not gated.
+- A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) caps live harness
+  processes on this machine: placed, not ended processes of live sessions, entry sessions included. Only starting a
+  process waits (`starts.ts`): a `vibest run` launch (the session and its task are recorded, the harness is not
+  launched yet), a relaunch of an exited session for a send, and a new entry session. A start is admitted when the live
+  processes and the starts in flight are below the limit and no earlier start waits; otherwise it waits in an in-memory
+  queue, first come first served, which advances when a process ends (`process.ended`, `session.ended`) or the limit
+  changes. A start holds its place until it returns, so a failed start frees it and a start whose harness never becomes
+  ready holds only its process place. A running session takes messages, pushed or pulled, without any check. The
+  queue is not stored: a `vibest run` still waiting when vibestd stops is reported as never finished starting.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the

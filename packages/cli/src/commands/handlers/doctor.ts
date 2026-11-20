@@ -155,7 +155,9 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         const { max, problems, unsupported } = concurrency.value
 
         const findings: Array<Finding> = [
-          ...(max === null ? [] : [{ mark: "ok" as const, text: `at most ${max} working executions on this machine` }]),
+          ...(max === null
+            ? []
+            : [{ mark: "ok" as const, text: `at most ${max} live harness processes on this machine` }]),
           ...problems.map((text): Finding => ({ mark: "problem", text, fix: `fix the rule in ${layout.config}` })),
           ...unsupported.map((text): Finding => ({ mark: "note", text })),
         ]

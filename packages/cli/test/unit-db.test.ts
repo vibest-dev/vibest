@@ -625,27 +625,19 @@ describe("Db", () => {
 
       assert.deepStrictEqual(briefs.get("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
         task: "from parent",
-        queued: true,
         latest: { status: "failed", summary: "new line", endedAt: 20 },
       })
-      assert.deepStrictEqual(briefs.get("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), {
-        task: "do it",
-        queued: true,
-        latest: null,
-      })
+      assert.deepStrictEqual(briefs.get("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), { task: "do it", latest: null })
       assert.deepStrictEqual(briefs.get("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"), {
         task: null,
-        queued: false,
         latest: { status: "working", summary: "", endedAt: null },
       })
       assert.deepStrictEqual(briefs.get("ffffffff-ffff-4fff-8fff-ffffffffffff"), {
         task: null,
-        queued: false,
         latest: { status: "interrupted", summary: "fallback", endedAt: 7 },
       })
       assert.deepStrictEqual(briefs.get("11111111-1111-4111-8111-111111111111"), {
         task: null,
-        queued: false,
         latest: { status: "lost", summary: "hidden", endedAt: 8 },
       })
       assert.isUndefined(briefs.get("00000000-0000-4000-8000-000000000000"))

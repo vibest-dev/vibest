@@ -240,7 +240,7 @@ export const SessionInfo = Schema.Struct({
   createdAt: Schema.Number,
   lastActive: Schema.Number,
   task: Schema.NullOr(Schema.String),
-  waitingForSlot: Schema.optional(Schema.Literal(true)),
+  waitingToStart: Schema.optional(Schema.Literal(true)),
   latest: Schema.NullOr(
     Schema.Struct({
       status: MessageStatus,

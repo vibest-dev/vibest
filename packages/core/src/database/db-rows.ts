@@ -281,7 +281,6 @@ export type MessageStatusName = typeof MessageStatus.Type
 
 export type SessionBrief = {
   readonly task: string | null
-  readonly queued: boolean
   readonly latest: {
     readonly status: MessageStatusName
     readonly summary: string

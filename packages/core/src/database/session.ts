@@ -22,7 +22,6 @@ import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
-import type { Admission } from "../concurrency.ts"
 import { type ObservedEnd } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
@@ -62,8 +61,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       currentProcessId,
       findEntrySessions,
       openExecution,
-      workingExecutions,
-      admits,
       startExecution,
       acceptedAt,
       accept,
@@ -410,7 +407,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly sessionId?: string | undefined
             readonly agent: string
             readonly firstInput?: string | undefined
-            readonly admission?: Admission | undefined
           },
         ) =>
           Effect.gen(function* () {
@@ -491,10 +487,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     status: "delivered",
                   })
 
-                const handed =
-                  start.firstInput !== undefined && resume === undefined && (yield* admits(entryId, start.admission))
-
-                if (handed) yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
+                if (start.firstInput !== undefined && resume === undefined)
+                  yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
                 yield* afterCommit(() => void moving.delete(project))
 
                 if (!movingHere || fresh) yield* dropWaiting(entryId)
@@ -504,7 +498,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   harnessSessionId: resume ?? null,
                   projectId: project,
                   process,
-                  firstInput: handed ? start.firstInput : undefined,
+                  firstInput: resume === undefined ? start.firstInput : undefined,
                 }
               }),
             )
@@ -704,8 +698,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ).pipe(Effect.orDie),
       ),
 
-      workingExecutions: Effect.fn("Db.session.workingExecutions")(() => workingExecutions.pipe(Effect.orDie)),
-
       startExecution: Effect.fn("Db.session.startExecution")((id: string, at: number) =>
         tx(
           Effect.gen(function* () {
@@ -718,21 +710,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ).pipe(Effect.orDie),
       ),
 
-      startExecutionWithin: Effect.fn("Db.session.startExecutionWithin")(
-        (id: string, at: number, admission: Admission | undefined) =>
-          tx(
-            Effect.gen(function* () {
-              const open = yield* openExecution(id)
-
-              if (open !== undefined) return { execution: open, opened: false }
-
-              if (!(yield* admits(id, admission))) return undefined
-
-              return { execution: yield* startExecution(id, at), opened: true }
-            }),
-          ).pipe(Effect.orDie),
-      ),
-
       acceptExecution: Effect.fn("Db.session.acceptExecution")((id: string, execution: number) =>
         tx(accept(id, execution)).pipe(Effect.orDie),
       ),
@@ -743,6 +720,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
           return execution !== undefined && (yield* acceptedAt(id, execution)) !== null
         }).pipe(Effect.orDie),
+      ),
+
+      liveProcesses: Effect.fn("Db.session.liveProcesses")(() =>
+        sql<{ id: string }>`SELECT s.id FROM session s JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+          WHERE s.ended_at IS NULL AND p.ended_at IS NULL AND p.placed_at IS NOT NULL`.pipe(
+          Effect.map((rows) => rows.map((row) => row.id)),
+          Effect.orDie,
+        ),
       ),
 
       currentProcessId: Effect.fn("Db.session.currentProcessId")((id: string) =>

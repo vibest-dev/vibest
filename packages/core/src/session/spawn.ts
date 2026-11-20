@@ -36,6 +36,7 @@ import { Archive } from "./archive.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Move } from "./move.ts"
 import { type LaunchOptions, Placement } from "./placement.ts"
+import { Starts } from "./starts.ts"
 
 export * as Spawn from "./spawn.ts"
 
@@ -115,6 +116,7 @@ export const make = Effect.gen(function* () {
   const { worktreeOf, launch, launchFailed } = yield* Placement.Service
   const { abandonLaunch } = yield* Archive.Service
   const { rerun } = yield* Move.Service
+  const starts = yield* Starts.Service
   const logged = Reactor.logFailure
 
   const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
@@ -440,20 +442,24 @@ export const make = Effect.gen(function* () {
                 if (inserted !== true) return { before: inserted }
                 yield* Ref.set(handedOver, true)
                 yield* Ref.set(attachmentsOwned, true)
-                const row = (yield* db.session.getSession(id))!
                 const leave = drain.track(`spawn ${id}`)
+
+                const launchNow = Effect.flatMap(db.session.getSession(id), (now) =>
+                  now === undefined || archived(now)
+                    ? Effect.void
+                    : launchOwned(rt, target, now, root, task, {
+                        splitFrom: input.share,
+                        env: input.env,
+                        commit: input.commit,
+                      }),
+                )
+
                 yield* Effect.forkIn(
-                  locks
-                    .withLock(id)(
-                      Deferred.succeed(held, undefined).pipe(
-                        Effect.andThen(
-                          launchOwned(rt, target, row, root, task, {
-                            splitFrom: input.share,
-                            env: input.env,
-                            commit: input.commit,
-                          }),
-                        ),
-                      ),
+                  starts
+                    .run(
+                      id,
+                      locks.withLock(id)(Deferred.succeed(held, undefined).pipe(Effect.andThen(launchNow))),
+                      Deferred.succeed(held, undefined),
                     )
                     .pipe(Effect.ensuring(leave), logged(`spawn ${id}`)),
                   scope,
@@ -520,6 +526,7 @@ export const deps = [
   Plugins.node,
   Runtimes.node,
   SessionLocks.node,
+  Starts.node,
   PlatformNode.crypto,
   PlatformNode.fileSystem,
   PlatformNode.layout,

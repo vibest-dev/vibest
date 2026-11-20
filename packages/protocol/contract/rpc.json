@@ -1929,7 +1929,7 @@
               }
             ]
           },
-          "waitingForSlot": {
+          "waitingToStart": {
             "anyOf": [
               {
                 "type": "boolean",
@@ -4633,7 +4633,7 @@
                     }
                   ]
                 },
-                "waitingForSlot": {
+                "waitingToStart": {
                   "anyOf": [
                     {
                       "type": "boolean",
@@ -15320,7 +15320,7 @@
                         }
                       ]
                     },
-                    "waitingForSlot": {
+                    "waitingToStart": {
                       "anyOf": [
                         {
                           "type": "boolean",
@@ -15891,7 +15891,7 @@
                       }
                     ]
                   },
-                  "waitingForSlot": {
+                  "waitingToStart": {
                     "anyOf": [
                       {
                         "type": "boolean",

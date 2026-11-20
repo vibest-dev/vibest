@@ -1,5 +1,4 @@
 import { Bus } from "@vibest/core/bus"
-import { atLimit, Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
@@ -7,6 +6,7 @@ import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
+import { Starts } from "@vibest/core/session/starts"
 import { Caller, type CallerIdentity, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import type { AgentFrom, AgentSender } from "@vibest/schema/event"
 import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
@@ -28,10 +28,10 @@ export const make = Effect.gen(function* () {
   const sessions = yield* Session.Service
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
-  const concurrency = yield* Concurrency.Service
   const watchFeed = yield* WatchFeed.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
+  const starts = yield* Starts.Service
   const seenLocked = yield* KeyedMutex.make<string>()
 
   const peerSender = (caller: Extract<CallerIdentity, { readonly _tag: "Peer" }>, from: AgentFrom | undefined) =>
@@ -201,7 +201,7 @@ export const make = Effect.gen(function* () {
           const session = Listing.toInfo(
             row,
             (yield* db.session.sessionBriefs([id])).get(id),
-            atLimit(yield* concurrency.limit, yield* db.session.workingExecutions()),
+            (yield* starts.waiting).includes(id),
           )
 
           return {
