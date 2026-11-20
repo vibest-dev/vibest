@@ -5,6 +5,8 @@ import type {
   MachineHooks,
   MachineNote,
   PluginOptions,
+  PluginSession,
+  SessionSend,
   SubscriptionReport,
 } from "../domain.ts"
 import type { HarnessEditor } from "../effect/harness.ts"
@@ -34,6 +36,12 @@ export interface Context {
   readonly harness: Definitions<HarnessEditor>
   readonly subscription: { readonly report: (input: SubscriptionReport) => Promise<void> }
   readonly event: EventDomain
+  readonly session: {
+    readonly list: () => Promise<ReadonlyArray<PluginSession>>
+    readonly get: (id: string) => Promise<PluginSession | undefined>
+    readonly sentIn: (id: string, execution: number) => Promise<number>
+    readonly send: (input: SessionSend) => Promise<void>
+  }
 }
 
 export type Cleanup = () => Promise<void> | void

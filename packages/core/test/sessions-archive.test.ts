@@ -109,7 +109,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     })
 
   const askEntry = (w: { readonly id: string; readonly entryId: string; readonly db: Db.Interface }) =>
-    w.db.inbox.insertSend(w.entryId, "a question", undefined, w.id)
+    w.db.inbox.insertSend(w.entryId, "a question", { type: "agent", session: w.id })
 
   const finishExecution = (
     w: { readonly id: string; readonly sessions: Session.Interface; readonly herdr: FakeRuntime["Service"] },
@@ -153,7 +153,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const rows = yield* sql<{
         kind: string
         status: string
-      }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE m.sender_session_id = ${w.id} ORDER BY m.id`.pipe(
+      }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE (m.sender_session_id = ${w.id} OR m.about_session_id = ${w.id}) ORDER BY m.id`.pipe(
         Effect.orDie,
       )
 

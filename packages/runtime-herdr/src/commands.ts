@@ -1,7 +1,7 @@
 import readline from "node:readline"
 
 import { Claim, type VibestClient, type VibestClients } from "@vibest/client/client"
-import { isLimited } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { VibestCommand } from "@vibest/schema/layout"
@@ -120,7 +120,7 @@ export const formatUsage = (usage: ReadonlyArray<UsageWindow> | undefined) => {
 
   return usage
     .map((window) => {
-      const status = isLimited({ limits: [window] }) ? "limited" : "available"
+      const status = Host.isLimited({ limits: [window] }) ? "limited" : "available"
       const error = window.error ? `  ${window.error}` : ""
 
       return `${window.harness}  ${window.window}  ${window.percent}%  ${status}${error}`

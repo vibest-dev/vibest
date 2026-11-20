@@ -14,6 +14,7 @@
   "dependencies": {
     "@vibest/plugin": "workspace:*",
     "@vibest/plugin-harnesses": "workspace:*",
+    "@vibest/plugin-report-reminder": "workspace:*",
     "@vibest/runtime-herdr": "workspace:*",
     "@vibest/runtime-herdr-core": "workspace:*",
     "effect": "catalog:"

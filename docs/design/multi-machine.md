@@ -106,7 +106,8 @@ Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `noti
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
 B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
-`Peer.Ack { ids }` appends `outbox.acked`, which deletes them. Archiving a peer session (`session.ended`) deletes its
+`Peer.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
+same request id finds it and queues nothing. Archiving a peer session (`session.ended`) deletes its unacknowledged
 rows.
 
 `List`, `Get`, `Send`, `Interrupt`, `Remove` and `Peek` from a peer resolve a session id only among sessions whose
@@ -166,7 +167,8 @@ and passes `PromptTooLarge` through.
 
 After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
 recipient's project (none: logged and acknowledged); an inbox row whose `peer_item` is the outbox id (found: only
-acknowledged); otherwise an `inbox.queued` with no sender and `peerItem` set, routed to the recipient while it
+acknowledged); otherwise an `inbox.queued` with `peerItem` set, from the remote agent session with its machine (a `notice` is from
+`"vibest"`), routed to the recipient while it
 has not ended, else to the project's entry session, `pending` when that one is present, else `dropped`. A `notice` has content
 `<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Peer.Ack`. A pipe that drops
 between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
@@ -297,7 +299,7 @@ CREATE TABLE peer (                -- B: a vibestd that dials this one, like an 
   connected_at INTEGER NOT NULL    -- its last successful Peer.Hello (peer.seen)
 ) STRICT;
 
-CREATE TABLE outbox (              -- B: what this vibestd still has to deliver to a peer
+CREATE TABLE outbox (              -- B: what this vibestd delivers, or delivered, to a peer
   id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.peer_item)
   seq        INTEGER NOT NULL,     -- its outbox.queued in the ledger aggregate: the order it is sent in
   peer_id    TEXT NOT NULL,
@@ -305,10 +307,11 @@ CREATE TABLE outbox (              -- B: what this vibestd still has to deliver 
   recipient  TEXT,                 -- the session on the peer that receives it; null in rows from before it existed (then the sender's origin_session)
   kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
   content    TEXT NOT NULL,        -- the text, rendered on A by kind
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  acked_at   INTEGER               -- its outbox.acked; null: still to deliver
 ) STRICT;
-CREATE INDEX outbox_peer ON outbox (peer_id, seq);
+CREATE INDEX outbox_peer ON outbox (peer_id, seq) WHERE acked_at IS NULL;
 CREATE INDEX outbox_session ON outbox (session_id);
 ```
 
-A row exists until A acknowledges it; there is no status column.
+A row is still to deliver until A acknowledges it; then it stays as the record of that id.

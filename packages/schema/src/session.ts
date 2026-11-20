@@ -45,8 +45,7 @@ export type RuntimeMachine = typeof RuntimeMachine.Type
 
 export const InboxRow = Schema.Struct({
   id: Schema.Number,
-  sender: Schema.NullOr(Schema.String),
-  from: Schema.NullOr(Sender),
+  sender: Sender,
   recipient: Schema.NullOr(Schema.String),
   kind: InboxKind,
   message: Schema.String,
@@ -56,22 +55,7 @@ export const InboxRow = Schema.Struct({
 export type InboxRow = typeof InboxRow.Type
 
 export const Detail = Schema.Struct({
-  sender: Schema.Union([
-    Schema.Struct({
-      agent: Schema.String,
-      title: Schema.String,
-      session: Schema.String,
-      machine: Schema.String,
-    }),
-    Schema.Struct({
-      agent: Schema.String,
-      title: Schema.String,
-      session: Schema.String,
-    }),
-    Schema.Struct({ address: Schema.String }),
-    Schema.Literal("vibest"),
-    Schema.Literal("user"),
-  ]),
+  sender: Sender,
   message: Schema.String,
 })
 

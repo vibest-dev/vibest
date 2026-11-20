@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { launchLine } from "@vibest/core/launch"
-import { typedLine } from "@vibest/plugin/effect"
+import { typedLine } from "@vibest/plugin/effect/launch"
 import { Effect, FileSystem, Path } from "effect"
 
 import { tempDirectory } from "./lib/directory.ts"

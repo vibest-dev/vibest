@@ -587,7 +587,7 @@ describe.concurrent("Session", () => {
 
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE about_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
 
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)
@@ -681,7 +681,7 @@ describe.concurrent("Session", () => {
 
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE about_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
 
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)

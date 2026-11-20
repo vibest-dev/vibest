@@ -13,6 +13,7 @@ import {
   type FromSql,
   fromOf,
   toInbox,
+  type InboxSql,
 } from "./db-rows.ts"
 import type { MachineRow, OutboxRow } from "./remote.ts"
 
@@ -21,7 +22,7 @@ export const LOCAL_MACHINE = "local"
 const retried = (execution: { readonly outcome: string | null }) =>
   execution.outcome === "failed" || execution.outcome === "not_started"
 
-export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readonly sender: string | null }>) => {
+export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readonly sender: string }>) => {
   const last = rows.at(-1)
   let from = rows.length
 
@@ -149,14 +150,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
 export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
 
-type InboxColumns = FromSql & {
-  readonly id: number
-  readonly sessionId: string
-  readonly senderSessionId: string | null
-  readonly kind: string
-  readonly content: string
-  readonly status: string
-}
+type InboxColumns = InboxSql
 
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
@@ -177,7 +171,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_session_id, m.from_session, m.from_agent, m.from_title, m.from_machine, m.kind, m.content, m.status
+    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_type, m.sender_session_id, m.sender_agent, m.sender_title,
+        m.sender_machine, m.sender_plugin, m.kind, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
   const briefs = (ids: ReadonlyArray<string>) =>
@@ -225,11 +220,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       WHERE i.session_id = ${id} AND i.kind = 'task' AND i.execution_id IS NULL
       ORDER BY i.id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.content))
 
-  const queuedBy = (session: string, request: string) =>
-    sql<{ id: number }>`SELECT id FROM inbox
-      WHERE request = ${request} AND session_id = ${session}
-      ORDER BY id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
-
   const spawnedBy = (project: string, request: string) =>
     sql<{
       id: string
@@ -264,7 +254,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         o.from_session, o.from_agent, o.from_title, o.from_machine, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
       FROM outbox o LEFT JOIN session s ON s.id = o.session_id
-      WHERE o.peer_id = ${peer} AND o.seq > ${after} AND coalesce(o.recipient, s.origin_session) IS NOT NULL
+      WHERE o.peer_id = ${peer} AND o.acked_at IS NULL AND o.seq > ${after} AND coalesce(o.recipient, s.origin_session) IS NOT NULL
       ORDER BY o.seq LIMIT ${limit}`.pipe(
       Effect.map((rows) =>
         rows.map(({ fromSession, fromAgent, fromTitle, fromMachine, ...row }): OutboxRow => ({
@@ -308,7 +298,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       const [linked] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM inbox
         WHERE session_id = ${id} AND execution_id IS NOT NULL`
 
-      const rows = yield* sql<{ content: string; sender: string | null }>`SELECT content, sender_session_id AS sender
+      const rows = yield* sql<{ content: string; sender: string }>`SELECT content, sender_key AS sender
         FROM inbox WHERE session_id = ${id} AND status = 'delivered'
           AND id > ${linked?.id ?? 0}
         ORDER BY id`
@@ -326,7 +316,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     briefs,
     hadTerminal,
     untakenTask,
-    queuedBy,
     spawnedBy,
     outboxOf,
     sessionRows,

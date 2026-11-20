@@ -1,5 +1,5 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
-import { reconnectSchedule } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
@@ -77,7 +77,7 @@ const sameMembers = (a: Runtime, b: Runtime) => {
   return members.length === others.size && members.every(([key, value]) => others.get(key) === value)
 }
 
-const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
+const RESUBSCRIBE_BACKOFF = Host.reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
 
 export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | TerminalProcesses | HostEnv | Scope.Scope> =
   Effect.gen(function* () {

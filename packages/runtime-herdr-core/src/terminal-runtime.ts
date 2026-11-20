@@ -1,6 +1,8 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { launchLine, reconnectSchedule, typedLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { launchLine, typedLine } from "@vibest/plugin/effect/launch"
+import { Host } from "@vibest/plugin/host"
 import { ID, shortId } from "@vibest/schema/id"
 import {
   Clock,
@@ -159,7 +161,7 @@ const failWith = <A, R>(effect: Effect.Effect<A, HcFailure, R>) => effect.pipe(E
 const SHELL_WAIT = Duration.seconds(30)
 export const FOLLOW_ATTEMPTS = 8
 
-const FOLLOW_BACKOFF = reconnectSchedule({ first: Duration.millis(500), max: Duration.seconds(30) })
+const FOLLOW_BACKOFF = Host.reconnectSchedule({ first: Duration.millis(500), max: Duration.seconds(30) })
 
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 

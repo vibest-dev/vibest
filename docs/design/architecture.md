@@ -153,7 +153,7 @@ started, an entry session) cannot answer results with results (rule 4), and that
 
 **Packages.** Most workspace packages export `./*` → `./src/*.ts`, so an import names the module
 (`@vibest/core/database/db`); `plugin`, `builtins`, the herdr SDKs and `integration/cursor` export named entries
-(`@vibest/plugin/effect`, `@vibest/plugin/testing`). A module imports a name from the module that defines it (no re-exports of other
+(`@vibest/plugin/effect`, `@vibest/plugin/testing`; host-side helpers that vibestd and the builtin plugins share, such as `capture` and `isLimited`, are on `@vibest/plugin/host`, off the plugin API). A module imports a name from the module that defines it (no re-exports of other
 modules' names, except a domain facade re-exporting its own domain, see below).
 
 | Package                 | Role                                                                                                                                                                                              |
@@ -359,7 +359,9 @@ below it and subscribing to the events it handles itself:
 | `placement.ts` (`Placement`)   | the worktree, environment, system prompt and argv of a start; opening the terminal; notices      |
 | `move.ts` (`Move`)             | moving a session to another harness after a usage limit                                          |
 | `archive.ts` (`Archive`)       | remove, the idle-archive check, finishing an archive vibestd stopped in                          |
-| `delivery.ts` (`Delivery`)     | send, queued inbox rows, the next batch after an execution, interrupt, typed prompts             |
+| `sends.ts` (`Sends`)           | send, admit, and relay to the nearest living ancestor; what plugins send through                 |
+| `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins          |
+| `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts                   |
 | `exits.ts` (`Exits`)           | recording a harness exit and what a usage limit leaves behind                                    |
 | `spawn.ts` (`Spawn`)           | admitting and starting a session, `VIBEST_MAX_SESSIONS`                                          |
 | `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`       |
@@ -818,7 +820,7 @@ client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and 
 **Loading and watching:** local plugin changes reload without repeating unchanged imports; failed revisions keep
 the previous one. See [loading and watching](plugin-loading.md#loading-and-watching) for watch and reload details.
 
-**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin` and `@vibest/plugin/effect` instances while local modules reload.
+**Loading on Bun:** plugins share vibestd's `effect`, `@vibest/plugin`, `@vibest/plugin/effect` and `@vibest/plugin/host` instances while local modules reload.
 See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module lifetime details.
 
 **Order:**
@@ -829,6 +831,36 @@ builtin plugins         `@vibest/builtins` `pre`: vibest.harness-pi, vibest.harn
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
+**Shipped opt-in plugins** (as OpenCode's `packages/plugins/<name>`, `@opencode/plugin-<name>`, id `opencode.<name>`):
+each is a package `packages/plugins/<name>` named `@vibest/plugin-<name>` with plugin id `vibest.<name>`, bundled into
+vibest through `pre` in `packages/builtins` but marked optional, so it is not loaded. A user turns one on by writing its
+id in `vibest.json` `plugins` (with options, `{ "package": "vibest.<name>", "options": { … } }`); it then loads in its
+place among the builtins, and `"-vibest.<name>"` turns it off again. Today that is `vibest.report-reminder`: when a
+subagent's execution completes without the subagent sending a message, it sends the subagent's creator one message
+(request `vibest.report-reminder:<session>:<execution>`), and on activation it checks each session's latest execution.
+
+**Extension places and rules.** An extension is one of three kinds:
+
+| Kind     | How                                                             | Examples                                         |
+| -------- | --------------------------------------------------------------- | ------------------------------------------------ |
+| provider | `transform` adds or changes a definition                        | harness and runtime definitions                  |
+| decider  | `hook`: core asks, waits up to 5 s, and uses the answer         | `agent.start.before` routing, `agent.fail` moves |
+| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `vibest.report-reminder`                         |
+
+1. Only core writes the ledger, through its commands. A plugin changes state only through what the context offers;
+   a plugin send is recorded with the plugin as its sender (`{ type: "plugin", plugin }`), filled in by vibestd, never chosen by the
+   plugin.
+2. An extension holds no authoritative memory. `event.subscribe` is live and best effort (no cursor, no durable
+   delivery, no plugin storage): a reaction covers reloads and restarts by a pass over current state when it activates,
+   and makes its sends idempotent with `request`.
+3. Core asks: a hook. Nobody asks: a reaction.
+4. A builtin gets nothing a user plugin cannot: builtins use the same context.
+5. Engine or policy: if removing an extension would make an accepted command silently do nothing, it is engine and
+   lives in core; otherwise it is policy and may be a plugin.
+
+Core never awaits a plugin reaction while it holds a session lock: reactions run on the Bus after the fact commits, and
+a plugin send goes through the inbox like any other send.
+
 **Where plugins live**: only in the vibest home (`VIBEST_HOME`, by default `~/.vibest`), in `vibest.json` and the
 `plugins/` directory. There is no project tier: a Project directory adds no plugins and no configuration.
 
@@ -838,6 +870,7 @@ user plugins            the plugins directory (sorted by name), then `vibest.jso
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/` or `file://` (absolute, taken as is) or `./` or `../` (resolved from the vibest home)                                                                                                                                                                                             |
 | `{ "package": "…", "options": { … } }` | add a local plugin with options                                                                                                                                                                                                                                                                                                                                      |
+| `"vibest.report-reminder"`             | the id of a shipped opt-in plugin turns it on                                                                                                                                                                                                                                                                                                                        |
 | `"@scope/vibest-plugin-x"`             | any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                                                                                                                                                                                            |
 | `"-check"`                             | remove the plugins added before it whose id matches, builtins included (a builtin only by exact id; `*` and `prefix.*` match user plugins only, `*` also failed ones). Builtins are kept or removed from the config text at every activation, so removing and restoring one needs no restart. Example: `"-vibest.harness-default"` drops the builtin default harness |
 

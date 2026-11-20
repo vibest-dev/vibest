@@ -92,7 +92,14 @@ const story = Effect.gen(function* () {
       const task = yield* emit(Catalog["inbox.queued"], {
         sessionId: SUB,
         at: 301,
-        data: { kind: "task", recipient: SUB, sender: MAIN, content: "fix it", status: "delivered", request: "r-1" },
+        data: {
+          kind: "task",
+          recipient: SUB,
+          sender: { type: "agent", session: MAIN },
+          content: "fix it",
+          status: "delivered",
+          request: "r-1",
+        },
       })
 
       const subProcess = yield* emit(Catalog["process.started"], {
@@ -129,7 +136,14 @@ const story = Effect.gen(function* () {
       const result = yield* emit(Catalog["inbox.queued"], {
         sessionId: MAIN,
         at: 322,
-        data: { kind: "notice", recipient: MAIN, sender: SUB, content: "", status: "pending" },
+        data: {
+          kind: "notice",
+          recipient: MAIN,
+          sender: { type: "vibest" },
+          about: SUB,
+          content: "",
+          status: "pending",
+        },
       })
 
       yield* emit(Catalog["inbox.moved"], { sessionId: MAIN, at: 323, data: { inbox: result, to: "delivering" } })
@@ -189,7 +203,14 @@ const story = Effect.gen(function* () {
       const notice = yield* emit(Catalog["inbox.queued"], {
         sessionId: MAIN,
         at: 530,
-        data: { kind: "notice", recipient: MAIN, content: "remote done", status: "pending", peerItem: ITEM },
+        data: {
+          kind: "notice",
+          recipient: MAIN,
+          sender: { type: "vibest" },
+          content: "remote done",
+          status: "pending",
+          peerItem: ITEM,
+        },
       })
 
       const typed = yield* emit(Catalog["execution.started"], {
@@ -331,7 +352,7 @@ describe("projectors", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
         { endedAt: 700 },
       ])
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox"), [])
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox WHERE acked_at IS NULL"), [])
     }).pipe(Effect.provide(memory())),
   )
 
@@ -510,7 +531,7 @@ describe("projectors", () => {
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
-          `SELECT id, session_id, sender_session_id, kind, content, request, peer_item,
+          `SELECT id, session_id, sender_session_id, about_session_id, kind, content, request, peer_item,
             status, execution_id FROM inbox ORDER BY session_id = '${SUB}' DESC, id`,
         ),
         [
@@ -518,6 +539,7 @@ describe("projectors", () => {
             id: task,
             sessionId: SUB,
             senderSessionId: MAIN,
+            aboutSessionId: null,
             kind: "task",
             content: "fix it",
             request: "r-1",
@@ -528,7 +550,8 @@ describe("projectors", () => {
           {
             id: result,
             sessionId: MAIN,
-            senderSessionId: SUB,
+            senderSessionId: null,
+            aboutSessionId: SUB,
             kind: "notice",
             content: "",
             request: null,
@@ -540,6 +563,7 @@ describe("projectors", () => {
             id: notice,
             sessionId: MAIN,
             senderSessionId: null,
+            aboutSessionId: null,
             kind: "notice",
             content: "remote done",
             request: null,
@@ -560,7 +584,14 @@ describe("projectors", () => {
         .transaction(
           bus.publish(Catalog["inbox.queued"], {
             sessionId: MAIN,
-            data: { kind: "notice", recipient: MAIN, content: "again", status: "pending", peerItem: ITEM },
+            data: {
+              kind: "notice",
+              recipient: MAIN,
+              sender: { type: "vibest" },
+              content: "again",
+              status: "pending",
+              peerItem: ITEM,
+            },
           }),
         )
         .pipe(Effect.exit)
@@ -575,7 +606,7 @@ describe("projectors", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [])
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM peer"), [{ id: PEER, name: "mac2", connectedAt: 170 }])
       const [queued] = yield* sql<{ seq: number }>`SELECT seq FROM event WHERE type = 'outbox.queued' ORDER BY seq DESC`
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM outbox"), [
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM outbox WHERE acked_at IS NULL"), [
         {
           id: ITEM_2,
           seq: queued!.seq,
@@ -589,6 +620,7 @@ describe("projectors", () => {
           fromTitle: null,
           fromMachine: null,
           createdAt: 511,
+          ackedAt: null,
         },
       ])
       yield* bus.transaction(
@@ -740,7 +772,7 @@ describe("bus", () => {
           })
           yield* bus.publish(Catalog["inbox.queued"], {
             sessionId: MAIN,
-            data: { kind: "send", sender: MAIN, content: "hi", status: "pending" },
+            data: { kind: "send", sender: { type: "agent", session: MAIN }, content: "hi", status: "pending" },
           })
           yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
           yield* bus.publish(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })

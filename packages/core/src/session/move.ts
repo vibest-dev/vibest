@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { exhaustedText, isLimited, stillLimited } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import type { ProcessEndReason } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import type { Subscription } from "@vibest/schema/subscription"
@@ -39,11 +39,13 @@ const limitFailure = (
 ) => {
   const text = rows
     .values()
-    .filter((row) => row.harness === harness && (provider === undefined || row.provider === provider) && isLimited(row))
+    .filter(
+      (row) => row.harness === harness && (provider === undefined || row.provider === provider) && Host.isLimited(row),
+    )
     .map((row) => {
       const who = row.provider === "" ? harness : `${harness}/${row.provider}`
 
-      return `${who}: ${exhaustedText(row.limits)}`
+      return `${who}: ${Host.exhaustedText(row.limits)}`
     })
     .toArray()
     .join("; ")
@@ -131,7 +133,7 @@ export const make = Effect.gen(function* () {
         const mine = recorded.map((a) => (a.provider !== undefined ? `${a.harness}/${a.provider}` : a.harness))
 
         const reported = (yield* subscriptions.list)
-          .filter(isLimited)
+          .filter(Host.isLimited)
           .map((s) => (s.provider !== "" ? `${s.harness}/${s.provider}` : s.harness))
 
         const other =
@@ -204,7 +206,9 @@ export const make = Effect.gen(function* () {
       return attempts().some(
         (a) =>
           a.harness === move.harness &&
-          (a.outcome !== "limited" || a.provider === undefined || (a.provider === provider && stillLimited(a, rows))),
+          (a.outcome !== "limited" ||
+            a.provider === undefined ||
+            (a.provider === provider && Host.stillLimited(a, rows))),
       )
     }
 

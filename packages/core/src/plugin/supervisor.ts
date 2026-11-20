@@ -31,10 +31,21 @@ const removeMatching = (candidates: Array<Candidate>, target: string) => {
   }
 }
 
-export const keptBuiltins = (builtins: ReadonlyArray<Candidate>, operations: ReadonlyArray<Operation>) => {
-  const kept = [...builtins]
+const lastNaming = (candidate: Candidate, operations: ReadonlyArray<Operation>) =>
+  operations.findLast((op) => "id" in candidate.plugin && op.target === candidate.plugin.id)
 
-  for (const op of operations) if (op.type === "remove") removeMatching(kept, op.target)
+const selects = (builtins: ReadonlyArray<Candidate>, op: Operation) =>
+  builtins.some((b) => b.optional && "id" in b.plugin && b.plugin.id === op.target)
+
+export const keptBuiltins = (builtins: ReadonlyArray<Candidate>, operations: ReadonlyArray<Operation>) => {
+  const kept = builtins.flatMap((candidate) => {
+    if (!candidate.optional) return [candidate]
+    const op = lastNaming(candidate, operations)
+
+    return op?.type === "add" ? [{ ...candidate, options: op.options }] : []
+  })
+
+  for (const op of operations) if (op.type === "remove" && !selects(builtins, op)) removeMatching(kept, op.target)
 
   return kept
 }
@@ -44,7 +55,8 @@ export const resolve = Effect.fnUntraced(function* (
   builtins: ReadonlyArray<Candidate> = [],
   note: (sources: ReadonlyArray<string>) => Effect.Effect<void> = () => Effect.void,
 ) {
-  const { operations, watched } = yield* sources.operations
+  const { operations: all, watched } = yield* sources.operations
+  const operations = all.filter((op) => !selects(builtins, op))
   const loading = operations.flatMap((op) => (op.type === "add" ? [op.target] : []))
   yield* note([...loading])
   const candidates: Array<Candidate> = [...builtins]

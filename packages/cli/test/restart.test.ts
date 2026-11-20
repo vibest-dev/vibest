@@ -189,7 +189,7 @@ describe("restart in place", () => {
     const version = "10.20.300-beta.4000+build.5"
 
     const message = detailOf([
-      { kind: "notice", sender: null, from: null, message: noticeEnvelope(continueText(version)) },
+      { kind: "notice", sender: { type: "vibest" }, message: noticeEnvelope(continueText(version)) },
     ])[0]!.message
 
     assert.isTrue(message.startsWith(CONTINUE))
