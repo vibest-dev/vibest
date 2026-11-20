@@ -307,9 +307,10 @@ const make = Effect.gen(function* () {
       })
 
       const only = repositories[0]
+      const child = folders?.length === 1 ? folders[0] : undefined
 
       const sent =
-        folders !== undefined && folders.length > 0
+        folders !== undefined && folders.length > 1
           ? {
               repositories: yield* Effect.forEach(folders, (folder) =>
                 git.remoteUrl(folder.path).pipe(
@@ -318,9 +319,11 @@ const make = Effect.gen(function* () {
                 ),
               ),
             }
-          : folders === undefined && repositories.length === 1 && only !== undefined
-            ? yield* pin(only.path, yield* git.remoteUrl(only.path))
-            : yield* new MachineFailed({ message: "the project has no repository another machine can run in" })
+          : child !== undefined
+            ? yield* pin(child.path, yield* git.remoteUrl(child.path))
+            : folders === undefined && repositories.length === 1 && only !== undefined
+              ? yield* pin(only.path, yield* git.remoteUrl(only.path))
+              : yield* new MachineFailed({ message: "the project has no repository another machine can run in" })
 
       const capabilities = (yield* machines.link(machine)).capabilities
 

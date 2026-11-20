@@ -179,8 +179,9 @@ their case; either gives `NoProject`.
 
 `vibest run --machine <name>` (a session, the entry session included) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
-calling session, which B records as the creator, as `vibest-peer-by`; a project whose folder holds repositories sends
-one such entry per repository folder, with its folder name, read from the folder at each run (not from A's database,
+calling session, which B records as the creator, as `vibest-peer-by`; a project whose folder holds two or more repositories
+sends one such entry per repository folder, with its folder name, and a folder holding one checkout sends that checkout
+as the single-repository request an older B takes; the folder is read at each run (not from A's database,
 so a repository cloned beside a running project is sent). A repository without a remote is refused on A, naming it. A B whose Ping
 does not have the `peerSpawnRepositories` capability is refused on A for a multi-repository project ("<B> runs a
 vibest that does not take a project of several repositories; run vibest update on <B>"), never downgraded to one
