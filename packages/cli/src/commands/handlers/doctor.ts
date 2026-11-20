@@ -12,14 +12,12 @@ import { Commands } from "../commands.ts"
 const MARKS = { ok: "✓", problem: "✗", note: "·" } as const
 
 export const plainHarnessProblem = (harness: string, problem: string) => {
-  if (/sign in/i.test(problem)) return { text: "not signed in", fix: `run ${harness} once to sign in` }
-
   const failed = `${harness} model discovery failed: `
   const discovered = problem.startsWith(failed) ? problem.slice(failed.length) : problem
   const reported = discovered.replace(/^\S+ gave no model list: /, "").replace(/^\S+ did not list its models: /, "")
   const text = reported.startsWith("Error: ") ? reported.slice("Error: ".length) : reported
 
-  return { text: text === "" ? problem : text }
+  return text === "" ? problem : text
 }
 
 export const doctorVerdict = (findings: ReadonlyArray<Finding>) => {
@@ -104,12 +102,9 @@ export default Runtime.handler(Commands.commands.doctor, () =>
                 text: `${row.harness.padEnd(width)}  ${row.models.length} models, default ${row.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
               }
 
-            const plain = plainHarnessProblem(row.harness, row.problem)
-
             return {
               mark: "problem" as const,
-              text: `${row.harness.padEnd(width)}  ${plain.text}`,
-              ...(plain.fix !== undefined && { fix: plain.fix }),
+              text: `${row.harness.padEnd(width)}  ${plainHarnessProblem(row.harness, row.problem)}`,
             }
           })
 
