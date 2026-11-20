@@ -41,7 +41,6 @@ import { limitSeen, Subscriptions } from "../subscriptions/service.ts"
 import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions, notStartedMessage, Pickup } from "./executions.ts"
-import { Starts } from "./starts.ts"
 
 export * as Placement from "./placement.ts"
 
@@ -74,7 +73,6 @@ export const make = Effect.gen(function* () {
   const git = yield* Git.Service
   const vibest = yield* VibestCommand
   const { openFirst, launched } = yield* Executions.Service
-  const starts = yield* Starts.Service
 
   const provided = <A, E>(
     effect: Effect.Effect<
@@ -284,40 +282,31 @@ export const make = Effect.gen(function* () {
   ) {
     const near = input.near !== undefined ? input.near : yield* nearCreator(session, h.id)
     const remote = yield* db.session.startedByPeer(session.id)
+    yield* db.session.startProcess(session.id, startOf(session))
 
-    return yield* starts.gate(
-      session.id,
-      [],
-      Effect.gen(function* () {
-        yield* db.session.startProcess(session.id, startOf(session))
+    if (input.beforeStart !== undefined) yield* input.beforeStart
+    const started = yield* db.session.currentProcessId(session.id)
+    const launch = input.launch(started)
 
-        if (input.beforeStart !== undefined) yield* input.beforeStart
-        const started = yield* db.session.currentProcessId(session.id)
-        const launch = input.launch(started)
+    const opened = yield* h
+      .open({
+        project: input.project,
+        cwd: input.cwd,
+        launch: { ...launch, env: { ...input.env, ...launch.env } },
+        label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
+        ...(near !== undefined && { near }),
+        ...(input.split === true && { split: true }),
+        ...(remote && { remote: true }),
+        ...(target !== undefined && { target }),
+      })
+      .pipe(
+        Effect.onError(() => (input.endedByCaller ? Effect.void : db.session.endProcess(session.id, "launch_failed"))),
+      )
 
-        const opened = yield* h
-          .open({
-            project: input.project,
-            cwd: input.cwd,
-            launch: { ...launch, env: { ...input.env, ...launch.env } },
-            label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
-            ...(near !== undefined && { near }),
-            ...(input.split === true && { split: true }),
-            ...(remote && { remote: true }),
-            ...(target !== undefined && { target }),
-          })
-          .pipe(
-            Effect.onError(() =>
-              input.endedByCaller ? Effect.void : db.session.endProcess(session.id, "launch_failed"),
-            ),
-          )
+    const terminal = addressOf(opened)
+    yield* db.session.placeProcess(session.id, terminal.id)
 
-        const terminal = addressOf(opened)
-        yield* db.session.placeProcess(session.id, terminal.id)
-
-        return terminal
-      }),
-    )
+    return terminal
   }, provided)
 
   const shareRow = (session: SessionRow, splitFrom: string) =>
@@ -419,7 +408,6 @@ export const make = Effect.gen(function* () {
       options: LaunchOptions,
     ) =>
       launchRaw(h, target, session, root, firstPrompt, options).pipe(
-        Effect.catchTag("StartCancelled", () => Effect.void),
         Effect.catchCause((cause) => launchFailed(session, cause)),
       ),
     provided,
@@ -554,7 +542,6 @@ export const node = LayerNode.make({
     Harnesses.node,
     Inbox.node,
     Runtimes.node,
-    Starts.node,
     Subscriptions.node,
     PlatformNode.childProcessSpawner,
     PlatformNode.crypto,

@@ -1,118 +1,81 @@
 import { ProcessEnded, SessionEnded } from "@vibest/schema/event"
-import { Context, Data, Deferred, Effect, Layer, Semaphore, Stream } from "effect"
+import { Context, Effect, Layer, Semaphore, Stream } from "effect"
 
 import { Bus } from "../bus.ts"
 import { Concurrency } from "../concurrency.ts"
+import { archived, type ProcessStart } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as Reactor from "../reactor.ts"
 
 export * as Starts from "./starts.ts"
 
-export class StartCancelled extends Data.TaggedError("StartCancelled")<{ readonly key: string }> {}
-
-interface Waiting {
-  readonly key: string
-  readonly replaces: ReadonlyArray<string>
-  readonly admit: Deferred.Deferred<boolean>
+export interface Waiting {
+  readonly id: string
+  readonly start: ProcessStart
+  readonly launch: Effect.Effect<void>
 }
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const concurrency = yield* Concurrency.Service
   const reactor = yield* Reactor.make
+  const scope = yield* Effect.scope
   const lock = yield* Semaphore.make(1)
-  const starting = new Set<string>()
-  const queue: Array<Waiting> = []
+  const list: Array<Waiting> = []
 
-  const room = (replaces: ReadonlyArray<string>) =>
+  const maxForNew = Effect.map(concurrency.limit, (limit) => (list.length > 0 ? 0 : limit))
+
+  const admit = (id: string, start: ProcessStart) =>
+    lock.withPermits(1)(
+      Effect.flatMap(maxForNew, (max) => (max === 0 ? Effect.succeed(false) : db.session.admitProcess(id, start, max))),
+    )
+
+  const walk = lock.withPermits(1)(
     Effect.gen(function* () {
-      const limit = yield* concurrency.limit
+      while (list.length > 0) {
+        const next = list[0]!
+        const session = yield* db.session.getSession(next.id)
 
-      if (limit === undefined) return true
-      const live = (yield* db.session.liveProcesses()).filter((id) => !replaces.includes(id))
+        if (session === undefined || archived(session)) {
+          list.shift()
+          continue
+        }
 
-      return new Set([...live, ...starting]).size < limit
-    })
-
-  const admitWaiting = lock.withPermits(1)(
-    Effect.gen(function* () {
-      while (queue.length > 0 && (yield* room(queue[0]!.replaces))) {
-        const next = queue.shift()!
-        starting.add(next.key)
-        yield* Deferred.succeed(next.admit, true)
+        if (!(yield* db.session.admitProcess(next.id, next.start, yield* concurrency.limit))) return
+        list.shift()
+        yield* Effect.forkIn(next.launch, scope)
       }
     }),
   )
 
-  const release = (key: string) => Effect.sync(() => starting.delete(key)).pipe(Effect.andThen(admitWaiting))
+  const wait = (waiting: Waiting) =>
+    Effect.sync(() => {
+      if (!list.some((queued) => queued.id === waiting.id)) list.push(waiting)
+    }).pipe(Effect.andThen(walk))
 
-  const enter = (key: string, replaces: ReadonlyArray<string>) =>
-    lock.withPermits(1)(
-      Effect.gen(function* () {
-        if (queue.length === 0 && (yield* room(replaces))) {
-          starting.add(key)
+  const remove = (id: string) =>
+    Effect.sync(() => {
+      const at = list.findIndex((queued) => queued.id === id)
 
-          return undefined
-        }
+      if (at >= 0) list.splice(at, 1)
 
-        const waiting = { key, replaces, admit: yield* Deferred.make<boolean>() }
-        queue.push(waiting)
+      return at >= 0
+    })
 
-        return waiting
-      }),
-    )
-
-  const leave = (waiting: Waiting) =>
-    lock
-      .withPermits(1)(
-        Effect.sync(() => {
-          const at = queue.indexOf(waiting)
-
-          if (at >= 0) queue.splice(at, 1)
-        }),
-      )
-      .pipe(Effect.andThen(release(waiting.key)))
-
-  const gate = <A, E, R>(key: string, replaces: ReadonlyArray<string>, start: Effect.Effect<A, E, R>) =>
-    Effect.uninterruptibleMask((restore) =>
-      Effect.gen(function* () {
-        const waiting = yield* enter(key, replaces)
-
-        if (waiting !== undefined) {
-          const admitted = yield* Effect.interruptible(Deferred.await(waiting.admit)).pipe(
-            Effect.onInterrupt(() => leave(waiting)),
-          )
-
-          if (!admitted) return yield* new StartCancelled({ key })
-        }
-
-        return yield* restore(start).pipe(Effect.ensuring(release(key)))
-      }),
-    )
-
-  const cancel = (key: string) =>
-    lock.withPermits(1)(
-      Effect.gen(function* () {
-        const at = queue.findIndex((waiting) => waiting.key === key)
-
-        if (at < 0) return
-        const [waiting] = queue.splice(at, 1)
-        yield* Deferred.succeed(waiting!.admit, false)
-      }),
-    )
-
-  yield* reactor.on([ProcessEnded, SessionEnded], () => admitWaiting)
+  yield* reactor.on([ProcessEnded, SessionEnded], () => walk)
   yield* concurrency.limits.pipe(
-    Stream.runForEach(() => admitWaiting),
+    Stream.runForEach(() => walk),
     Effect.forkScoped,
   )
 
   return {
-    gate,
-    cancel,
-    waiting: Effect.sync(() => queue.map((waiting) => waiting.key)),
-    isWaiting: (key: string) => Effect.sync(() => queue.some((waiting) => waiting.key === key)),
+    maxForNew,
+    admit,
+    wait,
+    remove,
+    waiting: Effect.sync(() => list.map((queued) => queued.id)),
+    isWaiting: (id: string) => Effect.sync(() => list.some((queued) => queued.id === id)),
   }
 })
 

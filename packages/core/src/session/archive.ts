@@ -91,9 +91,9 @@ export const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       let session = yield* getRow(id)
-      const h = yield* live(session)
+      const h = session.process === null ? undefined : yield* live(session)
       const terminal = terminalOf(session)
-      const seen = yield* agentState(h, terminal)
+      const seen = h === undefined ? ("absent" as const) : yield* agentState(h, terminal)
       const reasons: Array<string> = []
       const working = busyOf(seen)
       const execution = yield* db.session.openExecution(id)
@@ -101,7 +101,7 @@ export const make = Effect.gen(function* () {
       if (working || execution !== undefined) {
         if (options.unlessPending) return undefined
 
-        if (working) {
+        if (working && h !== undefined) {
           const stopped = yield* interruptAgent(h, session, terminal)
           reasons.push(
             stopped
@@ -150,7 +150,7 @@ export const make = Effect.gen(function* () {
       const { already } = yield* sessionLive.stop(id)
 
       if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
-      yield* starts.cancel(id)
+      yield* starts.remove(id)
       const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(release(id))))!
 
       return out

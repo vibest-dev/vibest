@@ -30,7 +30,6 @@ import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 import { runtimeEnv } from "./placement.ts"
-import { Starts } from "./starts.ts"
 
 export * as EntrySession from "./entry.ts"
 
@@ -75,13 +74,6 @@ const make = Effect.gen(function* () {
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
   const processes = yield* Processes.Service
-  const starts = yield* Starts.Service
-
-  const startGate = <A, E, R>(projectId: string, current: SessionRow | undefined, start: Effect.Effect<A, E, R>) =>
-    starts
-      .gate(`entry:${projectId}`, current === undefined ? [] : [current.id], start)
-      .pipe(Effect.catchTag("StartCancelled", (cancelled) => Effect.die(cancelled)))
-
   const layout = yield* Layout
   const vibestCommand = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
@@ -245,7 +237,7 @@ const make = Effect.gen(function* () {
             ),
     )
 
-    const launched = Effect.gen(function* () {
+    return yield* Effect.gen(function* () {
       const command = yield* withHarness(
         Launch.entryCommand({
           harness: chosen,
@@ -254,60 +246,54 @@ const make = Effect.gen(function* () {
           provider: decision.provider ?? null,
           model: decision.model ?? null,
           session: projectLocked.withLock(id)(
-            startGate(
-              id,
-              current,
-              Effect.gen(function* () {
-                yield* notRunning(id, "")
-                const existing = yield* db.session.entryOf(id)
+            Effect.gen(function* () {
+              yield* notRunning(id, "")
+              const existing = yield* db.session.entryOf(id)
 
-                const sessionId =
-                  existing === undefined || fresh
-                    ? yield* db.session.allocateSessionId().pipe(Effect.orDie)
-                    : existing.id
+              const sessionId =
+                existing === undefined || fresh ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
 
-                const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
-                  root,
-                  label: "vibest",
-                  home: layout.home,
-                  focus: input.focus,
-                }).pipe(
-                  Effect.tap((pane) =>
+              const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
+                root,
+                label: "vibest",
+                home: layout.home,
+                focus: input.focus,
+              }).pipe(
+                Effect.tap((pane) =>
+                  Effect.sync(() => {
+                    opened = pane
+                  }),
+                ),
+                Effect.uninterruptible,
+              )
+
+              const claimed = yield* db.session
+                .startEntry(
+                  id,
+                  chosen,
+                  fresh,
+                  { runtime: rt.id, address: pane },
+                  {
+                    provider: decision.provider,
+                    model: decision.model,
+                    routing: { decidedBy: decision.decidedBy, trace: decision.trace },
+                    projectDirectory: root,
+                    agent,
+                    firstInput: firstInputOf(chosen),
+                    ...((existing === undefined || fresh) && { sessionId }),
+                  },
+                )
+                .pipe(
+                  Effect.tap((claimed) =>
                     Effect.sync(() => {
-                      opened = pane
+                      claimedId = claimed.sessionId
                     }),
                   ),
                   Effect.uninterruptible,
                 )
 
-                const claimed = yield* db.session
-                  .startEntry(
-                    id,
-                    chosen,
-                    fresh,
-                    { runtime: rt.id, address: pane },
-                    {
-                      provider: decision.provider,
-                      model: decision.model,
-                      routing: { decidedBy: decision.decidedBy, trace: decision.trace },
-                      projectDirectory: root,
-                      agent,
-                      firstInput: firstInputOf(chosen),
-                      ...((existing === undefined || fresh) && { sessionId }),
-                    },
-                  )
-                  .pipe(
-                    Effect.tap((claimed) =>
-                      Effect.sync(() => {
-                        claimedId = claimed.sessionId
-                      }),
-                    ),
-                    Effect.uninterruptible,
-                  )
-
-                return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
-              }),
-            ),
+              return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
+            }),
           ),
         }),
       ).pipe(
@@ -337,8 +323,6 @@ const make = Effect.gen(function* () {
         ...(routing !== undefined && { routing }),
       }
     }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeLaunched)))
-
-    return yield* launched
   })
 
   const start = Effect.fn("EntrySession.start")(function* (input: {
@@ -412,31 +396,27 @@ const make = Effect.gen(function* () {
             root: directory,
             provider: input.provider ?? null,
             model: input.model ?? null,
-            session: startGate(
-              projectId,
-              yield* db.session.entryOf(projectId),
-              Effect.gen(function* () {
-                const saved = yield* db.session.startEntry(
-                  projectId,
-                  input.harness,
-                  input.fresh,
-                  { runtime: kind, address },
-                  {
-                    provider: input.provider,
-                    model: input.model,
-                    routing: input.routing,
-                    pid: input.pid,
-                    projectDirectory: directory,
-                    agent,
-                    firstInput: firstInputOf(input.harness),
-                  },
-                )
+            session: Effect.gen(function* () {
+              const saved = yield* db.session.startEntry(
+                projectId,
+                input.harness,
+                input.fresh,
+                { runtime: kind, address },
+                {
+                  provider: input.provider,
+                  model: input.model,
+                  routing: input.routing,
+                  pid: input.pid,
+                  projectDirectory: directory,
+                  agent,
+                  firstInput: firstInputOf(input.harness),
+                },
+              )
 
-                claimed = { ...saved, runtime: runtimeEnv(kind, address) }
+              claimed = { ...saved, runtime: runtimeEnv(kind, address) }
 
-                return claimed
-              }),
-            ),
+              return claimed
+            }),
           }),
         ).pipe(
           Effect.catchTag("SystemPromptDirUnsafe", (error) =>
@@ -531,7 +511,6 @@ export const node = LayerNode.make({
     Processes.node,
     Runtimes.node,
     SessionLive.node,
-    Starts.node,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,

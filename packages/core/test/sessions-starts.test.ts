@@ -2,11 +2,13 @@ import { assert, describe } from "@effect/vitest"
 import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
+import { LIVE_PROCESS_COUNT } from "@vibest/core/database/session"
 import { Drain } from "@vibest/core/drain"
 import { Session } from "@vibest/core/session"
 import { EntrySession } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
 import { Effect, Fiber, PubSub, Ref } from "effect"
+import { SqlClient } from "effect/sql"
 
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
@@ -17,9 +19,18 @@ import { entryOfProject, spawnInput, spawnWorking, test } from "./lib/sessions-h
 const limitTo = (rules: ReadonlyArray<{ readonly max: number }> | undefined) =>
   Effect.flatMap(Concurrency.Service, (c) => c.configure(rules))
 
-const live = Effect.flatMap(Db.Service, (db) => db.session.liveProcesses())
+const live = Effect.flatMap(
+  SqlClient.SqlClient,
+  (sql) => sql<{ id: string }>`SELECT session_id AS id FROM process WHERE ended_at IS NULL`,
+).pipe(Effect.map((rows) => rows.map((row) => row.id)))
 
-const placed = (id: string) => Effect.map(live, (ids) => ids.includes(id))
+const placed = (id: string) =>
+  Effect.flatMap(Db.Service, (db) =>
+    Effect.map(
+      db.session.getSession(id),
+      (row) => (row?.process?.placedAt ?? null) !== null && (row?.process?.endedAt ?? null) === null,
+    ),
+  )
 
 const waiting = Effect.flatMap(Starts.Service, (starts) => starts.waiting)
 
@@ -165,27 +176,18 @@ describe("a cap on live harness processes", () => {
   )
 
   test(
-    "reopening an exited entry session waits like any other start",
+    "an entry session opens while the cap is full and counts toward it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sessions = yield* Session.Service
       const repo = yield* makeRepository
-      const entry = (yield* claimEntry(repo, "pane:a")).sessionId
-      yield* herdr.seedAgent("pane:a")
       yield* limitTo([{ max: 1 }])
-      yield* herdr.updateAgent("pane:a", (agent) => ({ ...agent, alive: false }))
-      yield* sessions.check(entry)
-      yield* until(live, (ids) => ids.length === 0)
+      yield* claimEntry(repo, "pane:a")
+      yield* herdr.seedAgent("pane:a")
+      yield* claimEntry(yield* makeRepository, "pane:other")
+      assert.lengthOf(yield* live, 2)
 
-      const other = yield* makeRepository
-      yield* claimEntry(other, "pane:other")
-      yield* until(live, (ids) => ids.length === 1)
-      const reopening = yield* Effect.forkChild(claimEntry(repo, "pane:b"))
-      yield* until(waiting, (keys) => keys.length === 1)
-      assert.lengthOf(yield* live, 1)
-
-      yield* limitTo(undefined)
-      yield* Fiber.join(reopening)
+      const [b] = yield* spawnSome(repo, 1)
+      yield* until(waiting, (keys) => keys.length === 1 && keys[0] === b)
       assert.lengthOf(yield* live, 2)
     }),
     hooked,
@@ -321,5 +323,59 @@ describe("a cap on live harness processes", () => {
       yield* until(db.inbox.pendingInbox(a), (rows) => rows.length === 0)
     }),
     hooked,
+  )
+
+  test(
+    "a waiting run can be interrupted and another archived at once, and vibestd can stop while runs wait",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      yield* limitTo([{ max: 1 }])
+      const [b, c, d] = yield* spawnSome(repo, 3)
+      yield* until(waiting, (keys) => keys.length === 3)
+
+      assert.match((yield* sessions.interrupt(b!)).message, /will not start/)
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(b!))!), "interrupted")
+      yield* sessions.remove(c!)
+      assert.deepStrictEqual(yield* waiting, [d])
+
+      const drain = yield* Drain.Service
+      assert.isTrue(yield* drain.begin)
+      yield* until(drain.accept, (accepted) => accepted)
+    }),
+    hooked,
+  )
+
+  test(
+    "a run still waiting when vibestd restarts ends not_started and its creator is told",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      yield* limitTo([{ max: 1 }])
+      const [b] = yield* spawnSome(repo, 1)
+      yield* until(waiting, (keys) => keys.length === 1 && keys[0] === b)
+
+      yield* restartSessions
+      yield* until(db.session.getSession(b!), (row) => executionStateOf(row!) === "not_started")
+      const notice = yield* db.inbox.latestInbox(b!, "notice")
+      assert.include(JSON.stringify(notice), "did not start: vibestd restarted while it was waiting for a free slot")
+      assert.isNull((yield* db.session.getSession(b!))!.process)
+    }),
+    hooked,
+  )
+
+  test(
+    "the live process count reads the process_live index",
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${LIVE_PROCESS_COUNT}`)
+      assert.isTrue(
+        plan.some((row) => row.detail.includes("process_live")),
+        JSON.stringify(plan),
+      )
+    }),
   )
 })

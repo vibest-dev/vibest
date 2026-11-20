@@ -12,6 +12,7 @@ import {
   exitedAt,
   executionStateOf,
   archived,
+  startOf,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -36,6 +37,7 @@ import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
 import { Sends } from "./sends.ts"
+import { Starts } from "./starts.ts"
 
 export * as Delivery from "./delivery.ts"
 
@@ -54,6 +56,7 @@ export const make = Effect.gen(function* () {
   const { notice, resume, taskInput } = yield* Placement.Service
   const { send, deliverTo, admit } = yield* Sends.Service
   const reactor = yield* Reactor.make
+  const starts = yield* Starts.Service
   const { locked } = locks
   const { undelivered } = inbox
 
@@ -165,6 +168,37 @@ export const make = Effect.gen(function* () {
         ),
       )
 
+  const resumeAdmitted = (id: string) =>
+    Effect.gen(function* () {
+      const session = yield* getRow(id)
+      const admitted = session.process?.id
+      const h = yield* runtimes.route(runtimeOf(session))
+
+      return yield* deliverQueued(h, session, terminalOf(session), (text, onHandover) =>
+        resume(h, session, { text, onHandover }),
+      ).pipe(
+        Effect.ensuring(
+          db.session
+            .getSession(id)
+            .pipe(
+              Effect.flatMap((now) =>
+                now?.process?.id === admitted && (now?.process?.placedAt ?? null) === null
+                  ? db.session.endProcess(id, "launch_failed", admitted)
+                  : Effect.void,
+              ),
+            ),
+        ),
+      )
+    })
+
+  const relaunch = (id: string) =>
+    locked(id)(
+      Effect.gen(function* () {
+        if (archived(yield* getRow(id))) return
+        yield* resumeAdmitted(id)
+      }),
+    ).pipe(Reactor.logFailure(`relaunch ${id}`))
+
   const deliver = Effect.fn("Delivery.deliver")(function* (id: string) {
     const session = yield* getRow(id)
 
@@ -196,7 +230,11 @@ export const make = Effect.gen(function* () {
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
 
-      return yield* deliverQueued(h, session, terminal, (text, onHandover) => resume(h, session, { text, onHandover }))
+      const start = startOf(session)
+
+      if (!(yield* starts.admit(id, start))) return yield* starts.wait({ id, start, launch: relaunch(id) })
+
+      return yield* resumeAdmitted(id)
     }
 
     const fresh = (yield* db.session.getSession(id)) ?? session
@@ -211,7 +249,6 @@ export const make = Effect.gen(function* () {
         Option.exists(
           (e) =>
             Predicate.isTagged(e, "RuntimeUnreachable") ||
-            Predicate.isTagged(e, "StartCancelled") ||
             (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
         ),
       )
@@ -247,6 +284,16 @@ export const make = Effect.gen(function* () {
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
+
+    if (yield* starts.remove(id)) {
+      if (known.process === null) {
+        yield* db.session.endUnstarted(id, "interrupted")
+
+        return { message: `${id} was waiting for a free slot; it will not start` }
+      }
+
+      return { message: `${id} was waiting for a free slot to resume; it stays stopped until it gets another message` }
+    }
 
     return yield* locked(id)(
       Effect.gen(function* () {
@@ -328,6 +375,17 @@ export const make = Effect.gen(function* () {
       `A message to ${label} was not delivered: vibestd stopped while handing it over; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
+  for (const id of yield* db.session.unstartedRuns()) {
+    const session = yield* db.session.getSession(id)
+
+    if (session !== undefined && (yield* db.inbox.untakenTask(id)) !== undefined)
+      yield* db.session.endUnstarted(
+        id,
+        "not_started",
+        `${id} (${session.name}) did not start: vibestd restarted while it was waiting for a free slot; run it again`,
+      )
+  }
+
   for (const id of yield* db.inbox.pendingRecipients()) {
     const session = yield* db.session.getSession(id)
 
@@ -359,5 +417,6 @@ export const node = LayerNode.make({
     SessionLive.node,
     SessionLocks.node,
     Sends.node,
+    Starts.node,
   ],
 })

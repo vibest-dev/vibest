@@ -17,7 +17,15 @@ import { Hex } from "effect/encoding"
 
 import { definitionLaunch } from "../agent-launch.ts"
 import { Agents, unknownAgent } from "../agents.ts"
-import { type NewSession, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
+import {
+  type NewSession,
+  type ProcessStart,
+  type SessionRow,
+  harnessIdOf,
+  runtimeOf,
+  terminalOf,
+  archived,
+} from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import type { PeerStart } from "../database/remote.ts"
 import { Drain } from "../drain.ts"
@@ -35,6 +43,7 @@ import { machinesListing as machines, Runtimes } from "../runtimes.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+import { Starts } from "./starts.ts"
 
 export * as Spawn from "./spawn.ts"
 
@@ -112,6 +121,7 @@ export const make = Effect.gen(function* () {
   const scope = yield* Effect.scope
   const locks = yield* SessionLocks.Service
   const { worktreeOf, launch } = yield* Placement.Service
+  const starts = yield* Starts.Service
   const logged = Reactor.logFailure
 
   const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
@@ -396,9 +406,37 @@ export const make = Effect.gen(function* () {
               lastActive: now,
             }
 
+            const chosen: ProcessStart = {
+              harness: harnessId,
+              ...(provider !== undefined && { provider }),
+              ...(model !== undefined && { model }),
+              routing,
+              runtime: runtimeKind,
+              terminal: "",
+              ...(draft.harnessSessionId !== null && { resume: draft.harnessSessionId }),
+            }
+
+            const started = (go: (row: SessionRow) => Effect.Effect<void, unknown>, onLock: Effect.Effect<void>) =>
+              Effect.suspend(() => {
+                const leave = drain.track(`spawn ${id}`)
+
+                return locks
+                  .withLock(id)(
+                    onLock.pipe(
+                      Effect.andThen(db.session.getSession(id)),
+                      Effect.flatMap((row) => (row === undefined ? Effect.void : go(row))),
+                    ),
+                  )
+                  .pipe(Effect.ensuring(leave), logged(`spawn ${id}`))
+              })
+
             return yield* Effect.uninterruptible(
               Effect.gen(function* () {
+                const launchAgent = (row: SessionRow) =>
+                  launch(rt, target, row, root, task, { splitFrom: input.share, env: input.env, commit: input.commit })
+
                 const inserted = yield* db.session.insertSession(draft, input.projectId, {
+                  max: yield* starts.maxForNew,
                   cwd,
                   task,
                   parentSessionId: input.parentSessionId,
@@ -413,27 +451,18 @@ export const make = Effect.gen(function* () {
                     message: `${input.parentSessionId} has ended and can no longer start sessions`,
                   })
 
+                if (inserted === "waiting") {
+                  yield* Ref.set(handedOver, true)
+                  yield* Ref.set(attachmentsOwned, true)
+                  yield* starts.wait({ id, start: chosen, launch: started(launchAgent, Effect.void) })
+
+                  return { before: undefined, waiting: true }
+                }
+
                 if (inserted !== true) return { before: inserted }
                 yield* Ref.set(handedOver, true)
                 yield* Ref.set(attachmentsOwned, true)
-                const row = (yield* db.session.getSession(id))!
-                const leave = drain.track(`spawn ${id}`)
-                yield* Effect.forkIn(
-                  locks
-                    .withLock(id)(
-                      Deferred.succeed(held, undefined).pipe(
-                        Effect.andThen(
-                          launch(rt, target, row, root, task, {
-                            splitFrom: input.share,
-                            env: input.env,
-                            commit: input.commit,
-                          }),
-                        ),
-                      ),
-                    )
-                    .pipe(Effect.ensuring(leave), logged(`spawn ${id}`)),
-                  scope,
-                )
+                yield* Effect.forkIn(started(launchAgent, Deferred.succeed(held, undefined)), scope)
 
                 return { before: undefined }
               }),
@@ -451,6 +480,8 @@ export const make = Effect.gen(function* () {
                 return yield* admit(shared)
               }),
             )
+
+      if ("waiting" in admitted) return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
 
       if (admitted.before !== undefined) {
         const { before } = admitted
@@ -494,6 +525,7 @@ export const deps = [
   Plugins.node,
   Runtimes.node,
   SessionLocks.node,
+  Starts.node,
   PlatformNode.crypto,
   PlatformNode.fileSystem,
   PlatformNode.layout,
