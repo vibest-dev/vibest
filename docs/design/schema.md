@@ -217,8 +217,9 @@ session, so a row is named by both.
   when it was received from another vibestd), `{type: "plugin", plugin}`, `{type: "vibest"}` (every notice) or
   `{type: "user"}` (a send or task with no session). The row keeps the tag in `sender_type` and each field in its own
   column; a local agent sender has `sender_session_id` set and `sender_machine` null, and `about_session_id` is a
-  notice's `about`; a relay to the
-  nearest living ancestor keeps the sender, so both stay right after the recipient changes.
+  notice's `about`. `sender` is whoever wrote the message: a relay to the nearest living ancestor on this machine passes
+  the message on unchanged and keeps the sender, while one that goes on to another machine writes a new message
+  (prefixed with the incoming address) from the ended recipient's session, which is then its sender there.
 - A `request` repeats nothing: one sender (`sender_key`) queues one row per request, whatever the recipient, so a
   repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The
   unique index `inbox_request` backs it: a second row would fail its transaction.

@@ -173,7 +173,11 @@ describe("sends from sessions", () => {
         const out = yield* db.remote.outboxOf(peer)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
-        assert.deepStrictEqual(out[0]!.from, item.from, "the relay keeps the original sender, not the ended recipient")
+        assert.deepInclude(
+          out[0]!,
+          { sessionId: ended, from: null },
+          "the relay wrote the new message, so it is the sender",
+        )
       }).pipe(memory),
   )
 })

@@ -2776,13 +2776,19 @@
                         {
                           "type": "object",
                           "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "agent"
+                              ]
+                            },
+                            "session": {
+                              "type": "string"
+                            },
                             "agent": {
                               "type": "string"
                             },
                             "title": {
-                              "type": "string"
-                            },
-                            "session": {
                               "type": "string"
                             },
                             "machine": {
@@ -2790,29 +2796,7 @@
                             }
                           },
                           "required": [
-                            "agent",
-                            "title",
-                            "session",
-                            "machine"
-                          ],
-                          "additionalProperties": true
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "agent": {
-                              "type": "string"
-                            },
-                            "title": {
-                              "type": "string"
-                            },
-                            "session": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "agent",
-                            "title",
+                            "type",
                             "session"
                           ],
                           "additionalProperties": true
@@ -2820,38 +2804,52 @@
                         {
                           "type": "object",
                           "properties": {
-                            "address": {
-                              "type": "string"
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "plugin"
+                              ]
+                            },
+                            "plugin": {
+                              "type": "string",
+                              "minLength": 1
                             }
                           },
                           "required": [
-                            "address"
+                            "type",
+                            "plugin"
                           ],
                           "additionalProperties": true
                         },
                         {
                           "type": "object",
                           "properties": {
-                            "plugin": {
-                              "type": "string"
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "vibest"
+                              ]
                             }
                           },
                           "required": [
-                            "plugin"
+                            "type"
                           ],
                           "additionalProperties": true
                         },
                         {
-                          "type": "string",
-                          "enum": [
-                            "vibest"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "user"
-                          ]
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "user"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": true
                         }
                       ]
                     },

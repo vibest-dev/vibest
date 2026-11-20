@@ -216,7 +216,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
-                  from: item.from,
                 })
 
                 return "queued" as const

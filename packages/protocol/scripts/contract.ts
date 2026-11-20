@@ -8,7 +8,7 @@ import { RpcSchema } from "effect/rpc"
 import { ACCESS, CAPABILITIES, VibestRpcs } from "../src/rpc.ts"
 
 const CONTRACT_DIR = path.join(import.meta.dirname, "..", "contract")
-const RPC_JSON = path.join(CONTRACT_DIR, "rpc.json")
+export const RPC_JSON = path.join(CONTRACT_DIR, "rpc.json")
 
 const document = (schema: Schema.Top) => {
   const { schema: root, definitions } = Schema.toJsonSchemaDocument(schema)
@@ -52,7 +52,7 @@ const contract = () => {
   return { protocol: PROTOCOL, capabilities: CAPABILITIES, methods }
 }
 
-const render = () => `${JSON.stringify(contract(), null, 2)}\n`
+export const render = () => `${JSON.stringify(contract(), null, 2)}\n`
 
 if (import.meta.main) {
   fs.mkdirSync(CONTRACT_DIR, { recursive: true })
