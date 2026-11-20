@@ -19,8 +19,9 @@ each terminal with its project and task and shows which session started which.
 
 ## S59. A harness that exits at once
 
-A session's harness in herdr-core starts after the user's shell configuration, and the terminal returns to the user's
-shell when it exits. When it exits before it started working, its creator is told at once, with the last lines of its terminal,
+A session's harness in herdr-core starts after the user's shell configuration, with the vibest that started it still
+first on PATH when that configuration puts another vibest first, and the terminal returns to the user's shell when it
+exits. When it exits before it started working, its creator is told at once, with the last lines of its terminal,
 instead of after the ready timeout.
 
 ## S36. Unwatched execution ends

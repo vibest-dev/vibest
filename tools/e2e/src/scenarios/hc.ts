@@ -575,7 +575,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S59",
     title:
-      "herdr-core runtime: a subagent's harness starts after the user's shell rc; when it exits before it started working, its terminal is back at the login shell and the creator is told at once with the terminal's last lines",
+      "herdr-core runtime: a subagent's harness starts after the user's shell rc, with the vibest that started it still first on PATH when the rc puts another vibest first; when it exits before it started working, its terminal is back at the login shell and the creator is told at once with the terminal's last lines",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -588,7 +588,11 @@ const checks: ReadonlyArray<Check> = [
       await fs.writeFile(path.join(broken, "sessions"), "")
       const zdotdir = path.join(w.root, "hc-exit-zdotdir")
       await fs.mkdir(zdotdir, { recursive: true })
-      await fs.writeFile(path.join(zdotdir, ".zshrc"), "echo vbt-rc-ran\n")
+      const other = path.join(w.root, "hc-exit-other-vibest")
+      const ran = path.join(w.root, "hc-exit-other-vibest-ran")
+      await fs.mkdir(other, { recursive: true })
+      await fs.writeFile(path.join(other, "vibest"), `#!/bin/sh\necho "$@" >> '${ran}'\nexit 1\n`, { mode: 0o755 })
+      await fs.writeFile(path.join(zdotdir, ".zshrc"), `echo vbt-rc-ran\nPATH='${other}':$PATH\n`)
       const zsh = (Bun.env.SHELL ?? "").endsWith("/zsh")
 
       try {
@@ -610,6 +614,42 @@ const checks: ReadonlyArray<Check> = [
               (e) => e.agent === "coordinator",
             ),
           60_000,
+        )
+
+        const pinned = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--runtime",
+                "hc",
+                "--env",
+                `PI_CODING_AGENT_DIR=${piAgentDir}`,
+                "--env",
+                `ZDOTDIR=${zdotdir}`,
+                "--title",
+                "Pinned",
+                "--",
+                ask("pinned"),
+              ],
+              { cwd: repo, timeoutMs: 60_000 },
+            ),
+          ) as { id: string }
+        ).id
+
+        await until(
+          "the subagent's plain vibest send reached its creator",
+          () => model.seen.some((m) => m.includes(pinned) && m.includes("done-pinned")),
+          120_000,
+        ).catch(async (e: Error) => {
+          throw new Error(
+            `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
+          )
+        })
+        expect(
+          !(await fs.exists(ran)),
+          `the vibest the rc put first ran: ${await fs.readFile(ran, "utf8").catch(() => "")}`,
         )
 
         const sub = (
