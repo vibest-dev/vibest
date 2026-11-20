@@ -1,292 +1,93 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { harnessIdOf, exitedAt, executionStateOf, terminalOf } from "@vibest/core/database/db-rows"
+import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin/effect"
-import { Layout } from "@vibest/schema/layout"
-import { Deferred, Effect, Fiber, FileSystem, HashMap, Ref } from "effect"
+import { Effect, HashMap } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
-import { EXECUTIONS, settled, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
+import { until, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import {
-  harnessOf,
-  spawnWorking,
-  sessionWorktree,
-  spawnInput,
-  test,
-  sqlNotices,
-  limited,
-  chooseNext,
-  type FailSeen,
-  entryOfProject,
-} from "./lib/sessions-helpers.ts"
+import { harnessOf, spawnInput, spawnWorking, sqlNotices, test, limited } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Session", () => {
   test(
-    "a usage limit when the first terminal opens moves the session; when the move dies the new worktree is removed",
+    "a usage limit when the first terminal opens fails the launch naming the limit and starts nothing else",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db.Service
-      const fs = yield* FileSystem.FileSystem
       const opening = yield* herdr.hold("open")
       const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
       yield* opening.reached
-      const worktree = yield* sessionWorktree(id)
-      assert.isTrue(yield* fs.exists(worktree))
       yield* opening.release("rate_limit: usage limit reached")
       yield* until(db.session.getSession(id), (row) => row !== undefined && exitedAt(row) !== null)
-      yield* settled
-      assert.isFalse(yield* fs.exists(worktree))
-      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "move died")
-    }),
-    { db: (db) => ({ ...db, session: { ...db.session, limitSource: () => Effect.die(new Error("move died")) } }) },
-  )
-
-  {
-    const defect = { armed: false }
-    test(
-      "a move that dies after it opened the replacement terminal closes that terminal before removing the worktree",
-      Effect.gen(function* () {
-        const herdr = yield* FakeRuntime
-        const db = yield* Db.Service
-        const fs = yield* FileSystem.FileSystem
-        const opening = yield* herdr.hold("open")
-        const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
-        yield* opening.reached
-        const worktree = yield* sessionWorktree(id)
-        const replacing = yield* herdr.hold("open")
-        yield* opening.release("rate_limit: usage limit reached")
-        yield* replacing.reached
-        defect.armed = true
-        yield* replacing.release()
-        yield* until(db.inbox.latestInbox(id, "notice"), (row) => row?.message.includes("move died") === true)
-        yield* settled
-        const replacement = terminalOf((yield* db.session.getSession(id))!)
-        assert.notStrictEqual(replacement.id, "")
-        assert.include(
-          (yield* herdr.callsTo("close")).map((call) => call.terminal),
-          replacement.id,
-        )
-        assert.isFalse(yield* fs.exists(worktree))
-      }),
-      {
-        plugins: [chooseNext],
-        db: (db) => ({
-          ...db,
-          session: {
-            ...db.session,
-            getSession: (id) => {
-              if (!defect.armed) return db.session.getSession(id)
-              defect.armed = false
-
-              return Effect.die(new Error("move died"))
-            },
-          },
-        }),
-      },
-    )
-  }
-
-  {
-    const gate = { armed: false, reached: Deferred.makeUnsafe<void>(), go: Deferred.makeUnsafe<void>() }
-    test(
-      "a move that dies after another session joined its worktree with --share keeps the worktree for that session",
-      Effect.gen(function* () {
-        const herdr = yield* FakeRuntime
-        const db = yield* Db.Service
-        const fs = yield* FileSystem.FileSystem
-        const sessions = yield* Session.Service
-        const repo = yield* makeRepository
-        const opening = yield* herdr.hold("open")
-        const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-        yield* opening.reached
-        const worktree = yield* sessionWorktree(id)
-        const replacing = yield* herdr.hold("open")
-        yield* opening.release("rate_limit: usage limit reached")
-        yield* replacing.reached
-        gate.armed = true
-        yield* replacing.release()
-        yield* Deferred.await(gate.reached)
-        const borrower = yield* sessions.spawn({ ...(yield* spawnInput(repo)), share: id })
-        yield* until(
-          db.session.getSession(borrower.id),
-          (row) => row !== undefined && (row.process?.placedAt ?? null) !== null,
-        )
-        assert.strictEqual(yield* sessionWorktree(borrower.id), worktree)
-        yield* Deferred.succeed(gate.go, undefined)
-        yield* until(db.inbox.latestInbox(id, "notice"), (row) => row?.message.includes("move died") === true)
-        yield* settled
-        assert.isTrue(yield* fs.exists(worktree))
-        assert.isNull(exitedAt((yield* db.session.getSession(borrower.id))!))
-      }),
-      {
-        plugins: [chooseNext],
-        db: (db) => ({
-          ...db,
-          session: {
-            ...db.session,
-            getSession: (id) => {
-              if (!gate.armed) return db.session.getSession(id)
-              gate.armed = false
-
-              return Deferred.succeed(gate.reached, undefined).pipe(
-                Effect.andThen(Deferred.await(gate.go)),
-                Effect.andThen(Effect.die(new Error("move died"))),
-              )
-            },
-          },
-        }),
-      },
-    )
-  }
-
-  test(
-    "a usage-limit failure of a running session reports the limit and starts nothing else",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* (yield* Subscriptions.Service).report({
-        harness: "pi",
-        limits: [{ window: "5h", percent: 100, status: "limited", resetTime }],
-      })
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* sessions.check(id)
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(harnessIdOf(row), "pi")
-      assert.strictEqual(executionStateOf(row), "failed")
       assert.include(
         (yield* db.inbox.latestInbox(id, "notice"))!.message,
-        `pi: 5h limit exhausted, resets ${new Date(resetTime).toISOString()}`,
+        "failed to start pi: rate_limit: usage limit reached (no reset time reported)",
       )
+      assert.lengthOf(yield* herdr.callsTo("open"), 1)
+
+      const ended = yield* (yield* SqlClient.SqlClient)<{ data: string }>`SELECT data FROM event
+        WHERE aggregate = ${id} AND type = 'execution.ended'`.pipe(Effect.orDie)
+
       assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
+        ended.map((e) => {
+          const { outcome, failure } = JSON.parse(e.data)
+
+          return { outcome, failure }
+        }),
+        [{ outcome: "failed", failure: { message: "rate_limit: usage limit reached", kind: "limit" } }],
       )
     }),
   )
 
   test(
-    "a usage-limit move onto a harness that takes its first message in its launch argv starts it with the task in the argv and types nothing; its report accepts that execution",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const typed = (yield* herdr.callsTo("send")).filter((call) => call.text !== undefined).length
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      const moving = yield* Effect.forkChild(sessions.check(id))
-      yield* until(herdr.callsTo("run"), (calls) => calls.length === 1)
-      const [run] = yield* herdr.callsTo("run")
-      assert.strictEqual(run!.argv[0], "first")
-      assert.strictEqual(run!.argv.at(-2), "--first")
-      assert.include(run!.argv.at(-1)!, "do it")
-      const execution = yield* until(db.session.openExecution(id), (open) => open !== undefined)
-      yield* (yield* Integration.Service).prompt(
-        { id, entry: false, harness: FIRST_IN_ARGV.id },
-        JSON.stringify({ hook_event_name: "afterAgentThought" }),
-      )
-      yield* TestClock.adjust("1 second")
-      yield* Fiber.join(moving)
-      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "first")
-      assert.isTrue(yield* db.session.executionAccepted(id))
-      assert.strictEqual(yield* db.session.openExecution(id), execution)
-      assert.strictEqual((yield* herdr.callsTo("send")).filter((call) => call.text !== undefined).length, typed)
-    }),
-    { plugins: [chooseNext], harnesses: [PI, FIRST_IN_ARGV] },
-  )
-
-  test(
-    "a usage-limit move writes the system prompt again: memory written since the first start is in it",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const herdr = yield* FakeRuntime
-      const layout = yield* Layout
-      const repo = yield* makeRepository
-      const { id, sessions, db } = yield* spawnWorking(repo)
-      assert.notInclude(yield* fs.readFileString(yield* systemPromptFile(id)), "learned before the move")
-      const memory = `${layout.project(String((yield* db.session.getSession(id))!.projectId))}/memories`
-      yield* fs.makeDirectory(memory, { recursive: true })
-      yield* fs.writeFileString(`${memory}/moved.md`, "learned before the move")
-      yield* fs.writeFileString(yield* systemPromptFile(id), "stale text")
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* sessions.check(id)
-      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "claude")
-      const [run] = yield* herdr.callsTo("run")
-      assert.include(run!.argv, yield* systemPromptFile(id))
-      const prompt = yield* fs.readFileString(yield* systemPromptFile(id))
-      assert.include(prompt, "learned before the move")
-      assert.notInclude(prompt, "stale text")
-    }),
-    { plugins: [chooseNext] },
-  )
-
-  test(
-    "a execution-end rate limit moves the subagent to another harness: the limited execution keeps the task, a new execution carries the result",
+    "a usage limit at execution end fails the execution with its reset time, tells the creator once and leaves the agent running",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const project = (yield* db.session.getSession(id))!.projectId
+      const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
+      const { id, row: started, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
+      const pane = (yield* herdr.agent(id))!.terminal
+      yield* (yield* Subscriptions.Service).report({
+        harness: "cursor",
+        limits: [{ window: "5h", percent: 100, status: "limited", resetTime }],
+      })
       yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* sessions.check(id)
-      const moved = (yield* db.session.getSession(id))!
-      assert.strictEqual(harnessIdOf(moved), "claude")
-      assert.strictEqual(executionStateOf(moved), "open")
-      assert.deepStrictEqual(yield* entryPending(db, project), [])
-      assert.strictEqual((yield* db.session.sessionBriefs([id])).get(id)?.task, "do it")
-      assert.strictEqual((yield* herdr.callsTo("open")).at(-1)!.cwd, yield* sessionWorktree(id))
-      assert.lengthOf(yield* herdr.callsTo("close"), 1)
-      assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
-
-      const executions = () =>
-        sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
-        FROM ${sql.literal(EXECUTIONS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
-
-      const moved2 = yield* executions()
-      assert.deepStrictEqual(
-        moved2.map((row) => [row.status, row.inbox === row.task]),
-        [
-          ["failed", true],
-          ["working", false],
-        ],
+      yield* (yield* Integration.Service).executionEnd(
+        { id, entry: false, harness: "cursor", process: started.process?.id },
+        JSON.stringify({ hook_event_name: "afterAgentResponse", text: "", error: "rate_limit" }),
       )
-      yield* writeEnd(id, "pi", { error: "rate_limit", text: "status: completed\nsummary: stale" })
       yield* sessions.check(id)
-      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "claude")
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
+      const row = (yield* db.session.getSession(id))!
+      assert.strictEqual(harnessIdOf(row), "cursor")
+      assert.strictEqual(executionStateOf(row), "failed")
+      assert.isNull(exitedAt(row))
+      assert.isTrue(HashMap.has(yield* herdr.panes, pane))
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi", "claude"],
+        ["cursor"],
       )
 
-      yield* herdr.endExecution(id)
+      const ended = yield* sql<{ data: string }>`SELECT data FROM event
+        WHERE aggregate = ${id} AND type = 'execution.ended'`.pipe(Effect.orDie)
 
-      yield* writeEnd(id, "claude", { last_assistant_message: "status: completed\nsummary: moved" })
-      yield* sessions.check(id)
       assert.deepStrictEqual(
-        (yield* executions()).map((row) => row.status),
-        ["failed", "completed"],
+        ended.map((e) => JSON.parse(e.data).failure),
+        [{ message: "rate_limit", kind: "limit", resetAt: resetTime }],
       )
-
-      const [reply] = yield* sql<{
-        reply: string | null
-      }>`SELECT reply FROM execution WHERE session_id = ${id} AND outcome = 'completed'`.pipe(Effect.orDie)
-
-      assert.include(reply!.reply, "moved")
-      assert.notInclude(reply!.reply, "stale")
+      const notices = yield* sqlNotices(id)
+      assert.lengthOf(notices, 1)
+      assert.include(notices[0]!, "5h")
+      assert.include(
+        notices[0]!,
+        `(cursor) hit a usage limit: rate_limit (5h exhausted; resets ${new Date(resetTime).toISOString()})`,
+      )
     }),
-    { noRun: true, plugins: [chooseNext] },
   )
 
   test(
@@ -315,7 +116,7 @@ describe.concurrent("Session", () => {
           assert.strictEqual(executionStateOf(row), "failed")
           const result = yield* db.inbox.latestInbox(id, "notice")
           assert.include(result!.message, error)
-          assert.notInclude(result!.message, "no harness left")
+          assert.notInclude(result!.message, "usage limit:")
         })
 
       yield* fail(aborted.id, aborted.sessions, aborted.db, "aborted")
@@ -333,322 +134,5 @@ describe.concurrent("Session", () => {
         ["pi", "pi", "pi"],
       )
     }),
-  )
-
-  test(
-    "a failed pane close does not start a second agent",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const pane = (yield* herdr.agent(id))!.terminal
-      const held = yield* herdr.hold("close")
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* TestClock.adjust("2 seconds")
-      yield* herdr.endExecution(id)
-      const checking = yield* Effect.forkChild(sessions.check(id))
-      yield* held.reached
-      yield* held.release("failed")
-      yield* Fiber.join(checking)
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
-      )
-      assert.lengthOf(yield* herdr.callsTo("send"), 0)
-      const agent = (yield* herdr.agent(id))!
-      assert.strictEqual(harnessOf((yield* herdr.callsTo("open")).at(-1)!.argv), "pi")
-      assert.strictEqual(agent.terminal, pane)
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(harnessIdOf(row), "pi")
-      assert.strictEqual(executionStateOf(row), "failed")
-      assert.isNull(exitedAt(row))
-      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "closing its terminal failed")
-    }),
-    { noRun: true, plugins: [chooseNext] },
-  )
-
-  test(
-    "a start failure after a limit tries the next harness and is not remembered, so the next limit can use that harness",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      const held = yield* herdr.hold("open", id)
-      const checking = yield* Effect.forkChild(sessions.check(id))
-      yield* held.reached
-      yield* held.release("failed to start claude")
-      yield* Fiber.join(checking)
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(harnessIdOf(row), "cursor")
-      assert.strictEqual(executionStateOf(row), "open")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi", "claude", "cursor"],
-      )
-      assert.include((yield* herdr.callsTo("open")).at(-1)!.argv.at(-1), "do it")
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "cursor", { error: "rate_limit" })
-      yield* sessions.check(id)
-      const again = (yield* db.session.getSession(id))!
-      assert.strictEqual(harnessIdOf(again), "claude")
-      assert.strictEqual(executionStateOf(again), "open")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi", "claude", "cursor", "claude"],
-      )
-    }),
-    { noRun: true, plugins: [chooseNext] },
-  )
-
-  const failSeen: FailSeen = []
-  test(
-    "an unusable harness is never offered; the give-up names only real limits",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const { id, sessions, db } = yield* spawnWorking(repo)
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* sessions.check(id)
-      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "cursor")
-      assert.deepStrictEqual(failSeen, [{ parent: yield* entryOfProject(repo), attempts: [["pi", "limited"]] }])
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "cursor", { error: "rate_limit" })
-      yield* sessions.check(id)
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(executionStateOf(row), "failed")
-      assert.isNull(exitedAt(row))
-      const message = (yield* db.inbox.latestInbox(id, "notice"))!.message
-      assert.include(message, "cursor: rate_limit")
-      assert.strictEqual(message.includes("claude"), false)
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi", "cursor"],
-      )
-    }),
-    {
-      noRun: true,
-      unusable: ["claude"],
-      plugins: [
-        chooseNext,
-        Plugin.define({
-          id: "see-again",
-          effect: (ctx) =>
-            ctx.agent.hook("fail", (e) =>
-              Effect.sync(() => {
-                failSeen.push({ parent: e.parentSessionId, attempts: e.attempts.map((a) => [a.harness, a.outcome]) })
-              }),
-            ),
-        }),
-      ],
-    },
-  )
-
-  test(
-    "a plugin that repeats a tried harness ends with no harness left",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Session.Service).check(id)
-      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "pi")
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
-      )
-      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "no harness left")
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-    }),
-    {
-      plugins: [
-        Plugin.define({
-          id: "stuck",
-          effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi" }))),
-        }),
-      ],
-    },
-  )
-
-  test(
-    "a refused move target is named as tried and not started",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Session.Service).check(id)
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(harnessIdOf(row), "pi")
-      assert.strictEqual(executionStateOf(row), "failed")
-      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "claude tried and did not start")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
-      )
-    }),
-    {
-      plugins: [
-        Plugin.define({
-          id: "refuse-claude",
-          effect: (ctx) =>
-            Effect.gen(function* () {
-              yield* ctx.agent.hook("start.before", (event) =>
-                event.harness === "claude" ? Effect.fail(new PluginRefused({ reason: "no claude" })) : Effect.void,
-              )
-              yield* ctx.agent.hook("fail", (event) =>
-                Effect.sync(() => {
-                  if (!event.attempts.some((attempt) => attempt.harness === "claude"))
-                    event.move = { harness: "claude" }
-                }),
-              )
-            }),
-        }),
-      ],
-    },
-  )
-
-  test(
-    "a plugin that returns no move keeps the still-running agent listed with one failed result",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sql = yield* SqlClient.SqlClient
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const pane = (yield* herdr.agent(id))!.terminal
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Session.Service).check(id)
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(executionStateOf(row), "failed")
-      assert.isNull(exitedAt(row))
-      assert.include(
-        (yield* db.session.listSessions()).map((s) => s.id),
-        id,
-      )
-      assert.isTrue(HashMap.has(yield* herdr.panes, pane))
-      assert.strictEqual(harnessOf((yield* herdr.callsTo("open"))[0]!.argv), "pi")
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "pi: rate_limit")
-
-      const results = yield* sql<{
-        n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
-
-      assert.strictEqual(results[0]!.n, 1)
-      assert.lengthOf(yield* sqlNotices(id), 1)
-    }),
-    {
-      plugins: [
-        Plugin.define({
-          id: "end-now",
-          effect: (ctx) => ctx.agent.hook("fail", () => Effect.void),
-        }),
-      ],
-    },
-  )
-
-  test(
-    "a move that dies on the last harness closes the new pane and stops that agent",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const original = (yield* herdr.agent(id))!.terminal
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* Ref.set(herdr.skipPromptUpdates, 1)
-      const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
-      yield* untilVirtual(herdr.callsTo("close"), (calls) => calls.length === 2, "1 second")
-      yield* Fiber.join(checking)
-      const closes = (yield* herdr.callsTo("close")).map((call) => call.terminal)
-      assert.deepStrictEqual(closes[0], original)
-      assert.lengthOf(closes, 2)
-      assert.isFalse(HashMap.has(yield* herdr.panes, closes[1]!))
-      assert.isFalse((yield* herdr.agent(id))!.agent.alive)
-      assert.include((yield* db.inbox.latestInbox(id, "notice"))!.message, "rate_limit")
-      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
-      assert.lengthOf(yield* sqlNotices(id), 1)
-    }),
-    {
-      noRun: true,
-      plugins: [
-        Plugin.define({
-          id: "once",
-          effect: (ctx) => {
-            let first = true
-
-            return ctx.agent.hook("fail", (event) =>
-              Effect.sync(() => {
-                if (first) event.move = { harness: "claude" }
-                first = false
-              }),
-            )
-          },
-        }),
-      ],
-    },
-  )
-
-  test(
-    "a give-up whose pane will not close fails the execution once and leaves that pane",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sql = yield* SqlClient.SqlClient
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const original = (yield* herdr.agent(id))!.terminal
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      const closing = yield* herdr.hold("close")
-      yield* Ref.set(herdr.skipPromptUpdates, 1)
-      const checking = yield* Effect.forkChild((yield* Session.Service).check(id))
-      yield* closing.reached
-      yield* closing.release()
-      const closingAgain = yield* herdr.hold("close")
-      yield* untilVirtual(herdr.callsTo("close"), (calls) => calls.length === 2, "1 second")
-      yield* closingAgain.reached
-      yield* closingAgain.release("failed")
-      yield* Fiber.join(checking)
-      const closes = (yield* herdr.callsTo("close")).map((call) => call.terminal)
-      assert.strictEqual(closes[0], original)
-      assert.lengthOf(closes, 2)
-      const kept = closes[1]!
-      assert.isTrue(HashMap.has(yield* herdr.panes, kept))
-      assert.isFalse(HashMap.has(yield* herdr.panes, original))
-      const agent = (yield* herdr.agent(id))!
-      assert.strictEqual(harnessOf((yield* herdr.callsTo("open")).at(-1)!.argv), "claude")
-      assert.strictEqual(agent.terminal, kept)
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(harnessIdOf(row), "claude")
-      assert.strictEqual(executionStateOf(row), "failed")
-      assert.isNull(exitedAt(row))
-      const message = (yield* db.inbox.latestInbox(id, "notice"))!.message
-      assert.include(message, "closing its terminal failed")
-      assert.notInclude(message, "no harness left")
-
-      const results = yield* sql<{
-        n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
-
-      assert.strictEqual(results[0]!.n, 1)
-      assert.lengthOf(yield* sqlNotices(id), 1)
-    }),
-    {
-      noRun: true,
-      plugins: [
-        Plugin.define({
-          id: "close-fails",
-          effect: (ctx) => {
-            let first = true
-
-            return ctx.agent.hook("fail", (event) =>
-              Effect.sync(() => {
-                if (first) event.move = { harness: "claude" }
-                first = false
-              }),
-            )
-          },
-        }),
-      ],
-    },
   )
 })

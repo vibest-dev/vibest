@@ -114,7 +114,7 @@ const IDENTITY_ENV = [
   "VIBEST_HARNESS",
   "VIBEST_RUNTIME",
   "VIBEST_HOME",
-  "VIBEST_COMMAND",
+  "VIBEST_CLI",
 ] as const
 
 const identityPairs = (env: Readonly<Record<string, string>>) =>

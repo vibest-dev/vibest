@@ -2,10 +2,22 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel, reply, sseHeaders, text, toolCall, type Message } from "../fake-model.ts"
-import { alive, expect, expectReplied, expectFacts, row, until, type World } from "../world.ts"
+import {
+  ask,
+  entryRunMessage,
+  heldModel,
+  nextEntryRun,
+  piDir,
+  reply,
+  sseHeaders,
+  text,
+  toolCall,
+  type Message,
+} from "../fake-model.ts"
+import { alive, expect, row, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
+import { dropHerdrSession } from "./inbox.ts"
 
 type ListedGit = {
   branch: string
@@ -326,7 +338,7 @@ const checks: ReadonlyArray<Check> = [
 
         const waiting = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE (sender_session_id = ?1 OR session_id = ?1) AND status IN ('pending', 'delivering')",
+          "SELECT count(*) AS n FROM inbox WHERE ?1 IN (sender_session_id, about_session_id, session_id) AND status IN ('pending', 'delivering')",
           auto,
         )
 
@@ -439,53 +451,81 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S9",
     title:
-      "with VIBEST_MAX_SESSIONS=2 in vibestd, the entry session is not counted: two subagents start, the third vibest run fails LimitReached naming the limit, and starts once one is archived",
+      "with concurrency [{ max: 2 }] in vibest.json and the entry session running, two subagents given tasks in one entry execution: both vibest run calls return at once, the first starts and the second waits to start with no terminal (vibest ls shows waitingToStart with its harness and runtime) even after the first has replied, and starts once the first is archived; doctor reports the limit and a filtered rule as not supported",
     run: async (w) => {
       const p = await piProject(w, "s9")
+      const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
+
+      const subagent = (task: string) =>
+        [
+          '"$VIBEST_CLI"',
+          "run",
+          "pi",
+          "--session",
+          `${w.herdrSession}-s9`,
+          "--env",
+          `PI_CODING_AGENT_DIR=${w.root}/pi-s9`,
+          "--",
+          ask(task),
+        ]
+          .map((word, i) => (i === 0 ? word : quote(word)))
+          .join(" ")
 
       try {
+        await fs.writeFile(
+          path.join(w.vibestHome, "vibest.json"),
+          JSON.stringify({ concurrency: [{ max: 2 }, { agent: "general", max: 5 }] }),
+        )
+        let doctor = ""
+        await until(
+          "vibest doctor to report the limit",
+          async () =>
+            (doctor = (await w.vibest(["doctor"], { cwd: p.repo, env: p.env })).stdout).includes(
+              "at most 2 live harness processes on this machine",
+            ),
+          30_000,
+        )
+        expect(doctor.includes("rules with harness or agent are not supported yet"), `doctor: ${doctor}`)
+
+        const entry = await w.entryOf(p.repo)
+        const run = nextEntryRun()
+        const out = path.join(w.root, `entry-run-${run}`)
+        const both = `${subagent("one")} && ${subagent("two")}`
+        const command = `{ ${both}; } > ${quote(out)} 2>&1; echo $? > ${quote(`${out}.tmp`)} && mv ${quote(`${out}.tmp`)} ${quote(`${out}.exit`)}`
+        await w.ok(["send", entry!, "--", entryRunMessage(run, command)], { cwd: p.repo, env: p.env })
+        await until("the entry session to run both subagents", () => exists(`${out}.exit`), 180_000)
+        const started = await fs.readFile(out, "utf8")
+        expect((await fs.readFile(`${out}.exit`, "utf8")).trim() === "0", `the runs: ${started}`)
+        const [one, two] = [...started.matchAll(/"id":\s*"([0-9a-f-]{36})"/g)].map((m) => m[1]!)
+        expect(one !== undefined && two !== undefined, `two runs: ${started}`)
+
+        const listed = async () => (await ls(w, p)) as Array<Listed & { waitingToStart?: true; runtime: string }>
+        const rowOf = async (id: string) => (await listed()).find((r) => r.id === id)
+        await until("the first subagent to work", () => p.model.asked("one") === 1, 90_000)
+        await until(
+          "the second subagent to wait to start",
+          async () => (await rowOf(two!))?.waitingToStart === true,
+          30_000,
+        )
+        const waiting = (await rowOf(two!))!
+        expect(waiting.address.id === "", `the waiting subagent already has a terminal: ${JSON.stringify(waiting)}`)
+        expect(
+          waiting.harness === "pi" && waiting.runtime !== "",
+          `the waiting subagent does not show its launch choice: ${JSON.stringify(waiting)}`,
+        )
+        expect((await rowOf(one!))?.waitingToStart === undefined, "the running subagent is listed as waiting")
+
+        p.model.releaseOne()
+        await answered(w, p, one!, "one")
+        await Bun.sleep(3_000)
+        expect((await rowOf(two!))?.waitingToStart === true, "the second subagent started while the first still ran")
+        expect(p.model.asked("two") === 0, "the second subagent's task reached the model while the first still ran")
+
+        await w.ok(["archive", one!], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+        await until("the second subagent to work", () => p.model.asked("two") === 1, 90_000)
+        expect((await rowOf(two!))?.waitingToStart === undefined, "the second subagent is still listed as waiting")
         p.model.release()
-        Object.assign(p.env, { VIBEST_MAX_SESSIONS: "2" })
-        await w.stopDaemon()
-        await p.startDaemon()
-        const first = await p.runSub("one")
-        await p.runSub("two")
-
-        const third = await w.viaEntry(
-          [
-            "run",
-            "pi",
-            "--session",
-            `${w.herdrSession}-s9`,
-            "--env",
-            `PI_CODING_AGENT_DIR=${w.root}/pi-s9`,
-            "--",
-            ask("three"),
-          ],
-          { cwd: p.repo, env: p.env, timeoutMs: 90_000 },
-        )
-
-        const said = `${third.stdout}${third.stderr}`
-        expect(
-          third.code !== 0 && said.includes("LimitReached") && said.includes("VIBEST_MAX_SESSIONS=2"),
-          `third run exited ${third.code}: ${said}`,
-        )
-        await archive(w, p, first)
-        expectFacts(w, first, ["session.created", "session.ended", "process.ended"])
-
-        const archived = row<{ ended: number | null; reason: string | null }>(
-          w,
-          "SELECT s.ended_at AS ended, p.end_reason AS reason FROM session s JOIN process p ON p.session_id = s.id WHERE s.id = ?",
-          first,
-        )
-
-        expect(
-          archived?.ended != null && archived.reason === "archived",
-          `the archived session: ${JSON.stringify(archived)}`,
-        )
-        const three = await p.runSub("three")
-        await answered(w, p, three, "three")
-        await expectReplied(w, three)
+        await answered(w, p, two!, "two")
       } finally {
         await p.close()
       }
@@ -625,6 +665,242 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         await fs.rm(path.join(w.vibestHome, "plugins", "see-files.ts"), { force: true })
         model.stop()
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S58",
+    title:
+      "vibest worktree list shows each worktree vibest made, grouped by project: a live session's worktree with that session live, an archived session's dirty worktree with the changed-file count and that session archived, a clean worktree kept with --keep-worktree, commits on no branch as unsaved, and each repository of a project of several repositories",
+    run: async (w) => {
+      const p = await piProject(w, "s58")
+      const multi = `${w.herdrSession}-s58m`
+
+      type Repo = { folder: string; branch?: string; commit?: string; state: string; changed?: number }
+
+      type Tree = {
+        path: string
+        repositories: Array<Repo>
+        sessions: Array<{ id: string; title: string; state: string }>
+      }
+
+      type Listed = { projects: Array<{ id: string; directory: string; worktrees: Array<Tree> }> }
+
+      const same = async (directory: string, repo: string) =>
+        (await fs.realpath(directory)) === (await fs.realpath(repo))
+
+      const find = (listed: Listed, id: string) => {
+        for (const project of listed.projects) {
+          const worktree = project.worktrees.find((tree) => tree.sessions.some((session) => session.id === id))
+
+          if (worktree !== undefined) return { project, worktree }
+        }
+
+        return undefined
+      }
+
+      try {
+        p.model.release()
+
+        const ready = async (task: string) => {
+          const id = await p.runSub(task, "--title", `s58 ${task}`)
+          await answered(w, p, id, task)
+          await until(`${task} idle`, () => p.idle(id), 30_000)
+          const worktree = (await ls(w, p)).find((entry) => entry.id === id)?.worktree ?? ""
+          expect(worktree !== "", `${task} has no worktree`)
+
+          return { id, worktree }
+        }
+
+        const live = await ready("live")
+        const dirty = await ready("dirty")
+        await fs.writeFile(path.join(dirty.worktree, "notes.txt"), "mine\n")
+        await archive(w, p, dirty.id)
+        const kept = await ready("kept")
+        await archive(w, p, kept.id, "--keep-worktree")
+        const loose = await ready("loose")
+        await git(w, loose.worktree, "commit", "-q", "--allow-empty", "-m", "loose")
+        await archive(w, p, loose.id)
+
+        const root = path.join(w.root, "s58-multi")
+        const work = path.join(root, "work")
+        await fs.mkdir(work, { recursive: true })
+
+        for (const name of ["a", "b"]) {
+          const dir = path.join(root, name)
+          await fs.mkdir(dir)
+          await fs.writeFile(path.join(dir, "f"), "x\n")
+
+          for (const argv of [
+            ["git", "init", "-q", "-b", "main"],
+            ["git", "add", "f"],
+            ["git", "commit", "-q", "-m", "f"],
+          ]) {
+            const ran = await w.run(dir, argv)
+            expect(ran.code === 0, `${name} ${argv.join(" ")}: ${ran.stderr}`)
+          }
+        }
+
+        const combo = path.join(work, "combo")
+        await w.json(["project", "create", combo, "--from", path.join(root, "a"), "--from", path.join(root, "b")], {
+          cwd: work,
+        })
+        const pi = await piDir(w, "pi-s58m", p.model.url)
+        await w.entry({ cwd: combo, session: multi })
+
+        const both = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--session",
+                multi,
+                "--env",
+                `PI_CODING_AGENT_DIR=${pi}`,
+                "--title",
+                "s58 both",
+                "--",
+                ask("both"),
+              ],
+              { cwd: combo, timeoutMs: 90_000 },
+            ),
+          ) as { id: string }
+        ).id
+
+        await until(
+          "both done",
+          async () =>
+            (
+              (await w.json<{ reply: { text: string | null } | null }>(["result", both], { cwd: combo })).reply?.text ??
+              ""
+            ).includes("done-both"),
+          90_000,
+        )
+
+        const bucket = path.dirname(live.worktree)
+        await fs.writeFile(path.join(path.dirname(bucket), ".DS_Store"), "")
+        await fs.writeFile(path.join(bucket, ".DS_Store"), "")
+        await fs.symlink("dead", path.join(bucket, "dead"))
+        const listed = await w.json<Listed>(["worktree", "list"], { cwd: p.repo, env: p.env })
+
+        const expectTree = (id: string, title: string, sessionState: string, repo: (repository: Repo) => boolean) => {
+          const found = find(listed, id)
+          expect(found !== undefined, `${id} is not listed in ${JSON.stringify(listed)}`)
+          const session = found!.worktree.sessions.find((row) => row.id === id)
+          expect(
+            session !== undefined && session.title === title && session.state === sessionState,
+            `${id}: ${JSON.stringify(found)}`,
+          )
+          expect(
+            found!.worktree.repositories.every(repo),
+            `${id} repositories: ${JSON.stringify(found!.worktree.repositories)}`,
+          )
+
+          return found!
+        }
+
+        const detached = (repository: Repo) =>
+          repository.branch === undefined && /^[0-9a-f]{7,}$/.test(repository.commit ?? "")
+
+        const liveTree = expectTree(
+          live.id,
+          "s58 live",
+          "live",
+          (repository) => repository.state === "clean" && detached(repository),
+        )
+
+        expect(
+          (await fs.realpath(liveTree.worktree.path)) === (await fs.realpath(live.worktree)),
+          liveTree.worktree.path,
+        )
+        expect(liveTree.worktree.repositories.length === 1, JSON.stringify(liveTree.worktree.repositories))
+        expect(
+          (await fs.realpath(liveTree.worktree.repositories[0]!.folder)) === (await fs.realpath(live.worktree)),
+          liveTree.worktree.repositories[0]!.folder,
+        )
+
+        const dirtyTree = expectTree(
+          dirty.id,
+          "s58 dirty",
+          "archived",
+          (repository) => repository.state === "dirty" && repository.changed === 1,
+        )
+
+        expect(
+          (await fs.realpath(dirtyTree.worktree.path)) === (await fs.realpath(dirty.worktree)),
+          dirtyTree.worktree.path,
+        )
+        expectTree(
+          kept.id,
+          "s58 kept",
+          "archived",
+          (repository) => repository.state === "clean" && detached(repository),
+        )
+        expectTree(
+          loose.id,
+          "s58 loose",
+          "archived",
+          (repository) => repository.state === "unsaved" && detached(repository),
+        )
+
+        const bothTree = expectTree(
+          both,
+          "s58 both",
+          "live",
+          (repository) => repository.state === "clean" && detached(repository),
+        )
+
+        expect(
+          bothTree.worktree.repositories.map((repository) => path.basename(repository.folder)).join(",") === "a,b",
+          JSON.stringify(bothTree.worktree.repositories),
+        )
+        expect(await same(bothTree.project.directory, combo), bothTree.project.directory)
+        expect(await same(liveTree.project.directory, p.repo), liveTree.project.directory)
+
+        const only = await w.json<Listed>(["worktree", "list", "--project", liveTree.project.id], {
+          cwd: p.repo,
+          env: p.env,
+        })
+
+        expect(
+          only.projects.length === 1 && only.projects[0]!.id === liveTree.project.id,
+          JSON.stringify(only.projects),
+        )
+        expect(!JSON.stringify(only).includes(both), "--project included the other project")
+        const byFolder = await w.json<Listed>(["worktree", "list", "--project", p.repo], { cwd: p.repo, env: p.env })
+        expect(
+          byFolder.projects.length === 1 && byFolder.projects[0]!.id === liveTree.project.id,
+          JSON.stringify(byFolder),
+        )
+
+        const missing = await w.vibest(["worktree", "list", "--project", "no-such-project"], {
+          cwd: p.repo,
+          env: p.env,
+        })
+
+        expect(missing.code !== 0 && missing.stderr.includes("no project"), missing.stderr)
+        const fromAgent = await w.okViaEntry(["worktree", "list"], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+        expect(fromAgent.includes(live.id), "an agent cannot list worktrees")
+
+        const index = await git(w, kept.worktree, "rev-parse", "--path-format=absolute", "--git-path", "index")
+        await fs.rename(index, `${index}.ok`)
+        await fs.writeFile(index, "bad")
+
+        try {
+          const unreadable = await w.json<Listed>(["worktree", "list"], { cwd: p.repo, env: p.env })
+          const keptRepos = find(unreadable, kept.id)?.worktree.repositories ?? []
+          expect(
+            keptRepos.length === 1 && keptRepos[0]!.state === "unknown",
+            `a worktree git cannot read: ${JSON.stringify(keptRepos)}`,
+          )
+          expect(find(unreadable, live.id) !== undefined, "an unreadable worktree hid the others")
+        } finally {
+          await fs.rename(`${index}.ok`, index)
+        }
+      } finally {
+        await dropHerdrSession(w, multi)
         await p.close()
       }
     },

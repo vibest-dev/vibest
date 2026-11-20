@@ -26,10 +26,12 @@ import { SessionLive } from "@vibest/core/session/live"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
+import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
+import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
@@ -41,6 +43,7 @@ import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { SqlClient } from "effect/sql"
 
+import { layer as hostSample } from "./host-sample.ts"
 import { trimLog } from "./log-file.ts"
 import { graph, pluginLoads, packageName, watch } from "./plugin-source.ts"
 
@@ -155,6 +158,7 @@ const provided = new Map<string, ModuleExports>([
   ["effect", effect],
   ["@vibest/plugin", VibestPlugin],
   ["@vibest/plugin/effect", VibestPluginEffect],
+  ["@vibest/plugin/host", VibestPluginHost],
   ["effect/process/ChildProcess", ChildProcess],
   ["effect/process/ChildProcessSpawner", ChildProcessSpawner],
   ...Object.entries(effect).flatMap(([name, value]): ReadonlyArray<readonly [string, ModuleExports]> =>
@@ -394,10 +398,15 @@ export const replacements: LayerNode.Replacements = [
   builtinsNode.replace(
     LayerNode.make({
       name: "vibest/Builtins",
-      layer: Layer.effect(Builtins, pre).pipe(Layer.provide(Layer.effect(ArchiveOnIdle, archiveOnIdle))),
+      layer: Layer.effect(
+        Builtins,
+        Effect.flatMap(Layout, (layout) => pre(layout.home)),
+      ).pipe(Layer.provide(Layer.effect(ArchiveOnIdle, archiveOnIdle))),
       deps: [
         PlatformNode.fileSystem,
         PlatformNode.path,
+        PlatformNode.crypto,
+        PlatformNode.layout,
         PlatformNode.childProcessSpawner,
         Archive.node,
         Db.node,
@@ -429,6 +438,13 @@ export const replacements: LayerNode.Replacements = [
   ),
   Identity.hostFactsNode.replace(
     Layer.succeed(Identity.HostFacts, { name: os.hostname(), id: hostId, pid: process.pid }),
+  ),
+  Load.hostSampleNode.replace(
+    LayerNode.make({
+      service: Load.HostSample,
+      layer: hostSample,
+      deps: [PlatformNode.fileSystem, PlatformNode.childProcessSpawner],
+    }),
   ),
 ]
 

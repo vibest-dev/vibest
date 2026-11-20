@@ -21,6 +21,11 @@ export default Runtime.handler(Commands.commands.run, (o) =>
             message: "this vibestd does not take --runtime on vibest run; run vibest update",
           })
 
+        if (Option.isSome(o.project) && ping.capabilities?.peerSpawnProject !== true)
+          return yield* new LaunchFailed({
+            message: "this vibestd does not take --project on vibest run; run vibest update",
+          })
+
         if (files.length > 0 && ping.capabilities?.spawnFiles !== true)
           return yield* new LaunchFailed({
             message: "this vibestd does not take --file on vibest run; run vibest update",
@@ -48,6 +53,7 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           archive: o.archive || undefined,
           runtime: Option.getOrUndefined(o.runtime),
           machine: Option.getOrUndefined(o.machine),
+          project: Option.getOrUndefined(o.project),
           callerEnv: callerEnvOf(),
           ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
           ...(files.length !== 0 && { files }),

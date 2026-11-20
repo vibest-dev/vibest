@@ -2,6 +2,7 @@ import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
+import { Concurrency } from "@vibest/core/concurrency"
 import {
   Builtins,
   type Candidate,
@@ -33,7 +34,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "../../platform-bun/src/bun.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryBus } from "./platform/bun.ts"
+import { memoryPluginHost } from "./platform/bun.ts"
 
 const events: Array<string> = []
 
@@ -73,7 +74,6 @@ const event = {
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   harnesses: [
     { harness: "pi", available: true },
     { harness: "claude", available: true },
@@ -94,7 +94,7 @@ const host = <A, E>(
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
-    Effect.provide(memoryBus),
+    Effect.provide(memoryPluginHost),
     Effect.provide(Hooks.layer),
   )
 
@@ -377,8 +377,9 @@ const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(memoryBus),
+    Layer.provide(memoryPluginHost),
     Layer.provide(Hooks.layer),
+    Layer.provide(Concurrency.layer),
     Layer.build,
     Effect.map(Context.get(Plugins.Service)),
   )
@@ -706,55 +707,7 @@ describe("plugins: supervisor", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(memoryBus),
-      )
-    }),
-  )
-
-  it.effect("a reload while subscriptions are read keeps the fail hook captured with readiness", () =>
-    Effect.gen(function* () {
-      const entered = yield* Deferred.make<void>()
-      const release = yield* Deferred.make<void>()
-
-      const failing = Plugin.define({
-        id: "a",
-        effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi" }))),
-      })
-
-      yield* makeHost().pipe(
-        Effect.flatMap((h) =>
-          Effect.gen(function* () {
-            yield* h.activate([candidate("a", "1", failing)])
-
-            const moved = yield* Effect.forkChild(
-              h.service.fail({
-                project: "/r",
-                agent: "general",
-                parentSessionId: undefined,
-                harnesses: event.harnesses,
-                attempts: [],
-                sessionId: "s",
-                reason: "limited",
-                error: "limited",
-                input: "p",
-                harness: "claude",
-                provider: undefined,
-              }),
-            )
-
-            yield* Deferred.await(entered)
-            yield* h.activate([])
-            yield* Deferred.succeed(release, undefined)
-            assert.strictEqual((yield* Fiber.join(moved)).move?.harness, "pi")
-          }),
-        ),
-        Effect.scoped,
-        Effect.provide(blockedSubscriptions(entered, release)),
-        Effect.provide(Hooks.layer),
-        Effect.provide(harnessesLayer()),
-        Effect.provide(runtimesLayer),
-        Effect.provide(Agents.layer),
-        Effect.provide(memoryBus),
+        Effect.provide(memoryPluginHost),
       )
     }),
   )

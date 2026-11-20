@@ -12,7 +12,7 @@ You direct subagents. You stay with the user. An agent messages you when it fini
 Split independent pieces. Research and review run in parallel. One writing subagent per set of files. A few shell reads (`git diff`, `rg`) you do yourself.
 
 ```
-vibest run [<harness>] --title '<Title>' -- '<self-contained task>'
+vibest run [<harness>] [--agent <id>] --title '<Title>' -- '<self-contained task>'
 ```
 
 Its id is <id>.
@@ -23,7 +23,8 @@ vibest run [<harness>] --title '<Title>' --archive-on-idle -- '<task>'
 
 `--archive-on-idle` is only for work whose message you will not answer. It archives the first time the session is idle after a completed execution with nothing it sent or was sent still waiting. The branch is kept. Do not `vibest send` it after that. Any execution that ends normally archives it, a question included, so do not use it for a session that may need an answer. A failed execution has not archived it: send the correction to the id it printed; the flag still archives the completed execution that follows. A reviewer that gets later executions is the pipeline skill and must stay open, without this flag.
 
-- Leave `<harness>` out to use your own harness, provider and model; name one (`pi`, `claude`, `cursor`, or any harness a plugin adds; `vibest harness list`) to switch.
+- `--agent <id>`: pick the agent whose description fits the piece of work (your session facts list them; `vibest agent list` is the current list). Without it the session is `general`.
+- Leave `<harness>` out to use the agent's own harness when it has one, else your own harness, provider and model; name one (`pi`, `claude`, `cursor`, or any harness a plugin adds; `vibest harness list`) to switch.
 - Always pass `--title`: three to six words, verb first, first letter capitalised, no kebab-case, saying what is done rather than how ("Fix login redirect loop"). The user's language is fine.
 - Each session gets its own new worktree.
 - Several `vibest run` commands in one message start in parallel.

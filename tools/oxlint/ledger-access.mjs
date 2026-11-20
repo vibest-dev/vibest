@@ -35,12 +35,13 @@ const approvedOperations = (file, operations) => {
 const eventTable = /\b(FROM|JOIN) event\b/
 const position = /\bposition\b/
 const ledgerFiles = ["/packages/core/src/bus.ts", "/packages/core/src/database/db-schema.ts"]
+const migrationFolder = "/packages/core/src/database/migration/"
 
 const eventReads = {
   create(context) {
     const file = normalized(context)
 
-    if (!isSource(file) || ledgerFiles.some((part) => file.endsWith(part))) return {}
+    if (!isSource(file) || ledgerFiles.some((part) => file.endsWith(part)) || file.includes(migrationFolder)) return {}
     const message = "Only the bus reads the event table and its local position."
 
     const check = (node, text) => {

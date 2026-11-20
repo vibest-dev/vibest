@@ -1,6 +1,6 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
-import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
+import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, PubSub, Ref, Schedule } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
@@ -10,6 +10,7 @@ import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
+  alive,
   sessionState,
   type AgentState,
   paneTail,
@@ -26,6 +27,17 @@ export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const STOP_WAIT = Duration.seconds(10)
 const STARTUP_DIALOG_POLL = Schedule.spaced("500 millis")
+
+export type Pickup = Data.TaggedEnum<{
+  Taken: {}
+  Exited: {}
+  NotStarted: { readonly message: string }
+}>
+
+export const Pickup = Data.taggedEnum<Pickup>()
+
+export const notStartedMessage = (pickup: Pickup) =>
+  Predicate.isTagged(pickup, "NotStarted") ? pickup.message : undefined
 
 export const busy = (state: AgentState) => state === "working" || state === "blocked"
 
@@ -297,28 +309,55 @@ export const make = Effect.gen(function* () {
       return yield* db.session.executionAccepted(session.id)
     })
 
-    const took = yield* taken.pipe(
-      Effect.tap((done) => (done ? Effect.void : answer)),
-      Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
-      Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
+    const process = (yield* db.session.getSession(session.id))?.process?.id
+    const seenRunning = yield* Ref.make(false)
+
+    const running = Effect.tap(alive(h, terminal), (up) => (up ? Ref.set(seenRunning, true) : Effect.void))
+
+    const gone = Effect.gen(function* () {
+      const row = yield* db.session.getSession(session.id)
+
+      if (row?.process?.id !== process || (yield* running)) return Option.none<Pickup>()
+      const started = (yield* Ref.get(seenRunning)) || (row?.process?.readyAt ?? null) !== null
+
+      return started ? Option.some(Pickup.Exited()) : Option.none<Pickup>()
+    })
+
+    const exitedHere = (event: BusEvent) =>
+      event.type === "terminal.exited" && event.runtime === h.id && sameTerminal(event.terminal, terminal)
+
+    const signalExit = Effect.flatMap(db.session.processesAt(h.id, terminal), (processes) =>
+      bus.observe({ type: "terminal.exited", runtime: h.id, terminal, processes }),
     )
 
-    if (took) return undefined
+    const exited = Effect.flatMap(bus.subscribe(), (subscription) =>
+      awaitOn(
+        subscription,
+        gone,
+        (event) => (exitedHere(event) ? gone : Effect.succeedNone),
+        READY_TIMEOUT,
+        Effect.never,
+      ),
+    ).pipe(Effect.tap(() => signalExit))
+
+    const took = yield* taken.pipe(
+      Effect.tap((done) => (done ? Effect.void : Effect.andThen(answer, running))),
+      Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
+      Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
+      Effect.map((done) => (done ? Pickup.Taken() : undefined)),
+      Effect.raceFirst(exited),
+    )
+
+    if (took !== undefined) return took
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* db.session.closeExecution(session.id, execution, "not_started")
 
-    return `${sessionLabel(session)} did not start working on its first message (${adapter.binary} may be signed out: sign in with ${adapter.binary})`
-  })
+    return Pickup.NotStarted({
+      message: `${sessionLabel(session)} did not start working on its first message (${adapter.binary} may be signed out: sign in with ${adapter.binary})`,
+    })
+  }, Effect.scoped)
 
-  const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
-    yield* db.session.endExecution(
-      session.id,
-      { outcome: end, failure: { message: error } },
-      `${sessionLabel(session)} ended its execution with an error: ${error}`,
-    )
-  })
-
-  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, openFirst, launched, finish }
+  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, openFirst, launched }
 })
 
 export type Interface = Effect.Success<typeof make>

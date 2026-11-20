@@ -1,4 +1,5 @@
 import { Bus } from "@vibest/core/bus"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -19,19 +20,22 @@ import { Executions } from "@vibest/core/session/executions"
 import { Exits } from "@vibest/core/session/exits"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
-import { Move } from "@vibest/core/session/move"
 import { Placement } from "@vibest/core/session/placement"
 import { Reconcile } from "@vibest/core/session/reconcile"
 import { Restart } from "@vibest/core/session/restart"
 import { Spawn } from "@vibest/core/session/spawn"
+import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 
+import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
 import { Remote } from "./machine/remote.ts"
 
 export const services = LayerNode.group([
   Bus.node,
+  Concurrency.node,
+  Starts.node,
   SessionLive.node,
   Drain.node,
   Harnesses.node,
@@ -47,7 +51,6 @@ export const services = LayerNode.group([
   SessionLocks.node,
   Executions.node,
   Placement.node,
-  Move.node,
   Spawn.node,
   Archive.node,
   Delivery.node,
@@ -58,6 +61,7 @@ export const services = LayerNode.group([
   Integration.node,
   Peer.node,
   EntrySession.node,
+  Load.node,
   Machines.node,
   Remote.node,
 ])

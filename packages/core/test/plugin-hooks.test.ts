@@ -7,7 +7,7 @@ import { Duration, Deferred, Effect, Fiber, type Schema } from "effect"
 import { TestClock } from "effect/testing"
 
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryBus } from "./platform/bun.ts"
+import { memoryPluginHost } from "./platform/bun.ts"
 
 const candidate = (
   source: string,
@@ -28,7 +28,6 @@ const event = {
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   harnesses: [
     { harness: "pi", available: true },
     { harness: "claude", available: true },
@@ -47,27 +46,13 @@ const host = <A, E>(
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
-    Effect.provide(memoryBus),
+    Effect.provide(memoryPluginHost),
     Effect.provide(Hooks.layer),
   )
 
 describe("plugins: hook events are detached copies", () => {
   const hooked = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void>) =>
     candidate(id, "1", Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) }))
-
-  const failInput = {
-    project: "/r",
-    agent: "general",
-    parentSessionId: undefined,
-    harnesses: event.harnesses,
-    attempts: [],
-    sessionId: "s",
-    reason: "limited" as const,
-    error: "limited",
-    input: "p",
-    harness: "claude",
-    provider: undefined,
-  }
 
   it.effect("a reference a plugin keeps cannot change the result or the trace after its callback succeeded", () =>
     host((h) =>
@@ -121,29 +106,6 @@ describe("plugins: hook events are detached copies", () => {
           assert.deepStrictEqual(input, event)
         }),
       "20 millis",
-    ),
-  )
-
-  it.effect("a later fail hook can clear an earlier move and is named as the decider", () =>
-    host((h) =>
-      Effect.gen(function* () {
-        const failing = (id: string, move: { harness: string } | undefined) =>
-          candidate(
-            id,
-            "1",
-            Plugin.define({
-              id,
-              effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = move))),
-            }),
-          )
-
-        yield* h.activate([failing("sets", { harness: "pi" }), failing("clears", undefined)])
-        const result = yield* h.service.fail(failInput)
-        assert.isUndefined(result.move)
-        assert.deepStrictEqual(result.trace[1]!.changes, [
-          { field: "move", from: { harness: "pi" }, overwrote: "sets" },
-        ])
-      }),
     ),
   )
 })

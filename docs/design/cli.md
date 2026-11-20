@@ -16,7 +16,7 @@ A verb names what happens to the user's thing, as `docker stop` and `docker rm`,
 
 `vibest rm` is not a command. It used to be another name for `archive`, and `rm` says delete. An old `vibest rm` is an unknown command.
 
-Two older aliases are still accepted, and are the same operations: `vibest upgrade` is `vibest update`, and `vibest harness ls` is `vibest harness list`.
+Three aliases are still accepted, and are the same operations: `vibest upgrade` is `vibest update`, `vibest harness ls` is `vibest harness list`, and `vibest agent ls` is `vibest agent list`.
 
 `vibest machine rm` is not a session command. It forgets a machine.
 
@@ -48,12 +48,13 @@ The user, or a session for a session it started.
 
 ### Opening a project
 
-| Command                                                  | For                                                                                                                                                                                                                                                                                                                                                            | Who  |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| `vibest`                                                 | In a project directory, open its entry session in this terminal. `--new` starts a new conversation. Leave `--harness` out to keep the current one; on a project's first start, leave it out to use Claude when Claude can start. `--provider` and `--model` apply only when passed: leaving them out, including with `--new`, does not keep the previous ones. | User |
-| `vibest project create <directory> --from <repository>…` | Several repositories worked on together. Copies each into the new directory as its own folder and leaves the originals untouched. One git repository is already a project.                                                                                                                                                                                     | User |
-| `vibest project add [directory]`                         | Record a checkout as a project without opening an entry session, so another machine can run agents in it.                                                                                                                                                                                                                                                      | User |
-| `vibest project move <old-directory>`                    | Continue, here, the project recorded at an old directory that is gone. Same id, memories and sessions. Run it inside the repository at its new place.                                                                                                                                                                                                          | User |
+| Command                                                  | For                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Who  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| `vibest`                                                 | In a project directory, open its entry session in this terminal. `--new` starts a new conversation. Leave `--harness` out to keep the current one; on a project's first start, leave it out to use Claude when Claude can start. `--provider` and `--model` apply only when passed: leaving them out, including with `--new`, does not keep the previous ones. `--agent` starts a new conversation as that definition (default coordinator); the conversation keeps it, so another needs `--new`. | User |
+| `vibest project create <directory> --from <repository>…` | Several repositories worked on together. Copies each into the new directory as its own folder and leaves the originals untouched. One git repository is already a project.                                                                                                                                                                                                                                                                                                                        | User |
+| `vibest project add [directory]`                         | Record a checkout as a project without opening an entry session, so another machine can run agents in it.                                                                                                                                                                                                                                                                                                                                                                                         | User |
+| `vibest project move <old-directory>`                    | Continue, here, the project recorded at an old directory that is gone. Same id, memories and sessions. Run it inside the repository at its new place.                                                                                                                                                                                                                                                                                                                                             | User |
+| `vibest project clone <url>`                             | Clone a repository and record it as a project, here or with `--machine` on another machine. The folder is `--dir`, or the repository name under that machine's clone directory. An existing folder is refused.                                                                                                                                                                                                                                                                                    | User |
 
 ### Sessions
 
@@ -67,7 +68,7 @@ The user, or a session for a session it started.
 | `vibest interrupt <id>`           | See [Lifecycle](#interrupt).                                                                                                                                                                                                                                              | User or agent |
 | `vibest archive <id>`             | See [Lifecycle](#archive).                                                                                                                                                                                                                                                | User or agent |
 
-`vibest run` options a caller needs: leave the harness out and the session uses the caller's harness, provider and model; name a harness to switch, and then leaving `--provider` and `--model` out uses that harness's default. `--title` names the pane; `--env KEY=VALUE` reaches the harness and is not saved; `--share <id>` runs in that session's directory instead of a new worktree; `--file` attaches a file, copied into the project folder; `--machine` runs it on another machine; `--agent` picks the agent definition (`general` by default); `--runtime` picks the terminal runtime; `--session` picks the runtime's session.
+`vibest run` options a caller needs: leave the harness out and the session uses the caller's harness, provider and model; name a harness to switch, and then leaving `--provider` and `--model` out uses that harness's default. `--title` names the pane; `--env KEY=VALUE` reaches the harness and is not saved; `--share <id>` runs in that session's directory instead of a new worktree; `--file` attaches a file, copied into the project folder; `--machine` runs it on another machine, and `--project` picks which of that machine's projects when it has several; `--agent` picks the agent definition (`general` by default); `--runtime` picks the terminal runtime; `--session` picks the runtime's session.
 
 ### Project folder
 
@@ -75,6 +76,21 @@ The user, or a session for a session it started.
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `vibest project info`           | Paths of the project folder and of preferences.md, docs, memories and artifacts. For an agent that folder is `VIBEST_PROJECT_DIR`. | User or agent |
 | `vibest project search <query>` | Case-insensitive search of that folder. `--kind` is `docs`, `memories` or `artifacts`.                                             | User or agent |
+
+### Agent definitions
+
+| Command                  | For                                                                                                                                                                                        | Who           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| `vibest agent list`      | Each definition: description, who added it, and the harness, provider and model a run uses when it names none. Invalid files are listed with the reason. `--machine` asks another machine. | User or agent |
+| `vibest agent show <id>` | One definition, including the prompt its sessions get before their session facts.                                                                                                          | User or agent |
+
+Definitions are the builtin ones, one file `~/.vibest/agents/<id>.md` each, and any a plugin adds.
+
+### Worktrees
+
+| Command                | For                                                                                                                                                                                          | Who           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `vibest worktree list` | The worktrees vibest made, grouped by project, as JSON: path, git state (dirty, unsaved, or clean) and the sessions recorded there. `--project` limits it. `--machine` asks another machine. | User or agent |
 
 ### Harnesses and models
 
@@ -92,7 +108,7 @@ Only the user. Another machine's vibestd is reached over ssh.
 | Command                              | For                                                                                                            |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `vibest machine add <name> <target>` | Connect once and keep the machine. `<target>` is `user@host`, `user@host:port`, or a Host from the ssh config. |
-| `vibest machine ls`                  | Connection, runtimes, and whether this machine shows their terminals. JSON.                                    |
+| `vibest machine ls`                  | Connection, runtimes, whether this machine shows their terminals, and their load. JSON.                        |
 | `vibest machine rm <name>`           | Forget the machine and stop the connection. Agents there keep running; adding it again delivers their results. |
 | `vibest connect`                     | What the other machine's vibestd runs over ssh. Not for direct use.                                            |
 
@@ -102,7 +118,7 @@ Only the user. Another machine's vibestd is reached over ssh.
 
 | Command                      | For                                                                                                                                                                                                                                                                                                                           | Who           |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `vibest status`              | This vibest, whether vibestd is running, and the terminal runtimes it has. Does not start vibestd.                                                                                                                                                                                                                            | User or agent |
+| `vibest status`              | This vibest, whether vibestd is running, this machine's load when it is, and the terminal runtimes it has. Does not start vibestd.                                                                                                                                                                                            | User or agent |
 | `vibest doctor`              | Whether vibest can work here. Each problem says how to fix it. Starts vibestd when it is not running.                                                                                                                                                                                                                         | User or agent |
 | `vibest daemon`              | Start vibestd in the background. Exits 0 when it is already running. `--foreground` runs it in this process.                                                                                                                                                                                                                  | User          |
 | `vibest daemon restart`      | Replace the running vibestd with this vibest, after a confirmation. May refuse while work is still finishing. Then asks whether to restart agents still on the old version, keeping their conversations.                                                                                                                      | User          |

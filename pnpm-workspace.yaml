@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - packages/integration/*
+  - packages/plugins/*
   - tools/tsconfig
   - tools/verify
   - tools/bench

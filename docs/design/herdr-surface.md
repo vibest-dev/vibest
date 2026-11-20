@@ -287,7 +287,7 @@ fragile.
   `--session` wins. Its terminal is `<session>/<HERDR_PANE_ID>`, the session found by its socket in `herdr session
   list`. A harness may hand its shell less environment than it got, so `HERDR_PANE_ID` and `HERDR_SOCKET_PATH` are
   passed on explicitly (`CALLER_ENV`).
-- **The plugin.** `runtime-herdr` builds its own platform (socket dialing, file system, child processes), so it
+- **The plugin.** `vibest.runtime-herdr` builds its own platform (socket dialing, file system, child processes), so it
   loads in any host that runs the plugin API; its pool lives in the plugin's scope and closes with it. `doctor`
   asserts the type of the spawner's output, since `spawner` is typed by its tag.
 

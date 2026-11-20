@@ -220,6 +220,41 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
   )
 
   it.live(
+    "a program open starts runs as the login shell's child, and its exit leaves that shell in the terminal",
+    () =>
+      withRuntime((runtime, hc) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+          const seen = yield* Ref.make<ReadonlyArray<string>>([])
+          yield* runtime.events.pipe(
+            Stream.runForEach((e) =>
+              Ref.update(seen, (all) => [...all, e.type === "reset" ? "reset" : `${e.type}:${e.terminal.id}`]),
+            ),
+            Effect.forkScoped,
+          )
+          yield* Effect.sleep("300 millis")
+
+          const terminal = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: ["sh", "-c", 'echo "ran-$VIBEST_HARNESS"; sleep 2'], env: { VIBEST_HARNESS: "vbt" } },
+            label: "argv",
+          })
+
+          const address = parseTerminalId(terminal.id, socketPath).address
+          yield* until(runtime.process(terminal), (p) => p.running, "the program never ran")
+          yield* until(Ref.get(seen), (all) => all.includes(`exited:${terminal.id}`), "no exited event after it ended")
+          assert.isFalse((yield* runtime.process(terminal)).running)
+          const record = yield* hc.call("terminal.get", { terminal: address })
+          assert.strictEqual(record.state, "live")
+          assert.include(yield* runtime.read(terminal, 40), "ran-vbt")
+          yield* runtime.close(terminal)
+        }),
+      ),
+    90_000,
+  )
+
+  it.live(
     "labels an entry session's terminal for herdr-app and reports the typed program's exit",
     () =>
       withRuntime((runtime, hc) =>

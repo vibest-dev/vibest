@@ -78,9 +78,9 @@ export const oldInstall = async (w: World, name: string) => {
   return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}` } }
 }
 
-const usageLimitMove = async (
+const usageLimited = async (
   w: World,
-  o: { readonly name: string; readonly limited: (path: string) => boolean; readonly plugin: string },
+  o: { readonly name: string; readonly limited: (path: string) => boolean },
   body: (m: {
     readonly id: string
     readonly seen: ReadonlyArray<string>
@@ -93,7 +93,6 @@ const usageLimitMove = async (
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   const model = usageLimitedModel(o.limited)
   const session = `${w.herdrSession}-${o.name}`
-  const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
 
   try {
     const repo = await project(w, o.name)
@@ -102,23 +101,11 @@ const usageLimitMove = async (
     const agentDir = await piShadow(
       path.join(w.root, `pi-${o.name}`),
       w.profile,
-      { first: { baseUrl: `${base}/v1` }, second: { baseUrl: `${base}/v2` } },
+      { first: { baseUrl: `${base}/v1` } },
       undefined,
     )
 
-    await fs.mkdir(path.dirname(plugin), { recursive: true })
-    await fs.writeFile(plugin, o.plugin)
     const env = { PI_CODING_AGENT_DIR: agentDir }
-    await w.stopDaemon()
-    await w.ok(["daemon"], { cwd: repo, env })
-    await until(
-      "the move plugin is active",
-      async () =>
-        (await w.json<Array<{ id: string; status: string }>>(["plugins"], { cwd: repo, env })).some(
-          (p) => p.id === "move-e2e" && p.status === "active",
-        ),
-      30_000,
-    )
     await w.entry({ cwd: repo, session, processEnv: env })
 
     const id = (
@@ -154,8 +141,6 @@ const usageLimitMove = async (
     })
   } finally {
     model.stop()
-    await fs.rm(plugin, { force: true })
-    await w.stopDaemon()
     await dropHerdrSession(w, session)
   }
 }
@@ -759,106 +744,37 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "U5",
     title:
-      "a usage-limit move in place: a Pi subagent whose execution hits a usage limit ends only its harness; the next login runs in the same pane and finishes the work in a new execution",
+      "a usage limit fails the execution: a Pi subagent whose execution hits a usage limit ends that execution failed with failure kind limit, its creator gets one notice naming the limit, and the same harness process keeps running in its pane with nothing else started",
     run: (w) =>
-      usageLimitMove(
+      usageLimited(
         w,
-        {
-          name: "move",
-          limited: (p) => p.startsWith("/v1/"),
-          plugin: `import { Plugin } from "@vibest/plugin/effect"
-import { Effect } from "effect"
-export default Plugin.define({
-  id: "move-e2e",
-  effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi", provider: "second", model: "m" }))),
-})
-`,
-        },
-        async ({ seen, row, status, pane: paneNow, log }) => {
-          await until("the first login's harness reports its pid", () => row().pid !== null, 60_000)
-          const pane = paneNow()
-          const before = row()
-          await until(
-            "the move to the second login",
-            () => row().provider === "second" && row().pid !== null && row().pid !== before.pid,
-            120_000,
-          ).catch(async (e: Error) => {
-            throw new Error(
-              `${e.message}; row ${JSON.stringify(row())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
-            )
-          })
-          expect(!alive(before.pid!), `the limited harness ${before.pid} still runs`)
-          expect(alive(row().pid!), `the moved harness ${row().pid} does not run`)
-          expect(row().harness === "pi", `moved to ${row().harness}`)
-          await until(
-            "the work completes on the second login",
-            () => status().some((m) => m.status === "completed"),
-            120_000,
-          ).catch(async (e: Error) => {
-            throw new Error(
-              `${e.message}; executions ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
-            )
-          })
-          expect(
-            status()
-              .map((m) => m.status)
-              .join() === "failed,completed",
-            `the limited execution, then the completed one: ${JSON.stringify(status())}`,
-          )
-          expect(
-            seen.some((s) => s.startsWith("/v2/")),
-            `the second login got no request: ${JSON.stringify(seen)}`,
-          )
-          expect(paneNow() === pane, `the moved subagent is in ${paneNow()}, not ${pane}`)
-        },
-      ),
-  },
-  {
-    id: "U8",
-    title:
-      "a usage-limit move tries each login at most once for one input: both Pi logins answer a usage limit while their usage rows read free; each login's execution fails, then one failed execution says no harness is left, and no third start",
-    run: (w) =>
-      usageLimitMove(
-        w,
-        {
-          name: "move-twice",
-          limited: () => true,
-          plugin: `import { Plugin } from "@vibest/plugin/effect"
-import { Effect, Schedule } from "effect"
-const free = [{ window: "5h", percent: 0, status: "available", resetTime: null }]
-export default Plugin.define({
-  id: "move-e2e",
-  effect: (ctx) =>
-    Effect.gen(function* () {
-      yield* Effect.forkScoped(
-        Effect.repeat(
-          Effect.all([
-            ctx.subscription.report({ harness: "pi", provider: "first", limits: free }),
-            ctx.subscription.report({ harness: "pi", provider: "second", limits: free }),
-          ]),
-          Schedule.spaced("1 second"),
-        ),
-      )
-      yield* ctx.agent.hook("fail", (e) =>
-        Effect.sync(() => {
-          e.move = { harness: "pi", provider: e.provider === "first" ? "second" : "first", model: "m" }
-        }),
-      )
-    }),
-})
-`,
-        },
-        async ({ id, seen, row, status, log }) => {
+        { name: "limit", limited: (p) => p.startsWith("/v1/") },
+        async ({ id, seen, row, status, pane: paneNow, log }) => {
           const notices = () => {
             const db = readDb(path.join(w.vibestHome, "vibest.db"))
 
             try {
               return db
                 .query<{ content: string }, [string]>(
-                  `SELECT content FROM inbox WHERE sender_session_id = ? AND kind = 'notice' ORDER BY id`,
+                  `SELECT content FROM inbox WHERE about_session_id = ? AND kind = 'notice' ORDER BY id`,
                 )
                 .all(id)
                 .map((r) => r.content)
+            } finally {
+              db.close()
+            }
+          }
+
+          const kinds = () => {
+            const db = readDb(path.join(w.vibestHome, "vibest.db"))
+
+            try {
+              return db
+                .query<{ kind: string | null }, [string]>(
+                  `SELECT failure_kind AS kind FROM execution WHERE session_id = ? ORDER BY id`,
+                )
+                .all(id)
+                .map((r) => r.kind)
             } finally {
               db.close()
             }
@@ -870,28 +786,22 @@ export default Plugin.define({
             )
           }
 
-          await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)
-          await until(
-            "the no-harness-left notice",
-            () => notices().some((r) => r.includes("no harness left")),
-            120_000,
-          ).catch(fail)
-          const moved = row()
-          expect(
-            status().length === 3 && status().every((m) => m.status === "failed"),
-            `one failed execution per login and the no-harness-left one: ${JSON.stringify(status())}`,
+          await until("the harness reports its pid", () => row().pid !== null, 60_000).catch(fail)
+          const pane = paneNow()
+          const before = row()
+          await until("the limited execution fails", () => status().some((m) => m.status === "failed"), 120_000).catch(
+            fail,
           )
+          await until("the creator is told", () => notices().length > 0, 30_000).catch(fail)
+          await Bun.sleep(5_000)
+          expect(kinds().join() === "limit", `one execution, failed with kind limit: ${JSON.stringify(kinds())}`)
           const said = notices()
-          expect(said.length === 1 && said[0]!.includes("no harness left"), `notices: ${JSON.stringify(said)}`)
+          expect(said.length === 1 && said[0]!.includes("hit a usage limit"), `notices: ${JSON.stringify(said)}`)
           expect(
-            row().provider === "second" && row().pid === moved.pid,
-            `a third start: ${JSON.stringify(moved)} -> ${JSON.stringify(row())}`,
+            row().pid === before.pid && alive(before.pid!) && row().provider === "first",
+            `the harness was replaced: ${JSON.stringify(before)} -> ${JSON.stringify(row())}`,
           )
-          const firstAgain = seen.findIndex((s) => s.startsWith("/v2/"))
-          expect(
-            firstAgain !== -1 && !seen.slice(firstAgain).some((s) => s.startsWith("/v1/")),
-            `the first login got a request after the move: ${JSON.stringify(seen)}`,
-          )
+          expect(paneNow() === pane, `the subagent is in ${paneNow()}, not ${pane}`)
         },
       ),
   },
