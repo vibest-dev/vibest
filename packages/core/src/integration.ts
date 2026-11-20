@@ -12,7 +12,7 @@ import type { HarnessDefinition } from "./plugin/domains.ts"
 import { jsonObject, promptOf, executionEndOf, type ObservedEnd } from "./replies.ts"
 import { alive, Runtimes } from "./runtimes.ts"
 import { Session } from "./session.ts"
-import { resetOf, Subscriptions } from "./subscriptions/service.ts"
+import { limitSeen, Subscriptions } from "./subscriptions/service.ts"
 
 export * as Integration from "./integration.ts"
 
@@ -64,7 +64,7 @@ const make = Effect.gen(function* () {
       const provider = (yield* db.session.getSession(who.id))?.process?.provider ?? ""
       const now = yield* Clock.currentTimeMillis
 
-      return { ...end, resetAt: resetOf(yield* subscriptions.list, end.harness, provider, now) }
+      return { ...end, ...limitSeen(yield* subscriptions.list, end.harness, provider, now) }
     })
 
   const executionEnd = Effect.fn("Integration.executionEnd")(function* (who: HookCaller, raw: string) {

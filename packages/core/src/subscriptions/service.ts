@@ -52,12 +52,20 @@ const wrote = (
   return { harness, provider, machine: MACHINE, account, limits, updatedAt: now, ...(error && { error }) }
 }
 
-export const resetOf = (rows: ReadonlyArray<Row>, harness: string, provider: string, now: number) => {
-  const resets = (rows.find((row) => row.harness === harness && row.provider === provider)?.limits ?? [])
-    .filter((limit) => limit.resetTime !== null && isLimited({ limits: [limit] }, now))
-    .map((limit) => limit.resetTime!)
+const representable = (time: number | null): time is number => time !== null && !Number.isNaN(new Date(time).getTime())
 
-  return resets.length === 0 ? undefined : Math.min(...resets)
+export const limitSeen = (rows: ReadonlyArray<Row>, harness: string, provider: string, now: number) => {
+  const exhausted = (rows.find((row) => row.harness === harness && row.provider === provider)?.limits ?? []).filter(
+    (limit) => isLimited({ limits: [limit] }, now),
+  )
+
+  const resets = exhausted.map((limit) => limit.resetTime).filter(representable)
+
+  return {
+    windows: exhausted.map((limit) => limit.window),
+    ...(provider !== "" && { provider }),
+    ...(resets.length > 0 && { resetAt: Math.min(...resets) }),
+  }
 }
 
 export type Interface = SubscriptionsDomain

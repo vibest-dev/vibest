@@ -819,7 +819,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   sessionId: id,
                   message:
                     failure?.kind === "limit"
-                      ? `${yield* session.labelOf(id)} (${end.harness}) hit a usage limit: ${limitText(failure)}`
+                      ? `${yield* session.labelOf(id)} (${end.harness}) hit a usage limit: ${limitText(failure, end)}`
                       : `${yield* session.labelOf(id)} ended its execution with an error: ${end.failure}`,
                 },
                 end.at,

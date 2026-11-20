@@ -82,9 +82,10 @@ describe.concurrent("Session", () => {
       )
       const notices = yield* sqlNotices(id)
       assert.lengthOf(notices, 1)
+      assert.include(notices[0]!, "5h")
       assert.include(
         notices[0]!,
-        `(cursor) hit a usage limit: rate_limit (resets ${new Date(resetTime).toISOString()})`,
+        `(cursor) hit a usage limit: rate_limit (5h exhausted; resets ${new Date(resetTime).toISOString()})`,
       )
     }),
   )

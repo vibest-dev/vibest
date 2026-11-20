@@ -1,6 +1,6 @@
 # Update and restart
 
-How vibest updates itself and moves running agents onto a new version or another login. Each capability below says what
+How vibest updates itself and moves running agents onto a new version. Each capability below says what
 it is and when it counts as working.
 
 ## U1. Where the latest version comes from

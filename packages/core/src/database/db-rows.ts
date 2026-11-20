@@ -251,10 +251,20 @@ export const limitFailure = (message: string, resetAt: number | undefined): Exec
   ...(resetAt !== undefined && { resetAt }),
 })
 
-export const limitText = (failure: ExecutionFailure) =>
-  failure.resetAt === undefined
-    ? `${failure.message} (no reset time reported)`
-    : `${failure.message} (resets ${new Date(failure.resetAt).toISOString()})`
+export type LimitAbout = {
+  readonly provider?: string | undefined
+  readonly windows?: ReadonlyArray<string> | undefined
+}
+
+export const limitText = (failure: ExecutionFailure, about: LimitAbout = {}) => {
+  const details = [
+    ...(about.provider === undefined ? [] : [`provider ${about.provider}`]),
+    ...(about.windows === undefined || about.windows.length === 0 ? [] : [`${about.windows.join(", ")} exhausted`]),
+    failure.resetAt === undefined ? "no reset time reported" : `resets ${new Date(failure.resetAt).toISOString()}`,
+  ]
+
+  return `${failure.message} (${details.join("; ")})`
+}
 
 export const toInbox = (row: InboxSql) => {
   return {
