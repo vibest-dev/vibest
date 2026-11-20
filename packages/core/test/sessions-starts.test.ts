@@ -440,14 +440,14 @@ describe("a cap on live harness processes", () => {
       const repo = yield* makeRepository
       yield* liveEntry(repo)
       yield* limitTo([{ max: 1 }])
-      const [a, b] = yield* spawnSome(repo, 2)
-      yield* until(waiting, (keys) => keys.length === 2)
+      yield* spawnSome(repo, 2)
+      const [a, b] = yield* until(waiting, (keys) => keys.length === 2)
       yield* parked.park(a!)
 
       yield* Effect.forkChild(limitTo([{ max: 2 }]))
       yield* parked.reached
       const interrupting = yield* Effect.forkChild(sessions.interrupt(a!))
-      yield* Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true })
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
       yield* parked.release
       const answer = yield* Fiber.join(interrupting)
       yield* limitTo([{ max: 3 }])
