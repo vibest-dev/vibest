@@ -64,6 +64,7 @@ export const shardWeights = {
   S59: 15,
   S37: 7,
   S38: 7,
+  S68: 12,
   S42: 20,
   G7: 21,
   U1: 2,

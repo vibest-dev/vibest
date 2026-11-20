@@ -15,7 +15,7 @@ import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { settled, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, restartSessions, type TestOptions } from "./lib/session.ts"
-import { entryOfProject, spawnInput, spawnWorking, test } from "./lib/sessions-helpers.ts"
+import { entryOfProject, spawnInput, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
 const limitTo = (rules: ReadonlyArray<{ readonly max: number }> | undefined) =>
   Effect.flatMap(Concurrency.Service, (c) => c.configure(rules))
@@ -560,6 +560,59 @@ describe("a cap on live harness processes", () => {
 
       assert.strictEqual(start?.harness, "pi")
       assert.strictEqual(start?.runtime, "herdr")
+    }),
+    hooked,
+  )
+
+  test(
+    "an unclosable queued resume does not strand unrelated starts",
+    Effect.gen(function* () {
+      const h = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      const a = yield* exitedChild(repo)
+      yield* limitTo([{ max: 1 }])
+      const [first] = yield* spawnSome(repo, 1)
+      yield* until(waiting, (keys) => keys.includes(first!))
+      yield* sessions.send(a, "resume")
+      yield* until(waiting, (keys) => keys.includes(a))
+      const [next] = yield* spawnSome(repo, 1)
+      yield* until(waiting, (keys) => keys.includes(next!))
+      const opens = (yield* h.callsTo("open")).length
+      const close = yield* h.hold("close", a)
+      yield* Effect.forkChild(limitTo([{ max: 4 }]))
+      yield* close.reached
+      yield* close.release("failed")
+      yield* until(placed(first!), Boolean)
+      const ran = yield* until(placed(next!), Boolean).pipe(Effect.orElseSucceed(() => false))
+
+      assert.isTrue(
+        ran,
+        `live=${(yield* live).length}/4, waiting=${(yield* waiting).join(",")}, expected ${next} to start`,
+      )
+      assert.isFalse((yield* waiting).includes(a))
+      assert.strictEqual((yield* h.callsTo("open")).length, opens + 2)
+
+      const told = yield* until(sqlNotices(a), (rows) =>
+        rows.some((message) => message.includes("was not delivered") && message.includes("close: failed")),
+      )
+
+      assert.isTrue(told.some((message) => message.includes("close: failed")))
+
+      const reason = yield* Effect.flatMap(SqlClient.SqlClient, (sql) =>
+        sql<{
+          reason: string | null
+        }>`SELECT end_reason AS reason FROM process WHERE session_id = ${a} ORDER BY id DESC LIMIT 1`.pipe(
+          Effect.map((rows) => rows[0]?.reason),
+        ),
+      )
+
+      assert.strictEqual(reason, "launch_failed")
+      const kept = (yield* db.session.getSession(a))!
+      assert.notStrictEqual(kept.process?.terminal ?? null, null)
+      assert.notStrictEqual(kept.process?.endedAt ?? null, null)
     }),
     hooked,
   )

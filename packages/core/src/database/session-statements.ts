@@ -359,6 +359,10 @@ export const statements = Effect.gen(function* () {
       JOIN process p ON p.session_id = s.id AND p.id = s.process_id
       WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL`
 
+  const lastSessionAt = (runtime: string, address: RuntimeAddress) =>
+    sql<{ sessionId: string }>`SELECT session_id FROM process WHERE runtime = ${runtime} AND terminal = ${address.id}
+      ORDER BY started_at DESC, rowid DESC LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.sessionId))
+
   const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
@@ -448,6 +452,7 @@ export const statements = Effect.gen(function* () {
     setStatus,
     entrySessionsAt,
     processesAt,
+    lastSessionAt,
     unusedId,
     conversationOf,
     creatorOf,
