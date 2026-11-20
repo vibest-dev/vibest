@@ -5,40 +5,50 @@ import { Spec } from "../framework/spec.ts"
 
 const text = (name: string) =>
   Argument.String(name).pipe(
-    Argument.withDescription(
-      "Literal text, or - to read it from stdin. Put -- before it so text starting with - is not read as an option",
-    ),
+    Argument.withDescription("The text, or - to read it from stdin. Put -- before it when it starts with -"),
   )
 
 const id = Argument.String("id").pipe(
-  Argument.withDescription("session id, or a unique prefix of at least 8 of its characters (as vibest shows ids)"),
+  Argument.withDescription("A session id, or a unique prefix of at least 8 characters"),
 )
 
 const sessionFlag = Flag.String("session").pipe(
   Flag.withDescription(
-    "The herdr session to use, overriding the ambient herdr session when run inside herdr (default vibest); bare `vibest` refuses it inside herdr",
+    "The runtime's session to use, instead of the one this terminal is in. Bare vibest refuses it inside herdr",
   ),
   Flag.optional,
 )
 
 const providerFlag = Flag.String("provider").pipe(
-  Flag.withDescription("Only this provider's models; a harness with no provider option refuses it"),
+  Flag.withDescription("Only this provider's models. A harness with no provider option refuses it"),
   Flag.optional,
 )
 
-const hookHarness = Flag.String("harness").pipe(Flag.withDescription("The harness whose hook this is"))
+const hookHarness = Flag.String("harness").pipe(Flag.withDescription("Which harness this hook is for"))
 
 export const entryFlags = {
   fresh: Flag.Boolean("new").pipe(
-    Flag.withDescription("Start a new conversation with the entry session instead of reopening the current one"),
+    Flag.withDescription("Start a new conversation instead of reopening the current one"),
     Flag.withDefault(false),
   ),
   harness: Flag.String("harness").pipe(
-    Flag.withDescription("Leave out for the harness the entry session last used; a project's first start needs it"),
+    Flag.withDescription(
+      "The harness for the entry session. Leave it out to keep the current one. On a project's first start, leave it out to use Claude when Claude can start",
+    ),
     Flag.optional,
   ),
-  provider: Flag.String("provider").pipe(Flag.optional),
-  model: Flag.String("model").pipe(Flag.optional),
+  provider: Flag.String("provider").pipe(
+    Flag.withDescription(
+      "The provider for --model. Used only when you pass it; leaving it out does not keep the previous one",
+    ),
+    Flag.optional,
+  ),
+  model: Flag.String("model").pipe(
+    Flag.withDescription(
+      "The model for the entry session. Used only when you pass it. Leaving it out, including with --new, does not keep the previous model",
+    ),
+    Flag.optional,
+  ),
   agent: Flag.String("agent").pipe(
     Flag.withDescription(
       "The agent definition a new entry conversation runs as (default coordinator; see vibest agent list). A conversation keeps the agent it started with: naming another needs --new",
@@ -47,22 +57,22 @@ export const entryFlags = {
   ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
-    Flag.withDescription("Outside herdr: do not attach to the session"),
+    Flag.withDescription("Do not attach to the session when it opens outside herdr"),
     Flag.withDefault(false),
   ),
   runtime: Flag.String("runtime").pipe(
     Flag.withDescription(
-      "The terminal runtime the entry session runs in. Overrides the runtime this terminal's environment detects; required when none is detected",
+      "The terminal runtime the entry session runs in. Overrides what this terminal's environment detects; required when none is detected",
     ),
     Flag.optional,
   ),
 }
 
 const daemon = Spec.make("daemon", {
-  description: "Start vibestd (in the background unless --foreground); exits 0 if it is already running",
+  description: "Start vibestd in the background. Exits 0 when it is already running",
   params: {
     foreground: Flag.Boolean("foreground").pipe(
-      Flag.withDescription("Run vibestd in this process; its output goes to vibestd.log in the vibest home"),
+      Flag.withDescription("Run vibestd in this process. Its log is vibestd.log in the vibest home"),
       Flag.withDefault(false),
     ),
     handoff: Flag.Boolean("import").pipe(Flag.withHidden, Flag.withDefault(false)),
@@ -70,43 +80,50 @@ const daemon = Spec.make("daemon", {
   commands: [
     Spec.make("restart", {
       description:
-        "Replace the running vibestd with this vibest, after a yes on a terminal; agents keep running and queued messages are kept, but unfinished daemon operations may refuse the restart. Then offers to restart the agents on another integration in place, with their conversations",
+        "Replace the running vibestd with this vibest, after you confirm. May refuse while work is still finishing. Then asks whether to restart agents still on the old version, keeping their conversations",
     }),
-    Spec.make("import-check"),
+    Spec.make("import-check", {
+      description: "Check that this vibest can open the current database",
+    }),
   ],
 })
 
 const run = Spec.make("run", {
   description:
-    'Run by an agent in a session; a person opens a session with bare vibest. Start a session on a task and print {"id":"<session id>"} at once; the routing that plugins decided is in the routing field of vibest ls and vibest result. An execution end sends nothing: the session sends a message with vibest send when it decides to, and its latest reply is read with vibest result. vibest makes each session its own worktree (detached, no branch); in a project of several repositories (a directory of git repositories) that is one worktree of every repository, side by side. The entry session may run it from anywhere in its project, also from inside one repository. Never tell the session to make its own worktree, clone or copy',
+    "Start a session on a task and print its id. Only an agent in a session runs this; a person opens a session with bare vibest. Leave the harness out to use your own harness, provider and model. An execution end sends nothing: the session messages with vibest send, and its latest reply is vibest result. Each session gets its own worktree, detached and on no branch; in a project of several repositories, one worktree of each, side by side. Do not tell the session to make its own worktree, clone or copy. A plugin's harness choice shows on the session in vibest ls",
   params: {
     words: Argument.String("harness and prompt").pipe(
       Argument.between(1, 2),
       Argument.withMetavar("[<harness>] <prompt>"),
       Argument.withDescription(
-        "The harness (leave it out to use the caller's harness, provider and model; name one to switch), then the prompt: literal text, or - to read it from stdin. Put -- before the prompt so text starting with - is not read as an option",
+        "The harness, then the prompt. Leave the harness out to use your harness, provider and model. Name a harness to switch; then leave --provider and --model out for that harness's default. The prompt is literal text, or - for stdin. Put -- before a prompt that starts with -",
       ),
     ),
     title: Flag.String("title").pipe(
       Flag.withDescription(
-        "What the agent does, in a few words (its pane title, and the line its results show); default: the task's start",
+        "A few words for what the agent does: its pane title, and the line its results show. Default: the start of the task",
       ),
       Flag.optional,
     ),
-    provider: Flag.String("provider").pipe(Flag.optional),
+    provider: Flag.String("provider").pipe(
+      Flag.withDescription(
+        "The provider. With the harness left out, leave this out to use the caller's provider. With a harness named, leave it out for that harness's default. A harness with no provider option refuses it",
+      ),
+      Flag.optional,
+    ),
     model: Flag.String("model").pipe(
-      Flag.withDescription("Leave out for the harness default; see vibest models"),
+      Flag.withDescription(
+        "The model. With the harness left out, leave this out to use the caller's model. With a harness named, leave it out for that harness's default. See vibest models",
+      ),
       Flag.optional,
     ),
     env: Flag.KeyValuePair("env").pipe(
-      Flag.withDescription(
-        "KEY=VALUE for the harness, never stored: a restart or a harness change in the same pane keeps it, a new pane (the old one closed) does not; pass it again then",
-      ),
+      Flag.withDescription("KEY=VALUE for the harness. Not saved: pass it again when the session opens a new terminal"),
       Flag.optional,
     ),
     share: Flag.String("share").pipe(
       Flag.withDescription(
-        "A session id (or a unique prefix of at least 8 characters): run in its directory, on its runtime and machine, in a pane split from its pane, instead of a new worktree (the directory goes with the archive of the last live session in it)",
+        "A session id, or a unique prefix of at least 8 characters. Run in its directory, on its runtime and machine, in a pane split from its pane, instead of a new worktree. The directory goes when the last live session in it is archived",
       ),
       Flag.optional,
     ),
@@ -118,7 +135,7 @@ const run = Spec.make("run", {
     ),
     machine: Flag.String("machine").pipe(
       Flag.withDescription(
-        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this HEAD; its address is <machine>/<id>, and its results come to this project's entry session, or stay there for vibest result <machine>/<id> when there is none",
+        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this commit. Its address is <machine>/<id>. Results come to this project's entry session, or stay for vibest result <machine>/<id> when there is none",
       ),
       Flag.optional,
     ),
@@ -130,13 +147,13 @@ const run = Spec.make("run", {
     ),
     agent: Flag.String("agent").pipe(
       Flag.withDescription(
-        "The agent definition the session runs as: its system prompt and tool rules. The registered ids are listed when one is unknown",
+        "The agent definition: its system prompt and tool rules. An unknown id lists the registered ones. Default: general",
       ),
       Flag.withDefault("general"),
     ),
     file: Flag.String("file").pipe(
       Flag.withDescription(
-        "Attach this file: it is copied into the project folder for the new session, and the task ends with a line naming the copy, for the agent to read. Repeat for each file. A file over 10 MiB, or one that cannot be read, refuses the run",
+        "Attach this file. It is copied into the project folder for the new session, and the task ends with a line naming the copy. Repeat for each file. A file over 10 MiB, or one that cannot be read, refuses the run",
       ),
       Flag.atLeast(0),
     ),
@@ -146,47 +163,47 @@ const run = Spec.make("run", {
 
 const send = Spec.make("send", {
   description:
-    "Continue a session: queue a message, delivered once it is idle (never interrupts an execution); prints at once",
+    "Queue a message for a session and print at once. It is delivered when the session is idle, and does not interrupt a running execution. For a resumable session started with vibest run, sending after its pane closes or its harness exits reopens the conversation in a new pane",
   params: { id, message: text("message") },
 })
 
 const status = Spec.make("status", {
   description:
-    "vibest's status: this client, vibestd (running or not; never started by this), this machine's load when vibestd is running, and the terminal runtimes it has",
+    "This vibest, whether vibestd is running, this machine's load when vibestd is running, and the terminal runtimes it has. Does not start vibestd",
 })
 
 const result = Spec.make("result", {
-  description: "A session's latest result (JSON; null before its first)",
+  description:
+    "A session, as JSON. For an id that exists the object is always returned; reply is null until the first result. Test reply, not the object",
   params: { id },
 })
 
 const interrupt = Spec.make("interrupt", {
   description:
-    "Interrupt a session's running execution; the session stays for follow-ups (no reply arrives for that execution)",
+    "Stop a session's running execution. The session stays, and that execution sends no reply. Not the entry session: end that one in its terminal",
   params: { id },
 })
 
 const peek = Spec.make("peek", {
   description:
-    "Print the last lines on a session's terminal, read now (plain text). Results never carry screen text: look here when one says the execution ended without a reply or did not start",
+    "Print the last lines of a session's terminal, as plain text, read now. Look here when a result says the execution ended without a reply or did not start. Not the entry session",
   params: {
     id,
     lines: Flag.Int("lines").pipe(
       Flag.withAlias("n"),
-      Flag.withDescription("How many of the last lines to print (at most 500; vibestd's default is 30)"),
+      Flag.withDescription("How many of the last lines to print, at most 500. Default 30"),
       Flag.optional,
     ),
   },
 })
 
 const archive = Spec.make("archive", {
-  alias: "rm",
   description:
-    "Archive an agent session (a working one is interrupted for up to 10 s, then its pane closed and that execution's reply lost; releases terminal pane, workspace, and clean worktree; retains the session row, inbox history, and stored replies)",
+    "End a session for good. Closes its terminal and removes a clean worktree. Keeps the record, its messages, replies and branch. Not the entry session: end that one in its terminal",
   params: {
     id,
     keepWorktree: Flag.Boolean("keep-worktree").pipe(
-      Flag.withDescription("Archive the session but keep its worktree"),
+      Flag.withDescription("End the session and keep its worktree"),
       Flag.withDefault(false),
     ),
   },
@@ -194,11 +211,11 @@ const archive = Spec.make("archive", {
 
 const ls = Spec.make("ls", {
   description:
-    "Your sessions that have not exited, as JSON: each task (cut to 500 characters), its live status, and its latest result (--all: exited ones too). vibest result keeps the full task",
+    "Sessions that have not exited, as JSON: each task, cut to 500 characters, its status, and its latest result. vibest result has the full task",
   params: {
     all: Flag.Boolean("all").pipe(
       Flag.withAlias("a"),
-      Flag.withDescription("Exited sessions too"),
+      Flag.withDescription("Include exited sessions"),
       Flag.withDefault(false),
     ),
   },
@@ -206,18 +223,18 @@ const ls = Spec.make("ls", {
 
 const events = Spec.make("events", {
   description:
-    "The event log as JSON lines: one session's facts (--session, from after --after) or all of them; --follow keeps printing new ones",
+    "Print the event log as JSON lines, for one session (--session) or all of them. --follow keeps printing new ones. Only the user runs this",
   params: {
     session: Flag.String("session").pipe(
-      Flag.withDescription("Only this session's facts (its id, or a unique prefix of at least 8 characters)"),
+      Flag.withDescription("Only this session: its id, or a unique prefix of at least 8 characters"),
       Flag.optional,
     ),
     after: Flag.Int("after").pipe(
-      Flag.withDescription("With --session: only facts after this seq (the seq of the last fact already seen)"),
+      Flag.withDescription("With --session: only events after this seq, the seq of the last one already seen"),
       Flag.optional,
     ),
     follow: Flag.Boolean("follow").pipe(
-      Flag.withDescription("Keep running and print facts as they are recorded"),
+      Flag.withDescription("Keep running and print events as they are recorded"),
       Flag.withDefault(false),
     ),
   },
@@ -225,9 +242,9 @@ const events = Spec.make("events", {
 
 const models = Spec.make("models", {
   description:
-    "The models each harness accepts, as the harness reports them: start a session with one entry's harness, provider (null: leave it out) and model",
+    "The models each harness accepts, as the harness reports them. Start a session with one entry's harness, provider (null: leave it out) and model",
   params: {
-    target: Argument.String("harness").pipe(Argument.withDescription("Only this harness's models"), Argument.optional),
+    target: Argument.String("harness").pipe(Argument.withDescription("Only this harness"), Argument.optional),
     harness: Flag.String("harness").pipe(Flag.withDescription("Same as the harness argument"), Flag.optional),
     provider: providerFlag,
   },
@@ -239,16 +256,16 @@ const harness = Spec.make("harness", {
     Spec.make("list", {
       alias: "ls",
       description:
-        "Each harness: its binary, whether vibest can start it, the model it runs by default (null: the harness chooses) and why it cannot be started; --machine lists another machine's. The list is the whole machine's; the default model is the harness's global default, which a repository's own harness settings may change in its project, and vibest does not read them",
+        "Each harness: its binary, whether vibest can start it, the model it runs by default (null: the harness chooses) and, when it cannot start, why. --machine lists another machine's. This is the whole machine. A repository's own harness settings can change the default model in that project; vibest does not read them",
       params: {
         machine: Flag.String("machine").pipe(
-          Flag.withDescription("List another machine's harnesses (asked each time)"),
+          Flag.withDescription("List another machine's harnesses. Asked each time"),
           Flag.optional,
         ),
       },
     }),
     Spec.make("models", {
-      description: "The models one harness accepts; same JSON as vibest models",
+      description: "The models one harness accepts. Same JSON as vibest models",
       params: { harness: Argument.String("harness"), provider: providerFlag },
     }),
   ],
@@ -278,14 +295,14 @@ const agent = Spec.make("agent", {
 
 const project = Spec.make("project", {
   description:
-    "This repository's project folder (VIBEST_PROJECT_DIR for agents): preferences.md, docs/, memories/ and artifacts/, read and written with file tools",
+    "This repository's project folder (VIBEST_PROJECT_DIR for agents): preferences.md, docs/, memories/ and artifacts/. Read and write them with your file tools",
   commands: [
     Spec.make("create", {
       description:
-        "Only for working on several repositories together; a single git repository is already a project (cd into it and run vibest). Copies them into a new project directory, one folder each: `vibest project create ~/work/combo --from ~/code/shop --from ~/code/admin` makes ~/work/combo/shop and ~/work/combo/admin (your originals are untouched); ~/work/combo itself must not be inside a git repository. Then `cd ~/work/combo && vibest`: the entry session works there, and each subagent gets its own copy with the same folders. An agent may not run it",
+        "For working on several repositories together. One git repository is already a project: cd into it and run vibest. Copies each repository into a new directory, one folder each, and leaves your originals untouched. The new directory must not be inside a git repository. Example: vibest project create ~/work/combo --from ~/code/shop --from ~/code/admin. Only the user runs this",
       params: {
         directory: Argument.String("directory").pipe(
-          Argument.withDescription("The project directory to create (or an empty directory to use)"),
+          Argument.withDescription("The project directory to create, or an empty directory to use"),
         ),
         from: Flag.String("from").pipe(
           Flag.withDescription("A git repository to copy in, as a folder named after it. Repeat for each repository"),
@@ -312,58 +329,60 @@ const project = Spec.make("project", {
     }),
     Spec.make("add", {
       description:
-        "Record a checkout as a project without starting an entry session, so another machine's vibestd can run agents in it",
+        "Record a checkout as a project without opening an entry session, so another machine can run agents in it. Only the user runs this",
       params: { directory: Argument.String("directory").pipe(Argument.withDefault(".")) },
     }),
     Spec.make("move", {
       description:
-        "Run inside the repository at its new place: the project that was recorded at the old directory continues here, with its id, memories and sessions. Only for a directory that no longer exists; vibest never detects a move by itself. Prints `git worktree repair` for each worktree of yours outside vibest's worktrees",
+        "Continue, here, the project recorded at an old directory: same id, memories and sessions. Run it inside the repository at its new place, and only when the old directory is gone. Prints git worktree repair for each of your worktrees outside vibest's. Only the user runs this",
       params: { from: Argument.String("old-directory") },
     }),
     Spec.make("info", {
-      description: "The paths of the project folder, its preferences.md, docs, memories and artifacts",
+      description: "The paths of the project folder and of its preferences.md, docs, memories and artifacts",
     }),
     Spec.make("search", {
-      description: "Case-insensitive text search; hits are kind/path:line: text",
+      description: "Search the project folder, ignoring case. Each hit is kind/path:line: text",
       params: {
         query: Argument.String("query"),
-        kind: Flag.Literals("kind", ProjectKind.literals).pipe(Flag.optional),
+        kind: Flag.Literals("kind", ProjectKind.literals).pipe(
+          Flag.withDescription("Only this kind: docs, memories or artifacts"),
+          Flag.optional,
+        ),
       },
     }),
   ],
 })
 
 const plugins = Spec.make("plugins", {
-  description:
-    "List the plugins vibestd loaded (from ~/.vibest/plugins and vibest.json) with their hook counters since it started",
+  description: "Plugins loaded from ~/.vibest/plugins and vibest.json, with hook counts since vibestd started",
 })
 
 const subscriptions = Spec.make("subscriptions", {
-  description: "Print each harness login and its usage limits, as vibestd last read them",
+  description: "Each harness login and its usage limits, as last read",
 })
 
 const integration = Spec.make("integration", {
   description:
-    "Internal: called by vibest's plugin in each harness (user prompt, execution end, pre-tool guard); not for direct use",
+    "What vibest's plugin in a harness calls: a prompt, an execution end, the pre-tool guard. Not for direct use",
   commands: [
     Spec.make("guard", {
       description:
-        "Pre-tool hook: reads the harness's pre-tool input on stdin, prints its answer when the rules of the session's agent refuse the call",
+        "Pre-tool hook. Reads the harness's pre-tool input on stdin and prints a refusal when this session's rules refuse the call",
       params: { harness: hookHarness },
     }),
     Spec.make("prompt", {
       description:
-        "A harness plugin's execution-start bridge: its prompt or activity event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
+        "Execution-start report: the harness's prompt or activity event as JSON on stdin. Exits non-zero when vibestd did not get it. Does not start vibestd",
       params: { harness: hookHarness },
     }),
     Spec.make("stop", {
       description:
-        "A harness plugin's execution-end bridge: its execution-end event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
+        "Execution-end report: the harness's execution-end event as JSON on stdin. Exits non-zero when vibestd did not get it. Does not start vibestd",
       params: { harness: hookHarness },
     }),
     Spec.make("ready", {
       description:
-        "A harness plugin's session-start bridge: tells vibestd the session takes input. Does not start vibestd; exits non-zero when the report did not reach vibestd",
+        "Session-start report: tells vibestd the session takes input. Exits non-zero when vibestd did not get it. Does not start vibestd",
       params: { harness: hookHarness },
     }),
   ],
@@ -371,16 +390,16 @@ const integration = Spec.make("integration", {
 
 const doctor = Spec.make("doctor", {
   description:
-    "Check that vibest can work here: the coding agents, vibestd, each runtime agents run in, and plugins, each problem with how to fix it; starts vibestd when it is not running",
+    "Check that vibest can work here: the harnesses, vibestd, the runtimes agents run in, and plugins. Each problem says how to fix it. Starts vibestd when it is not running",
 })
 
 const update = Spec.make("update", {
   alias: "upgrade",
   description:
-    "Update vibest the way it was installed (install.sh: from the GitHub releases; npm: from the registry, at that exact version, with the package manager that installed it; either is first tried aside and must open the database), hand the running vibestd over to it (agents keep running), then offer to restart the agents still on the old integration in place, with their conversations. A stable vibest updates to the newest stable release, a beta to the newest release of either channel",
+    "Update vibest the way it was installed. install.sh takes a GitHub release; npm takes that exact version from the registry, with the package manager that installed it. The new one is tried aside first and must open the database. Then replaces the running vibestd and asks whether to restart agents still on the old version, keeping their conversations. A stable install updates to the newest stable release; a beta install updates to the newest release of either channel",
   params: {
     beta: Flag.Boolean("beta").pipe(
-      Flag.withDescription("Update to the newest release of either channel, beta or stable"),
+      Flag.withDescription("Update to the newest release, beta or stable"),
       Flag.withDefault(false),
     ),
     stable: Flag.Boolean("stable").pipe(
@@ -388,9 +407,7 @@ const update = Spec.make("update", {
       Flag.withDefault(false),
     ),
     yes: Flag.Boolean("yes").pipe(
-      Flag.withDescription(
-        "Restart the agents still on the old integration without asking (a shell without a terminal)",
-      ),
+      Flag.withDescription("Restart agents still on the old version without asking. For a shell with no terminal"),
       Flag.withDefault(false),
     ),
     restartAgentsAfter: Flag.Int("restart-agents-after").pipe(Flag.withHidden, Flag.optional),
@@ -399,7 +416,7 @@ const update = Spec.make("update", {
 
 const connect = Spec.make("connect", {
   description:
-    "Internal: what another machine's vibestd runs over ssh. Joins stdin and stdout to this machine's vibestd, starting it when it is not running",
+    "What another machine's vibestd runs over ssh. Joins stdin and stdout to this machine's vibestd, and starts it when it is not running. Not for direct use",
 })
 
 const worktree = Spec.make("worktree", {
@@ -423,32 +440,34 @@ const worktree = Spec.make("worktree", {
 })
 
 const machine = Spec.make("machine", {
-  description: "Other machines this vibestd dials over ssh, to run agents there (vibest run --machine)",
+  description:
+    "Machines this vibestd connects to over ssh, so vibest run --machine can run agents there. Only the user runs these",
   commands: [
     Spec.make("add", {
-      description: "Connect once to a machine's vibestd over ssh and keep it as a machine",
+      description: "Connect to a machine's vibestd over ssh and keep it",
       params: {
-        name: Argument.String("name").pipe(Argument.withDescription("What --machine and addresses name/<id> use")),
+        name: Argument.String("name").pipe(
+          Argument.withDescription("The name --machine and addresses <name>/<id> use"),
+        ),
         target: Argument.String("target").pipe(
-          Argument.withDescription("ssh target: user@host, user@host:port, or a Host of the ssh config"),
+          Argument.withDescription("An ssh target: user@host, user@host:port, or a Host from the ssh config"),
         ),
       },
     }),
     Spec.make("ls", {
       description:
-        "The machines this vibestd dials, with their connection state, their runtimes, whether this machine shows their terminals and their load (cores, CPU in use, memory, working executions; loadError when it cannot be read) (JSON)",
+        "The machines this vibestd connects to: connection, runtimes, whether this machine shows their terminals, and their load (cores, CPU in use, memory, working executions; loadError when it cannot be read). JSON",
     }),
     Spec.make("rm", {
       description:
-        "Forget a machine: its connection stops; its agents keep running there and adding it again delivers their results",
+        "Forget a machine and stop its connection. Agents there keep running; adding it again delivers their results",
       params: { name: Argument.String("name") },
     }),
   ],
 })
 
 export const Commands = Spec.make("vibest", {
-  description:
-    "vibest: in a project directory, open its entry session here (--new: a new conversation); the entry session runs subagents in herdr panes",
+  description: "In a project directory, open its entry session in this terminal. --new starts a new conversation",
   params: entryFlags,
   commands: [
     daemon,

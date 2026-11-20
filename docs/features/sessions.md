@@ -78,7 +78,7 @@ rules to the ones every agent has. Bare `vibest` opens the entry session as `coo
 `general` session unless `--agent` names another registered id, and on another machine the same id is looked up there. An
 id that is not registered is refused with the registered ids listed (or, for an invalid file, its error), before any
 worktree or pane is made. A session may
-manage (send to, interrupt, peek at, remove) only the sessions it started.
+manage (send to, interrupt, peek at, archive) only the sessions it started.
 
 ## S60. Agents from files
 
