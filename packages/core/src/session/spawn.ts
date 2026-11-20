@@ -29,6 +29,7 @@ import {
 } from "effect"
 import { Hex } from "effect/encoding"
 
+import { definitionLaunch } from "../agent-launch.ts"
 import { Agents, unknownAgent } from "../agents.ts"
 import { type NewSession, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
@@ -199,14 +200,16 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
           return yield* new NoCallingSession()
         const root = input.root
         const agent = input.agent
+        const definition = agents.find(agent)
 
-        if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
+        if (definition === undefined) return yield* unknownAgent(agent, agents)
+        const ownLaunch = definitionLaunch(definition, input)
 
         const parent =
           input.parentSessionId === undefined ? undefined : yield* db.session.getSession(input.parentSessionId)
 
         const parentRuntime = parent === undefined ? undefined : runtimeOf(parent) || undefined
-        const from = input.harness !== undefined ? undefined : parent
+        const from = input.harness !== undefined || ownLaunch !== undefined ? undefined : parent
 
         const namedShare =
           input.runtime === undefined && input.share !== undefined
@@ -253,24 +256,27 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
           Ref.get(attachmentsOwned).pipe(Effect.flatMap((owned) => (owned ? Effect.void : dropAttachments))),
         )
 
-        const decision = yield* plugins.start({
-          project: root,
-          agent,
-          parentSessionId: input.parentSessionId,
-          prompt: withAttachedFiles(input.prompt, files),
-          files,
-          harness: input.harness ?? (from === undefined ? undefined : harnessIdOf(from)),
-          provider: input.provider ?? from?.process?.provider ?? undefined,
-          model: input.model ?? from?.process?.model ?? undefined,
-          harnesses: yield* harnessOptions.pipe(
-            Effect.provideService(Harness.Service, harness),
-            Effect.provideService(Harnesses.Service, harnesses),
-          ),
-          machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
-          runtime: followedShare === undefined ? input.runtime : runtimeOf(followedShare),
-          parentRuntime,
-          machines: yield* machinesListing,
-        })
+        const decision = yield* plugins.start(
+          {
+            project: root,
+            agent,
+            parentSessionId: input.parentSessionId,
+            prompt: withAttachedFiles(input.prompt, files),
+            files,
+            harness: ownLaunch?.choice.harness ?? input.harness ?? (from === undefined ? undefined : harnessIdOf(from)),
+            provider: ownLaunch?.choice.provider ?? input.provider ?? from?.process?.provider ?? undefined,
+            model: ownLaunch?.choice.model ?? input.model ?? from?.process?.model ?? undefined,
+            harnesses: yield* harnessOptions.pipe(
+              Effect.provideService(Harness.Service, harness),
+              Effect.provideService(Harnesses.Service, harnesses),
+            ),
+            machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
+            runtime: followedShare === undefined ? input.runtime : runtimeOf(followedShare),
+            parentRuntime,
+            machines: yield* machinesListing,
+          },
+          ownLaunch?.decidedBy,
+        )
 
         const { provider, model } = decision
 

@@ -127,6 +127,7 @@ export const make = Effect.gen(function* () {
       sharer: yield* db.session.earlierSharer(session.id),
       creator: yield* db.session.creatorLabel(session.id),
       projectDir: layout.project(session.projectId),
+      agents: agents.all,
       ...(yield* projectText(layout.project(session.projectId))),
     })
   }, provided)

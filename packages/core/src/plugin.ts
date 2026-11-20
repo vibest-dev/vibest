@@ -415,7 +415,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         return yield* f(trace)
       })
 
-    const start = Effect.fn("Plugins.start")(function* (input: StartInput) {
+    const start = Effect.fn("Plugins.start")(function* (
+      input: StartInput,
+      decidedBefore?: Readonly<Record<string, string>>,
+    ) {
       const trace: Array<TraceEntry> = []
       const entries = yield* admit("agent.start.before")
 
@@ -431,6 +434,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         }
 
         const decidedBy: Record<string, string> = {}
+        Object.assign(decidedBy, decidedBefore)
 
         const route = (draft: VibestPlugin.AgentStartBefore, plugin: string) => {
           const fields = routed(event, draft)

@@ -8,6 +8,7 @@ import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import { parseShard, shardOf } from "./runner/shard.ts"
+import agents from "./scenarios/agents.ts"
 import agy from "./scenarios/agy.ts"
 import cursor from "./scenarios/cursor.ts"
 import daemon from "./scenarios/daemon.ts"
@@ -46,6 +47,7 @@ import { privateIn, redactor } from "./world/redact.ts"
 import { capture } from "./world/user-env.ts"
 
 const areas = {
+  agents,
   agy,
   daemon,
   project,

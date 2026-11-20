@@ -1,6 +1,7 @@
 import type {
   AgentDefinition as PluginAgentDefinition,
   AgentEditor,
+  InvalidAgent,
   Harness as PluginHarness,
   Runtime as PluginRuntime,
   SubscriptionReport,
@@ -36,10 +37,15 @@ export interface HarnessesDomain extends PluginHarness.HarnessDomain {
   readonly find: (id: string | null | undefined) => HarnessDefinition | undefined
 }
 
+export type RegisteredAgent = AgentDefinition & { readonly plugin: string }
+
+export type RejectedAgent = InvalidAgent & { readonly plugin: string }
+
 export interface AgentsDomain {
-  readonly all: ReadonlyArray<AgentDefinition>
-  readonly find: (id: string | null | undefined) => AgentDefinition | undefined
-  readonly transform: Transform<AgentEditor>
+  readonly all: ReadonlyArray<RegisteredAgent>
+  readonly invalid: ReadonlyArray<RejectedAgent>
+  readonly find: (id: string | null | undefined) => RegisteredAgent | undefined
+  readonly transformFor: (plugin: string) => Transform<AgentEditor>
 }
 
 export interface SubscriptionsDomain {

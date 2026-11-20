@@ -39,6 +39,12 @@ export const entryFlags = {
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
   model: Flag.String("model").pipe(Flag.optional),
+  agent: Flag.String("agent").pipe(
+    Flag.withDescription(
+      "The agent definition a new entry conversation runs as (default coordinator; see vibest agent list). A conversation keeps the agent it started with: naming another needs --new",
+    ),
+    Flag.optional,
+  ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
     Flag.withDescription("Outside herdr: do not attach to the session"),
@@ -248,6 +254,28 @@ const harness = Spec.make("harness", {
   ],
 })
 
+const agentMachine = Flag.String("machine").pipe(
+  Flag.withDescription("Ask another machine, whose own definitions its sessions run as"),
+  Flag.optional,
+)
+
+const agent = Spec.make("agent", {
+  description:
+    "The agent definitions sessions run as: the builtin ones, one per file in ~/.vibest/agents (<id>.md) and those plugins add",
+  commands: [
+    Spec.make("list", {
+      alias: "ls",
+      description:
+        "Each agent definition with its description, the plugin that added it and the harness, provider and model it starts on when a run names none; invalid lists each definition file that failed to load and why",
+      params: { machine: agentMachine },
+    }),
+    Spec.make("show", {
+      description: "One agent definition with the full prompt its sessions get before their session facts",
+      params: { id: Argument.String("id"), machine: agentMachine },
+    }),
+  ],
+})
+
 const project = Spec.make("project", {
   description:
     "This repository's project folder (VIBEST_PROJECT_DIR for agents): preferences.md, docs/, memories/ and artifacts/, read and written with file tools",
@@ -398,6 +426,7 @@ export const Commands = Spec.make("vibest", {
     events,
     models,
     harness,
+    agent,
     project,
     plugins,
     subscriptions,

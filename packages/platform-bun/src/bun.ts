@@ -398,10 +398,15 @@ export const replacements: LayerNode.Replacements = [
   builtinsNode.replace(
     LayerNode.make({
       name: "vibest/Builtins",
-      layer: Layer.effect(Builtins, pre).pipe(Layer.provide(Layer.effect(ArchiveOnIdle, archiveOnIdle))),
+      layer: Layer.effect(
+        Builtins,
+        Effect.flatMap(Layout, (layout) => pre(layout.home)),
+      ).pipe(Layer.provide(Layer.effect(ArchiveOnIdle, archiveOnIdle))),
       deps: [
         PlatformNode.fileSystem,
         PlatformNode.path,
+        PlatformNode.crypto,
+        PlatformNode.layout,
         PlatformNode.childProcessSpawner,
         Archive.node,
         Db.node,

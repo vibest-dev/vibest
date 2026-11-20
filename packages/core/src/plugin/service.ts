@@ -23,7 +23,10 @@ export interface SpawnDecision extends Routing {
 }
 
 export interface Interface {
-  readonly start: (input: StartInput) => Effect.Effect<SpawnDecision, AgentRefused | PluginsNotActive>
+  readonly start: (
+    input: StartInput,
+    decidedBy?: Readonly<Record<string, string>>,
+  ) => Effect.Effect<SpawnDecision, AgentRefused | PluginsNotActive>
   readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   readonly settled: Effect.Effect<boolean>
   readonly machine: (
