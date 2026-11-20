@@ -47,6 +47,10 @@ Adding a machine shows B's herdr-core terminals in A's herdr-core: a session on 
 typing there starts an execution on B whose message arrives once; a rename is followed; a removed terminal comes back with the
 next `vibest ls`; `vibest machine rm` removes them.
 
+## M10. How loaded a machine is
+
+`vibest status` gives this machine's load, and `vibest machine ls` gives each added machine's under `load`: usable cores, the share of CPU in use over a 200 ms sample, total memory and the memory the OS can hand out without swapping (on macOS free, inactive and speculative pages, not free alone; on Linux MemAvailable; a cgroup cap counts on Linux), and how many executions are working on that machine. Another machine is asked of that machine's vibestd, which measures itself. A machine that cannot be read has no `load` and says why in `loadError`; it never shows as idle. Nothing is stored and nothing is read on a timer; a reading is reused for 5 seconds.
+
 ## M7. B's herdr sessions on A
 
 `vibest run --machine`, run by a session on A, opens in B's default herdr session (`default`), which `vibest machine add` saves on A and which

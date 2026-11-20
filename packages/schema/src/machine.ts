@@ -69,6 +69,15 @@ export const RuntimeView = Schema.Struct({
 
 export type RuntimeView = typeof RuntimeView.Type
 
+export const MachineLoad = Schema.Struct({
+  sampledAt: Schema.Number,
+  cpu: Schema.Struct({ count: Schema.Number, utilization: Schema.NullOr(Schema.Number) }),
+  memory: Schema.Struct({ total: Schema.Number, available: Schema.Number }),
+  executions: Schema.Struct({ working: Schema.Number }),
+})
+
+export type MachineLoad = typeof MachineLoad.Type
+
 export const MachineInfo = Schema.Struct({
   name: Schema.String,
   target: Schema.String,

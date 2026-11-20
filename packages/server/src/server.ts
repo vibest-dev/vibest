@@ -34,6 +34,7 @@ import * as ProjectHandlers from "./handlers/project.ts"
 import * as RemoteHandlers from "./handlers/remote.ts"
 import * as SessionHandlers from "./handlers/session.ts"
 import * as Listing from "./listing.ts"
+import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
 import { Remote } from "./machine/remote.ts"
@@ -97,6 +98,7 @@ export const node = LayerNode.make({
     Inbox.node,
     Integration.node,
     EntrySession.node,
+    Load.node,
     Machines.node,
     Peer.node,
     Plugins.node,

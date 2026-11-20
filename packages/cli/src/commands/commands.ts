@@ -146,7 +146,7 @@ const send = Spec.make("send", {
 
 const status = Spec.make("status", {
   description:
-    "vibest's status: this client, vibestd (running or not; never started by this) and the terminal runtimes it has",
+    "vibest's status: this client, vibestd (running or not; never started by this), this machine's load when vibestd is running, and the terminal runtimes it has",
 })
 
 const result = Spec.make("result", {
@@ -371,7 +371,7 @@ const machine = Spec.make("machine", {
     }),
     Spec.make("ls", {
       description:
-        "The machines this vibestd dials, with their connection state, their runtimes and whether this machine shows their terminals (JSON)",
+        "The machines this vibestd dials, with their connection state, their runtimes, whether this machine shows their terminals and their load (cores, CPU in use, memory, working executions; loadError when it cannot be read) (JSON)",
     }),
     Spec.make("rm", {
       description:

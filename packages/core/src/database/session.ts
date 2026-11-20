@@ -913,6 +913,13 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           Effect.orDie,
         ),
       ),
+
+      workingExecutions: Effect.fn("Db.session.workingExecutions")(() =>
+        sql<{ n: number }>`SELECT count(*) AS n FROM execution WHERE outcome IS NULL`.pipe(
+          Effect.map((rows) => Number(rows[0]?.n ?? 0)),
+          Effect.orDie,
+        ),
+      ),
     }
   })
 
