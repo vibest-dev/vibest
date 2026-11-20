@@ -153,12 +153,6 @@ export const openSources = Effect.fnUntraced(function* (
       Effect.orElseSucceed(() => false),
     )
 
-  const isFile = (target: string) =>
-    fs.stat(target).pipe(
-      Effect.map((i) => i.type === "File"),
-      Effect.orElseSucceed(() => false),
-    )
-
   const revisionOf = (graph: Graph, base: string) =>
     Effect.forEach(
       [...graph.files.map((f) => [f, false] as const), ...graph.unresolved.map((d) => [d, true] as const)],
@@ -352,12 +346,6 @@ export const openSources = Effect.fnUntraced(function* (
         : path.resolve(layout.home, target)
 
       paths.add(resolved)
-
-      if (yield* isFile(resolved)) {
-        yield* warn(`vibest.json: plugin path must be a directory: ${resolved}`)
-        continue
-      }
-
       configured.push({ type: "add", target: resolved, options })
     }
 

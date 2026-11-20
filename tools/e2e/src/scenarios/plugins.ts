@@ -110,17 +110,44 @@ const checks: ReadonlyArray<Check> = [
           plugins: [path.dirname(configured), url.pathToFileURL(path.dirname(spaced)).href, solo],
         }),
       )
-      await until("all three plugins active", async () => {
+      await until("the configured plugins active", async () => {
         const all = await list(w)
 
-        return ["home", "configured", "spaced"].every((id) => all.some((p) => p.id === id && p.status === "active"))
+        return ["home", "configured", "spaced", "solo"].every((id) =>
+          all.some((p) => p.id === id && p.status === "active"),
+        )
       })
-      await until("the single-file entry refused", async () =>
-        (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).includes(
-          `vibest.json: plugin path must be a directory: ${solo}`,
-        ),
+    },
+  },
+  {
+    id: "G17",
+    title:
+      "a vibest.json created after vibestd started loads the plugin file it names, and vibest doctor shows it active",
+    run: async (w) => {
+      const file = path.join(w.vibestHome, "cursor-auto.ts")
+      await write(file, plugin("late-config"))
+      await list(w)
+      const pid = await w.daemonPid()
+      expect(pid !== undefined, "vibestd did not start")
+      expect(!(await list(w)).some((p) => p.id === "late-config"), "the plugin was active before vibest.json existed")
+      await write(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: ["./cursor-auto.ts"] }))
+      await until("the plugin from the new vibest.json is active", async () =>
+        (await list(w)).some((p) => p.id === "late-config" && p.status === "active"),
       )
-      expect(!(await list(w)).some((p) => p.id === "solo"), "a single file named in vibest.json was loaded")
+
+      const shown = async (id: string) => {
+        const doctor = await w.ok(["doctor"], { timeoutMs: 120_000 })
+        const active = doctor.split("\n").find((line) => line.includes("active:"))
+        expect(active?.includes(id) === true, `vibest doctor did not list ${id} active:\n${doctor}`)
+        expect((await w.daemonPid()) === pid, "vibestd restarted")
+      }
+
+      await shown("late-config")
+      await write(file, plugin("late-config-v2"))
+      await until("the edited plugin file is active", async () =>
+        (await list(w)).some((p) => p.id === "late-config-v2" && p.status === "active"),
+      )
+      await shown("late-config-v2")
     },
   },
   {

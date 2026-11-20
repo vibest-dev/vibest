@@ -41,10 +41,6 @@ release. Each release lists what broke, who is affected and how to migrate under
   `Plugin.effectOf` is gone (the host picks the form itself; `@vibest/plugin/promise/adapter` exports the Promise adapter `fromPromise`). `PromiseContext`, `PromiseRegistration` and `PromiseDefinitions`
   are now `Plugin.Context`, `Registration` and `Definitions` of the Promise entry. `Subscription`, `SubscriptionAccount` and `SubscriptionLimit` are no longer exported from either entry: import them from `@vibest/schema/subscription`. `@vibest/plugin/testing` `machineHooks` accepts only Effect plugins (a Promise plugin throws `TypeError: plugin.effect is not a function`); migrate `machineHooks(plugin)` to `machineHooks({ id: plugin.id, effect: fromPromise(plugin) })` with `fromPromise` from `@vibest/plugin/promise/adapter`. Migrate: an Effect plugin changes
   `from "@vibest/plugin"` to `from "@vibest/plugin/effect"`; a Promise plugin keeps its import.
-- **A `vibest.json` plugin entry must be a folder** (plugin authors, users with single-file entries): an entry that names
-  a file is skipped with a warning, as OpenCode does. Put the file in `~/.vibest/plugins/`, or move it to a folder with
-  an `index.ts` (or a `package.json` with `exports`) and name the folder. The shipped Cursor plugin is now
-  `harnesses/cursor/index.js`; name the folder `harnesses/cursor`.
 - **`Send` takes a UUID `request`** (RPC clients): the optional `request` field of `Send` must be a v4 UUID and any
   other value is refused when the request is decoded. A retried `Send` with the same `request` reaches another
   machine once. Send a fresh `crypto.randomUUID()` per message and reuse it only when retrying that message.
