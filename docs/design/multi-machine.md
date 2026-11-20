@@ -127,6 +127,15 @@ origin has that peer and that project; any other session is `NoSuchSession`.
 
 ## Repository identity
 
+Which remote a checkout is known by is chosen the same way on both machines (`Git.remoteUrl`, `fetchRemote` in
+`packages/core/src/repository-url.ts`), from the remotes that have a fetch URL with a network form (not a local path
+or a `file://` URL): the remote the GitHub CLI marked as default (`remote.<name>.gh-resolved`, only when present),
+then `upstream`, then `origin`, then the others by name. A reads it from each checkout when it runs
+`vibest run --machine`, B from each checkout of its projects when it answers, so a remote added or changed after
+`vibest project add` counts; `remote_url` is recorded with the same choice. A checkout with no such remote is
+refused for remote runs, naming it ("<dir> has no remote with a network URL"), on A; on B it matches nothing. The rule
+is the same for every host: GitHub, GitLab with nested groups, Bitbucket, Gitea or a self-hosted server.
+
 The same repository is often cloned with different URLs on two machines (`git@github-me:o/r.git` on A,
 `https://github.com/o/r` on B), so B does not match `remote_url` as a string alone. The repository identity
 (`packages/core/src/repository-url.ts`) is the host in lower case and the `owner/repo` path, without scheme, user,

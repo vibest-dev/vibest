@@ -170,6 +170,11 @@ describe("git, the live layer: worktree add and remove", () => {
       assert.isUndefined(yield* git.originUrl(repo))
       yield* sh(repo, "remote", "add", "origin", "git@github.com:Org/MyRepo.git")
       assert.strictEqual(yield* git.originUrl(linked), "git@github.com:Org/MyRepo.git")
+      assert.strictEqual(yield* git.remoteUrl(linked), "git@github.com:Org/MyRepo.git")
+      yield* sh(repo, "remote", "add", "upstream", "https://gitlab.com/group/sub/my-repo.git")
+      assert.strictEqual(yield* git.remoteUrl(repo), "https://gitlab.com/group/sub/my-repo.git")
+      yield* sh(repo, "config", "remote.origin.gh-resolved", "base")
+      assert.strictEqual(yield* git.remoteUrl(repo), "git@github.com:Org/MyRepo.git")
 
       yield* fs.writeFileString(path.join(linked, "x.txt"), "x\n")
       assert.include((yield* Effect.flip(git.removeWorktree(repo, linked))).message, "untracked")

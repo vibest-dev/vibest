@@ -31,7 +31,9 @@ type Wanted = {
   readonly commit: string
 }
 
-type Checkout = Effect.Success<Db.Interface["remote"]["remoteProjects"]>[number]
+type Checkout = Effect.Success<Db.Interface["remote"]["projectCheckouts"]>[number] & {
+  readonly remote: string | undefined
+}
 
 type Paired = { readonly wanted: Wanted; readonly row: Checkout }
 
@@ -85,7 +87,13 @@ const make = Effect.gen(function* () {
 
       if (!folders.every(safeRepositoryDirectory) || new Set(folders).size !== folders.length)
         return yield* new NoProject({ message: `${self.name} refuses the folder names ${folders.join(", ")}` })
-      const rows = yield* db.remote.remoteProjects
+
+      const rows: ReadonlyArray<Checkout> = yield* Effect.forEach(
+        yield* db.remote.projectCheckouts,
+        (row) => Effect.map(git.remoteUrl(row.path), (remote) => ({ ...row, remote })),
+        { concurrency: 8 },
+      )
+
       const exact = (w: Wanted) => rows.filter((row) => row.remote === w.repository)
       const byIdentity = wanted.some((w) => w.identity !== undefined && exact(w).length === 0)
 
@@ -93,7 +101,11 @@ const make = Effect.gen(function* () {
         byIdentity
           ? yield* Effect.forEach(
               rows,
-              (row) => Effect.map(repositoryIdentity(row.remote), (id) => [row, id] as const),
+              (row) =>
+                Effect.map(
+                  row.remote === undefined ? Effect.succeed(undefined) : repositoryIdentity(row.remote),
+                  (id) => [row, id] as const,
+                ),
               {
                 concurrency: 8,
               },
@@ -132,9 +144,9 @@ const make = Effect.gen(function* () {
 
       const projects = [...new Set(rows.map((row) => row.id))].flatMap((id) => {
         const own = rows.filter((row) => row.id === id)
-        const { directory, repositories } = own[0]!
+        const { directory } = own[0]!
 
-        return directory === null ? [] : [{ id, directory, repositories, own }]
+        return directory === null ? [] : [{ id, directory, own }]
       })
 
       const shown = (list: ReadonlyArray<{ readonly id: string; readonly directory: string }>) =>
@@ -142,7 +154,7 @@ const make = Effect.gen(function* () {
 
       const holding = (list: typeof projects) =>
         list.flatMap((p) => {
-          const pairs = p.repositories === wanted.length ? pairedIn(p.own) : undefined
+          const pairs = p.own.length === wanted.length ? pairedIn(p.own) : undefined
 
           return pairs === undefined ? [] : [{ id: p.id, directory: p.directory, pairs }]
         })

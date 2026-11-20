@@ -254,7 +254,7 @@ export const projectRepositories = Effect.fn("Project.projectRepositories")(func
     const path = yield* fs.realPath(checkout)
 
     if (places.some((place) => place.path === path)) continue
-    places.push({ path, remote: yield* Git.Service.use((git) => git.originUrl(path)) })
+    places.push({ path, remote: yield* Git.Service.use((git) => git.remoteUrl(path)) })
   }
 
   return places

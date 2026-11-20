@@ -1,4 +1,5 @@
 import { Git, GitError, type GitState } from "@vibest/core/git"
+import { parseRemote } from "@vibest/core/repository-url"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, PlatformError } from "effect"
 
@@ -114,6 +115,12 @@ export class FakeGit extends Context.Service<
         isMainCheckout: (dir) =>
           Effect.map(locate(dir), (found) => found !== undefined && found.path === found.repository.main),
         originUrl: (dir) => Effect.map(locate(dir), (found) => found?.repository.facts.origin),
+        remoteUrl: (dir) =>
+          Effect.map(locate(dir), (found) => {
+            const origin = found?.repository.facts.origin
+
+            return origin !== undefined && parseRemote(origin) !== undefined ? origin : undefined
+          }),
         currentBranch: (dir) => Effect.map(inRepository(["branch", "--show-current"], dir), branchOf),
         uncommitted: (dir) =>
           Effect.map(inRepository(["status"], dir), (found) => found.repository.facts.uncommitted ?? []),

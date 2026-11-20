@@ -234,10 +234,10 @@ const make = Effect.gen(function* () {
             )
           : undefined
 
-      const pin = Effect.fn("Remote.pin")(function* (path: string, remote: string | null | undefined) {
-        if (remote === null || remote === undefined)
+      const pin = Effect.fn("Remote.pin")(function* (path: string, remote: string | undefined) {
+        if (remote === undefined)
           return yield* new MachineFailed({
-            message: `${path} has no remote; another machine finds its checkout by the remote URL`,
+            message: `${path} has no remote with a network URL; another machine finds its checkout by the remote URL`,
           })
 
         const commit = yield* git
@@ -255,14 +255,14 @@ const make = Effect.gen(function* () {
         folders !== undefined
           ? {
               repositories: yield* Effect.forEach(folders, (folder) =>
-                git.originUrl(folder.path).pipe(
+                git.remoteUrl(folder.path).pipe(
                   Effect.flatMap((remote) => pin(folder.path, remote)),
                   Effect.map((entry) => ({ folder: folder.name, ...entry })),
                 ),
               ),
             }
           : repositories.length === 1 && only !== undefined
-            ? yield* pin(only.path, only.remote)
+            ? yield* pin(only.path, yield* git.remoteUrl(only.path))
             : yield* new MachineFailed({ message: "the project has no repository another machine can run in" })
 
       const capabilities = (yield* machines.link(machine)).capabilities

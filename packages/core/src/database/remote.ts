@@ -241,17 +241,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           ).pipe(Effect.orDie),
       ),
 
-      remoteProjects: sql<{
-        id: string
-        directory: string | null
-        repositories: number
-        path: string
-        remote: string
-      }>`SELECT
-            p.id, p.directory, r.path, r.remote_url AS remote,
-            (SELECT count(*) FROM project_repository c WHERE c.project_id = p.id) AS repositories
-          FROM project p JOIN project_repository r ON r.project_id = p.id
-          WHERE r.remote_url IS NOT NULL ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
+      projectCheckouts: sql<{ id: string; directory: string | null; path: string }>`SELECT p.id, p.directory, r.path
+          FROM project p JOIN project_repository r ON r.project_id = p.id ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
 
       outboxOf: Effect.fn("Db.remote.outboxOf")((peer: string, after = 0, limit = -1) =>
         reads.outboxOf(peer, after, limit).pipe(Effect.orDie),

@@ -7,7 +7,10 @@ One machine's vibestd (A) can run agents on another machine (B) over ssh. Design
 
 `vibest machine add` records B, B records A as a peer, and a second name for the same B is refused. `vibest run
 --machine`, run by A's entry session, starts a session on B and none on A; A's entry session gets one message from `<machine>/<id>` with what the session sent, and nothing stays
-waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B.
+waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B. Each checkout is known by one remote, chosen the same way on
+both machines (the GitHub CLI default, then `upstream`, then `origin`, then the others by name; network URLs only),
+and the same repository matches across URL forms and ssh aliases for any host; a checkout with no such remote is refused
+naming it.
 
 ## M8. A remote execution end sends nothing
 
