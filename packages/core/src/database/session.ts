@@ -658,6 +658,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           }),
       ),
 
+      lastSessionAt: Effect.fn("Db.session.lastSessionAt")((runtime: string, address: RuntimeAddress) =>
+        session.lastSessionAt(runtime, address).pipe(Effect.orDie),
+      ),
+
       processesAt: Effect.fn("Db.session.processesAt")((runtime: string, address: RuntimeAddress) =>
         session.processesAt(runtime, address).pipe(Effect.orDie),
       ),

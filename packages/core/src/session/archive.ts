@@ -40,7 +40,7 @@ export const make = Effect.gen(function* () {
   const removal = yield* Remove.make
   const locks = yield* SessionLocks.Service
   const sessionLive = yield* SessionLive.Service
-  const { notice, recount, ownTerminal } = yield* Placement.Service
+  const { notice, recount, ownTerminal, terminalLocked } = yield* Placement.Service
   const { interruptAgent, settleAfterInterrupt } = yield* Executions.Service
   const archives = yield* FiberSet.make()
   const { locked } = locks
@@ -91,7 +91,7 @@ export const make = Effect.gen(function* () {
   const release = (id: string) =>
     db.session.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
 
-  const removeLocked = (
+  const removeOwned = (
     id: string,
     options: { readonly keepWorktree?: boolean | undefined; readonly unlessPending?: boolean },
   ) =>
@@ -148,6 +148,11 @@ export const make = Effect.gen(function* () {
 
       return out
     })
+
+  const removeLocked = (
+    id: string,
+    options: { readonly keepWorktree?: boolean | undefined; readonly unlessPending?: boolean },
+  ) => Effect.flatMap(getRow(id), (session) => terminalLocked(session)(removeOwned(id, options)))
 
   const remove = Effect.fn("Archive.remove")(
     function* (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) {

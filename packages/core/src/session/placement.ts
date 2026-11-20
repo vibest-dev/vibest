@@ -48,6 +48,7 @@ import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "
 import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
+import { SessionLocks, terminalLock } from "./locks.ts"
 
 export * as Placement from "./placement.ts"
 
@@ -89,6 +90,7 @@ export const make = Effect.gen(function* () {
   const git = yield* Git.Service
   const vibest = yield* VibestCommand
   const { prompt, openFirst, launched } = yield* Executions.Service
+  const locks = yield* SessionLocks.Service
 
   const provided = <A, E>(
     effect: Effect.Effect<
@@ -279,23 +281,32 @@ export const make = Effect.gen(function* () {
     const recorded = terminalOf(session)
 
     if (recorded.id === "") return undefined
-    const holders = yield* db.session.processesAt(runtimeOf(session), recorded)
 
-    return holders.some((held) => held.sessionId !== session.id) ? undefined : recorded
+    return (yield* db.session.lastSessionAt(runtimeOf(session), recorded)) === session.id ? recorded : undefined
   })
 
-  const closeLeftTerminal = Effect.fn("Placement.closeLeftTerminal")(function* (session: SessionRow) {
-    const left = yield* ownTerminal(session)
-    const owner = runtimes.find(runtimeOf(session))
+  const terminalLocked =
+    (session: SessionRow) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      terminalOf(session).id === ""
+        ? effect
+        : locks.withLock(terminalLock(runtimeOf(session), terminalOf(session)))(effect)
 
-    if (left === undefined || owner === undefined) return
-    yield* owner.close(left).pipe(
-      Effect.catchIf(
-        (e) => e.code === "not_found",
-        () => Effect.void,
-      ),
+  const closeLeftTerminal = (session: SessionRow) =>
+    terminalLocked(session)(
+      Effect.gen(function* () {
+        const left = yield* ownTerminal(session)
+        const owner = runtimes.find(runtimeOf(session))
+
+        if (left === undefined || owner === undefined) return
+        yield* owner.close(left).pipe(
+          Effect.catchIf(
+            (e) => e.code === "not_found",
+            () => Effect.void,
+          ),
+        )
+      }),
     )
-  })
 
   const openTerminal = Effect.fn("Placement.openTerminal")(function* (
     h: Runtime,
@@ -581,6 +592,7 @@ export const make = Effect.gen(function* () {
     recount,
     openTerminal,
     ownTerminal,
+    terminalLocked,
     show,
     locate,
   }
@@ -604,6 +616,7 @@ export const node = LayerNode.make({
     Harnesses.node,
     Inbox.node,
     Runtimes.node,
+    SessionLocks.node,
     PlatformNode.childProcessSpawner,
     PlatformNode.crypto,
     PlatformNode.fileSystem,
