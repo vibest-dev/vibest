@@ -6,14 +6,10 @@ export * as Plugin from "./plugin.ts"
 
 export * as Runtime from "./runtime.ts"
 
-export type { AgentDomain, Context, MachineDomain } from "./plugin.ts"
+export type { AgentDomain, Context, MachineDomain, SessionDomain } from "./plugin.ts"
 
 export type { EventDomain } from "./event.ts"
 
 export type { Hooks, Registration, Transform } from "./registration.ts"
 
-export { capture, type Captured } from "./capture.ts"
-
-export { reconnectSchedule } from "./reconnect.ts"
-
-export { launchLine, typedLine, type Launch } from "./launch.ts"
+export type { Launch } from "./launch.ts"

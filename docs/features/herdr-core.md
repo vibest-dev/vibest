@@ -17,12 +17,19 @@ each terminal with its project and task and shows which session started which.
 `vibest` in a herdr-core terminal, without `--runtime`, starts the entry session there, and its sessions start there too;
 `vibest run --runtime herdr` places a session in herdr instead.
 
+## S59. A harness that exits at once
+
+A session's harness in herdr-core starts after the user's shell configuration, with the vibest that started it still
+first on PATH when that configuration puts another vibest first, and the terminal returns to the user's shell when it
+exits. When it exits before it started working, its creator is told at once, with the last lines of its terminal,
+instead of after the ready timeout.
+
 ## S36. Unwatched execution ends
 
 A session execution that ended while nobody watched shows as done, for the session and its project; once it is seen, it is
 idle.
 
-## S58. A session keeps one terminal
+## S66. A session keeps one terminal
 
 A session has at most one terminal. A harness that exits before it reports ready leaves no terminal behind; a session
 sent a message after its harness exited starts again in a new terminal under the same name, and the old one is gone;

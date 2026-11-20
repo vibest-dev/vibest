@@ -176,7 +176,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.deepInclude(
         yield* a.sessions.remove(a.id),
         { processes: "exited", pane: "closed", worktree: "gone" },
-        "exited before the archive: its recorded terminal is still closed",
+        "closed by hand: the pane is already gone, so archive finds it closed",
       )
       assert.strictEqual(yield* reportedExecutionEndEvent(a.id), `result of ${a.id}`)
       assert.isFalse(yield* fs.exists(a.rules))

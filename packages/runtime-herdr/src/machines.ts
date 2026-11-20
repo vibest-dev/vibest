@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { capture } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { Duration, Effect, Option, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -21,7 +21,7 @@ const CLI_TIMEOUT = Duration.seconds(25)
 export const cliOf =
   (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]): Cli =>
   (args) =>
-    capture("herdr", args, { stdin: "ignore", timeout: CLI_TIMEOUT }).pipe(
+    Host.capture("herdr", args, { stdin: "ignore", timeout: CLI_TIMEOUT }).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Effect.map((run) =>
         run === undefined

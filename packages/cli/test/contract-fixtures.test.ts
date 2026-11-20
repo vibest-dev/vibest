@@ -12,6 +12,7 @@ import {
   type TestServices,
   wire,
 } from "@vibest/platform-bun/test/lib/fakes"
+import { render, RPC_JSON } from "@vibest/protocol/scripts/contract"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { Effect, Layer, Predicate, type Schema, type Scope } from "effect"
@@ -109,6 +110,10 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
   it.effect(name, () => program.pipe(Effect.provide(served)))
 
 describe("contract", () => {
+  it("rpc.json is what the RPC schemas generate", () => {
+    assert.strictEqual(fs.readFileSync(RPC_JSON, "utf8"), render(), "run pnpm --filter @vibest/protocol contract")
+  })
+
   test(
     "Project.Open finds or creates the project of a checkout and refuses a folder outside one",
     Effect.gen(function* () {

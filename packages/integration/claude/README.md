@@ -64,7 +64,7 @@ The generated files are ignored by Git.
 ## Use
 
 The launch side (arguments, models, resume, subscription reading) is the `claude` harness definition, added by the
-builtin plugin `harness-claude` in `packages/plugin-harnesses`; this package is only what runs inside Claude.
+builtin plugin `vibest.harness-claude` in `packages/plugin-harnesses`; this package is only what runs inside Claude.
 
 Nothing to install. vibest starts each Claude session (and a Claude entry session) with
 `claude --plugin-dir <@vibest/cli>/harnesses/claude`, which loads the plugin for that session only. vibest writes

@@ -1,5 +1,4 @@
 import childProcess from "node:child_process"
-import crypto from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -45,7 +44,24 @@ const has = (stage: string) => stages.includes(stage)
 const curlLeg = has("e2e") && legs.includes("curl")
 const npmLeg = has("e2e") && legs.includes("npm")
 const only = process.argv.filter((a, i) => i >= 2 && a !== "--no-cache" && !flagSlots.has(i))
-const NPM_SMOKE = ["I1", "I2", "U1", "U9", "U10", "H1"]
+
+const NPM_CHECKS = [
+  "D1",
+  "H1",
+  "H8",
+  "I1",
+  "I2",
+  "I3",
+  "I7",
+  "I9",
+  "I11",
+  "S10-launch",
+  "U1",
+  "U2",
+  "U10",
+  "U12",
+  ...(process.platform === "darwin" ? ["H4"] : []),
+]
 
 type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
 
@@ -196,35 +212,11 @@ await all([
   })(),
 ])
 
-const layoutOf = (top: string) => {
-  const entries = fs
-    .readdirSync(top, { recursive: true, withFileTypes: true })
-    .map((e) => {
-      const rel = path.relative(top, path.join(e.parentPath, e.name))
-
-      return e.isSymbolicLink()
-        ? `${rel} -> ${fs.readlinkSync(path.join(top, rel))}`
-        : `${rel}${e.isDirectory() ? "/" : ""}`
-    })
-    .filter((rel) => !rel.startsWith("package-lock.json"))
-    .sort()
-
-  return crypto.createHash("sha256").update(entries.join("\n")).digest("hex")
-}
-
-const common = childProcess.execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-  cwd: root,
-  encoding: "utf8",
-})
-
-const layoutFile = path.join(common.trim(), "vibest-e2e", "npm-layout")
-const layout = npmLeg ? layoutOf(npm) : ""
-const layoutKnown = fs.existsSync(layoutFile) && fs.readFileSync(layoutFile, "utf8") === layout
-const npmChecks = only.length > 0 || noCache ? only : layoutKnown ? NPM_SMOKE : []
+const npmChecks = only.length > 0 ? only : NPM_CHECKS
 
 const e2e = (method: string, install: string, ids: ReadonlyArray<string>) =>
   run(
-    `e2e on the ${method} install${ids === NPM_SMOKE ? ` (smoke: ${ids.join(" ")})` : ""}`,
+    `e2e on the ${method} install${ids === NPM_CHECKS ? ` (install and launch checks: ${ids.join(" ")})` : ""}`,
     [
       "bun",
       "tools/e2e/src/main.ts",
@@ -244,11 +236,6 @@ const [curlOk, npmOk] = await Promise.all([
   curlLeg ? e2e("curl", curl, only) : true,
   npmLeg ? e2e("npm", npm, npmChecks) : true,
 ])
-
-if (npmLeg && npmOk && npmChecks.length === 0 && !shard) {
-  fs.mkdirSync(path.dirname(layoutFile), { recursive: true })
-  fs.writeFileSync(layoutFile, layout)
-}
 
 fs.rmSync(dir, { recursive: true, force: true })
 

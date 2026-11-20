@@ -1,4 +1,4 @@
-import { Sender } from "@vibest/schema/event"
+import { AgentFrom } from "@vibest/schema/event"
 import { RequestId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
@@ -6,6 +6,7 @@ import {
   MachineFailed,
   MachineIncompatible,
   MachineInfo,
+  MachineLoad,
   MachineNote,
   MachineUnavailable,
   NoCommit,
@@ -17,16 +18,25 @@ import {
 } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
-import { ProjectActivity, ProjectCreateFailed, ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
+import {
+  NoSuchProject,
+  CloneFailed,
+  CloneRequest,
+  CloneStep,
+  ProjectActivity,
+  ProjectCreateFailed,
+  ProjectInfoResult,
+  ProjectSearchInput,
+} from "@vibest/schema/project"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
   AllocationFailed,
   AmbiguousSession,
   HarnessChoice,
+  AgentListing,
   HarnessUnavailable,
   LaunchFailed,
-  LimitReached,
   MoveRefused,
   NoCallingSession,
   NoHarnessChosen,
@@ -42,6 +52,7 @@ import {
   ExecutionState,
 } from "@vibest/schema/session"
 import { Subscription } from "@vibest/schema/subscription"
+import { WorktreeList } from "@vibest/schema/worktree"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 
@@ -241,6 +252,7 @@ export const SessionInfo = Schema.Struct({
   createdAt: Schema.Number,
   lastActive: Schema.Number,
   task: Schema.NullOr(Schema.String),
+  waitingToStart: Schema.optional(Schema.Literal(true)),
   latest: Schema.NullOr(
     Schema.Struct({
       status: MessageStatus,
@@ -329,6 +341,7 @@ export class VibestRpcs extends RpcGroup.make(
           runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),
           machine: Schema.optional(Schema.String),
+          project: Schema.optional(Schema.String),
           files: Attachments,
         },
         success: Schema.Struct({
@@ -349,7 +362,6 @@ export class VibestRpcs extends RpcGroup.make(
           NoProject,
           NoCommit,
           PromptTooLarge,
-          LimitReached,
           AllocationFailed,
           HarnessUnavailable,
           NotInRepository,
@@ -369,10 +381,33 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   protocol(Rpc.make("Plugins", { success: Schema.Array(PluginInfo) })),
   protocol(
+    Rpc.make("Concurrency", {
+      success: Schema.Struct({
+        max: Schema.NullOr(Schema.Number),
+        problems: Schema.Array(Schema.String),
+        unsupported: Schema.Array(Schema.String),
+      }),
+    }),
+  ),
+  protocol(
     Rpc.make("Harnesses.List", {
       payload: { provider: Schema.optional(Schema.String), machine: Schema.optional(Schema.String) },
       success: Schema.Array(HarnessChoice),
       error: Schema.Union([Forbidden, ...LINE_ERRORS]),
+    }),
+  ),
+  protocol(
+    Rpc.make("Agents.List", {
+      payload: { machine: Schema.optional(Schema.String) },
+      success: AgentListing,
+      error: Schema.Union([Forbidden, ...LINE_ERRORS]),
+    }),
+  ),
+  protocol(
+    Rpc.make("Worktree.List", {
+      payload: { project: Schema.optional(Schema.String), machine: Schema.optional(Schema.String) },
+      success: WorktreeList,
+      error: Schema.Union([Forbidden, NoSuchProject, ...LINE_ERRORS]),
     }),
   ),
   scoped(
@@ -396,6 +431,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           argv: Schema.Array(Schema.String),
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           focus: Schema.Boolean,
           callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
@@ -428,7 +464,7 @@ export class VibestRpcs extends RpcGroup.make(
           id: Schema.String,
           message: Schema.String,
           request: Schema.optional(RequestId),
-          from: Schema.optional(Sender),
+          from: Schema.optional(AgentFrom),
         },
         success: Schema.Struct({ id: Schema.String }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
@@ -542,6 +578,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           harness: Schema.String,
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           fresh: Schema.Boolean,
           terminal: Schema.String,
           runtime: Schema.optional(Schema.String),
@@ -579,6 +616,8 @@ export class VibestRpcs extends RpcGroup.make(
       payload: {
         harness: Schema.optional(Schema.String),
         agent: Schema.String,
+        agentNamed: Schema.optional(Schema.Boolean),
+        fresh: Schema.optional(Schema.Boolean),
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         runtime: Schema.optional(Schema.String),
@@ -715,6 +754,16 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   scoped(
+    admitted(
+      Rpc.make("Project.Clone", {
+        payload: CloneRequest,
+        success: CloneStep,
+        error: Schema.Union([Forbidden, CloneFailed]),
+        stream: true,
+      }),
+    ),
+  ),
+  scoped(
     Rpc.make("Daemon.Stop", {
       payload: { instance: Schema.String },
       success: Schema.Struct({ instance: Schema.String }),
@@ -776,9 +825,20 @@ export class VibestRpcs extends RpcGroup.make(
     admitted(
       Rpc.make("Peer.Spawn", {
         payload: {
-          repository: Schema.String,
+          repository: Schema.optional(Schema.String),
           identity: Schema.optional(Schema.String),
-          commit: Schema.String,
+          commit: Schema.optional(Schema.String),
+          project: Schema.optional(Schema.String),
+          repositories: Schema.optional(
+            Schema.Array(
+              Schema.Struct({
+                folder: Schema.String,
+                repository: Schema.String,
+                identity: Schema.optional(Schema.String),
+                commit: Schema.String,
+              }),
+            ),
+          ),
           agent: Schema.String,
           prompt: Schema.String,
           harness: Schema.optional(Schema.String),
@@ -803,7 +863,6 @@ export class VibestRpcs extends RpcGroup.make(
           NoProject,
           NoCommit,
           PromptTooLarge,
-          LimitReached,
           AllocationFailed,
           HarnessUnavailable,
           NoCallingSession,
@@ -834,6 +893,13 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, MachineFailed, MachineIncompatible, AlreadyAdded]),
     }),
   ),
+  scoped(
+    Rpc.make("Machine.Load", {
+      payload: { machine: Schema.optional(Schema.String) },
+      success: MachineLoad,
+      error: Schema.Union([Forbidden, UnknownMachine, MachineUnavailable, MachineIncompatible]),
+    }),
+  ),
   scoped(Rpc.make("Machine.List", { success: Schema.Array(MachineInfo), error: Forbidden })),
   scoped(
     Rpc.make("Machine.Remove", {
@@ -849,7 +915,10 @@ type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "peer"
 export const ACCESS = {
   Ping: ["open", "peer"],
   Plugins: "open",
+  Concurrency: "open",
   "Harnesses.List": ["open", "peer"],
+  "Agents.List": ["open", "peer"],
+  "Worktree.List": ["open", "peer"],
   "Integration.Guard": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
@@ -874,6 +943,7 @@ export const ACCESS = {
   "Project.RunningEntry": "agent",
   "Project.StopEntry": "cli",
   "Project.Create": "cli",
+  "Project.Clone": ["agent", "peer"],
   "Project.Info": "agent",
   "Project.Search": "agent",
   Send: ["owner", "session", "peer"],
@@ -890,6 +960,7 @@ export const ACCESS = {
   "Peer.Outbox": "peer",
   "Peer.Ack": "peer",
   "Machine.Add": "cli",
+  "Machine.Load": ["cli", "peer"],
   "Machine.List": "cli",
   "Machine.Remove": "cli",
 } as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
@@ -905,17 +976,14 @@ export const PEER_CALLS: ReadonlySet<string> = new Set(
 )
 
 export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
-  [...PEER_CALLS].filter((method) => method !== "Ping" && method !== "Harnesses.List" && !method.startsWith("Peer.")),
+  [...PEER_CALLS].filter(
+    (method) =>
+      method !== "Ping" &&
+      method !== "Harnesses.List" &&
+      method !== "Agents.List" &&
+      method !== "Machine.Load" &&
+      method !== "Worktree.List" &&
+      method !== "Project.Clone" &&
+      !method.startsWith("Peer."),
+  ),
 )
-
-export const CAPABILITIES = {
-  http: true,
-  handoff: true,
-  requests: true,
-  watch: true,
-  events: true,
-  projects: true,
-  spawnRuntime: true,
-  spawnFiles: true,
-  peerSpawnFiles: true,
-} as const

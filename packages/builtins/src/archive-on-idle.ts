@@ -20,7 +20,7 @@ const opted = (deps: ArchiveOnIdleOperations, ids: ReadonlyArray<string>) =>
 
 export const archiveOnIdlePlugin = Effect.map(ArchiveOnIdle, (deps) =>
   Plugin.define({
-    id: "archive-on-idle",
+    id: "vibest.archive-on-idle",
     effect: (ctx) =>
       Effect.gen(function* () {
         const facts = ctx.event.subscribe({
@@ -51,7 +51,9 @@ export const archiveOnIdlePlugin = Effect.map(ArchiveOnIdle, (deps) =>
 
           return act.pipe(
             Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning(`archive-on-idle ${event.type}`, cause),
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.void
+                : Effect.logWarning(`vibest.archive-on-idle ${event.type}`, cause),
             ),
           )
         }).pipe(Effect.forkScoped)

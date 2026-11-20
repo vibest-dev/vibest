@@ -8,6 +8,7 @@ import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import { parseShard, shardOf } from "./runner/shard.ts"
+import agents from "./scenarios/agents.ts"
 import agy from "./scenarios/agy.ts"
 import cursor from "./scenarios/cursor.ts"
 import daemon from "./scenarios/daemon.ts"
@@ -20,6 +21,7 @@ import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
+import machinesRepositories from "./scenarios/machines-repositories.ts"
 import machines from "./scenarios/machines.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
@@ -46,6 +48,7 @@ import { privateIn, redactor } from "./world/redact.ts"
 import { capture } from "./world/user-env.ts"
 
 const areas = {
+  agents,
   agy,
   daemon,
   project,
@@ -62,7 +65,7 @@ const areas = {
   delivery,
   routing,
   entry: entrySession,
-  machines: [...machines, ...machinesHerdr],
+  machines: [...machines, ...machinesRepositories, ...machinesHerdr],
   "terminal-status": terminalStatus,
 } satisfies Record<string, ReadonlyArray<Check>>
 

@@ -223,15 +223,20 @@ describe("Claude plugin inbox", () => {
         1,
         [
           {
-            sender: { agent: "general", title: "Upgrade", session: "6b8b00e4-1111-4111-8111-111111111111" },
+            sender: {
+              type: "agent",
+              agent: "general",
+              title: "Upgrade",
+              session: "6b8b00e4-1111-4111-8111-111111111111",
+            },
             message: "hello",
           },
-          { sender: "vibest", message: "gone" },
+          { sender: { type: "vibest" }, message: "gone" },
         ],
         "full A",
       ),
-      batch(2, [{ sender: "vibest", message: "x" }], "full B"),
-      batch(3, [{ sender: "vibest", message: "w1 exited." }], "w1 exited."),
+      batch(2, [{ sender: { type: "vibest" }, message: "x" }], "full B"),
+      batch(3, [{ sender: { type: "vibest" }, message: "w1 exited." }], "w1 exited."),
     ]
 
     h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
@@ -277,7 +282,7 @@ describe("Claude plugin inbox", () => {
 
   it("a submit Claude refuses is reported once for its execution and not submitted again", async () => {
     const h = host()
-    const takes = [batch(1, [{ sender: "vibest", message: "same" }], "first")]
+    const takes = [batch(1, [{ sender: { type: "vibest" }, message: "same" }], "first")]
     h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
     await h.start()
     await h.tick()

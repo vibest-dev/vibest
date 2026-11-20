@@ -1,6 +1,7 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { typedLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { typedLine } from "@vibest/plugin/effect/launch"
 import type { RuntimeLocation, RuntimeUnreachable } from "@vibest/schema/session"
 import {
   Cause,
@@ -291,11 +292,11 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             )
 
             return hook.startsWith("current")
-              ? { ok: true, subject: h, text: `herdr can see its state (hook ${hook})` }
+              ? { ok: true, subject: h, text: `herdr can see its state, hook ${hook}` }
               : {
                   ok: false,
                   subject: h,
-                  text: `herdr cannot see its state (hook ${hook}); its agents never become ready`,
+                  text: `herdr cannot see its state, hook ${hook}; its agents never become ready`,
                   fix: `herdr integration install ${h}`,
                 }
           })

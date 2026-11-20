@@ -119,6 +119,7 @@ describe("Shell denials", () => {
       "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "vibest ls",
+      "vibest worktree list",
       "vibest daemon restart",
       "vibest --harness pi",
       "vibest --new",
@@ -660,12 +661,12 @@ layer(
   it.effect("a definition without a guard meets the floor only; a guard that throws is a refusal", () =>
     Effect.gen(function* () {
       const agents = yield* Agents.Service
-      yield* agents.transform((editor) => {
-        editor.add({ id: "plain", description: "no guard", system: "" })
+      yield* agents.transformFor("test")((editor) => {
+        editor.add({ id: "plain", description: "no guard", system: "plain" })
         editor.add({
           id: "broken",
           description: "guard throws",
-          system: "",
+          system: "broken",
           guard: () => {
             throw new Error("boom")
           },

@@ -6,7 +6,7 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { SessionLive } from "../session/live.ts"
 import * as Inbox from "./inbox.ts"
-import { apply } from "./migration.ts"
+import { open } from "./migration.ts"
 import * as Project from "./project.ts"
 import * as Projectors from "./projectors.ts"
 import * as Remote from "./remote.ts"
@@ -44,7 +44,7 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Db") 
 export const layer = Layer.effect(
   Service,
   SqlClient.SqlClient.pipe(
-    Effect.andThen(apply),
+    Effect.andThen(open()),
     Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
     Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
     Effect.andThen(

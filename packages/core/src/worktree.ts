@@ -17,7 +17,7 @@ const gitDirectory = (p: string) =>
 
 export const mainCheckout = (dir: string) => Git.Service.use((git) => git.mainCheckout(dir))
 
-const remoteRepositoryName = (url: string) => {
+export const remoteRepositoryName = (url: string) => {
   const bare = url
     .trim()
     .replace(/\/+$/, "")

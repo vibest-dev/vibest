@@ -1,10 +1,11 @@
-import { capture } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect"
-import { ChildProcessSpawner } from "effect/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
+import { parseRemote, rankedRemotes } from "./repository-url.ts"
 
 export * as Git from "./git.ts"
 
@@ -35,9 +36,11 @@ export interface Interface {
   readonly insideWorkTree: (dir: string) => Effect.Effect<boolean>
   readonly isMainCheckout: (dir: string) => Effect.Effect<boolean>
   readonly originUrl: (dir: string) => Effect.Effect<string | undefined>
+  readonly remoteUrl: (dir: string) => Effect.Effect<string | undefined>
   readonly currentBranch: (dir: string) => Effect.Effect<string, GitError>
   readonly uncommitted: (dir: string) => Effect.Effect<ReadonlyArray<string>, GitError>
   readonly copyRepository: (copy: RepositoryCopy) => Effect.Effect<void, GitError>
+  readonly clone: (url: string, dest: string) => Stream.Stream<string, GitError>
   readonly addWorktree: (root: string, path: string, commit?: string) => Effect.Effect<void, GitError>
   readonly head: (dir: string) => Effect.Effect<string, GitError>
   readonly hasCommit: (dir: string, commit: string) => Effect.Effect<boolean>
@@ -58,14 +61,14 @@ export const layer = Layer.effect(
     const path = yield* Path.Path
 
     const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: ReadonlyArray<number> = [0]) =>
-      capture("git", ["--no-optional-locks", ...args], {
+      Host.capture("git", ["--no-optional-locks", ...args], {
         cwd,
         ...(input !== undefined && { stdin: Stream.make(new TextEncoder().encode(input)) }),
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.flatMap((run) =>
           run === undefined
-            ? Effect.die("capture without a timeout returned undefined")
+            ? Effect.die("Host.capture without a timeout returned undefined")
             : ok.includes(run.exitCode)
               ? Effect.succeed(run.stdout)
               : Effect.fail(new GitError({ args, message: run.stderr.trim() || `exit ${run.exitCode}` })),
@@ -131,12 +134,52 @@ export const layer = Layer.effect(
       originUrl: Effect.fn("Git.originUrl")((dir) =>
         tryGit(dir, "config", "--get", "remote.origin.url").pipe(Effect.map((url) => url || undefined)),
       ),
+      remoteUrl: Effect.fn("Git.remoteUrl")(function* (dir) {
+        const config = yield* tryGit(dir, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$")
+
+        for (const name of rankedRemotes(config ?? "")) {
+          const url = yield* tryGit(dir, "remote", "get-url", name)
+
+          if (url !== undefined && parseRemote(url) !== undefined) return url
+        }
+
+        return undefined
+      }),
       currentBranch: Effect.fn("Git.currentBranch")((dir) => git(dir, "branch", "--show-current")),
       uncommitted: Effect.fn("Git.uncommitted")((dir) =>
         git(dir, "status", "--porcelain", "--branch", "--untracked-files=all").pipe(
           Effect.map((status) => status.split("\n").slice(1).filter(Boolean)),
         ),
       ),
+      clone: (url, dest) => {
+        const args = ["clone", "--progress", "--", url, dest]
+
+        return Stream.unwrap(
+          Effect.gen(function* () {
+            const handle = yield* spawner.spawn(
+              ChildProcess.make("git", args, { env: { GIT_TERMINAL_PROMPT: "0" }, extendEnv: true }),
+            )
+
+            let last = ""
+
+            const lines = Stream.decodeText(handle.stderr).pipe(
+              Stream.map((text) => text.replaceAll("\r", "\n")),
+              Stream.splitLines,
+              Stream.map((line) => line.trim()),
+              Stream.filter((line) => line !== ""),
+              Stream.tap((line) => Effect.sync(() => (last = line))),
+            )
+
+            const ended = Stream.unwrap(
+              Effect.map(handle.exitCode, (code) =>
+                code === 0 ? Stream.empty : Stream.fail(new GitError({ args, message: last || `exit ${code}` })),
+              ),
+            )
+
+            return Stream.concat(lines, ended)
+          }),
+        ).pipe(Stream.catchTag("PlatformError", (e) => Stream.fail(new GitError({ args, message: e.message }))))
+      },
       copyRepository: Effect.fn("Git.copyRepository")(function* ({ source, dest, branch, origin }) {
         yield* git(source, "clone", "--quiet", "--no-hardlinks", "--branch", branch, "--", source, dest)
         yield* git(dest, "remote", "remove", "origin")

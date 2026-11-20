@@ -187,7 +187,7 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
     rows<Execution>(w, "SELECT id, outcome, reply, typed FROM execution WHERE session_id = ? ORDER BY id", id)
 
   const notices = (id: string) =>
-    row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)?.n ?? 0
+    row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice'", id)?.n ?? 0
 
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
 

@@ -12,6 +12,7 @@ import {
 } from "@vibest/schema/session"
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 
+import { definitionLaunch } from "../agent-launch.ts"
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
 import { AddressJson, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
@@ -55,6 +56,11 @@ export const sameEntry = (current: SessionRow | undefined, runtime: string, addr
 const ENTRY_FIRST_INPUT =
   "The user has opened this conversation and has not given a task yet. Wait for the user's instructions."
 
+export interface EntryAgent {
+  readonly id: string
+  readonly named: boolean
+}
+
 const firstStart = new LaunchFailed({
   message: "no harness to inherit: pass --harness, for example `vibest --harness claude`",
 })
@@ -91,15 +97,26 @@ const make = Effect.gen(function* () {
   const firstInputOf = (harness: HarnessId) =>
     harnesses.find(harness)?.systemPromptInPrompt === true ? ENTRY_FIRST_INPUT : undefined
 
-  const known = (id: string) =>
-    agents.find(id) === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.void
+  const entryAgent = (current: { readonly agent: string } | undefined, fresh: boolean, requested: EntryAgent) => {
+    const isNew = current === undefined || fresh
 
-  const agentOf = (current: { readonly agent: string } | undefined, fresh: boolean, requested: string) =>
-    current === undefined || fresh ? requested : current.agent
+    if (!isNew && requested.named && requested.id !== current.agent)
+      return Effect.fail(
+        new LaunchFailed({
+          message: `this project's entry session runs as ${current.agent}; add --new to start a new conversation as ${requested.id}`,
+        }),
+      )
+    const id = isNew ? requested.id : current.agent
+    const definition = agents.find(id)
+
+    return definition === undefined ? Effect.fail(unknownAgent(id, agents)) : Effect.succeed({ id, definition, isNew })
+  }
+
+  type Chosen = Effect.Success<ReturnType<typeof entryAgent>>
 
   const decide = (input: {
     readonly root: string
-    readonly agent: string
+    readonly agent: Chosen
     readonly current: SessionRow | undefined
     readonly harness: string | undefined
     readonly provider: string | undefined
@@ -108,21 +125,28 @@ const make = Effect.gen(function* () {
     readonly runtime: string | undefined
   }) =>
     Effect.gen(function* () {
-      return yield* plugins.start({
-        project: input.root,
-        agent: input.agent,
-        parentSessionId: undefined,
-        prompt: "",
-        harness: input.harness ?? (input.current === undefined ? undefined : harnessIdOf(input.current)),
-        provider: input.provider,
-        model: input.model,
-        harnesses: yield* withHarness(startableOptions),
-        attempts: [],
-        machine: { id: input.machine },
-        runtime: input.runtime,
-        parentRuntime: input.current === undefined ? undefined : placedTerminal(input.current)?.runtime,
-        machines: yield* machinesListing(runtimes, harnessIds()).pipe(Effect.orElseSucceed(() => [])),
-      })
+      const ownLaunch = input.agent.isNew ? definitionLaunch(input.agent.definition, input) : undefined
+
+      return yield* plugins.start(
+        {
+          project: input.root,
+          agent: input.agent.id,
+          parentSessionId: undefined,
+          prompt: "",
+          harness:
+            ownLaunch?.choice.harness ??
+            input.harness ??
+            (input.current === undefined ? undefined : harnessIdOf(input.current)),
+          provider: ownLaunch?.choice.provider ?? input.provider,
+          model: ownLaunch?.choice.model ?? input.model,
+          harnesses: yield* withHarness(startableOptions),
+          machine: { id: input.machine },
+          runtime: input.runtime,
+          parentRuntime: input.current === undefined ? undefined : placedTerminal(input.current)?.runtime,
+          machines: yield* machinesListing(runtimes, harnessIds()).pipe(Effect.orElseSucceed(() => [])),
+        },
+        ownLaunch?.decidedBy,
+      )
     })
 
   const running = Effect.fn("EntrySession.running")(function* (projectId: string, terminal: string) {
@@ -161,17 +185,17 @@ const make = Effect.gen(function* () {
     readonly argv: ReadonlyArray<string>
     readonly focus: boolean
     readonly runtime: string | undefined
-    readonly agent: string
+    readonly agent: EntryAgent
   }) {
     const { projectId: id, root, at, argv } = input
     const current = yield* db.session.entryOf(id)
     const fresh = argv.includes("--new")
-    const agent = agentOf(current, fresh, input.agent)
-    yield* known(agent)
+    const chosenAgent = yield* entryAgent(current, fresh, input.agent)
+    const agent = chosenAgent.id
 
     const decision = yield* decide({
       root,
-      agent,
+      agent: chosenAgent,
       current,
       harness: Launch.flagValue(argv, "--harness"),
       provider: Launch.flagValue(argv, "--provider"),
@@ -310,11 +334,11 @@ const make = Effect.gen(function* () {
     readonly provider: string | undefined
     readonly model: string | undefined
     readonly runtime: string | undefined
-    readonly agent: string
+    readonly agent: EntryAgent
+    readonly fresh: boolean
   }) {
     const current = yield* db.session.entryOf(input.projectId)
-    const agent = agentOf(current, false, input.agent)
-    yield* known(agent)
+    const agent = yield* entryAgent(current, input.fresh, input.agent)
     const decision = yield* decide({ ...input, agent, current, machine: "local" })
 
     if (decision.harness === undefined) return yield* firstStart
@@ -344,11 +368,10 @@ const make = Effect.gen(function* () {
     readonly model: string | undefined
     readonly routing: Routing | undefined
     readonly pid: number | undefined
-    readonly agent: string
+    readonly agent: EntryAgent
   }) {
     const { projectId, directory, terminal } = input
-    const agent = agentOf(yield* db.session.entryOf(projectId), input.fresh, input.agent)
-    yield* known(agent)
+    const agent = (yield* entryAgent(yield* db.session.entryOf(projectId), input.fresh, input.agent)).id
     const kind = input.runtime ?? (yield* onlyRuntime)
 
     if (kind === undefined) return yield* new NoRuntime({ message: "the entry session's runtime is not named" })

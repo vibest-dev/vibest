@@ -2,26 +2,9 @@ import pkg from "../package.json" with { type: "json" }
 
 export const HOOK = `#!/bin/sh
 # @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`prompt\` and \`ready\` at the session start, \`prompt\` when an execution starts or works, \`stop\` at its response.
-# The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
-# cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
+# The vibest vibestd started this agent with (VIBEST_CLI), not the first vibest on PATH, which a login shell may reorder.
 vibest() {
-  case "\${VIBEST_COMMAND:-}" in
-    *'\\'*) ;;
-    '["'*'"]')
-      words=$(printf '%s' "$VIBEST_COMMAND" | sed -e 's/^\\["//' -e 's/"\\]$//' -e 's/","/\\
-/g')
-      ifs=$IFS
-      IFS='
-'
-      set -f
-      set -- $words "$@"
-      IFS=$ifs
-      set +f
-      "$@"
-      return
-      ;;
-  esac
-  command vibest "$@"
+  command "\${VIBEST_CLI:-vibest}" "$@"
 }
 case "\${1:-}" in
   guard)

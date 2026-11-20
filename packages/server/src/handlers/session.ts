@@ -6,8 +6,10 @@ import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
+import { Starts } from "@vibest/core/session/starts"
 import { Caller, type CallerIdentity, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
-import type { Sender } from "@vibest/schema/event"
+import type { AgentFrom, AgentSender } from "@vibest/schema/event"
+import { MachineFailed } from "@vibest/schema/machine"
 import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Predicate, Stream } from "effect"
 
@@ -30,16 +32,17 @@ export const make = Effect.gen(function* () {
   const watchFeed = yield* WatchFeed.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
+  const starts = yield* Starts.Service
   const seenLocked = yield* KeyedMutex.make<string>()
 
-  const peerSender = (caller: Extract<CallerIdentity, { readonly _tag: "Peer" }>, from: Sender | undefined) =>
+  const peerSender = (caller: Extract<CallerIdentity, { readonly _tag: "Peer" }>, from: AgentFrom | undefined) =>
     Effect.gen(function* () {
       if (caller.session === undefined) return undefined
 
       const machine = yield* db.remote.nameForPeer(caller.peerId)
-      const record: Sender = from?.session === caller.session ? from : { session: caller.session }
+      const record: AgentFrom = from?.session === caller.session ? from : { session: caller.session }
 
-      return { ...(machine !== undefined && { machine }), ...record } satisfies Sender
+      return { type: "agent", ...(machine !== undefined && { machine }), ...record } satisfies AgentSender
     })
 
   const startedByPeer = (
@@ -115,6 +118,11 @@ export const make = Effect.gen(function* () {
 
         if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
 
+        if (input.project !== undefined)
+          return yield* new MachineFailed({
+            message: "--project names a project of another machine; give --machine too",
+          })
+
         return yield* sessions.spawn({
           machine: yield* machineFromCaller(input),
           root: project.directory,
@@ -159,7 +167,7 @@ export const make = Effect.gen(function* () {
               message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
             })
           const from = Predicate.isTagged(caller, "Peer") ? yield* peerSender(caller, p.from) : undefined
-          yield* sessions.deliverTo(target, p.message, p.request, from?.session, from)
+          yield* sessions.deliverTo(target, p.message, from ?? { type: "user" }, p.request)
 
           return { id: target }
         }),
@@ -195,7 +203,12 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const id = yield* db.session.resolveSession(input, (yield* reach("Get")).scope)
           const row = yield* sessions.get(id)
-          const session = Listing.toInfo(row, (yield* db.session.sessionBriefs([id])).get(id))
+
+          const session = Listing.toInfo(
+            row,
+            (yield* db.session.sessionBriefs([id])).get(id),
+            (yield* starts.choices).get(id),
+          )
 
           return {
             ...session,

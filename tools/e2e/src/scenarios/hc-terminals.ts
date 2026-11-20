@@ -10,7 +10,7 @@ type Process = { terminal: string | null; pid: number | null; ready: number | nu
 
 const checks: ReadonlyArray<Check> = [
   {
-    id: "S58",
+    id: "S66",
     title:
       "herdr-core runtime: a session keeps one terminal: a harness that exits before it reports ready leaves no terminal, a resume after an exit replaces the old terminal under the same name, and vibest archive closes the terminal of a session whose harness already exited",
     run: async (w) => {

@@ -80,7 +80,7 @@ last pane closes its workspace, and a main checkout's workspace takes its linked
 `reset` when the runtime lost track; core then reads each of its terminals once. `events` emits `reset` as its first element once its subscription is acquired (build it with `Runtime.eventsFrom` over a PubSub), so core reads state after the subscription exists; when `events` fails, core logs it and subscribes again with a capped exponential backoff that starts over after each `reset`. `state` answers `not_found` when it
 names no agent in that terminal, which core reads as absent. `run(terminal, argv)` runs a command in an existing
 terminal once its program ended and its shell is back, the counterpart of `open`; without it there is no restart in
-place, and `vibest update` and a usage-limit move leave that terminal's agent for the user to restart. `present` gets
+place, and `vibest update` leaves that terminal's agent for the user to restart. `present` gets
 the keys `agent`, `harness`, `title`, `definition` and `session` for the terminal and `project` and `live` for the
 project's workspace; any other key is the caller's own, and a runtime shows only the keys it knows.
 
@@ -100,7 +100,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   read the terminal (and optionally a machine target) from those values. Definitions declare no priority;
   registration order decides. Without `--runtime`, vibest uses the runtime of the terminal it was started in. When a
   terminal carries both herdr-core and herdr variables (they are inherited), hc wins because the builtin
-  runtime-herdr-core registers before runtime-herdr. The CLI and core name no runtime id or variable for detection:
+  vibest.runtime-herdr-core registers before vibest.runtime-herdr. The CLI and core name no runtime id or variable for detection:
   vibestd reads the callers of the registered definitions (`Runtimes.callers`), so another runtime plugin needs no
   change to be detected. The CLI sends its environment to vibestd, which keeps only the keys some definition's caller
   declared and asks that definition for the machine target. `--session` is an opaque runtime session name.
@@ -145,7 +145,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   the harness's report of it, never by the runtime not knowing.
 - First input in the launch: a harness definition's `promptArgs` are the arguments after which the first message always comes last. `Harness.harnessArgv` (`@vibest/plugin`) is the only
   place that joins a definition's arguments and a message: always `[binary, ...launchArgs, ...promptArgs, message]`,
-  so no option that takes several values can swallow the message. `open` and `run` receive `launch: { harness, argv, prompt?, system?, env }` instead of a wrapped argv: `argv` is that harness argv with the message text last, `prompt` is the first message, `system` is the system prompt text. The system prompt file a harness reads is written when the launch is built, so `argv` can be run as it is. A runtime that types a line calls `launchLine(launch)` (`@vibest/plugin`, re-exported from core), which writes `first-input.md` and returns `env VIBEST_PROCESS=<n> <identity pairs> sh -c 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"' <first-input.md> <binary> <args...> <promptArgs...>`: run through sh, that line yields exactly `launch.argv`. A runtime that types into a shell calls `typedLine(launch)` instead: it writes that line to `launch.sh` beside `first-input.md` and returns the short line `sh <launch.sh>`, because a tty in canonical mode, before the shell has entered its line editor, keeps only the first 1024 bytes of a line and drops the rest with the newline (a Claude launch with its `--allowedTools` is longer). A runtime that can exec an argv may use `launch.argv` directly. Every start goes through one function
+  so no option that takes several values can swallow the message. `open` and `run` receive `launch: { harness, argv, prompt?, system?, env }` instead of a wrapped argv: `argv` is that harness argv with the message text last (when `env` has `VIBEST_CLI`, it is run as `sh -c 'PATH=${VIBEST_CLI%/*}:$PATH exec "$@"' sh <harness argv>`, so whichever way a runtime starts it, after any login shell, the harness finds the vibest that started it first on `PATH`), `prompt` is the first message, `system` is the system prompt text. The system prompt file a harness reads is written when the launch is built, so `argv` can be run as it is. A runtime that types a line calls `launchLine(launch)` (`@vibest/plugin`, re-exported from core), which writes `first-input.md` and returns `env VIBEST_PROCESS=<n> <identity pairs> sh -c 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"' <first-input.md> <binary> <args...> <promptArgs...>`: run through sh, that line yields exactly `launch.argv`. A runtime that types into a shell calls `typedLine(launch)` instead: it writes that line to `launch.sh` beside `first-input.md` and returns the short line `sh <launch.sh>`, because a tty in canonical mode, before the shell has entered its line editor, keeps only the first 1024 bytes of a line and drops the rest with the newline (a Claude launch with its `--allowedTools` is longer). A runtime that can exec an argv may use `launch.argv` directly; herdr-core runs the `launchLine` argv in the user's login shell through `terminal.run` for a new terminal ([runtime-herdr-core.md](runtime-herdr-core.md#terminals)), so the `PATH` pin runs after the login rc, and types `typedLine` only for `run`. Every start goes through one function
   (`Placement.launching`): it builds the argv and, for a first input, opens the execution and hands the message to it
   after the process is recorded and before it starts, so a report the harness sends at once finds it. If that start fails (the terminal does not open, or the in-place start fails), the execution it opened is closed
   `not_started` unless the harness already ended it, so a later message resumes the session again. vibestd then
@@ -158,11 +158,18 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   the system prompt in a prompt) is in its launch argv the same way: `startEntry` opens its execution with the
   process, and `entryCommand` builds the line with `Harness.harnessArgv`.
 - Every start names its process: every launch line is `env VIBEST_PROCESS=<n> <identity pairs> <command>`
-  (`Launch.launchLine`), in a new terminal or typed into one it reuses (a restart, a usage-limit move in place), entry
+  (`Launch.launchLine`), in a new terminal or typed into one it reuses (a restart), entry
   sessions included. A plugin that keeps state per process (agy's root conversation) needs no special case.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). A process that exits before its execution ends
-  loses the execution, as today.
+  loses the execution, as today. A first start stops waiting for its pickup when its harness is gone:
+  after subscribing to terminal exits it asks the runtime whether the terminal still runs the session's current
+  process, on every poll and on each exit of that terminal. Only the shell counts as gone once the start was
+  confirmed (the harness reported ready or the runtime was seen running it); before that it means a typed command has
+  not started yet. A stale exit of the harness a restart in place replaced does not count either. The wait then signals
+  the exit with the process bound, so it is recorded
+  once the start releases the session lock instead of after the ready timeout. When a harness exits with an execution it never started working on, the exit notice to
+  its creator says so and carries the last 10 lines of its terminal.
 - Empty input box before typing: when a harness definition gives `clearKeys`, vibestd sends them right before it types
   a message (a first task, delivered messages, a retype), whatever the box holds: a draft the user left there is
   cleared, as is a cancelled prompt the harness drew back after an interrupt (Cursor does when the interrupt lands
@@ -275,6 +282,6 @@ disposed or its plugin unloaded) stops its merge.
 ## 8. Order of work
 
 1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations report execution events and
-   OSC 7501; herdr becomes the builtin `runtime-herdr` plugin. Gates and e2e unchanged.
+   OSC 7501; herdr becomes the builtin `vibest.runtime-herdr` plugin. Gates and e2e unchanged.
 2. `vibest machine`, remote herdr, the machine flow above; proven on voyracloud (Linux) and macbook-pro-m1 (macOS).
 3. `runtime-rex` and `runtime-tern` (parallel), each passing the contract suite.

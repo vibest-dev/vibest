@@ -55,6 +55,8 @@ export default Runtime.handler(Commands, (o) =>
     const provider = Option.getOrUndefined(o.provider)
     const model = Option.getOrUndefined(o.model)
     const runtimeKind = Option.getOrUndefined(o.runtime)
+    const agent = Option.getOrElse(o.agent, () => ENTRY_AGENT)
+    const agentNamed = Option.isSome(o.agent)
 
     const again = [
       ...(yield* VibestCommand),
@@ -62,6 +64,7 @@ export default Runtime.handler(Commands, (o) =>
       ...(provider ? ["--provider", provider] : []),
       ...(model ? ["--model", model] : []),
       ...(runtimeKind ? ["--runtime", runtimeKind] : []),
+      ...(Option.isSome(o.agent) ? ["--agent", o.agent.value] : []),
       ...(o.fresh ? ["--new"] : []),
     ]
 
@@ -82,6 +85,9 @@ export default Runtime.handler(Commands, (o) =>
       Effect.gen(function* () {
         yield* noticeFrom(Effect.succeed(Option.some(ping)))
 
+        if (agentNamed && ping.capabilities?.agents !== true)
+          return yield* new LaunchFailed({ message: "this vibestd does not take --agent; run vibest update" })
+
         const [, placed] = yield* Effect.all(
           [
             client["Project.Open"]({}),
@@ -96,7 +102,8 @@ export default Runtime.handler(Commands, (o) =>
         if (placed.place.in === "launch") {
           const opened = yield* client.Launch({
             argv: again,
-            agent: ENTRY_AGENT,
+            agent,
+            agentNamed,
             focus: !o.headless,
             runtime: placed.place.runtime,
             callerEnv: callerEnvOf(),
@@ -115,7 +122,9 @@ export default Runtime.handler(Commands, (o) =>
           [
             client["Project.StartEntry"]({
               harness,
-              agent: ENTRY_AGENT,
+              agent,
+              agentNamed,
+              fresh: o.fresh,
               provider,
               model,
               runtime: placed.place.runtime,
@@ -132,7 +141,8 @@ export default Runtime.handler(Commands, (o) =>
           running,
           client["Project.EntrySession"]({
             harness: chosen.harness,
-            agent: ENTRY_AGENT,
+            agent,
+            agentNamed,
             fresh: o.fresh,
             terminal,
             runtime: chosen.runtime,

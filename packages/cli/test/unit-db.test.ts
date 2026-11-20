@@ -103,107 +103,6 @@ describe("Db", () => {
     program.pipe(Effect.provide(memoryDb()))
 
   it.effect(
-    "rescheduleSource: the open execution's input, the trailing delivered user or parent run, and the parent id; an empty open execution resends the trailing same-sender batch, not an earlier execution",
-    () =>
-      memory(
-        Effect.gen(function* () {
-          const db = yield* Db.Service
-          const parent = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
-          yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
-            cwd: "/w",
-            task: "do it",
-            parentSessionId: parent.sessionId,
-          })
-          yield* db.session.startObserved("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "typed", 1)
-
-          const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
-            fact("inbox.queued", {
-              sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-              data: {
-                kind,
-                recipient: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                ...(senderId !== null && { sender: senderId }),
-                content,
-                status,
-              },
-            })
-
-          yield* inbox("send", parent.sessionId, "from parent", "delivered")
-          yield* inbox("send", null, "later send", "delivered")
-          yield* inbox("notice", parent.sessionId, "a notice", "delivered")
-          yield* inbox("send", null, "still pending", "pending")
-          assert.deepStrictEqual(yield* db.session.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
-            working: "typed",
-            delivered: "a notice",
-            parentSessionId: parent.sessionId,
-            since: 1,
-          })
-          yield* complete(db, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-          yield* db.session.startExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2)
-          assert.strictEqual((yield* db.session.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).working, "")
-          yield* complete(db, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-          assert.deepStrictEqual(yield* db.session.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
-            working: "",
-            delivered: "a notice",
-            parentSessionId: parent.sessionId,
-            since: 2,
-          })
-          assert.deepStrictEqual(yield* db.session.rescheduleSource("00000000-0000-4000-8000-000000000000"), {
-            working: "",
-            delivered: "",
-            parentSessionId: undefined,
-            since: 0,
-          })
-
-          yield* db.session.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), {
-            cwd: "/w",
-            task: "do it",
-            parentSessionId: parent.sessionId,
-          })
-          yield* db.session.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 1)
-          yield* complete(db, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
-          yield* db.session.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 3)
-          const follow = yield* db.inbox.insertSend("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "add tests")
-          yield* db.inbox.setInboxStatus("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", [follow!.id], "delivered")
-          yield* complete(db, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
-          yield* db.session.startExecution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 5)
-
-          const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
-            fact("inbox.queued", {
-              sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-              data: {
-                kind,
-                recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-                ...(senderId !== null && { sender: senderId }),
-                content,
-                status,
-              },
-            })
-
-          yield* row("send", parent.sessionId, "from parent")
-          yield* row("send", null, "and docs")
-          assert.strictEqual(
-            (yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
-            "and docs",
-          )
-          yield* row("send", null, "also types")
-          assert.deepStrictEqual(yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), {
-            working: "",
-            delivered: "and docs\n\nalso types",
-            parentSessionId: parent.sessionId,
-            since: 5,
-          })
-          yield* row("send", null, "still pending", "pending")
-          yield* row("notice", parent.sessionId, "a notice", "pending")
-          assert.strictEqual(
-            (yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
-            "and docs\n\nalso types",
-          )
-        }),
-      ),
-  )
-
-  it.effect(
     "an execution's input is the rows delivered while it is open, or its task; the next execution with none is empty",
     () =>
       memory(
@@ -265,6 +164,57 @@ describe("Db", () => {
           const [next] = yield* execution("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           assert.strictEqual(next!.inboxId, third!.id)
           assert.strictEqual(next!.input, "and the docs")
+        }),
+      ),
+  )
+
+  it.effect(
+    "a send counts in the execution its sender had open, also in the millisecond one ends and the next starts",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db.Service
+          const [parent, child] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
+          yield* db.session.insertSession(session(parent), yield* projectOf("r"))
+          yield* db.session.insertSession(session(child), yield* projectOf("r"))
+          const first = (yield* db.session.startExecution(child, 2)).execution
+          yield* complete(db, child)
+          const second = (yield* db.session.startExecution(child, 2)).execution
+          yield* db.inbox.insertSend(parent, "done", { type: "agent", session: child })
+          yield* complete(db, child)
+          yield* db.inbox.insertSend(parent, "between executions", { type: "agent", session: child })
+
+          assert.deepStrictEqual([yield* db.inbox.sentIn(child, first), yield* db.inbox.sentIn(child, second)], [0, 1])
+        }),
+      ),
+  )
+
+  it.effect(
+    "a request queues once per sender, whatever the recipient; the same request from another sender queues",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db.Service
+          const sql = yield* SqlClient.SqlClient
+          const [x, y] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
+          yield* db.session.insertSession(session(x), yield* projectOf("r"))
+          yield* db.session.insertSession(session(y), yield* projectOf("r"))
+          const first = yield* db.inbox.insertSend(x, "remind", { type: "plugin", plugin: "p" }, "r1")
+          assert.deepStrictEqual(yield* db.inbox.insertSend(y, "remind", { type: "plugin", plugin: "p" }, "r1"), first)
+          assert.isDefined(yield* db.inbox.insertSend(y, "remind", { type: "plugin", plugin: "other" }, "r1"))
+          assert.isDefined(yield* db.inbox.insertSend(y, "typed", { type: "user" }, "r1"))
+          assert.isTrue(yield* db.inbox.queuedFrom({ type: "user" }, "r1"))
+          assert.deepStrictEqual(
+            yield* sql<{
+              session: string
+              senderKey: string
+            }>`SELECT session_id AS session, sender_key FROM inbox ORDER BY session_id, id`,
+            [
+              { session: x, senderKey: "plugin:p" },
+              { session: y, senderKey: "plugin:other" },
+              { session: y, senderKey: "user" },
+            ],
+          )
         }),
       ),
   )
@@ -609,7 +559,7 @@ describe("Db", () => {
           const noticeStatus = (content: string) =>
             Effect.map(
               sql<{ status: string }>`SELECT status FROM inbox
-              WHERE sender_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${noticeEnvelope(content)}`,
+              WHERE about_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${noticeEnvelope(content)}`,
               (rows) => rows.map((row) => row.status).join(),
             )
 

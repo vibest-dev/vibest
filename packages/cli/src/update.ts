@@ -180,7 +180,7 @@ export const noticeFrom = <E, R>(ping: Effect.Effect<Option.Option<Ping>, E, R>)
     const latest = Option.getOrUndefined(yield* ping)?.update?.latest
 
     if (latest && compareVersions(VERSION, latest) < 0)
-      yield* Console.error(`vibest ${latest} is available (this is ${VERSION}); update with: vibest update`)
+      yield* Console.error(`vibest ${latest} is available (current: ${VERSION}); update with: vibest update`)
   }).pipe(Effect.ignore)
 
 export const updateNotice = noticeFrom(Effect.flatMap(Layout, (layout) => readPing(layout.socket)))

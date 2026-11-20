@@ -29,6 +29,7 @@ import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
+import { Starts } from "./starts.ts"
 
 export * as Reconcile from "./reconcile.ts"
 
@@ -48,6 +49,7 @@ export const make = Effect.gen(function* () {
   const exits = yield* Exits.Service
   const { finishArchive } = yield* Archive.Service
   const { notice, republish } = yield* Placement.Service
+  const starts = yield* Starts.Service
   const scope = yield* Effect.scope
   const reactor = yield* Reactor.make
   const { locked } = locks
@@ -72,17 +74,14 @@ export const make = Effect.gen(function* () {
 
     if (session.entry && (yield* db.session.entryMoving(session.projectId))) return
     const open = executionStateOf(session) === "open"
-    const limited = yield* exits.limitOf(session)
 
-    if (!open && exitedAt(session) !== null && limited === undefined) return
+    if (!open && exitedAt(session) !== null) return
 
     if (yield* restarting.has(id)) return
     const routed = yield* live(session).pipe(Effect.option)
 
     if (Option.isNone(routed)) return yield* live(session)
     const h = routed.value
-
-    if (limited !== undefined && exitedAt(session) !== null) return yield* exits.afterLimit(h, session, limited, true)
     const terminal = terminalOf(session)
     const execution = open ? yield* db.session.openExecution(id) : undefined
     const r = yield* track(id)
@@ -107,8 +106,6 @@ export const make = Effect.gen(function* () {
           !terminalRunning || (Predicate.isNumber(reportedPid) && (yield* processes.liveness(reportedPid)) === "exited")
         )
       }))
-
-    if (limited !== undefined && (yield* exits.afterLimit(h, session, limited, exited))) return
 
     if (state === undefined) {
       if (exited) return yield* exits.recordExit(h, session, execution)
@@ -183,7 +180,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     const failure = `the harness stopped without its end hook (a usage limit?)`
     yield* db.session.closeExecution(id, execution, "lost", {
-      failure,
+      failure: { message: failure },
       notice: `${sessionLabel(session)} ended its execution with an error: ${failure}`,
     })
   })
@@ -191,7 +188,9 @@ export const make = Effect.gen(function* () {
   const checkSession = (id: string, bound?: number): Effect.Effect<unknown, unknown> => locked(id)(check(id, bound))
 
   const checkLocked = Effect.fn("Reconcile.check")((id: string, bound?: number): Effect.Effect<void> =>
-    logged(`check ${id}`)(checkSession(id, bound)),
+    Effect.flatMap(starts.isWaiting(id), (waiting) =>
+      waiting ? Effect.void : logged(`check ${id}`)(checkSession(id, bound)),
+    ),
   )
 
   const wakes = yield* RunCoordinator.make<string, number | undefined>({
@@ -230,19 +229,19 @@ export const make = Effect.gen(function* () {
 
       const rows = here.filter((row) => !archived(row) && (exitedAt(row) === null || executionStateOf(row) === "open"))
 
-      const ended = (yield* db.session.endedAtLimit)
-        .filter((row) => where === "all" || row.runtime === where.runtime)
-        .map((row) => row.id)
-
       const archiving = here.filter((row) => archived(row) && exitedAt(row) === null && terminalOf(row).id !== "")
       yield* Effect.forEach(archiving, (row) => finishArchive(row.id), { concurrency: 8, discard: true })
       yield* Effect.log(
         `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
       )
-      yield* Effect.forEach([...rows.map((row) => row.id), ...ended], (id) => checkLocked(id), {
-        concurrency: 8,
-        discard: true,
-      })
+      yield* Effect.forEach(
+        rows.map((row) => row.id),
+        (id) => checkLocked(id),
+        {
+          concurrency: 8,
+          discard: true,
+        },
+      )
       reconciles++
     })
 
@@ -291,5 +290,6 @@ export const node = LayerNode.make({
     Runtimes.node,
     SessionLive.node,
     SessionLocks.node,
+    Starts.node,
   ],
 })

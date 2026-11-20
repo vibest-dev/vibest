@@ -7,7 +7,10 @@ One machine's vibestd (A) can run agents on another machine (B) over ssh. Design
 
 `vibest machine add` records B, B records A as a peer, and a second name for the same B is refused. `vibest run
 --machine`, run by A's entry session, starts a session on B and none on A; A's entry session gets one message from `<machine>/<id>` with what the session sent, and nothing stays
-waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B.
+waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B. Each checkout is known by one remote, chosen the same way on
+both machines (the GitHub CLI default, then `upstream`, then `origin`, then the others by name; network URLs only),
+and the same repository matches across URL forms and ssh aliases for any host; a checkout with no such remote is refused
+naming it.
 
 ## M8. A remote execution end sends nothing
 
@@ -35,6 +38,35 @@ An unknown machine, vibest missing on the target, ssh failing, the target being 
 behind the target, a commit the target does not have, and agents running `connect` or `machine add`: each fails with its
 own message.
 
+## M11. A project of several repositories on another machine
+
+`vibest run --machine` from a project of several repositories (a folder of git repositories) starts the session in B's
+one project that holds exactly those repositories, in one worktree with A's folder names, each repository detached at
+A's commit. B lacking one of the repositories is refused naming it and `vibest project add`; B lacking a commit is
+refused naming the checkout and the commit; several such projects on B are listed and refused; nothing is started
+for a refused run. A reads the folder at each run, so a repository cloned beside a running project is included. Folder
+names that would collide on B's file system are refused. A single-repository project runs as in M1, at A's commit
+even when B keeps that checkout inside a project folder.
+
+## M12. A B too old for several repositories
+
+A `vibest run --machine` from a project of several repositories to a B whose vibest does not take a repository list is
+refused on A with `run vibest update on <B>`; B starts nothing.
+
+## M13. Choosing B's project
+
+When B has several projects holding A's repositories, `vibest run --machine` is refused listing each with its id and
+folder and saying to pass `--project`. `vibest run --machine <B> --project <id, id prefix or folder name>` runs in
+that project, which must still hold exactly A's repositories at A's commits; another project's URL spelling does not
+affect it. A CLI whose local vibestd predates `--project` refuses it with `run vibest update` and B starts nothing.
+
+## M14. Cloning a project
+
+`vibest project clone <url> --machine <B>` clones the repository on B into B's `cloneDirectory` (from B's vibest.json,
+default `~/code`) under the repository name, or into `--dir`, shows git's progress, and prints the new project of B.
+Without `--machine` it clones here. The user or an agent may run it; vibest never clones by itself. A folder that is
+not empty is refused. It clones the default branch: a run on B still needs A's commit there.
+
 ## M9. Listing another machine's harnesses
 
 `vibest harness ls --machine <name>` prints the harnesses of that machine in the shape of the local list, asked of that
@@ -46,6 +78,10 @@ is not connected fail with their own message and print no list.
 Adding a machine shows B's herdr-core terminals in A's herdr-core: a session on B is addressed by its terminal on A;
 typing there starts an execution on B whose message arrives once; a rename is followed; a removed terminal comes back with the
 next `vibest ls`; `vibest machine rm` removes them.
+
+## M10. How loaded a machine is
+
+`vibest status` gives this machine's load, and `vibest machine ls` gives each added machine's under `load`: usable cores, the share of CPU in use over a 200 ms sample, total memory and the memory the OS can hand out without swapping (on macOS free, inactive and speculative pages, not free alone; on Linux MemAvailable; a cgroup cap counts on Linux), and how many executions are working on that machine. Another machine is asked of that machine's vibestd, which measures itself. A machine that cannot be read has no `load` and says why in `loadError`; it never shows as idle. `vibest status` leaves `load` out when this vibestd cannot read it or does not answer within a second. On Linux the reading is what the tightest limit from vibestd's own cgroup up to the root and its CPU affinity allow, with reclaimable page cache counted as available. Nothing is stored and nothing is read on a timer; a reading is reused for 5 seconds.
 
 ## M7. B's herdr sessions on A
 

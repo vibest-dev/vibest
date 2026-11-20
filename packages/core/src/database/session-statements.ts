@@ -144,6 +144,11 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => rows[0]?.id),
     )
 
+  const workingExecutions = sql<{
+    n: number
+  }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
+      WHERE e.outcome IS NULL AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
+
   const currentProcessId = (sessionId: string) =>
     sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
       Effect.map((rows) => rows[0]?.id ?? undefined),
@@ -428,6 +433,7 @@ export const statements = Effect.gen(function* () {
     placed,
     findEntrySessions,
     openExecution,
+    workingExecutions,
     startExecution,
     acceptedAt,
     accept,
