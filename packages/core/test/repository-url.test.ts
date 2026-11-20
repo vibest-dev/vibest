@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { fetchRemote, RepositoryUrl, repositoryIdentity } from "@vibest/core/repository-url"
+import { rankedRemotes, RepositoryUrl, repositoryIdentity } from "@vibest/core/repository-url"
 import { Effect } from "effect"
 
 const config = (lines: ReadonlyArray<string>) => lines.join("\n")
@@ -9,7 +9,7 @@ const sshHosts = RepositoryUrl.Service.of({
 })
 
 describe("the remote a repository is known by", () => {
-  it("the GitHub CLI default first, then upstream, then origin, then the rest by name; only network fetch URLs", () => {
+  it("the GitHub CLI default first, then upstream, then origin, then the rest by name", () => {
     const remotes = [
       "remote.zeta.url git@github.com:z/r.git",
       "remote.alpha.url https://gitlab.com/a/r",
@@ -17,20 +17,12 @@ describe("the remote a repository is known by", () => {
       "remote.upstream.url https://github.com/o/r.git",
       "remote.fork.gh-resolved base",
       "remote.fork.url https://github.com/f/r",
-      "remote.local.url /srv/git/r.git",
-      "remote.file.url file:///srv/git/r.git",
+      "remote.my.fork.url https://h.example/o/r",
     ]
 
-    assert.strictEqual(fetchRemote(config(remotes)), "https://github.com/f/r")
-    assert.strictEqual(fetchRemote(config(remotes.slice(0, 4))), "https://github.com/o/r.git")
-    assert.strictEqual(fetchRemote(config(remotes.slice(0, 3))), "git@github.com:me/r.git")
-    assert.strictEqual(fetchRemote(config(remotes.slice(0, 2))), "https://gitlab.com/a/r")
-    assert.strictEqual(fetchRemote(config(["remote.fork.gh-resolved base", ...remotes.slice(6)])), undefined)
-    assert.strictEqual(
-      fetchRemote(config(["remote.my.fork.url https://h.example/o/r", "remote.origin.url /x"])),
-      "https://h.example/o/r",
-    )
-    assert.strictEqual(fetchRemote(""), undefined)
+    assert.deepStrictEqual(rankedRemotes(config(remotes)), ["fork", "upstream", "origin", "alpha", "my.fork", "zeta"])
+    assert.deepStrictEqual(rankedRemotes(config(["remote.fork.gh-resolved base"])), [])
+    assert.deepStrictEqual(rankedRemotes(""), [])
   })
 
   it.effect("the identity is the host in lower case and the whole path, for any host", () =>

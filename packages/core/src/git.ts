@@ -5,7 +5,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
-import { fetchRemote } from "./repository-url.ts"
+import { parseRemote, rankedRemotes } from "./repository-url.ts"
 
 export * as Git from "./git.ts"
 
@@ -134,11 +134,17 @@ export const layer = Layer.effect(
       originUrl: Effect.fn("Git.originUrl")((dir) =>
         tryGit(dir, "config", "--get", "remote.origin.url").pipe(Effect.map((url) => url || undefined)),
       ),
-      remoteUrl: Effect.fn("Git.remoteUrl")((dir) =>
-        tryGit(dir, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$").pipe(
-          Effect.map((config) => fetchRemote(config ?? "")),
-        ),
-      ),
+      remoteUrl: Effect.fn("Git.remoteUrl")(function* (dir) {
+        const config = yield* tryGit(dir, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$")
+
+        for (const name of rankedRemotes(config ?? "")) {
+          const url = yield* tryGit(dir, "remote", "get-url", name)
+
+          if (url !== undefined && parseRemote(url) !== undefined) return url
+        }
+
+        return undefined
+      }),
       currentBranch: Effect.fn("Git.currentBranch")((dir) => git(dir, "branch", "--show-current")),
       uncommitted: Effect.fn("Git.uncommitted")((dir) =>
         git(dir, "status", "--porcelain", "--branch", "--untracked-files=all").pipe(

@@ -37,7 +37,7 @@ const REMOTE_KEY = /^remote\.(.+)\.(url|gh-resolved)(?: (.*))?$/
 const remoteRank = (marked: ReadonlySet<string>, name: string) =>
   marked.has(name) ? 0 : name === "upstream" ? 1 : name === "origin" ? 2 : 3
 
-export const fetchRemote = (config: string): string | undefined => {
+export const rankedRemotes = (config: string): ReadonlyArray<string> => {
   const urls = new Map<string, string>()
   const marked = new Set<string>()
 
@@ -51,11 +51,7 @@ export const fetchRemote = (config: string): string | undefined => {
     else if (!urls.has(name!)) urls.set(name!, value)
   }
 
-  const [chosen] = [...urls.keys()]
-    .filter((name) => parseRemote(urls.get(name)!) !== undefined)
-    .sort((a, b) => remoteRank(marked, a) - remoteRank(marked, b) || a.localeCompare(b))
-
-  return chosen === undefined ? undefined : urls.get(chosen)
+  return [...urls.keys()].sort((a, b) => remoteRank(marked, a) - remoteRank(marked, b) || a.localeCompare(b))
 }
 
 export interface Interface {

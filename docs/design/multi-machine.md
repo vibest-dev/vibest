@@ -102,10 +102,11 @@ project add …"); no project of exactly that set and several such projects are 
 their ids and folders and a hint to pass `--project`. A single-repository request keeps the earlier rule: the projects
 holding the repository (by URL when any checkout has it, otherwise by identity) must be exactly one, or it is refused
 listing them, and that project must hold only that repository. Folder names that the file system of B would treat as
-one (`Tools` and `tools` on macOS) are refused. `vibest run --machine <B> --project <p>` sends `project`: B takes
+one (`Tools` and `tools` on macOS) are refused. `vibest run --machine <B> --project <p>` sends `project`: before any matching B narrows to
 the one project whose id is `p`, whose id starts with `p` (at least 8 characters) or whose folder is named `p`,
 refuses when none or several are, and still checks that its repositories are exactly A's; A refuses `--project`
-without `--machine`, and a B without the `peerSpawnProject` capability ("run vibest update on <B>").
+without `--machine`, and a B without the `peerSpawnProject` capability ("run vibest update on <B>"); the CLI refuses
+`--project` when its own vibestd lacks that capability ("run vibest update").
 Then B checks every commit before creating anything (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`;
 "<B>'s checkout <dir> does not have <sha>: push it and fetch it there", one clause per missing commit), and runs
 `Session.spawn`: a single repository whose checkout is the project folder gets the worktree detached at its commit;
@@ -146,9 +147,9 @@ B still pins A's commit and refuses when the clone does not have it.
 
 ## Repository identity
 
-Which remote a checkout is known by is chosen the same way on both machines (`Git.remoteUrl`, `fetchRemote` in
-`packages/core/src/repository-url.ts`), from the remotes that have a fetch URL with a network form (not a local path
-or a `file://` URL): the remote the GitHub CLI marked as default (`remote.<name>.gh-resolved`, only when present),
+Which remote a checkout is known by is chosen the same way on both machines (`Git.remoteUrl`, `rankedRemotes` in
+`packages/core/src/repository-url.ts`), from the remotes whose fetch URL as git resolves it (`git remote get-url`, so
+`url.<base>.insteadOf` applies) has a network form (not a local path or a `file://` URL): the remote the GitHub CLI marked as default (`remote.<name>.gh-resolved`, only when present),
 then `upstream`, then `origin`, then the others by name. A reads it from each checkout when it runs
 `vibest run --machine`, B from each checkout of its projects when it answers, so a remote added or changed after
 `vibest project add` counts; `remote_url` is recorded with the same choice. A checkout with no such remote is
@@ -164,7 +165,7 @@ port, a leading `~/` or `/`, a trailing `/` and a trailing `.git`: `github.com/o
 `HostName` with `ssh -G <alias>` (the `RepositoryUrl` service: a successful lookup is cached per alias; a failure, a non-zero exit or the 5 s limit gives
 the alias itself and is asked again next time)
 on the machine that reads it: A resolves its own remote, B the remotes of its own checkouts. An https host is never
-looked up, nor a bracketed IPv6 host or a one-letter host (a Windows path such as `C:/src/r`): those have no identity. A local path or `file://` URL has no identity and matches only the same string. A sends both the raw URL
+looked up, nor a bracketed IPv6 host or a one-letter host (a Windows path such as `C:/src/r`): those have no identity. A sends both the raw URL
 and the identity; B pairs checkouts whose raw URL equals A's before it pairs by identity (see "B: agents for
 another machine"; `ssh -G` runs on B for its checkouts at once), and every `NoProject`
 message names A's raw URL. `remote_url` is stored unchanged.
