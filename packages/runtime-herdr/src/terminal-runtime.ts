@@ -291,11 +291,11 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             )
 
             return hook.startsWith("current")
-              ? { ok: true, subject: h, text: `herdr can see its state (hook ${hook})` }
+              ? { ok: true, subject: h, text: `herdr can see its state, hook ${hook}` }
               : {
                   ok: false,
                   subject: h,
-                  text: `herdr cannot see its state (hook ${hook}); its agents never become ready`,
+                  text: `herdr cannot see its state, hook ${hook}; its agents never become ready`,
                   fix: `herdr integration install ${h}`,
                 }
           })

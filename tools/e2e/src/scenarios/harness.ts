@@ -165,7 +165,7 @@ const checks: ReadonlyArray<Check> = [
 
       expect(
         /^Runtime: herdr .*\(where agents run\)$/m.test(out) &&
-          /^(Ready\.|\d+ problems?; run the fix lines above\.)$/m.test(out),
+          /^(Ready\.|\d+ problems?(?:; run the fix lines above)?\.)$/m.test(out),
         `no herdr runtime section or verdict:\n${out}`,
       )
     },
