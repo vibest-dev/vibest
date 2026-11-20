@@ -9201,19 +9201,23 @@
                 "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
-                "$ref": "#/$defs/ProjectCloneFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ProjectCloneFailedEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/NoSuchSessionEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/UnknownMachineEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/MachineUnavailableEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/MachineIncompatibleEncoded"
+                  }
+                ]
               }
             ]
           },

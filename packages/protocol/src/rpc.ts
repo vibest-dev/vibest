@@ -19,9 +19,10 @@ import {
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
 import {
+  CloneFailed,
+  CloneRequest,
   CloneStep,
   ProjectActivity,
-  ProjectCloneFailed,
   ProjectCreateFailed,
   ProjectInfoResult,
   ProjectSearchInput,
@@ -746,20 +747,9 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Project.Clone", {
-        payload: {
-          url: Schema.String,
-          directory: Schema.optional(Schema.String),
-          machine: Schema.optional(Schema.String),
-        },
+        payload: CloneRequest,
         success: CloneStep,
-        error: Schema.Union([
-          Forbidden,
-          ProjectCloneFailed,
-          NoSuchSession,
-          UnknownMachine,
-          MachineUnavailable,
-          MachineIncompatible,
-        ]),
+        error: Schema.Union([Forbidden, CloneFailed]),
         stream: true,
       }),
     ),
