@@ -112,7 +112,7 @@ or goes two levels deep) registers nothing and is reported, never dropped: under
 `vibest doctor` with the fix, and by `vibest run --agent <id>`, which is refused with that error. An invalid file whose id is a builtin's (`general.md`)
 does not fall back to the builtin: starts of that agent, a plain `vibest run` included, are refused with the file's error
 until it is fixed or removed. A folder that cannot be read is reported the same way, with the agents it last read kept.
-The other files still load. Agents cannot read or change the folder; they use `vibest agent list` and `show`.
+The other files still load.
 
 ## S62. An agent's own harness
 

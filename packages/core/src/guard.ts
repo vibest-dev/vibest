@@ -402,9 +402,6 @@ const pathArgs = (input: ToolCall["input"]) =>
 const OFF_LIMITS =
   "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
 
-const AGENT_FILES_OFF_LIMITS =
-  "The agents folder of the vibest home is the user's; read the agents with vibest agent list and vibest agent show."
-
 const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
 const SHELL_SEARCH = /(?:^|[\s;&|(])(?:rg|ag|ack|grep|egrep|find|fd|tree|du)\s/
 
@@ -415,8 +412,6 @@ const floor = Effect.fn("Guard.floor")(function* (call: ToolCall, projectFolder:
   const vibestHome = yield* physicalOption(layout.home)
 
   if (projects === undefined || vibestHome === undefined) return OFF_LIMITS
-  const agentFiles = path.join(vibestHome, "agents")
-  const inAgentFiles = (targets: ReadonlyArray<string>) => targets.some((t) => inside(t, agentFiles, path.sep))
   const inOwn = (target: string) => projectFolder !== undefined && inside(target, projectFolder, path.sep)
   const resolve = (raw: string) => targetsOf(raw, call.cwd)
 
@@ -447,8 +442,6 @@ const floor = Effect.fn("Guard.floor")(function* (call: ToolCall, projectFolder:
 
       if (targets === undefined) return BAD_URL
 
-      if (inAgentFiles(targets)) return AGENT_FILES_OFF_LIMITS
-
       if (targets.some((t) => t === vibestHome || blocked(t, search))) return OFF_LIMITS
 
       if (word.includes(".vibest/projects") && !targets.every(inOwn)) return OFF_LIMITS
@@ -467,8 +460,6 @@ const floor = Effect.fn("Guard.floor")(function* (call: ToolCall, projectFolder:
     if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
 
     if (targets === undefined) return BAD_URL
-
-    if (inAgentFiles(targets)) return AGENT_FILES_OFF_LIMITS
 
     if (targets.some((t) => blocked(t, search))) return OFF_LIMITS
   }
