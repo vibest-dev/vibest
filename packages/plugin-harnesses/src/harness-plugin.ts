@@ -11,7 +11,7 @@ export const harnessPlugin = (
 ) =>
   Effect.map(Effect.service(ChildProcessSpawner.ChildProcessSpawner), (spawner) =>
     Plugin.define({
-      id: `harness-${definition.id}`,
+      id: `vibest.harness-${definition.id}`,
       effect: (ctx) =>
         ctx.harness
           .transform((editor) =>

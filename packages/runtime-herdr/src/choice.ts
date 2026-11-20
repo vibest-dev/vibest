@@ -3,7 +3,7 @@ import { Effect } from "effect"
 
 export const choicePlugin = (): VibestPlugin.Plugin.Plugin =>
   VibestPlugin.Plugin.define({
-    id: "runtime-choice",
+    id: "vibest.runtime-choice",
     effect: (context) =>
       context.agent.hook("start.before", (event) =>
         Effect.sync(() => {

@@ -14,7 +14,7 @@ Stories for `runtime-port.md`. Each becomes an e2e check (tools/e2e) or a contra
 | R5  | Step in on any runtime | While a subagent works in rex (or tern), type into its block                   | That execution's result still reaches the entry session once, with what you typed                                                                    |
 | R6  | A harness dies early   | A harness exits right after start (broken binary, login prompt it cannot pass) | Within seconds the entry session gets the terminal's last lines and the exit code, on every runtime; no endless retry                                |
 | R7  | Restart vibestd        | Stop vibestd while a subagent works; start it again                            | The subagent kept running in its terminal; vibestd finds it again and its result is delivered                                                        |
-| R8  | Two runtimes at once   | A terminal has both hc's and herdr's variables; `vibest`, no `--runtime`       | Without `--runtime`, the terminal it was started in. Both variable sets: hc wins because runtime-herdr-core loads before runtime-herdr               |
+| R8  | Two runtimes at once   | A terminal has both hc's and herdr's variables; `vibest`, no `--runtime`       | Without `--runtime`, the terminal it was started in. Both variable sets: hc wins because vibest.runtime-herdr-core loads before vibest.runtime-herdr |
 
 ## Machines
 

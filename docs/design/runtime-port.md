@@ -100,7 +100,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   read the terminal (and optionally a machine target) from those values. Definitions declare no priority;
   registration order decides. Without `--runtime`, vibest uses the runtime of the terminal it was started in. When a
   terminal carries both herdr-core and herdr variables (they are inherited), hc wins because the builtin
-  runtime-herdr-core registers before runtime-herdr. The CLI and core name no runtime id or variable for detection:
+  vibest.runtime-herdr-core registers before vibest.runtime-herdr. The CLI and core name no runtime id or variable for detection:
   vibestd reads the callers of the registered definitions (`Runtimes.callers`), so another runtime plugin needs no
   change to be detected. The CLI sends its environment to vibestd, which keeps only the keys some definition's caller
   declared and asks that definition for the machine target. `--session` is an opaque runtime session name.
@@ -275,6 +275,6 @@ disposed or its plugin unloaded) stops its merge.
 ## 8. Order of work
 
 1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations report execution events and
-   OSC 7501; herdr becomes the builtin `runtime-herdr` plugin. Gates and e2e unchanged.
+   OSC 7501; herdr becomes the builtin `vibest.runtime-herdr` plugin. Gates and e2e unchanged.
 2. `vibest machine`, remote herdr, the machine flow above; proven on voyracloud (Linux) and macbook-pro-m1 (macOS).
 3. `runtime-rex` and `runtime-tern` (parallel), each passing the contract suite.
