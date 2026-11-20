@@ -1,7 +1,7 @@
 import { cliHeaders, connect, readPing } from "@vibest/client/client"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import * as Daemon from "@vibest/server/daemon"
-import { Effect, Option, Path } from "effect"
+import { Effect, Exit, Option, Path } from "effect"
 import { RpcClient } from "effect/rpc"
 
 import { json } from "../../caller.ts"
@@ -9,6 +9,8 @@ import { Runtime } from "../../framework/runtime.ts"
 import { noticeFrom } from "../../update.ts"
 import { VERSION } from "../../version.ts"
 import { Commands } from "../commands.ts"
+
+const LOAD_TIMEOUT = "1 second"
 
 export default Runtime.handler(Commands.commands.status, () =>
   Effect.gen(function* () {
@@ -19,12 +21,12 @@ export default Runtime.handler(Commands.commands.status, () =>
 
     yield* noticeFrom(Effect.succeed(ping))
 
-    const load = Option.isNone(ping)
-      ? Option.none()
-      : yield* RpcClient.withHeaders(
+    const load = Option.exists(ping, (p) => p.capabilities?.load === true)
+      ? yield* RpcClient.withHeaders(
           connect(layout.socket).pipe(Effect.flatMap((c) => c["Machine.Load"]({}))),
           cliHeaders(path.resolve(".")),
-        ).pipe(Effect.scoped, Effect.option)
+        ).pipe(Effect.scoped, Effect.timeout(LOAD_TIMEOUT), Effect.exit, Effect.map(Exit.getSuccess))
+      : Option.none()
 
     yield* json({
       client: { version: VERSION, command: yield* VibestCommand },

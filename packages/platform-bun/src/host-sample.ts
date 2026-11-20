@@ -1,18 +1,54 @@
 import os from "node:os"
 
 import { Load } from "@vibest/server/machine/load"
-import { Duration, Effect, FileSystem, Layer } from "effect"
+import { Clock, Effect, FileSystem, Layer } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-const SAMPLE = Duration.millis(200)
+const SAMPLE = "200 millis"
 
-const cpuSample = (): Load.CpuSample => {
+interface CpuTimes {
+  readonly idle: number
+  readonly total: number
+  readonly count: number
+}
+
+export const parseCpuList = (list: string): ReadonlySet<number> | undefined => {
+  const cpus = new Set<number>()
+
+  for (const range of list.split(",")) {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(range.trim())
+
+    if (match === null) return undefined
+
+    for (let cpu = Number(match[1]); cpu <= Number(match[2] ?? match[1]); cpu++) cpus.add(cpu)
+  }
+
+  return cpus
+}
+
+export const pinnedCpu = (stat: string, allowed: ReadonlySet<number>): CpuTimes | undefined => {
+  const times = { idle: 0, total: 0, count: 0 }
+
+  for (const [, id, fields] of stat.matchAll(/^cpu(\d+) (.+)$/gm)) {
+    if (!allowed.has(Number(id))) continue
+    const counters = (fields ?? "").trim().split(/\s+/).map(Number)
+    const at = (index: number) => counters[index] ?? 0
+    const idle = at(3) + at(4)
+    times.idle += idle
+    times.total += idle + at(0) + at(1) + at(2) + at(5) + at(6) + at(7)
+    times.count++
+  }
+
+  return times.count > 0 ? times : undefined
+}
+
+const allCpus = (): CpuTimes => {
   const cpus = os.cpus()
 
   const sum = cpus.reduce(
-    (acc, cpu) => ({
-      idle: acc.idle + cpu.times.idle,
-      total: acc.total + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq,
+    (acc, { times }) => ({
+      idle: acc.idle + times.idle,
+      total: acc.total + times.user + times.nice + times.sys + times.idle + times.irq,
     }),
     { idle: 0, total: 0 },
   )
@@ -20,74 +56,133 @@ const cpuSample = (): Load.CpuSample => {
   return { ...sum, count: cpus.length }
 }
 
-const wallClockPause = (duration: Duration.Duration) =>
-  Effect.callback<void>((resume) => {
-    const timer = setTimeout(() => resume(Effect.void), Duration.toMillis(duration))
+export const darwinAvailableBytes = (output: string): number | undefined => {
+  const pageSize = /page size of (\d+) bytes/.exec(output)?.[1]
+  const free = /^Pages free:\s+(\d+)\./m.exec(output)?.[1]
+  const inactive = /^Pages inactive:\s+(\d+)\./m.exec(output)?.[1]
+  const speculative = /^Pages speculative:\s+(\d+)\./m.exec(output)?.[1]
 
-    return Effect.sync(() => clearTimeout(timer))
-  })
+  if (pageSize === undefined || free === undefined || inactive === undefined || speculative === undefined)
+    return undefined
+  const available = (Number(free) + Number(inactive) + Number(speculative)) * Number(pageSize)
 
-const withinTotal = (available: number, total: number) => Math.min(total, Math.max(0, available))
+  return Number.isSafeInteger(available) && Number(pageSize) > 0 ? available : undefined
+}
 
-type HostMemory = { readonly cpuCap: number | undefined; readonly total: number; readonly available: number }
+const numberIn = (text: string, pattern: RegExp) => {
+  const value = pattern.exec(text)?.[1]
 
-const atMost = (value: number, cap: number | undefined) => (cap === undefined ? value : Math.min(value, cap))
+  return value === undefined ? undefined : Number(value)
+}
+
+const hostShare = (before: CpuTimes, after: CpuTimes) => {
+  const total = after.total - before.total
+  const idle = after.idle - before.idle
+
+  return before.count === after.count && total > 0 && idle >= 0 ? Math.min(1, Math.max(0, 1 - idle / total)) : null
+}
+
+const cappedCpu = (
+  max: RegExpExecArray,
+  count: number,
+  host: number | null,
+  usedMicros: number | undefined,
+  elapsedMicros: number,
+) => {
+  const capacity = Math.min(Number(max[1]) / Number(max[2]), count)
+  const cgroupIdle = usedMicros !== undefined && elapsedMicros > 0 ? capacity - usedMicros / elapsedMicros : undefined
+  const hostIdle = host === null ? undefined : count * (1 - host)
+  const idles = [cgroupIdle, hostIdle].filter((idle) => idle !== undefined)
+  const idle = idles.length === 0 ? undefined : Math.min(...idles)
+
+  return {
+    count: Math.max(1, Math.floor(capacity)),
+    utilization: idle === undefined ? null : Math.min(1, Math.max(0, 1 - idle / capacity)),
+  }
+}
 
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const readFile = (path: string) => fs.readFileString(path).pipe(Effect.orElseSucceed(() => ""))
 
-  const cgroup = <A>(name: string, parse: (text: string) => A | undefined) =>
-    fs.readFileString(`/sys/fs/cgroup/${name}`).pipe(
-      Effect.map(parse),
-      Effect.orElseSucceed(() => undefined),
-    )
+  const ownCgroup = Effect.map(readFile("/proc/self/cgroup"), (text) => {
+    const path = /^0::(\/.*)$/m.exec(text)?.[1]
 
-  const linux = Effect.gen(function* () {
-    const meminfo = yield* fs.readFileString("/proc/meminfo").pipe(Effect.orElseSucceed(() => ""))
-    const cpuCap = yield* cgroup("cpu.max", Load.cgroupCpuCap)
-    const memoryCap = yield* cgroup("memory.max", Load.cgroupBytes)
-    const memoryUsed = yield* cgroup("memory.current", Load.cgroupBytes)
-    const total = atMost(os.totalmem(), memoryCap)
-    const host = Load.linuxAvailableBytes(meminfo) ?? os.freemem()
-    const capped = memoryCap === undefined || memoryUsed === undefined ? host : Math.min(host, memoryCap - memoryUsed)
-
-    return { cpuCap, total, available: withinTotal(capped, total) }
+    return path === undefined ? undefined : `/sys/fs/cgroup${path.replace(/\/$/, "")}`
   })
 
-  const darwin = spawner.string(ChildProcess.make("/usr/bin/vm_stat", [], { stdin: "ignore", stderr: "ignore" })).pipe(
+  const cpuOf = (cgroup: string | undefined, linux: boolean) =>
+    Effect.gen(function* () {
+      const cpuMax = cgroup === undefined ? null : /^(\d+) (\d+)$/.exec((yield* readFile(`${cgroup}/cpu.max`)).trim())
+
+      const usage =
+        cpuMax === null
+          ? Effect.succeed(undefined)
+          : Effect.map(readFile(`${cgroup}/cpu.stat`), (stat) => numberIn(stat, /^usage_usec (\d+)$/m))
+
+      const allowed = linux
+        ? parseCpuList(/^Cpus_allowed_list:\s*(\S+)$/m.exec(yield* readFile("/proc/self/status"))?.[1] ?? "")
+        : undefined
+
+      const times =
+        allowed === undefined
+          ? Effect.sync(allCpus)
+          : Effect.map(readFile("/proc/stat"), (stat) => pinnedCpu(stat, allowed) ?? allCpus())
+
+      const before = yield* times
+      const usageBefore = yield* usage
+      const startedAt = yield* Clock.currentTimeMillis
+      yield* Effect.sleep(SAMPLE)
+      const after = yield* times
+      const usageAfter = yield* usage
+      const elapsedMicros = ((yield* Clock.currentTimeMillis) - startedAt) * 1000
+      const host = hostShare(before, after)
+
+      if (cpuMax === null) return { count: after.count, utilization: host }
+      const used = usageBefore === undefined || usageAfter === undefined ? undefined : usageAfter - usageBefore
+
+      return cappedCpu(cpuMax, after.count, host, used, elapsedMicros)
+    })
+
+  const vmStat = spawner.string(ChildProcess.make("/usr/bin/vm_stat", [], { stdin: "ignore", stderr: "ignore" })).pipe(
     Effect.timeout("1 second"),
     Effect.orElseSucceed(() => ""),
-    Effect.map((output) => {
-      const total = os.totalmem()
-
-      return {
-        cpuCap: undefined,
-        total,
-        available: withinTotal(Load.darwinAvailableBytes(output) ?? os.freemem(), total),
-      }
-    }),
   )
 
-  const other: Effect.Effect<HostMemory> = Effect.sync(() => ({
-    cpuCap: undefined,
-    total: os.totalmem(),
-    available: os.freemem(),
-  }))
+  const hostAvailable = (platform: NodeJS.Platform) =>
+    Effect.gen(function* () {
+      if (platform === "linux") {
+        const kib = numberIn(yield* readFile("/proc/meminfo"), /^MemAvailable:\s+(\d+)\s+kB$/m)
 
-  const byPlatform: Partial<Record<NodeJS.Platform, Effect.Effect<HostMemory>>> = { linux, darwin }
-  const memory = byPlatform[os.platform()] ?? other
+        return kib === undefined ? os.freemem() : kib * 1024
+      }
+
+      if (platform === "darwin") return darwinAvailableBytes(yield* vmStat) ?? os.freemem()
+
+      return os.freemem()
+    })
+
+  const memoryOf = (cgroup: string | undefined, platform: NodeJS.Platform) =>
+    Effect.gen(function* () {
+      const host = { total: os.totalmem(), available: yield* hostAvailable(platform) }
+      const max = cgroup === undefined ? undefined : numberIn(yield* readFile(`${cgroup}/memory.max`), /^(\d+)$/m)
+      const current = max === undefined ? undefined : numberIn(yield* readFile(`${cgroup}/memory.current`), /^(\d+)$/m)
+
+      if (max === undefined || current === undefined) return host
+      const reclaimable = numberIn(yield* readFile(`${cgroup}/memory.stat`), /^inactive_file (\d+)$/m) ?? 0
+
+      return { total: Math.min(host.total, max), available: Math.min(host.available, max - (current - reclaimable)) }
+    })
 
   const read = Effect.gen(function* () {
-    const before = cpuSample()
-    yield* wallClockPause(SAMPLE)
-    const after = cpuSample()
-    const { cpuCap, total, available } = yield* memory
+    const platform = os.platform()
+    const linux = platform === "linux"
+    const cgroup = linux ? yield* ownCgroup : undefined
+    const cpu = yield* cpuOf(cgroup, linux)
+    const { total, available } = yield* memoryOf(cgroup, platform)
 
-    return {
-      cpu: { count: atMost(after.count, cpuCap), utilization: Load.cpuShare(before, after) },
-      memory: { total, available },
-    }
+    return { cpu, memory: { total, available: Math.min(total, Math.max(0, available)) } }
   })
 
   return { read }

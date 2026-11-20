@@ -62,6 +62,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       currentProcessId,
       findEntrySessions,
       openExecution,
+      workingExecutions,
       startExecution,
       acceptedAt,
       accept,
@@ -700,6 +701,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       openExecution: Effect.fn("Db.session.openExecution")((id: string) => openExecution(id).pipe(Effect.orDie)),
+      workingExecutions: Effect.fn("Db.session.workingExecutions")(() => workingExecutions.pipe(Effect.orDie)),
 
       archive: Effect.fn("Db.session.archive")((id: string) =>
         tx(
@@ -910,13 +912,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       projectOfSession: Effect.fn("Db.session.projectOfSession")((sessionId: string) =>
         sql<{ project: string }>`SELECT project_id AS project FROM session WHERE id = ${sessionId}`.pipe(
           Effect.map((rows) => rows[0]?.project),
-          Effect.orDie,
-        ),
-      ),
-
-      workingExecutions: Effect.fn("Db.session.workingExecutions")(() =>
-        sql<{ n: number }>`SELECT count(*) AS n FROM execution WHERE outcome IS NULL`.pipe(
-          Effect.map((rows) => Number(rows[0]?.n ?? 0)),
           Effect.orDie,
         ),
       ),

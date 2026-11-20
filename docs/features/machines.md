@@ -49,7 +49,7 @@ next `vibest ls`; `vibest machine rm` removes them.
 
 ## M10. How loaded a machine is
 
-`vibest status` gives this machine's load, and `vibest machine ls` gives each added machine's under `load`: usable cores, the share of CPU in use over a 200 ms sample, total memory and the memory the OS can hand out without swapping (on macOS free, inactive and speculative pages, not free alone; on Linux MemAvailable; a cgroup cap counts on Linux), and how many executions are working on that machine. Another machine is asked of that machine's vibestd, which measures itself. A machine that cannot be read has no `load` and says why in `loadError`; it never shows as idle. Nothing is stored and nothing is read on a timer; a reading is reused for 5 seconds.
+`vibest status` gives this machine's load, and `vibest machine ls` gives each added machine's under `load`: usable cores, the share of CPU in use over a 200 ms sample, total memory and the memory the OS can hand out without swapping (on macOS free, inactive and speculative pages, not free alone; on Linux MemAvailable; a cgroup cap counts on Linux), and how many executions are working on that machine. Another machine is asked of that machine's vibestd, which measures itself. A machine that cannot be read has no `load` and says why in `loadError`; it never shows as idle. `vibest status` leaves `load` out when this vibestd cannot read it or does not answer within a second. On Linux the reading is what vibestd's own cgroup and CPU affinity allow, with reclaimable page cache counted as available. Nothing is stored and nothing is read on a timer; a reading is reused for 5 seconds.
 
 ## M7. B's herdr sessions on A
 
