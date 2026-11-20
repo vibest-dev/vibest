@@ -1,6 +1,7 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -35,6 +36,7 @@ export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const plugins = yield* Plugins.Service
+  const concurrency = yield* Concurrency.Service
   const subscriptions = yield* Subscriptions.Service
   const identity = yield* Identity
   const updateStatus = yield* UpdateCheck.Service
@@ -69,6 +71,8 @@ export const make = Effect.gen(function* () {
       ),
 
     Plugins: () => plugins.list,
+
+    Concurrency: () => Effect.map(concurrency.rules, (rules) => ({ ...rules, max: rules.max ?? null })),
 
     "Runtimes.Doctor": ({ harnesses }) =>
       Effect.flatMap(runtimes.statuses, (rows) =>
@@ -136,6 +140,7 @@ export const make = Effect.gen(function* () {
 export const layer = group([
   "Ping",
   "Plugins",
+  "Concurrency",
   "Runtimes.Doctor",
   "Subscriptions",
   "Daemon.Stop",

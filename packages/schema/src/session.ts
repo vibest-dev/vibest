@@ -119,12 +119,6 @@ export class SessionBusy extends Schema.TaggedError<SessionBusy>()("SessionBusy"
   message: Schema.String,
 }) {}
 
-export class LimitReached extends Schema.TaggedError<LimitReached>()("LimitReached", { limit: Schema.Number }) {
-  override get message() {
-    return `VIBEST_MAX_SESSIONS=${this.limit} sessions are already open (working or kept); vibest archive one first`
-  }
-}
-
 export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
   id: Schema.String,
   message: Schema.String,

@@ -39,10 +39,13 @@ import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
 import type * as Session from "./session-statements.ts"
 
+export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
+
 export type SessionFilter = {
   readonly projectId?: string
   readonly stopped?: boolean
   readonly peer?: Remote.PeerScope | undefined
+  readonly waiting?: ReadonlyArray<string>
 }
 
 export const make = (session: Session.Statements, inbox: Inbox.Statements, remote: Remote.Statements) =>
@@ -57,7 +60,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       afterCommitLive,
       moving,
       running,
-      selectRaw,
       selectSessions,
       findSession,
       currentProcess,
@@ -83,6 +85,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
     } = session
 
     const { queueInbox, insertInboxRow, dropWaiting } = inbox
+
+    const roomFor = (max: number | undefined) =>
+      max === undefined
+        ? Effect.succeed(true)
+        : sql.unsafe<{ n: number }>(LIVE_PROCESS_COUNT).pipe(Effect.map((rows) => (rows[0]?.n ?? 0) < max))
 
     const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string) =>
       Effect.gen(function* () {
@@ -214,23 +221,23 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           row: Omit<NewSession, "projectId">,
           project: string,
           {
-            max,
             cwd = "",
             task,
             parentSessionId,
             request,
             origin,
             archiveOnIdle: archives = false,
+            max,
           }: {
-            readonly max?: number | undefined
             readonly cwd?: string
             readonly task?: string
             readonly parentSessionId?: string | undefined
             readonly request?: string | undefined
             readonly origin?: Remote.PeerStart | undefined
             readonly archiveOnIdle?: boolean
+            readonly max?: number | undefined
           } = {},
-        ): Effect.Effect<boolean | SpawnedBefore | "parent-ended"> =>
+        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended"> =>
           tx(
             Effect.gen(function* () {
               if (request !== undefined) {
@@ -244,15 +251,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 (yield* sql`SELECT 1 FROM session WHERE id = ${parentSessionId} AND ended_at IS NOT NULL`).length > 0
               )
                 return "parent-ended" as const
-
-              if (max !== undefined) {
-                const n = (yield* selectRaw(
-                  [sql`s.ended_at IS NULL`, sql`NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`],
-                  running,
-                )).length
-
-                if (n >= max) return false
-              }
 
               yield* publish(SessionCreated, {
                 sessionId: row.id,
@@ -275,22 +273,25 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (archives) yield* afterCommitLive(sessionLive.archiveWhenIdle(row.id))
               const processAt = row.startedAt ?? row.createdAt
+              const admitted = yield* roomFor(max)
 
-              const process = yield* startProcess(
-                row.id,
-                {
-                  harness: row.harnessId,
-                  ...(row.provider && { provider: row.provider }),
-                  ...(row.model && { model: row.model }),
-                  ...(row.routing !== undefined && { routing: row.routing }),
-                  runtime: row.runtime,
-                  terminal: row.address.id,
-                  ...(row.harnessSessionId && { resume: row.harnessSessionId }),
-                },
-                processAt,
-              )
+              const process = !admitted
+                ? undefined
+                : yield* startProcess(
+                    row.id,
+                    {
+                      harness: row.harnessId,
+                      ...(row.provider && { provider: row.provider }),
+                      ...(row.model && { model: row.model }),
+                      ...(row.routing !== undefined && { routing: row.routing }),
+                      runtime: row.runtime,
+                      terminal: row.address.id,
+                      ...(row.harnessSessionId && { resume: row.harnessSessionId }),
+                    },
+                    processAt,
+                  )
 
-              if (row.exitedAt !== null)
+              if (row.exitedAt !== null && process !== undefined)
                 yield* publish(ProcessEnded, {
                   sessionId: row.id,
                   at: row.exitedAt,
@@ -333,7 +334,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               yield* afterCommitLive(sessionLive.setStatus(row.id, row.status))
 
-              return true
+              return admitted ? (true as const) : ("waiting" as const)
             }),
           ).pipe(Effect.orDie),
       ),
@@ -391,7 +392,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             ...(filter.projectId === undefined ? [] : [sql`s.project_id = ${filter.projectId}`]),
             ...(filter.peer === undefined ? [] : [remote.ofPeer(sql`s.id`, filter.peer)]),
           ],
-          filter.stopped ? undefined : running,
+          filter.stopped
+            ? undefined
+            : sql`((${running} AND (p_id IS NOT NULL OR ended_at IS NULL)) OR ${
+                (filter.waiting ?? []).length === 0 ? sql`0` : sql.in("id", filter.waiting!)
+              })`,
         ).pipe(Effect.orDie),
       ),
 
@@ -737,6 +742,41 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
           return execution !== undefined && (yield* acceptedAt(id, execution)) !== null
         }).pipe(Effect.orDie),
+      ),
+
+      admitProcess: Effect.fn("Db.session.admitProcess")((id: string, start: ProcessStart, max: number | undefined) =>
+        tx(
+          Effect.gen(function* () {
+            if (!(yield* roomFor(max))) return false
+            yield* ensureProcess(id, start)
+
+            return true
+          }),
+        ).pipe(Effect.orDie),
+      ),
+
+      unstartedRuns: Effect.fn("Db.session.unstartedRuns")(() =>
+        sql<{ id: string }>`SELECT s.id FROM session s
+          WHERE s.ended_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM process p WHERE p.session_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM project j WHERE j.entry_session_id = s.id)`.pipe(
+          Effect.map((rows) => rows.map((row) => row.id)),
+          Effect.orDie,
+        ),
+      ),
+
+      endUnstarted: Effect.fn("Db.session.endUnstarted")(
+        (id: string, outcome: "not_started" | "interrupted", notice?: string) =>
+          tx(
+            Effect.gen(function* () {
+              const at = yield* now
+              const execution = yield* startExecution(id, at)
+              yield* inbox.linkTask(id, execution, at)
+              yield* endExecution(id, { outcome })
+
+              if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice })
+            }),
+          ).pipe(Effect.orDie),
       ),
 
       currentProcessId: Effect.fn("Db.session.currentProcessId")((id: string) =>

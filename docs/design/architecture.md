@@ -362,7 +362,7 @@ below it and subscribing to the events it handles itself:
 | `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins          |
 | `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts                   |
 | `exits.ts` (`Exits`)           | recording a harness exit                                                                         |
-| `spawn.ts` (`Spawn`)           | admitting and starting a session, `VIBEST_MAX_SESSIONS`                                          |
+| `spawn.ts` (`Spawn`)           | admitting and starting a session                                                                 |
 | `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`       |
 | `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                          |
 | `entry.ts` (`EntrySession`)    | starting and resuming the entry session                                                          |
@@ -391,6 +391,19 @@ How these modules keep the rules:
   no execution start can come before the wait on it. Only this execution's acceptance confirms pickup: the previous
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
   runs twice. A refused text undoes the execution unless the integration wrote a result anyway; a broken connection is not a refusal (the text may have arrived), so the execution stays.
+- A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) caps live harness
+  processes on this machine. The count is read from the database on every start: process rows not ended
+  (`LIVE_PROCESS_COUNT`, served by the partial index `process_live`). A process row is written when its start begins,
+  so starts in flight count, and a failed start or an exit ends it and frees the place; this vibestd records only its
+  own machine's processes. The check and the insert of the new process row run in one transaction, so concurrent
+  starts cannot pass the limit. Entry sessions are never held back, but their processes count. Only a waiting list
+  lives in memory (`starts.ts`): when the limit is reached, a `vibest run` stores the session and its task with no
+  process row and returns at once, and a relaunch of an exited session for a send waits with the choice of its last
+  process. The list holds no session lock and no fiber, so interrupt, archive and a vibestd stop never wait on
+  it; reconcile skips a waiting session, and a running session takes messages without any check. On `process.ended`, `session.ended` or a limit change, vibestd walks the list in order, inserting each process
+  row while there is room and launching outside the transaction. The list does not survive a vibestd restart: a run
+  that never had a process row and still has its task ends `not_started` with a notice to its creator, and a
+  relaunch for pending sends is woken again by delivery's startup pass.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the
