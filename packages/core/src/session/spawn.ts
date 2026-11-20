@@ -199,7 +199,7 @@ export const make = (options: { readonly maxSessions: number | undefined }) =>
         const root = input.root
         const agent = input.agent
 
-        if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
+        if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents)
 
         const parent =
           input.parentSessionId === undefined ? undefined : yield* db.session.getSession(input.parentSessionId)

@@ -89,8 +89,7 @@ const make = Effect.gen(function* () {
   const firstInputOf = (harness: HarnessId) =>
     harnesses.find(harness)?.systemPromptInPrompt === true ? ENTRY_FIRST_INPUT : undefined
 
-  const known = (id: string) =>
-    agents.find(id) === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.void
+  const known = (id: string) => (agents.find(id) === undefined ? Effect.fail(unknownAgent(id, agents)) : Effect.void)
 
   const agentOf = (current: { readonly agent: string } | undefined, fresh: boolean, requested: string) =>
     current === undefined || fresh ? requested : current.agent

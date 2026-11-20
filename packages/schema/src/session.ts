@@ -139,8 +139,10 @@ export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("No
 export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAgent", {
   agent: Schema.String,
   known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
+  invalid: Schema.optional(Schema.String),
 }) {
   override get message() {
+    if (this.invalid !== undefined) return `agent definition ${this.agent} is invalid: ${this.invalid}`
     const known = this.known.map((definition) => `${definition.id} (${definition.description})`).join("; ")
 
     return `no agent definition ${this.agent}; registered: ${known || "none"}`

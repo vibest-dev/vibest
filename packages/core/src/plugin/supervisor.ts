@@ -19,6 +19,11 @@ const named = (candidate: Candidate): string => ("error" in candidate.plugin ? c
 const matches = (selector: string, id: string) =>
   selector === "*" || (selector.endsWith(".*") ? id.startsWith(selector.slice(0, -1)) : selector === id)
 
+const revised = (candidate: Candidate) =>
+  candidate.revise === undefined
+    ? Effect.succeed(candidate)
+    : Effect.map(candidate.revise, (revision) => ({ ...candidate, revision }))
+
 const isBuiltin = (candidate: Candidate) => candidate.source.startsWith("builtin:")
 
 const removeMatching = (candidates: Array<Candidate>, target: string) => {
@@ -118,7 +123,7 @@ export const supervise = Effect.fnUntraced(function* (
       Effect.gen(function* () {
         if (next !== undefined) users = next
         const { operations } = yield* sources.operations
-        const candidates = [...keptBuiltins(builtins, operations), ...users]
+        const candidates = yield* Effect.forEach([...keptBuiltins(builtins, operations), ...users], revised)
         const revisions = candidates.map((c) => `${c.source}\n${keyOf(c)}`).join("\n")
 
         if (revisions === activated) return

@@ -33,6 +33,7 @@ export interface Candidate {
   readonly options: Schema.JsonObject
   readonly plugin: AnyPlugin | { readonly error: string }
   readonly optional?: boolean
+  readonly revise?: Effect.Effect<string>
 }
 
 export const keyOf = (c: Candidate) =>

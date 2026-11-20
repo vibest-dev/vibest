@@ -115,10 +115,20 @@ export interface AgentDefinition {
   readonly description: string
   readonly system: string
   readonly guard?: (call: GuardCall) => string | undefined
+  readonly harness?: string
+  readonly provider?: string
+  readonly model?: string
+}
+
+export interface InvalidAgent {
+  readonly id: string
+  readonly source: string
+  readonly error: string
 }
 
 export interface AgentEditor {
   add(definition: AgentDefinition): void
+  invalid(agent: InvalidAgent): void
 }
 
 export interface MachineHooks {
