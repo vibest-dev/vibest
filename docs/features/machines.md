@@ -35,6 +35,21 @@ An unknown machine, vibest missing on the target, ssh failing, the target being 
 behind the target, a commit the target does not have, and agents running `connect` or `machine add`: each fails with its
 own message.
 
+## M11. A project of several repositories on another machine
+
+`vibest run --machine` from a project of several repositories (a folder of git repositories) starts the session in B's
+one project that holds exactly those repositories, in one worktree with A's folder names, each repository detached at
+A's commit. B lacking one of the repositories is refused naming it and `vibest project add`; B lacking a commit is
+refused naming the checkout and the commit; several such projects on B are listed and refused; nothing is started
+for a refused run. A reads the folder at each run, so a repository cloned beside a running project is included. Folder
+names that would collide on B's file system are refused. A single-repository project runs as in M1, at A's commit
+even when B keeps that checkout inside a project folder.
+
+## M12. A B too old for several repositories
+
+A `vibest run --machine` from a project of several repositories to a B whose vibest does not take a repository list is
+refused on A with `run vibest update on <B>`; B starts nothing.
+
 ## M9. Listing another machine's harnesses
 
 `vibest harness ls --machine <name>` prints the harnesses of that machine in the shape of the local list, asked of that

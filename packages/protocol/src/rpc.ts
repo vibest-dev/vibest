@@ -797,9 +797,19 @@ export class VibestRpcs extends RpcGroup.make(
     admitted(
       Rpc.make("Peer.Spawn", {
         payload: {
-          repository: Schema.String,
+          repository: Schema.optional(Schema.String),
           identity: Schema.optional(Schema.String),
-          commit: Schema.String,
+          commit: Schema.optional(Schema.String),
+          repositories: Schema.optional(
+            Schema.Array(
+              Schema.Struct({
+                folder: Schema.String,
+                repository: Schema.String,
+                identity: Schema.optional(Schema.String),
+                commit: Schema.String,
+              }),
+            ),
+          ),
           agent: Schema.String,
           prompt: Schema.String,
           harness: Schema.optional(Schema.String),
@@ -955,6 +965,7 @@ export const CAPABILITIES = {
   spawnRuntime: true,
   spawnFiles: true,
   peerSpawnFiles: true,
+  peerSpawnRepositories: true,
   load: true,
   agents: true,
 } as const

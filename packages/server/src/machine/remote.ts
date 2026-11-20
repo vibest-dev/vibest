@@ -3,15 +3,17 @@ import { callerKind } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
 import type { PeerScope } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
+import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
+import { listProjectRepositories } from "@vibest/core/project/create"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { type ListedMachine, MachineFailed, MachineIncompatible } from "@vibest/schema/machine"
-import { Context, Data, Effect, Layer, Predicate } from "effect"
+import { Context, Data, Effect, FileSystem, Layer, Path, Predicate } from "effect"
 
 import { Machines } from "./machines.ts"
 
@@ -64,6 +66,15 @@ const make = Effect.gen(function* () {
   const self = yield* Identity.Service
   const git = yield* Git.Service
   const runtimes = yield* Runtimes.Service
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+
+  const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
+    effect.pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(Git.Service, git),
+    )
 
   const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) =>
     Effect.gen(function* () {
@@ -213,28 +224,55 @@ const make = Effect.gen(function* () {
       }
 
       const repositories = yield* db.project.projectRemote(from.project)
-      const repository = repositories[0]
+      const directory = yield* db.project.projectDirectory(from.project)
 
-      if (repositories.length !== 1 || repository === undefined)
+      const folders =
+        directory !== undefined
+          ? yield* listProjectRepositories(directory).pipe(
+              provided,
+              Effect.mapError((e) => new MachineFailed({ message: `cannot read ${directory}: ${e.message}` })),
+            )
+          : undefined
+
+      const pin = Effect.fn("Remote.pin")(function* (path: string, remote: string | null | undefined) {
+        if (remote === null || remote === undefined)
+          return yield* new MachineFailed({
+            message: `${path} has no remote; another machine finds its checkout by the remote URL`,
+          })
+
+        const commit = yield* git
+          .head(path)
+          .pipe(Effect.mapError((e) => new MachineFailed({ message: `cannot read HEAD of ${path}: ${e.message}` })))
+
+        const identity = yield* repositoryIdentity(remote)
+
+        return { repository: remote, ...(identity !== undefined && { identity }), commit }
+      })
+
+      const only = repositories[0]
+      const child = folders?.length === 1 ? folders[0] : undefined
+
+      const sent =
+        folders !== undefined && folders.length > 1
+          ? {
+              repositories: yield* Effect.forEach(folders, (folder) =>
+                git.originUrl(folder.path).pipe(
+                  Effect.flatMap((remote) => pin(folder.path, remote)),
+                  Effect.map((entry) => ({ folder: folder.name, ...entry })),
+                ),
+              ),
+            }
+          : child !== undefined
+            ? yield* pin(child.path, yield* git.originUrl(child.path))
+            : folders === undefined && repositories.length === 1 && only !== undefined
+              ? yield* pin(only.path, only.remote)
+              : yield* new MachineFailed({ message: "the project has no repository another machine can run in" })
+
+      if ("repositories" in sent && (yield* machines.link(machine)).capabilities.peerSpawnRepositories !== true)
         return yield* new MachineFailed({
-          message: "only a project of one repository runs agents on another machine",
-        })
-      const remote = repository.remote
-
-      if (remote === null)
-        return yield* new MachineFailed({
-          message: `${repository.path} has no remote; another machine finds its checkout by the remote URL`,
+          message: `${machine} runs a vibest that does not take a project of several repositories; run vibest update on ${machine}`,
         })
 
-      const commit = yield* git
-        .head(repository.path)
-        .pipe(
-          Effect.mapError(
-            (e) => new MachineFailed({ message: `cannot read HEAD of ${repository.path}: ${e.message}` }),
-          ),
-        )
-
-      const identity = yield* repositoryIdentity(remote)
       const runtime = input.runtime ?? callerKind(yield* runtimes.callers, input.callerEnv)
       const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
 
@@ -246,9 +284,7 @@ const make = Effect.gen(function* () {
       const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
         client["Peer.Spawn"](
           {
-            repository: remote,
-            ...(identity !== undefined && { identity }),
-            commit,
+            ...sent,
             agent: input.agent,
             prompt: input.prompt,
             ...(input.harness !== undefined && { harness: input.harness }),
@@ -285,5 +321,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Db.node, Git.node, Machines.node, Runtimes.node, Identity.node],
+  deps: [Db.node, Git.node, Machines.node, Runtimes.node, Identity.node, PlatformNode.fileSystem, PlatformNode.path],
 })
