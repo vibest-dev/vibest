@@ -180,6 +180,31 @@ export const make = Effect.gen(function* () {
         ),
       ),
 
+    Stop: (p) =>
+      routed.Stop(p, (id) =>
+        managed("Stop", id).pipe(
+          Effect.flatMap((id) =>
+            Effect.gen(function* () {
+              const caller = yield* Caller
+
+              const fromSession = Predicate.isTagged(caller, "Session")
+                ? yield* db.remote.senderOf(caller.sessionId)
+                : undefined
+
+              const by = Predicate.isTagged(caller, "Peer")
+                ? ((yield* peerSender(caller, undefined)) ?? { type: "user" as const })
+                : fromSession === undefined
+                  ? { type: "user" as const }
+                  : { type: "agent" as const, ...fromSession }
+
+              const { message } = yield* sessions.stop(id, by)
+
+              return { id, message }
+            }),
+          ),
+        ),
+      ),
+
     Remove: (p) =>
       routed.Remove(p, (id) =>
         managed("Remove", id).pipe(
@@ -332,6 +357,7 @@ export const layer = group([
   "Republish",
   "Send",
   "Interrupt",
+  "Stop",
   "Remove",
   "Get",
   "Peek",

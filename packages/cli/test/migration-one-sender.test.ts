@@ -3,6 +3,7 @@ import { checkLedger, open } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { database } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { CATALOG_VERSION } from "@vibest/schema/event"
 import { Effect, Exit, FileSystem, Layer, Path } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -232,7 +233,7 @@ describe("ledger migration 20261119000000_one_sender", () => {
               sql`SELECT (SELECT value FROM meta WHERE key = 'catalog') AS catalog,
                 (SELECT count(*) FROM migration WHERE id = ${MIGRATION}) AS applied`,
           ),
-          [{ catalog: "4", applied: 1 }],
+          [{ catalog: String(CATALOG_VERSION), applied: 1 }],
         )
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

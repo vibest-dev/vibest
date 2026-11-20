@@ -233,6 +233,9 @@ importers:
       '@vibest/plugin-harnesses':
         specifier: workspace:*
         version: link:../plugin-harnesses
+      '@vibest/plugin-idle-stop':
+        specifier: workspace:*
+        version: link:../plugins/idle-stop
       '@vibest/plugin-report-reminder':
         specifier: workspace:*
         version: link:../plugins/report-reminder
@@ -482,6 +485,15 @@ importers:
       '@vibest/schema':
         specifier: workspace:*
         version: link:../schema
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
+  packages/plugins/idle-stop:
+    dependencies:
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../../plugin
       effect:
         specifier: 4.0.2
         version: 4.0.2

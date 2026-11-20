@@ -73,6 +73,30 @@ export const ProcessReady = fact("process.ready", "session", {
 export const ProcessPid = fact("process.pid", "session", { process: Seq, pid: Pid })
 export const ProcessConversation = fact("process.conversation", "session", { process: Seq, conversation: Text })
 
+export const AgentFrom = Schema.Struct({
+  session: Schema.String,
+  agent: optional(Schema.String),
+  title: optional(Schema.String),
+  machine: optional(Schema.String),
+})
+
+export type AgentFrom = typeof AgentFrom.Type
+
+export const AgentSender = Schema.Struct({ type: Schema.Literal("agent"), ...AgentFrom.fields })
+
+export type AgentSender = typeof AgentSender.Type
+
+export const PluginSender = Schema.Struct({ type: Schema.Literal("plugin"), plugin: Text })
+
+export const Sender = Schema.Union([
+  AgentSender,
+  PluginSender,
+  Schema.Struct({ type: Schema.Literal("vibest") }),
+  Schema.Struct({ type: Schema.Literal("user") }),
+])
+
+export type Sender = typeof Sender.Type
+
 export const ProcessEndReason = Schema.Literals([
   "exited",
   "restart",
@@ -80,11 +104,16 @@ export const ProcessEndReason = Schema.Literals([
   "archived",
   "launch_failed",
   "superseded",
+  "stopped",
 ])
 
 export type ProcessEndReason = typeof ProcessEndReason.Type
 
-export const ProcessEnded = fact("process.ended", "session", { process: Seq, reason: ProcessEndReason })
+export const ProcessEnded = fact("process.ended", "session", {
+  process: Seq,
+  reason: ProcessEndReason,
+  by: optional(Sender),
+})
 
 export const ExecutionStarted = fact("execution.started", "session", {
   process: optional(Seq),
@@ -109,30 +138,6 @@ export const ExecutionEnded = fact("execution.ended", "session", {
 export const InboxKind = Schema.Literals(["task", "send", "notice"])
 
 export type InboxKind = typeof InboxKind.Type
-
-export const AgentFrom = Schema.Struct({
-  session: Schema.String,
-  agent: optional(Schema.String),
-  title: optional(Schema.String),
-  machine: optional(Schema.String),
-})
-
-export type AgentFrom = typeof AgentFrom.Type
-
-export const AgentSender = Schema.Struct({ type: Schema.Literal("agent"), ...AgentFrom.fields })
-
-export type AgentSender = typeof AgentSender.Type
-
-export const PluginSender = Schema.Struct({ type: Schema.Literal("plugin"), plugin: Text })
-
-export const Sender = Schema.Union([
-  AgentSender,
-  PluginSender,
-  Schema.Struct({ type: Schema.Literal("vibest") }),
-  Schema.Struct({ type: Schema.Literal("user") }),
-])
-
-export type Sender = typeof Sender.Type
 
 export const InboxQueued = fact("inbox.queued", "session", {
   kind: InboxKind,
@@ -205,7 +210,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 4
+export const CATALOG_VERSION = 5
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

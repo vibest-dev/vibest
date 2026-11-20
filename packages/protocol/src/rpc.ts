@@ -268,6 +268,16 @@ export type SessionInfo = typeof SessionInfo.Type
 
 const LINE_ERRORS = [UnknownMachine, MachineUnavailable, MachineIncompatible] as const
 
+const PROCESS_ERRORS = Schema.Union([
+  Forbidden,
+  NoSuchSession,
+  AmbiguousSession,
+  SessionBusy,
+  RuntimeUnreachable,
+  NoRuntime,
+  ...LINE_ERRORS,
+])
+
 export const SessionReply = Schema.Struct({
   execution: Schema.Number,
   status: Schema.String,
@@ -476,15 +486,16 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Interrupt", {
         payload: { id: Schema.String },
         success: Schema.Struct({ id: Schema.String, message: Schema.String }),
-        error: Schema.Union([
-          Forbidden,
-          NoSuchSession,
-          AmbiguousSession,
-          SessionBusy,
-          RuntimeUnreachable,
-          NoRuntime,
-          ...LINE_ERRORS,
-        ]),
+        error: PROCESS_ERRORS,
+      }),
+    ),
+  ),
+  scoped(
+    admitted(
+      Rpc.make("Stop", {
+        payload: { id: Schema.String },
+        success: Schema.Struct({ id: Schema.String, message: Schema.String }),
+        error: PROCESS_ERRORS,
       }),
     ),
   ),
@@ -493,15 +504,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Remove", {
         payload: { id: Schema.String, keepWorktree: Schema.optional(Schema.Boolean) },
         success: Schema.NullOr(RemoveOutcome),
-        error: Schema.Union([
-          Forbidden,
-          NoSuchSession,
-          AmbiguousSession,
-          SessionBusy,
-          RuntimeUnreachable,
-          NoRuntime,
-          ...LINE_ERRORS,
-        ]),
+        error: PROCESS_ERRORS,
       }),
     ),
   ),
@@ -948,6 +951,7 @@ export const ACCESS = {
   "Project.Search": "agent",
   Send: ["owner", "session", "peer"],
   Interrupt: ["owner", "peer"],
+  Stop: ["owner", "peer"],
   Peek: ["owner", "peer"],
   Remove: ["owner", "peer"],
   "Daemon.Stop": "cli",

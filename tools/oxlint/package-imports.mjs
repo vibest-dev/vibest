@@ -21,11 +21,13 @@ const allowed = {
   builtins: [
     "@vibest/plugin",
     "@vibest/plugin-harnesses",
+    "@vibest/plugin-idle-stop",
     "@vibest/plugin-report-reminder",
     "@vibest/runtime-herdr",
     "@vibest/runtime-herdr-core",
   ],
   "plugins/report-reminder": ["@vibest/plugin"],
+  "plugins/idle-stop": ["@vibest/plugin"],
   cli: [
     "@vibest/schema",
     "@vibest/protocol",

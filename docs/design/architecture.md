@@ -847,14 +847,17 @@ id in `vibest.json` `plugins` (with options, `{ "package": "vibest.<name>", "opt
 place among the builtins, and `"-vibest.<name>"` turns it off again. Today that is `vibest.report-reminder`: when a
 subagent's execution completes without the subagent sending a message, it sends the subagent's creator one message
 (request `vibest.report-reminder:<session>:<execution>`), and on activation it checks each session's latest execution.
+`vibest.idle-stop` looks at the running sessions when it activates and then every few minutes (option `idleMinutes`,
+default 30): it stops each subagent of a creator on this machine idle that long with nothing waiting
+(`session.stop` with `idleSince`, checked again under the session lock) and tells its creator when it stopped it.
 
 **Extension places and rules.** An extension is one of three kinds:
 
-| Kind     | How                                                             | Examples                        |
-| -------- | --------------------------------------------------------------- | ------------------------------- |
-| provider | `transform` adds or changes a definition                        | harness and runtime definitions |
-| decider  | `hook`: core asks, waits up to 5 s, and uses the answer         | `agent.start.before` routing    |
-| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `vibest.report-reminder`        |
+| Kind     | How                                                                    | Examples                                         |
+| -------- | ---------------------------------------------------------------------- | ------------------------------------------------ |
+| provider | `transform` adds or changes a definition                               | harness and runtime definitions                  |
+| decider  | `hook`: core asks, waits up to 5 s, and uses the answer                | `agent.start.before` routing, `agent.fail` moves |
+| reaction | `event.subscribe` plus `session.list`/`get`/`send`/`stop`; nobody asks | `vibest.report-reminder`, `vibest.idle-stop`     |
 
 1. Only core writes the ledger, through its commands. A plugin changes state only through what the context offers;
    a plugin send is recorded with the plugin as its sender (`{ type: "plugin", plugin }`), filled in by vibestd, never chosen by the
