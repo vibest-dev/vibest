@@ -16,7 +16,7 @@ type Refusals = {
   readonly [N in keyof AgentHooks]: (refusal: AgentRefused) => Effect.Effect<never, AgentFailures[N]>
 }
 
-const refusalAs: Refusals = { "start.before": Effect.fail, fail: Effect.die }
+const refusalAs: Refusals = { "start.before": Effect.fail }
 
 const refusable = <N extends keyof AgentHooks, A>(name: N, callback: () => Awaitable<A>) =>
   Effect.tryPromise({ try: () => Promise.resolve().then(callback), catch: (e) => e }).pipe(
@@ -81,6 +81,12 @@ export const fromPromise =
         harness: definitions(host.harness),
         subscription: { report: (input) => run(host.subscription.report(input)) },
         event: { subscribe: (input) => iterable(host.event.subscribe(input)) },
+        session: {
+          list: () => run(host.session.list()),
+          get: (id) => run(host.session.get(id)),
+          sentIn: (id, execution) => run(host.session.sentIn(id, execution)),
+          send: (input) => run(host.session.send(input)),
+        },
       }
 
       yield* Effect.acquireRelease(

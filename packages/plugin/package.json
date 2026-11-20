@@ -1,7 +1,7 @@
 {
   "name": "@vibest/plugin",
   "version": "0.0.2-dev",
-  "description": "Authoring API for vibest plugins. vibestd provides this module (and effect) to plugins at runtime.",
+  "description": "Authoring API for vibest plugins (experimental). vibestd provides this module (and effect) to plugins at runtime.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,6 +17,7 @@
     ".": "./src/promise/index.ts",
     "./effect": "./src/effect/index.ts",
     "./effect/launch": "./src/effect/launch.ts",
+    "./host": "./src/host.ts",
     "./promise/adapter": "./src/promise/adapter.ts",
     "./testing": "./src/testing.ts"
   },

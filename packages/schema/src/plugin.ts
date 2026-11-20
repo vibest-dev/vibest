@@ -9,8 +9,6 @@ export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefus
   }
 }
 
-export class HookFailed extends Schema.TaggedError<HookFailed>()("HookFailed", { message: Schema.String }) {}
-
 export class PluginsNotActive extends Schema.TaggedError<PluginsNotActive>()("PluginsNotActive", {
   plugins: Schema.Array(Schema.String),
 }) {

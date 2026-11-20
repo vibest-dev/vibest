@@ -1,5 +1,6 @@
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
+import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import type { PeerScope } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
@@ -9,6 +10,7 @@ import type { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
+import { Load } from "../machine/load.ts"
 import { Machines } from "../machine/machines.ts"
 import { Peer } from "../machine/peer.ts"
 import { address, type At, ListScope, Remote } from "../machine/remote.ts"
@@ -136,6 +138,7 @@ const make = Effect.gen(function* () {
   const self = yield* Identity.Service
   const { version } = yield* App.Service
   const machines = yield* Machines.Service
+  const load = yield* Load.Service
   const peers = yield* Peer.Service
   const remote = yield* Remote.Service
   const runtimes = yield* Runtimes.Service
@@ -195,12 +198,46 @@ const make = Effect.gen(function* () {
         return yield* peers.spawn(scope.peer, scope.project, scope.session, input)
       }),
 
+    "Project.Clone": ({ url, directory, machine }: PayloadOf<"Project.Clone">) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const away = machine !== undefined && machine !== LOCAL_MACHINE
+
+          if (away && Predicate.isTagged(yield* Caller, "Peer"))
+            return yield* new Forbidden({ method: "Project.Clone", message: "a peer clones only on this machine" })
+
+          return remote.clone(away ? machine : undefined, { url, directory })
+        }),
+      ),
+
     "Peer.Outbox": () => Stream.unwrap(Effect.map(peerOf("Peer.Outbox"), (peer) => peers.outbox(peer))),
 
     "Peer.Ack": ({ ids }: PayloadOf<"Peer.Ack">) => Effect.flatMap(peerOf("Peer.Ack"), (peer) => peers.ack(peer, ids)),
 
     "Machine.Add": ({ name, target }: PayloadOf<"Machine.Add">) =>
       cliOnly("Machine.Add").pipe(Effect.andThen(machines.add(name, target))),
+
+    "Machine.Load": ({ machine }: PayloadOf<"Machine.Load">) =>
+      Effect.gen(function* () {
+        const caller = yield* Caller
+
+        if (Predicate.isTagged(caller, "Peer")) {
+          if (machine !== undefined)
+            return yield* new Forbidden({ method: "Machine.Load", message: "a peer reads its own machine" })
+
+          return yield* load.read()
+        }
+
+        if (!Predicate.isTagged(caller, "Cli"))
+          return yield* new Forbidden({
+            method: "Machine.Load",
+            message: "only the user or another machine reads the load",
+          })
+
+        if (machine === undefined) return yield* load.read()
+
+        return yield* machines.reading(machine)
+      }),
 
     "Machine.List": () => cliOnly("Machine.List").pipe(Effect.andThen(machines.listing)),
 
@@ -213,9 +250,11 @@ export const layer = group([
   "List",
   "Peer.Hello",
   "Peer.Spawn",
+  "Project.Clone",
   "Peer.Outbox",
   "Peer.Ack",
   "Machine.Add",
+  "Machine.Load",
   "Machine.List",
   "Machine.Remove",
 ]).toLayer(make)

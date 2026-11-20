@@ -1,10 +1,63 @@
 import { assert, describe } from "@effect/vitest"
 import { exitedAt } from "@vibest/core/database/db-rows"
+import { Runtimes } from "@vibest/core/runtimes"
+import { Exits } from "@vibest/core/session/exits"
 import { Effect, FileSystem } from "effect"
 
-import { until } from "./lib/observe.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { settled, until } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
+import { idleSession, sessionWorktree, spawnInput, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
+
+describe.concurrent("an exited session", () => {
+  const exitedSession = Effect.gen(function* () {
+    const herdr = yield* FakeRuntime
+    const w = yield* idleSession(yield* makeRepository)
+    yield* herdr.updateAgent(w.id, (a) => ({ ...a, alive: false }))
+    yield* w.sessions.check(w.id)
+    yield* until(w.db.session.getSession(w.id), (row) => (row ? exitedAt(row) : null) !== null)
+    yield* settled
+
+    return { ...w, herdr }
+  })
+
+  test(
+    "archive leaves its pane open, and says so, when another live session now runs at that terminal",
+    Effect.gen(function* () {
+      const w = yield* exitedSession
+      const address = { machine: "local", id: w.row.process!.terminal! }
+      yield* w.db.session.startEntry(
+        w.row.projectId,
+        "claude",
+        false,
+        { runtime: RUNTIME, address },
+        { agent: "general" },
+      )
+      const [other] = yield* w.db.session.processesAt(RUNTIME, address)
+      const out = (yield* w.sessions.remove(w.id))!
+      assert.deepStrictEqual(yield* w.herdr.callsTo("close"), [])
+      assert.include(out.reasons.join("\n"), `left open: session ${other!.sessionId} runs in it`)
+    }),
+  )
+
+  test(
+    "its exit notice shows at most the last 10 lines of its terminal, each cut to 200 characters, 2000 in all",
+    Effect.gen(function* () {
+      const w = yield* spawnWorking(yield* makeRepository)
+      const runtime = yield* (yield* Runtimes.Service).route(RUNTIME)
+      const exits = yield* Exits.make
+      const screen = Array.from({ length: 40 }, (_, i) => `line${i}`.padEnd(65_536, "x")).join("\n")
+      yield* exits.settle({ ...runtime, read: () => Effect.succeed(screen) }, w.id, w.row.process!.id)
+      const [notice] = yield* sqlNotices(w.id)
+      const shown = notice!.slice(notice!.indexOf("Its terminal shows:"))
+      assert.include(shown, "line30")
+      assert.notInclude(shown, "line29")
+      assert.isAtMost(Math.max(...shown.split("\n").map((line) => line.length)), 200)
+      assert.isAtMost(shown.length, 2000 + "Its terminal shows:\n\n".length)
+    }),
+  )
+})
 
 describe.concurrent("vibest archive", () => {
   test(

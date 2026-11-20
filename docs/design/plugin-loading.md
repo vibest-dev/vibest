@@ -4,8 +4,10 @@ Implementation notes for the [plugin architecture](architecture.md#7-plugin-arch
 
 ## Order and boundary
 
-Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`harness-pi`, `harness-claude`,
-`runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `harness-default`), then the plugins directory, then
+Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`vibest.harness-pi`, `vibest.harness-claude`,
+`vibest.runtime-herdr-core`, `vibest.runtime-herdr`, `vibest.runtime-choice`, `vibest.harness-default`,
+`vibest.agent-files`, then the optional `vibest.report-reminder` when `vibest.json` names its id), then the plugins
+directory, then
 `vibest.json` in the order written. Registration order is detection order for runtime callers (herdr-core before
 herdr) and the order of `transform`s on a registry, so a user plugin sees and may change the builtin definitions.
 `vibest plugins` lists them in that order.
@@ -17,9 +19,23 @@ CLI. `.oxlintrc.json` enforces it with `no-restricted-imports` overrides (static
 and `vibest/no-restricted-disable` reports a disable comment for that rule. What a builtin needs from the platform
 (child processes, files, HTTP) it provides itself from `@effect/platform-node-shared`.
 
+## A builtin that reads files
+
+`vibest.agent-files` reads `~/.vibest/agents/*.md` when it activates and registers each file through
+`ctx.agent.transform`, as a user plugin would; core knows only the agent registry and checks each added definition
+(id, description, prompt, `provider`/`model` only with `harness`). It sits after `vibest.agent`, so a file replaces a
+builtin of its id, and before user plugins, so a plugin replaces a file. To pick up an edited file without a loop of
+its own, a builtin may give its revision as an effect (`revise`) that answers the revision together with the plugin
+built from what it read: the plugin scan, which already rereads the sources every second, runs it (here one read of the
+folder, hashed) and reactivates the plugin when the revision changes, so the registered definitions are always the bytes
+that were hashed. Reactivation restarts the plugins after it in load order, as any changed plugin does. `extends` is
+resolved with `editor.get`, against what is registered when the transform runs. A file that cannot be registered goes to
+`editor.invalid({ id, source, error })`, which removes an earlier definition of that id (a later plugin may add it again), and which `vibest agent list`, `vibest doctor` and the refusal of
+`vibest run --agent` report.
+
 ## Loading and watching
 
-In `plugin/sources.ts`: a `vibest.json` entry must be a folder (a single file there is skipped with a warning; single files are discovered in the plugins directory), and `file://` entries are decoded as URLs. A half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
+In `plugin/sources.ts`: a `vibest.json` entry is a folder or a single file (single files are also discovered in the plugins directory), and `file://` entries are decoded as URLs. A half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
 `package.json` has a `name` and `exports` loads, as OpenCode's `Host.resolve`, the first existing file `exports` maps
 for `./server`, then for `.` (taking the first of the `bun`, `import` and `default` conditions), and nothing else; the
 mapped files are watched until one exists. vibest reads the map itself, because Bun's resolver keeps a lookup that

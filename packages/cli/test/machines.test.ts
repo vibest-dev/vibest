@@ -395,6 +395,11 @@ describe("another machine's vibestd runs agents here", () => {
       )
 
       assert.deepStrictEqual(row, [{ parent: null, origin: A_ENTRY }])
+
+      const [task] = yield* b.run(sendersTo(spawned.session, "task"))
+
+      assert.include(task, { type: "agent", session: A_ENTRY }, "the task is from A's entry session")
+      assert.property(task, "machine")
       assert.strictEqual((yield* b.spawn(call, request)).session, spawned.session, "the same request")
 
       const noCommit = yield* Effect.flip(
@@ -446,7 +451,7 @@ describe("another machine's vibestd runs agents here", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("a result goes to the outbox, not to B's inbox delivery; the stream sends it and Ack deletes it", () =>
+  it.effect("a result goes to the outbox, not to B's inbox delivery; the stream sends it and Ack settles it", () =>
     Effect.gen(function* () {
       const b = yield* peerB
       const a = randomId()
@@ -599,23 +604,15 @@ describe("another machine's vibestd runs agents here", () => {
         const sent = yield* b.run(
           Effect.flatMap(
             SqlClient.SqlClient,
-            (sql) =>
-              sql<{
-                sender: string | null
-                content: string
-              }>`SELECT sender_session_id AS sender, content FROM inbox WHERE kind = 'send' ORDER BY id`,
+            (sql) => sql<{ content: string }>`SELECT content FROM inbox WHERE kind = 'send' ORDER BY id`,
           ),
         )
 
-        assert.deepStrictEqual(
-          sent.map((row) => row.sender),
-          [A_ENTRY, null],
-        )
         assert.include(sent[0]!.content, `<agent-id>${A_ENTRY}</agent-id>`)
         assert.strictEqual(sent[1]!.content, "from the user")
         assert.deepStrictEqual(yield* b.run(sendersTo(session)), [
-          { ...from, machine: "my-workstation" },
-          { session: null, agent: null, title: null, machine: null },
+          { type: "agent", ...from, machine: "my-workstation" },
+          { type: "user" },
         ])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
@@ -820,7 +817,13 @@ describe("vibest run --machine and remote sessions", () => {
         })
         const entry = (yield* a.db.session.getSession(entryId))!
         assert.deepStrictEqual(yield* b.run(sendersTo(onB(spawned.id))), [
-          { session: entryId, agent: entry.agent, title: entry.name, machine: (yield* b.db.remote.nameForPeer(a.id))! },
+          {
+            type: "agent",
+            session: entryId,
+            agent: entry.agent,
+            title: entry.name,
+            machine: (yield* b.db.remote.nameForPeer(a.id))!,
+          },
         ])
         const listed = yield* asEntry(a.raw.List({}))
         assert.deepInclude(
@@ -842,7 +845,7 @@ describe("vibest run --machine and remote sessions", () => {
       assert.include(sent!.content, "which branch?")
       const asker = (yield* b.db.session.getSession(onB(spawned.id)))!
       assert.deepStrictEqual(yield* a.run(sendersTo(entryId)), [
-        { session: onB(spawned.id), agent: "general", title: asker.name, machine: "mb" },
+        { type: "agent", session: onB(spawned.id), agent: "general", title: asker.name, machine: "mb" },
       ])
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

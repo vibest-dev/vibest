@@ -250,6 +250,12 @@ export const machineHooks = (
       harness: { transform: () => Effect.succeed(registration) },
       subscription: { report: () => Effect.void },
       event: { subscribe: () => Stream.empty },
+      session: {
+        list: () => Effect.succeed([]),
+        get: () => Effect.succeed(undefined),
+        sentIn: () => Effect.succeed(0),
+        send: () => Effect.void,
+      },
     })
 
     return {

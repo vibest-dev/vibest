@@ -2,20 +2,8 @@ import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { sessionLabel, shortId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { NoSuchSession, type HarnessUnavailable } from "@vibest/schema/session"
-import {
-  Cause,
-  Context,
-  Data,
-  Effect,
-  Exit,
-  FileSystem,
-  Layer,
-  Path,
-  type PlatformError,
-  Ref,
-  type Scope,
-} from "effect"
+import { NoSuchSession } from "@vibest/schema/session"
+import { Cause, Clock, Context, Effect, Exit, FileSystem, Layer, Path, Ref } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { Agents } from "../agents.ts"
@@ -28,12 +16,16 @@ import {
   terminalOf,
   exitedAt,
   archived,
+  limitFailure,
+  limitText,
+  type ExecutionFailure,
+  type LimitAbout,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
-import { encodeCommand, Harness } from "../harness.ts"
+import { cliEnv, Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
 import { definitionIn, withProcess, type Launch } from "../launch.ts"
@@ -41,20 +33,20 @@ import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
   listProjectRepositories,
+  type PinnedFolder,
   projectRoot,
 } from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
-import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
+import { addressOf, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
+import { limitSeen, Subscriptions } from "../subscriptions/service.ts"
 import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
-import { Executions } from "./executions.ts"
+import { Executions, notStartedMessage, Pickup } from "./executions.ts"
 
 export * as Placement from "./placement.ts"
 
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" && { terminal: address.id }) })
-
-class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
 
 export interface FirstInput {
   readonly text: string
@@ -65,18 +57,12 @@ export type LaunchOptions = {
   readonly splitFrom?: string | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
   readonly commit?: string | undefined
+  readonly folders?: ReadonlyArray<PinnedFolder> | undefined
 }
-
-export type LaunchOutcome = Data.TaggedEnum<{
-  Started: {}
-  Limited: { readonly input: string; readonly error: string; readonly execution: number }
-  Failed: {}
-}>
-
-const LaunchOutcome = Data.taggedEnum<LaunchOutcome>()
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
+  const subscriptions = yield* Subscriptions.Service
   const runtimes = yield* Runtimes.Service
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
@@ -88,7 +74,7 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const git = yield* Git.Service
   const vibest = yield* VibestCommand
-  const { prompt, openFirst, launched } = yield* Executions.Service
+  const { openFirst, launched } = yield* Executions.Service
 
   const provided = <A, E>(
     effect: Effect.Effect<
@@ -131,7 +117,6 @@ export const make = Effect.gen(function* () {
     VIBEST_HARNESS: harnessIdOf(session),
     VIBEST_RUNTIME: runtimeEnv(runtimeOf(session), { machine: terminalOf(session).machine, id: "" }),
     VIBEST_HOME: layout.home,
-    VIBEST_COMMAND: encodeCommand(vibest),
   })
 
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
@@ -142,7 +127,7 @@ export const make = Effect.gen(function* () {
       sharer: yield* db.session.earlierSharer(session.id),
       creator: yield* db.session.creatorLabel(session.id),
       projectDir: layout.project(session.projectId),
-      vibest,
+      agents: agents.all,
       ...(yield* projectText(layout.project(session.projectId))),
     })
   }, provided)
@@ -153,7 +138,7 @@ export const make = Effect.gen(function* () {
     const pluginDir = yield* harness.plugin(adapter.id)
     const id = session.process?.conversation ?? null
     const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
-    const env = vibestEnv(session)
+    const env = { ...vibestEnv(session), ...(yield* cliEnv(vibest, adapter.id)) }
 
     return {
       harness: adapter.id,
@@ -188,6 +173,18 @@ export const make = Effect.gen(function* () {
   const taskInput = (session: SessionRow, task: string) =>
     Effect.map(firstText(session, task), (text): FirstInput => ({ text, onHandover: db.inbox.linkTask(session.id) }))
 
+  const limitOf = (
+    session: SessionRow,
+    error: string,
+  ): Effect.Effect<{ readonly failure: ExecutionFailure; readonly about: LimitAbout } | undefined> =>
+    Effect.gen(function* () {
+      if (!isUsageLimitError(error)) return undefined
+      const now = yield* Clock.currentTimeMillis
+      const seen = limitSeen(yield* subscriptions.list, harnessIdOf(session), session.process?.provider ?? "", now)
+
+      return { failure: limitFailure(error, seen.resetAt), about: seen }
+    })
+
   const launching = Effect.fn("Placement.launching")(function* (
     session: SessionRow,
     resume: boolean,
@@ -204,28 +201,23 @@ export const make = Effect.gen(function* () {
 
     const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
       Effect.flatMap(Ref.get(execution), (opened) =>
-        opened === undefined ? Effect.succeed(undefined) : launched(h, row, terminal, opened),
+        opened === undefined ? Effect.succeed(Pickup.Taken()) : launched(h, row, terminal, opened),
       )
 
-    const abandoned = Effect.flatMap(Ref.get(execution), (opened) =>
-      opened === undefined ? Effect.void : db.session.closeExecution(session.id, opened, "not_started"),
-    )
+    const abandoned = (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const opened = yield* Ref.get(execution)
 
-    const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError(() => abandoned))
+        if (opened === undefined) return
+        const failure = (yield* limitOf(session, messageOf(Cause.squash(cause))))?.failure
+        yield* db.session.closeExecution(session.id, opened, failure === undefined ? "not_started" : "failed", {
+          failure,
+        })
+      })
 
-    return { launch, beforeStart, starting, deliver, opened: Ref.get(execution) }
-  }, provided)
+    const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError((cause) => abandoned(cause)))
 
-  const handTask = Effect.fn("Placement.handTask")(function* (
-    h: Runtime,
-    session: SessionRow,
-    terminal: Terminal,
-    task: string,
-  ) {
-    const { text, onHandover } = yield* taskInput(session, task)
-    const notStarted = yield* prompt(h, session, terminal, text, onHandover)
-
-    if (notStarted) yield* notice(session, notStarted)
+    return { launch, beforeStart, starting, deliver }
   }, provided)
 
   const projectName = (root: string) =>
@@ -341,33 +333,12 @@ export const make = Effect.gen(function* () {
     session: SessionRow,
     root: string,
     firstPrompt: string,
-    { splitFrom, env, commit }: LaunchOptions,
+    { splitFrom, env, commit, folders: pinned }: LaunchOptions,
   ) {
-    const folders = yield* listProjectRepositories(root)
+    const folders = pinned ?? (yield* listProjectRepositories(root))
     const sharedFrom = splitFrom !== undefined ? yield* shareRow(session, splitFrom) : undefined
     const near = sharedFrom === undefined ? undefined : terminalOf(sharedFrom)
     yield* fs.makeDirectory(layout.artifacts(session.projectId), { recursive: true })
-
-    const openOrMove = (
-      open: Effect.Effect<
-        Terminal,
-        RuntimeError | HarnessUnavailable | NoSuchSession | PlatformError.PlatformError,
-        Scope.Scope
-      >,
-    ) =>
-      undoOnFailure(
-        open.pipe(
-          Effect.catchTag("RuntimeError", (e): Effect.Effect<never, AgentOwnLimit | RuntimeError> =>
-            e.code === "failed" && isUsageLimitError(e.message)
-              ? Effect.fail(new AgentOwnLimit({ message: e.message }))
-              : Effect.fail(e),
-          ),
-        ),
-        (terminal) => h.close(terminal).pipe(Effect.ignore),
-      ).pipe(
-        Effect.map((terminal) => ({ terminal })),
-        Effect.catchTag("AgentOwnLimit", (e) => Effect.succeed({ limited: e.message })),
-      )
 
     const worktree = yield* worktreeOf(session)
 
@@ -390,7 +361,7 @@ export const make = Effect.gen(function* () {
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
     const plan = yield* launching(session, false, yield* taskInput(session, firstPrompt))
 
-    const terminal = yield* openOrMove(
+    const terminal = yield* undoOnFailure(
       plan.starting(
         openTerminal(h, target, session, {
           project: root,
@@ -403,33 +374,29 @@ export const make = Effect.gen(function* () {
           ...(sharedFrom !== undefined && { split: true }),
         }),
       ),
+      (terminal) => h.close(terminal).pipe(Effect.ignore),
     )
 
-    if ("limited" in terminal)
-      return LaunchOutcome.Limited({
-        input: firstPrompt,
-        error: terminal.limited,
-        execution: (yield* plan.opened) ?? 0,
-      })
-    yield* show(h, session, terminal.terminal, root)
-    const notStarted = yield* plan.deliver(h, session, terminal.terminal)
+    yield* show(h, session, terminal, root)
+    const notStarted = notStartedMessage(yield* plan.deliver(h, session, terminal))
 
     if (notStarted) yield* notice(session, notStarted)
-
-    return LaunchOutcome.Started()
   }, Effect.scoped)
 
   const launchFailed = Effect.fn("Placement.launchFailed")(function* (
     session: SessionRow,
     cause: Cause.Cause<unknown>,
   ) {
+    const error = messageOf(Cause.squash(cause))
+    const limit = yield* limitOf(session, error)
     const execution = yield* db.session.openExecution(session.id)
 
-    if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "failed")
+    if (execution !== undefined)
+      yield* db.session.closeExecution(session.id, execution, "failed", { failure: limit?.failure })
     yield* db.session.endProcess(session.id, "launch_failed")
     yield* notice(
       session,
-      `${sessionLabel(session)} failed to start ${harnessIdOf(session)}: ${messageOf(Cause.squash(cause))}`,
+      `${sessionLabel(session)} failed to start ${harnessIdOf(session)}: ${limit === undefined ? error : limitText(limit.failure, limit.about)}`,
     )
   })
 
@@ -443,9 +410,7 @@ export const make = Effect.gen(function* () {
       options: LaunchOptions,
     ) =>
       launchRaw(h, target, session, root, firstPrompt, options).pipe(
-        Effect.catchCause((cause) =>
-          launchFailed(session, cause).pipe(Effect.as<LaunchOutcome>(LaunchOutcome.Failed())),
-        ),
+        Effect.catchCause((cause) => launchFailed(session, cause)),
       ),
     provided,
   )
@@ -517,7 +482,7 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.tap((terminal) => show(h, session, terminal, root))),
       )
 
-      return yield* plan.deliver(h, session, terminal)
+      return notStartedMessage(yield* plan.deliver(h, session, terminal))
     },
     Effect.scoped,
     provided,
@@ -550,7 +515,6 @@ export const make = Effect.gen(function* () {
     systemPromptOf,
     launching,
     taskInput,
-    handTask,
     launch,
     launchFailed,
     resume,
@@ -580,6 +544,7 @@ export const node = LayerNode.make({
     Harnesses.node,
     Inbox.node,
     Runtimes.node,
+    Subscriptions.node,
     PlatformNode.childProcessSpawner,
     PlatformNode.crypto,
     PlatformNode.fileSystem,

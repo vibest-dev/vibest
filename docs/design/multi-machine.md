@@ -67,7 +67,7 @@ this one, else `MachineIncompatible` "<name> runs vibest <v> (protocol <n>); run
 supervised one (add dials once); a failure records nothing. It is refused when B answers this vibestd's
 own id ("<name> is this vibestd") or an id another row already has (`AlreadyAdded`: "this is the vibestd already
 added as <name> (<id8>); use that name"), decided from the result of the `INSERT … ON CONFLICT DO NOTHING`.
-`vibest machine ls` shows each row with its connection state, `vibest
+`vibest machine ls` shows each row with its connection state and its load, and `vibest status` shows this machine's load (`Machine.Load` with no machine). Another machine is asked over the peer link (capability `load`) and measures itself; one that is not connected, runs an older vibestd or does not answer in 3 s fails with `MachineUnavailable` or `MachineIncompatible`, which `machine ls` shows as `loadError` instead of `load`. A reading is cached for 5 seconds and not stored. `vibest
 machine rm` stops the connection and deletes the row (`UnknownMachine` when there is none), with no checks: agents and undelivered messages stay on B.
 
 The ssh command is `ssh -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p <port>] <target>
@@ -90,11 +90,28 @@ notifies nobody.
 
 ## B: agents for another machine
 
-`Peer.Spawn` (peer caller, with `vibest-peer-project` naming A's project) finds the one project whose repository
-`remote_url` equals `repository` or has the same repository identity as `identity` (a multi-repository project is
-refused), checks that the checkout has `commit`
-(`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
-and fetch it there"), and runs `Session.spawn` with the worktree detached at that commit. B learns a checkout with
+`Peer.Spawn` (peer caller, with `vibest-peer-project` naming A's project) carries either one repository
+(`repository`, `identity`, `commit`: a single-repository project) or `repositories`, one entry per repository of a
+multi-repository project (`folder`, its folder name inside A's project, `repository`, `identity`, `commit`). A
+multi-repository project is just a folder holding several git repositories, on both machines. B finds the one project
+whose repositories are exactly that set, one to one, no extra and no missing repository. Within each project B
+first pairs every entry with a checkout whose `remote_url` equals `repository`, then pairs the entries left with a
+remaining checkout of the same repository identity as `identity`; another project's URL spelling never decides for
+this one. A repository no project of B holds is refused naming it ("<B> has no checkout of <url>: … run vibest
+project add …"); no project of exactly that set and several such projects are refused, the second listing them with
+their ids and folders and a hint to pass `--project`. A single-repository request keeps the earlier rule: the projects
+holding the repository (by URL when any checkout has it, otherwise by identity) must be exactly one, or it is refused
+listing them, and that project must hold only that repository. Folder names that the file system of B would treat as
+one (`Tools` and `tools` on macOS) are refused. `vibest run --machine <B> --project <p>` sends `project`: before any matching B narrows to
+the one project whose id is `p`, whose id starts with `p` (at least 8 characters) or whose folder is named `p`,
+refuses when none or several are, and still checks that its repositories are exactly A's; A refuses `--project`
+without `--machine`, and a B without the `peerSpawnProject` capability ("run vibest update on <B>"); the CLI refuses
+`--project` when its own vibestd lacks that capability ("run vibest update").
+Then B checks every commit before creating anything (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`;
+"<B>'s checkout <dir> does not have <sha>: push it and fetch it there", one clause per missing commit), and runs
+`Session.spawn`: a single repository whose checkout is the project folder gets the worktree detached at its commit;
+a list, or a single repository inside a project folder, gets the multi-repository layout, one detached worktree per repository at A's commit under A's folder name, so paths in the task stay valid.
+Folder names that are not safe directory names, or repeat, are refused. B never clones, fetches or pulls. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
 `origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
@@ -106,13 +123,38 @@ Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `noti
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
 B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
-`Peer.Ack { ids }` appends `outbox.acked`, which deletes them. Archiving a peer session (`session.ended`) deletes its
+`Peer.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
+same request id finds it and queues nothing. Archiving a peer session (`session.ended`) deletes its unacknowledged
 rows.
 
 `List`, `Get`, `Send`, `Interrupt`, `Remove` and `Peek` from a peer resolve a session id only among sessions whose
 origin has that peer and that project; any other session is `NoSuchSession`.
 
+## Cloning a project
+
+`vibest project clone <url> [--machine <B>] [--dir <folder>]` (`Project.Clone`, the user or a session; a peer for its
+own machine only) clones a repository and records it as a project, and is the only way vibest clones: `vibest run`
+never clones, fetches or pulls. Without `--machine` it runs in this vibestd; with it, A forwards the call to B over
+the machine's connection (a B without the `projectClone` capability is refused, "run vibest update on <B>"). The
+machine that clones picks the folder: `--dir` (relative to its clone base, or absolute; the CLI makes a local one
+absolute against its own directory), otherwise the repository name (the last path segment of the URL without `.git`)
+under its clone base. The clone base is `cloneDirectory` in that machine's `vibest.json` (absolute or `~/…`),
+default `~/code`. A folder that exists and is not empty is refused before git runs. It runs `git clone --progress --
+<url> <folder>` (any URL git takes: ssh, https, git, any host; no terminal prompt), so it checks out the default
+branch, then records the folder as a project as `vibest project add` does. `Project.Clone` streams git's progress
+lines and ends with `{ projectId, directory }`; the CLI prints the lines on stderr and the result as JSON. A run on
+B still pins A's commit and refuses when the clone does not have it.
+
 ## Repository identity
+
+Which remote a checkout is known by is chosen the same way on both machines (`Git.remoteUrl`, `rankedRemotes` in
+`packages/core/src/repository-url.ts`), from the remotes whose fetch URL as git resolves it (`git remote get-url`, so
+`url.<base>.insteadOf` applies) has a network form (not a local path or a `file://` URL): the remote the GitHub CLI marked as default (`remote.<name>.gh-resolved`, only when present),
+then `upstream`, then `origin`, then the others by name. A reads it from each checkout when it runs
+`vibest run --machine`, B from each checkout of its projects when it answers, so a remote added or changed after
+`vibest project add` counts; `remote_url` is recorded with the same choice. A checkout with no such remote is
+refused for remote runs, naming it ("<dir> has no remote with a network URL"), on A; on B it matches nothing. The rule
+is the same for every host: GitHub, GitLab with nested groups, Bitbucket, Gitea or a self-hosted server.
 
 The same repository is often cloned with different URLs on two machines (`git@github-me:o/r.git` on A,
 `https://github.com/o/r` on B), so B does not match `remote_url` as a string alone. The repository identity
@@ -123,9 +165,9 @@ port, a leading `~/` or `/`, a trailing `/` and a trailing `.git`: `github.com/o
 `HostName` with `ssh -G <alias>` (the `RepositoryUrl` service: a successful lookup is cached per alias; a failure, a non-zero exit or the 5 s limit gives
 the alias itself and is asked again next time)
 on the machine that reads it: A resolves its own remote, B the remotes of its own checkouts. An https host is never
-looked up, nor a bracketed IPv6 host or a one-letter host (a Windows path such as `C:/src/r`): those have no identity. A local path or `file://` URL has no identity and matches only the same string. A sends both the raw URL
-and the identity; B takes the checkouts whose raw URL equals A's, and only when there is none compares identities
-(so `ssh -G` runs on B only then, for its checkouts at once), and every `NoProject`
+looked up, nor a bracketed IPv6 host or a one-letter host (a Windows path such as `C:/src/r`): those have no identity. A sends both the raw URL
+and the identity; B pairs checkouts whose raw URL equals A's before it pairs by identity (see "B: agents for
+another machine"; `ssh -G` runs on B for its checkouts at once), and every `NoProject`
 message names A's raw URL. `remote_url` is stored unchanged.
 
 Known limits of the identity: the user and a leading `/` or `~/` are dropped from ssh paths, so on a self-hosted plain
@@ -138,7 +180,13 @@ their case; either gives `NoProject`.
 
 `vibest run --machine <name>` (a session, the entry session included) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
-calling session as `vibest-peer-by`, which B records as the creator; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
+calling session, which B records as the creator, as `vibest-peer-by`; a project whose folder holds two or more repositories
+sends one such entry per repository folder, with its folder name, and a folder holding one checkout sends that checkout
+as the single-repository request an older B takes; the folder is read at each run (not from A's database,
+so a repository cloned beside a running project is sent). A repository without a remote is refused on A, naming it. A B whose Ping
+does not have the `peerSpawnRepositories` capability is refused on A for a multi-repository project ("<B> runs a
+vibest that does not take a project of several repositories; run vibest update on <B>"), never downgraded to one
+repository; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
 `--env`, `--share`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
@@ -166,7 +214,8 @@ and passes `PromptTooLarge` through.
 
 After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
 recipient's project (none: logged and acknowledged); an inbox row whose `peer_item` is the outbox id (found: only
-acknowledged); otherwise an `inbox.queued` with no sender and `peerItem` set, routed to the recipient while it
+acknowledged); otherwise an `inbox.queued` with `peerItem` set, from the remote agent session with its machine (a `notice` is from
+`"vibest"`), routed to the recipient while it
 has not ended, else to the project's entry session, `pending` when that one is present, else `dropped`. A `notice` has content
 `<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Peer.Ack`. A pipe that drops
 between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
@@ -212,7 +261,8 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   them` when A has no runtime of that kind with `locate`). `vibest peek` prints `terminal here: <address>` or `not
   shown here: <view>` on stderr. `Machine.Add` also answers that core note for each kind of B's that A cannot show.
 - **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
-  {visible, as?, note?}` from `ensure`, and the last hook notes per plugin with their time (`notes`).
+  {visible, as?, note?}` from `ensure`, the last hook notes per plugin with their time (`notes`), and `load`
+  (`Machine.Load`) or `loadError` when it could not be read.
 - **Stepping in.** Keys typed into the terminal on A go through the runtime's own link (A's hc core, B's hc core) to
   the harness on B. B records the typed execution as any local one, and what the session sends to A's entry session reaches it once as the
   `<name>/<id8>: …` notice through B's outbox.
@@ -297,7 +347,7 @@ CREATE TABLE peer (                -- B: a vibestd that dials this one, like an 
   connected_at INTEGER NOT NULL    -- its last successful Peer.Hello (peer.seen)
 ) STRICT;
 
-CREATE TABLE outbox (              -- B: what this vibestd still has to deliver to a peer
+CREATE TABLE outbox (              -- B: what this vibestd delivers, or delivered, to a peer
   id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.peer_item)
   seq        INTEGER NOT NULL,     -- its outbox.queued in the ledger aggregate: the order it is sent in
   peer_id    TEXT NOT NULL,
@@ -305,10 +355,11 @@ CREATE TABLE outbox (              -- B: what this vibestd still has to deliver 
   recipient  TEXT,                 -- the session on the peer that receives it; null in rows from before it existed (then the sender's origin_session)
   kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
   content    TEXT NOT NULL,        -- the text, rendered on A by kind
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  acked_at   INTEGER               -- its outbox.acked; null: still to deliver
 ) STRICT;
-CREATE INDEX outbox_peer ON outbox (peer_id, seq);
+CREATE INDEX outbox_peer ON outbox (peer_id, seq) WHERE acked_at IS NULL;
 CREATE INDEX outbox_session ON outbox (session_id);
 ```
 
-A row exists until A acknowledges it; there is no status column.
+A row is still to deliver until A acknowledges it; then it stays as the record of that id.

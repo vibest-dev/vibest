@@ -1,4 +1,4 @@
-import { capture } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { Context, Duration, Effect, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -32,6 +32,28 @@ export const parseRemote = (url: string): ParsedRemote | undefined => {
   return m === null ? undefined : parsed(m[1]!, m[2]!, true)
 }
 
+const REMOTE_KEY = /^remote\.(.+)\.(url|gh-resolved)(?: (.*))?$/
+
+const remoteRank = (marked: ReadonlySet<string>, name: string) =>
+  marked.has(name) ? 0 : name === "upstream" ? 1 : name === "origin" ? 2 : 3
+
+export const rankedRemotes = (config: string): ReadonlyArray<string> => {
+  const urls = new Map<string, string>()
+  const marked = new Set<string>()
+
+  for (const line of config.split("\n")) {
+    const m = REMOTE_KEY.exec(line.trim())
+
+    if (m === null) continue
+    const [, name, key, value = ""] = m
+
+    if (key === "gh-resolved") marked.add(name!)
+    else if (!urls.has(name!)) urls.set(name!, value)
+  }
+
+  return [...urls.keys()].sort((a, b) => remoteRank(marked, a) - remoteRank(marked, b) || a.localeCompare(b))
+}
+
 export interface Interface {
   readonly hostName: (alias: string) => Effect.Effect<string>
 }
@@ -45,7 +67,7 @@ export const layer = Layer.effect(
     const known = new Map<string, string>()
 
     const ask = (alias: string) =>
-      capture("ssh", ["-G", "--", alias], { timeout: Duration.seconds(5) }).pipe(
+      Host.capture("ssh", ["-G", "--", alias], { timeout: Duration.seconds(5) }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.map((run) => {
           if (run === undefined || run.exitCode !== 0) return alias

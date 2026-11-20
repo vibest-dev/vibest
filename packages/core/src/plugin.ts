@@ -1,11 +1,12 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { fromPromise } from "@vibest/plugin/promise/adapter"
 import { messageOf } from "@vibest/schema/error"
-import { AgentRefused, type Change, HookFailed, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
+import { AgentRefused, type Change, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
 import { Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Predicate, Queue, Scope, Stream } from "effect"
 
 import { Agents } from "./agents.ts"
 import { Bus } from "./bus.ts"
+import { Concurrency } from "./concurrency.ts"
 import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -13,31 +14,18 @@ import { Harnesses } from "./harnesses.ts"
 import { errorMessage, Hooks } from "./plugin/hooks.ts"
 import * as PluginHost from "./plugin/host.ts"
 import * as Registry from "./plugin/registry.ts"
-import {
-  type FailInput,
-  Service,
-  type StartInput,
-  type MachineHook,
-  type PluginNote,
-  type SpawnDecision,
-} from "./plugin/service.ts"
+import { Service, type StartInput, type MachineHook, type PluginNote, type SpawnDecision } from "./plugin/service.ts"
 import { type AnyPlugin, type Candidate, keyOf, openSources, PluginLoader, pluginLoaderNode } from "./plugin/sources.ts"
 import { supervise } from "./plugin/supervisor.ts"
 import { logFailure } from "./reactor.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
+import { Sends } from "./session/sends.ts"
+import { Summaries } from "./session/summaries.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 
 export * as Plugins from "./plugin.ts"
 
-export {
-  AgentRefused,
-  Change,
-  HookFailed,
-  PluginInfo,
-  PluginsNotActive,
-  Routing,
-  TraceEntry,
-} from "@vibest/schema/plugin"
+export { AgentRefused, Change, PluginInfo, PluginsNotActive, Routing, TraceEntry } from "@vibest/schema/plugin"
 
 export { type Candidate, pluginEntries, PluginLoader, pluginLoaderNode } from "./plugin/sources.ts"
 
@@ -45,7 +33,7 @@ export { DEBOUNCE, RECHECK } from "./plugin/supervisor.ts"
 
 export { errorMessage }
 
-export type { FailInput, Interface, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugin/service.ts"
+export type { Interface, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugin/service.ts"
 
 export { Service } from "./plugin/service.ts"
 
@@ -383,8 +371,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 
     const refusal = (stopped: Hooks.Stopped) => new AgentRefused({ plugin: stopped.plugin, reason: stopped.reason })
 
-    const failure = (stopped: Hooks.Stopped) => new HookFailed({ message: stopped.reason })
-
     const hooksOf = <N extends Hooks.Name>(name: N, runtime?: string): ReadonlyArray<Hooks.Entry<N>> =>
       slots.flatMap((s) => (s.running && s.running.broken === undefined ? hooks.get(name, runtime, s.running) : []))
 
@@ -408,7 +394,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         return yield* f(trace)
       })
 
-    const start = Effect.fn("Plugins.start")(function* (input: StartInput) {
+    const start = Effect.fn("Plugins.start")(function* (
+      input: StartInput,
+      decidedBefore?: Readonly<Record<string, string>>,
+    ) {
       const trace: Array<TraceEntry> = []
       const entries = yield* admit("agent.start.before")
 
@@ -424,6 +413,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         }
 
         const decidedBy: Record<string, string> = {}
+        Object.assign(decidedBy, decidedBefore)
 
         const route = (draft: VibestPlugin.AgentStartBefore, plugin: string) => {
           const fields = routed(event, draft)
@@ -448,31 +438,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           decidedBy,
           trace,
         } satisfies SpawnDecision
-      })
-    })
-
-    const fail = Effect.fn("Plugins.fail")(function* (input: FailInput) {
-      const trace: Array<TraceEntry> = []
-      const entries = yield* admit("agent.fail")
-
-      return yield* Effect.gen(function* () {
-        const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list, move: undefined }
-        const decidedBy: Record<string, string> = {}
-
-        const moveTo = (draft: VibestPlugin.AgentFail, plugin: string) => {
-          if (JSON.stringify(draft.move) === JSON.stringify(event.move)) return []
-          const move = structuredClone(draft.move)
-          const change = decide("move", event.move, move, plugin, decidedBy)
-          event.move = move
-
-          return [change]
-        }
-
-        const stopped = yield* Hooks.dispatch("agent.fail", entries, event, moveTo, trace, root, timeout)
-
-        if (stopped !== undefined) return yield* failure(stopped)
-
-        return { move: event.move, trace }
       })
     })
 
@@ -513,7 +478,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const list = Effect.sync(() => slots.map(info))
     const importing = (sources: ReadonlyArray<string>) => Effect.sync(() => void (loading = sources))
 
-    return { service: Service.of({ start, fail, list, settled, machine }), activate, holdNow, importing }
+    return { service: Service.of({ start, list, settled, machine }), activate, holdNow, importing }
   })
 
 export const makePlugins = (
@@ -531,7 +496,14 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     yield* (yield* PluginLoader).prepare
     const host = yield* makeHost()
-    const sources = yield* openSources(DEFAULT_TIMEOUT)
+    const concurrency = yield* Concurrency.Service
+    const opened = yield* openSources(DEFAULT_TIMEOUT)
+
+    const sources = {
+      ...opened,
+      operations: Effect.tap(opened.operations, (read) => concurrency.configure(read.concurrency)),
+    }
+
     const builtins = yield* Builtins
     yield* supervise(host, builtins, sources)
 
@@ -546,11 +518,14 @@ export const node = LayerNode.make({
     builtinsNode,
     Agents.node,
     Bus.node,
+    Concurrency.node,
     Harnesses.node,
     Hooks.node,
     pluginLoaderNode,
     Runtimes.node,
+    Sends.node,
     Subscriptions.node,
+    Summaries.node,
     PlatformNode.crypto,
     PlatformNode.fileSystem,
     PlatformNode.layout,

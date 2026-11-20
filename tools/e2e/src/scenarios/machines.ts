@@ -13,6 +13,25 @@ type Listed = { id: string; machine?: string; runtime?: string; address?: { mach
 
 type HcMachine = { id: string; name: string; session?: string | null }
 
+type MachineLoad = {
+  sampledAt: number
+  cpu: { count: number; utilization: number | null }
+  memory: { total: number; available: number }
+  executions: { working: number }
+}
+
+const plausible = (load: MachineLoad | undefined) =>
+  load !== undefined &&
+  Math.abs(Date.now() - load.sampledAt) < 60_000 &&
+  Number.isInteger(load.cpu.count) &&
+  load.cpu.count >= 1 &&
+  (load.cpu.utilization === null || (load.cpu.utilization >= 0 && load.cpu.utilization <= 1)) &&
+  load.memory.total > 0 &&
+  load.memory.available >= 0 &&
+  load.memory.available <= load.memory.total &&
+  Number.isInteger(load.executions.working) &&
+  load.executions.working >= 0
+
 type MachineView = {
   runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
 }
@@ -125,7 +144,15 @@ const hcCore = async (w: World, tag: string, env: Record<string, string | undefi
   return hc
 }
 
-const setup = async (w: World, options: { readonly bSession?: boolean; readonly aWithoutCursor?: boolean } = {}) => {
+export const setup = async (
+  w: World,
+  options: {
+    readonly bSession?: boolean
+    readonly aWithoutCursor?: boolean
+    readonly aProject?: string
+    readonly bBinary?: string
+  } = {},
+) => {
   for (const bin of ["pi", "hc", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   w.ownRuntimes.add("hc")
   const bin = path.join(w.root, "bin")
@@ -142,7 +169,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
 
   const bEnv = {
     VIBEST_HOME: path.join(b, "home"),
-    PATH: loginPath,
+    PATH: options.bBinary === undefined ? loginPath : `${path.dirname(options.bBinary)}:${loginPath}`,
     HC_SESSION: `${w.herdrSession.toLowerCase()}-b`,
     XDG_RUNTIME_DIR: path.join(b, "r"),
     XDG_STATE_HOME: path.join(b, "s"),
@@ -172,7 +199,9 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   }
 
   const hcB = await hcCore(w, "b", bEnv)
-  const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [binary, ...args], { env: bEnv })
+
+  const onB = (args: ReadonlyArray<string>, cwd = bRepo) =>
+    w.run(cwd, [options.bBinary ?? binary, ...args], { env: bEnv })
 
   const okB = async (args: ReadonlyArray<string>) => {
     const r = await onB(args)
@@ -181,7 +210,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     return r.stdout
   }
 
-  if (options.aWithoutCursor) await configurePlugins(w, (plugins) => [...plugins, "-harness-cursor"])
+  if (options.aWithoutCursor) await configurePlugins(w, (plugins) => [...plugins, "-vibest.harness-cursor"])
   await okB(["project", "add"])
 
   const aEnv = {
@@ -206,6 +235,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     processEnv: { CLAUDE_CONFIG_DIR: undefined },
     extra: ["--runtime", "hc"],
     name: "a-main",
+    ...(options.aProject !== undefined && { cwd: options.aProject }),
     hc: { run: hcA },
     timeoutMs: 60_000,
   })
@@ -242,7 +272,11 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   const run = async (marker: string, machine = "mb") => {
     const printed = (
       JSON.parse(
-        await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], { env: aEnv, asIs: true }),
+        await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], {
+          env: aEnv,
+          asIs: true,
+          ...(options.aProject !== undefined && { cwd: options.aProject }),
+        }),
       ) as { id: string }
     ).id
 
@@ -262,12 +296,54 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   const aSocket = w.hcSocket
   const log = path.join(w.root, "ssh.log")
 
-  return { b, bEnv, aEnv, aSocket, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcA, hcB }
+  const refusedOnA = async (marker: string, ...texts: ReadonlyArray<string>) => {
+    const r = await w.viaEntry(["run", "--machine", "mb", "pi", "--", ask(marker)], {
+      env: aEnv,
+      asIs: true,
+      ...(options.aProject !== undefined && { cwd: options.aProject }),
+    })
+
+    expect(r.code !== 0 && texts.every((text) => r.stderr.includes(text)), `run --machine mb: ${r.code} ${r.stderr}`)
+  }
+
+  return {
+    b,
+    bEnv,
+    aEnv,
+    aSocket,
+    onA,
+    okA,
+    onB,
+    okB,
+    bDb,
+    identity,
+    notices,
+    run,
+    refusedOnA,
+    subs,
+    main,
+    log,
+    stop,
+    hcA,
+    hcB,
+  }
 }
 
-type Setup = Awaited<ReturnType<typeof setup>>
+export type Setup = Awaited<ReturnType<typeof setup>>
 
 const checks: ReadonlyArray<Check> = [
+  {
+    id: "M10",
+    title: "vibest status gives this machine's load: cores, CPU in use, total and available memory, working executions",
+    run: async (w) => {
+      await w.ok(["daemon"])
+      const status = await w.json<{ daemon: { status: string; load?: MachineLoad } }>(["status"])
+      expect(
+        status.daemon.status === "running" && plausible(status.daemon.load),
+        `status: ${JSON.stringify(status.daemon)}`,
+      )
+    },
+  },
   {
     id: "M1",
     title:
@@ -294,6 +370,8 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         expect(m?.state === "connected" && m.id === b.id, `machine ls: ${JSON.stringify(m)}`)
+        const loaded = (JSON.parse(await s.okA(["machine", "ls"])) as Array<{ load?: MachineLoad }>)[0]
+        expect(plausible(loaded?.load), `M10 mb load: ${JSON.stringify(loaded)}`)
         const peer = s.bDb<{ id: string; n: number }>("SELECT id, (SELECT count(*) FROM peer) AS n FROM peer")
         expect(peer?.n === 1 && peer.id === a.id, `B's peer rows: ${JSON.stringify(peer)}`)
         const again = await s.onA(["machine", "add", "mb-again", "b-host"])
@@ -308,6 +386,8 @@ const checks: ReadonlyArray<Check> = [
           `B's ls (no --runtime: A sends its entry session's hc): ${JSON.stringify(bRows)}`,
         )
         expect(row(w, "SELECT id FROM session WHERE id LIKE ?", `${id8}%`) === undefined, "A has a session row")
+        const remoteTrees = await s.okA(["worktree", "list", "--machine", "mb"])
+        expect(remoteTrees.includes(`"id":"${id8}`), `worktree list --machine mb: ${remoteTrees}`)
         await until("the message on A", () => s!.notices(address, "mone") === 1, 120_000)
         await until(
           "A's entry session saw it",
@@ -316,7 +396,7 @@ const checks: ReadonlyArray<Check> = [
         )
         await until(
           "B's outbox empty",
-          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 0,
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 0,
           30_000,
         )
         await s.okA(["send", address, "--", ask("mtwo")])
@@ -467,7 +547,11 @@ const checks: ReadonlyArray<Check> = [
         await until("B's model got the first task", () => s!.subs.asked("heldone"), 120_000)
         await w.stopDaemon()
         s.subs.release("heldone")
-        await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
+        await until(
+          "B's outbox row",
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 1,
+          60_000,
+        )
         await s.okA(["daemon"])
         await until("the first notice", () => s!.notices(first, "heldone") === 1, 60_000)
 
@@ -485,7 +569,11 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         s.subs.release("heldtwo")
-        await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
+        await until(
+          "B's outbox row",
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 1,
+          60_000,
+        )
         await fs.rm(path.join(w.root, "down"))
         await until("the second notice", () => s!.notices(second, "heldtwo") === 1, 120_000)
         await Bun.sleep(2_000)
@@ -539,7 +627,11 @@ const checks: ReadonlyArray<Check> = [
         await until("B's model got the task", () => s!.subs.asked("heldfour"), 120_000)
         await s.okA(["machine", "rm", "mb"])
         s.subs.release("heldfour")
-        await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
+        await until(
+          "B's outbox row",
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 1,
+          60_000,
+        )
         await s.okA(["machine", "add", "mb2", "b-host"])
         await until(
           "the notice under the new name",
@@ -654,6 +746,11 @@ const checks: ReadonlyArray<Check> = [
           "mb not connected",
           async () => (JSON.parse(await s!.okA(["machine", "ls"])) as Array<Machine>)[0]?.state !== "connected",
           60_000,
+        )
+        const lost = (JSON.parse(await s.okA(["machine", "ls"])) as Array<{ load?: unknown; loadError?: string }>)[0]
+        expect(
+          lost?.load === undefined && lost?.loadError?.includes("mb") === true,
+          `M10 mb down reads as a load: ${JSON.stringify(lost)}`,
         )
         const down = await s.onA(["harness", "ls", "--machine", "mb"])
         expect(

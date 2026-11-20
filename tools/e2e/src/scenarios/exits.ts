@@ -65,7 +65,7 @@ export const piProject = async (w: World, name: string) => {
     q<{ n: number }>("SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome IS NOT NULL", id)?.n ?? 0
 
   const sent = (id: string) =>
-    q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE sender_session_id = ?", id)?.n ?? 0
+    q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE ?1 IN (sender_session_id, about_session_id)", id)?.n ?? 0
 
   const lastEnd = (id: string) => {
     return q<{ status: string; reply: string | null; failure: string | null }>(
@@ -87,7 +87,7 @@ export const piProject = async (w: World, name: string) => {
 
   const notices = (id: string, text: string) =>
     q<{ n: number }>(
-      "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice' AND instr(content, ?) > 0",
+      "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice' AND instr(content, ?) > 0",
       id,
       text,
     )?.n ?? 0
@@ -232,11 +232,12 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S22",
-    title: "harness killed (kill -9, the pane stays): as S21, and the pane still exists",
+    title:
+      "harness killed (kill -9, the pane stays): as S21, the pane still exists and the notice shows its last lines; vibest archive then closes the pane",
     run: async (w, evidence) => {
       let pane = ""
 
-      const { p } = await killedMidExecution(w, evidence, "s22", async (p, id) => {
+      const { p, sub } = await killedMidExecution(w, evidence, "s22", async (p, id) => {
         const pid = p.pid(id)
         expect(pid !== null, `no pid recorded for ${id}`)
         pane = p.pane(id)
@@ -244,10 +245,22 @@ const checks: ReadonlyArray<Check> = [
       })
 
       try {
-        const panes = (await herdr(p.socket, "pane.list", {})).panes as Array<{ pane_id: string }>
+        const panes = async () => (await herdr(p.socket, "pane.list", {})).panes as Array<{ pane_id: string }>
+        const before = await panes()
         expect(
-          panes.some((x) => x.pane_id === pane),
+          before.some((x) => x.pane_id === pane),
           `pane ${pane} is gone`,
+        )
+        expect(p.notices(sub, "Its terminal shows") === 1, "the exit notice does not show the terminal's last lines")
+        await w.ok(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+        const after = await panes()
+        await w.writeEvidence(
+          path.join(evidence, "S22-panes.json"),
+          `${JSON.stringify({ before: before.length, after: after.length })}\n`,
+        )
+        expect(
+          !after.some((x) => x.pane_id === pane) && after.length === before.length - 1,
+          `after vibest archive: pane ${pane} ${after.some((x) => x.pane_id === pane) ? "still open" : "closed"}, ${before.length} panes before, ${after.length} after`,
         )
       } finally {
         await p.close()
@@ -450,7 +463,7 @@ const checks: ReadonlyArray<Check> = [
         expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
 
         const text =
-          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", sub)
+          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE about_session_id = ? AND kind = 'notice'", sub)
             ?.c ?? ""
 
         const kept = await fs.stat(worktree).then(

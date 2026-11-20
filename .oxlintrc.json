@@ -84,6 +84,7 @@
         "packages/runtime-herdr/src/**",
         "packages/runtime-herdr-core/src/**",
         "packages/integration/*/src/**",
+        "packages/plugins/*/src/**",
         "packages/effect-herdr-sdk/src/**",
         "packages/effect-herdr-core-sdk/src/**",
         "tools/verify/src/**"
@@ -114,6 +115,7 @@
         "packages/runtime-herdr/src/**/bun.ts",
         "packages/runtime-herdr-core/src/**/bun.ts",
         "packages/integration/*/src/**/bun.ts",
+        "packages/plugins/*/src/**/bun.ts",
         "packages/effect-herdr-sdk/src/**/bun.ts",
         "packages/effect-herdr-core-sdk/src/**/bun.ts",
         "tools/verify/src/**/bun.ts",
@@ -127,12 +129,29 @@
         "packages/runtime-herdr/src/platform/**",
         "packages/runtime-herdr-core/src/platform/**",
         "packages/integration/*/src/platform/**",
+        "packages/plugins/*/src/platform/**",
         "packages/effect-herdr-sdk/src/platform/**",
         "packages/effect-herdr-core-sdk/src/platform/**",
         "tools/verify/src/platform/**"
       ],
       "rules": {
         "eslint/no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": ["packages/core/src/database/migration/**"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(?!effect(/|$))",
+                "message": "A ledger migration reads fact JSON as plain data and imports only effect: the catalog and the rest of vibest keep changing under it."
+              }
+            ]
+          }
+        ]
       }
     },
     {

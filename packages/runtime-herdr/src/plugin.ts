@@ -32,7 +32,7 @@ const caller: VibestPlugin.Runtime.RuntimeCaller = {
 }
 
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
-  id: "runtime-herdr",
+  id: "vibest.runtime-herdr",
   effect: (context) =>
     Effect.gen(function* () {
       const scope = yield* Effect.scope

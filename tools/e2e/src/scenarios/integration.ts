@@ -4,6 +4,7 @@ import path from "node:path"
 import type { Check } from "../check.ts"
 import {
   claudeConfigOf,
+  claudeSendOrReply,
   claudeEnv,
   envArgs,
   fakeAnthropic,
@@ -129,7 +130,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I11",
     title:
-      "another vibest first on PATH (an older install): a Pi entry session, a Pi subagent and a Claude subagent still reach this build's vibestd through their integrations, and the other vibest never runs",
+      "another vibest first on PATH, also after the login shell's rc files (an older install, as fnm puts it): a Pi entry session, a Pi subagent and a Claude subagent reach this build's vibestd through their integrations, each subagent's plain `vibest send` from its prompt reaches its creator, and the other vibest never runs",
     run: async (w) => {
       for (const bin of ["pi", "claude", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const other = path.join(w.root, "other-vibest")
@@ -142,29 +143,31 @@ const checks: ReadonlyArray<Check> = [
       )
       const zdot = path.join(w.root, "zdotdir-other")
       await fs.mkdir(zdot, { recursive: true })
+
+      for (const rc of [".zprofile", ".zshrc"]) await fs.writeFile(path.join(zdot, rc), `PATH='${other}':$PATH\n`)
       const env = { PATH: `${other}:${w.env().PATH}`, ZDOTDIR: zdot }
 
       const pi = fakeOpenAI(
-        (who, _dir, _done, last) => (who === "pi" && last === undefined ? "pong\nstatus: completed" : "ok"),
+        (who, _dir, done, _last, creator): Step =>
+          who !== "pi"
+            ? "ok"
+            : done === 0
+              ? { tool: "bash", input: { command: `vibest send ${creator} -- 'pong'` } }
+              : "pong\nstatus: completed",
         {},
       )
 
       const claude = fakeAnthropic((r) =>
-        r.tools.length > 0 && subagentFolder(r.system) !== undefined ? "pong\nstatus: completed" : "ok",
+        r.tools.length > 0 && subagentFolder(r.system) !== undefined
+          ? claudeSendOrReply(r, "pong\nstatus: completed")
+          : "ok",
       )
 
       const session = `${w.herdrSession}-other`
 
       try {
         const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
-        await w.daemon({ env })
-        await w.startEntry({
-          harness: "pi",
-          session,
-          env: { PI_CODING_AGENT_DIR: piEnv.slice("PI_CODING_AGENT_DIR=".length) },
-          processEnv: env,
-          timeoutMs: 90_000,
-        })
+        await w.entry({ session, processEnv: env })
 
         const run = async (flags: ReadonlyArray<string>) =>
           (
@@ -184,6 +187,11 @@ const checks: ReadonlyArray<Check> = [
         for (const id of subs) {
           await until(`${id}'s result`, async () => (await executionState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
+          expect(
+            (row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send'", id)
+              ?.n ?? 0) > 0,
+            `${id}'s plain vibest send never reached vibestd`,
+          )
         }
 
         const entry = (
@@ -446,7 +454,7 @@ const checks: ReadonlyArray<Check> = [
           expect((await aborted()) === 1, `execution ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
 
           const notices = () =>
-            row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)
+            row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice'", id)
               ?.n
 
           await w.ok(["send", id, HOLD])
