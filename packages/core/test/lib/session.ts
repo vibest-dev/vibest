@@ -48,6 +48,7 @@ import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { ArchiveOnIdle, archiveOnIdlePlugin } from "../../../builtins/src/archive-on-idle.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
+import { Load } from "../../../server/src/machine/load.ts"
 import { Machines } from "../../../server/src/machine/machines.ts"
 import { services } from "../../../server/src/services.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
@@ -289,6 +290,14 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Spawn.node.replace(defaultSpawn),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),
+      Load.hostSampleNode.replace(
+        Layer.succeed(Load.HostSample, {
+          read: Effect.succeed({
+            cpu: { count: 4, utilization: 0.25 },
+            memory: { total: 8_000_000_000, available: 4_000_000_000 },
+          }),
+        }),
+      ),
       Runtimes.hostEnvNode.replace(noHostEnv),
       Identity.node.replace(Layer.sync(Identity.Service, () => ({ id: randomId(), name: "test-host" }))),
       DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, {})),

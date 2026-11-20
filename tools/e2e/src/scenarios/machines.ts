@@ -13,6 +13,25 @@ type Listed = { id: string; machine?: string; runtime?: string; address?: { mach
 
 type HcMachine = { id: string; name: string; session?: string | null }
 
+type MachineLoad = {
+  sampledAt: number
+  cpu: { count: number; utilization: number | null }
+  memory: { total: number; available: number }
+  executions: { working: number }
+}
+
+const plausible = (load: MachineLoad | undefined) =>
+  load !== undefined &&
+  Math.abs(Date.now() - load.sampledAt) < 60_000 &&
+  Number.isInteger(load.cpu.count) &&
+  load.cpu.count >= 1 &&
+  (load.cpu.utilization === null || (load.cpu.utilization >= 0 && load.cpu.utilization <= 1)) &&
+  load.memory.total > 0 &&
+  load.memory.available >= 0 &&
+  load.memory.available <= load.memory.total &&
+  Number.isInteger(load.executions.working) &&
+  load.executions.working >= 0
+
 type MachineView = {
   runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
 }
@@ -269,6 +288,18 @@ type Setup = Awaited<ReturnType<typeof setup>>
 
 const checks: ReadonlyArray<Check> = [
   {
+    id: "M10",
+    title: "vibest status gives this machine's load: cores, CPU in use, total and available memory, working executions",
+    run: async (w) => {
+      await w.ok(["daemon"])
+      const status = await w.json<{ daemon: { status: string; load?: MachineLoad } }>(["status"])
+      expect(
+        status.daemon.status === "running" && plausible(status.daemon.load),
+        `status: ${JSON.stringify(status.daemon)}`,
+      )
+    },
+  },
+  {
     id: "M1",
     title:
       "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's entry session and none on A, A's entry session gets one message from mb/<id> with what the session sent itself, B's outbox empties; send, result, peek and archive forward to B; run --machine --file copies the file into B's project folder, the session on B reads it there and archive removes it",
@@ -294,6 +325,8 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         expect(m?.state === "connected" && m.id === b.id, `machine ls: ${JSON.stringify(m)}`)
+        const loaded = (JSON.parse(await s.okA(["machine", "ls"])) as Array<{ load?: MachineLoad }>)[0]
+        expect(plausible(loaded?.load), `M10 mb load: ${JSON.stringify(loaded)}`)
         const peer = s.bDb<{ id: string; n: number }>("SELECT id, (SELECT count(*) FROM peer) AS n FROM peer")
         expect(peer?.n === 1 && peer.id === a.id, `B's peer rows: ${JSON.stringify(peer)}`)
         const again = await s.onA(["machine", "add", "mb-again", "b-host"])
@@ -666,6 +699,11 @@ const checks: ReadonlyArray<Check> = [
           "mb not connected",
           async () => (JSON.parse(await s!.okA(["machine", "ls"])) as Array<Machine>)[0]?.state !== "connected",
           60_000,
+        )
+        const lost = (JSON.parse(await s.okA(["machine", "ls"])) as Array<{ load?: unknown; loadError?: string }>)[0]
+        expect(
+          lost?.load === undefined && lost?.loadError?.includes("mb") === true,
+          `M10 mb down reads as a load: ${JSON.stringify(lost)}`,
         )
         const down = await s.onA(["harness", "ls", "--machine", "mb"])
         expect(

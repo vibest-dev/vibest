@@ -60,6 +60,7 @@ export class MachineTransport extends Context.Service<
 export const machineTransportNode = LayerNode.unbound(MachineTransport)
 
 const ADD_TIMEOUT = Duration.seconds(30)
+const LOAD_TIMEOUT = Duration.seconds(3)
 export const RETRY_FIRST = Duration.millis(500)
 const RETRY_MAX = Duration.seconds(120)
 const RETRY_RESET = Duration.seconds(60)
@@ -650,6 +651,37 @@ const make = Effect.gen(function* () {
       for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
 
       return { notes }
+    }),
+
+    reading: Effect.fn("Machines.reading")(function* (name: string) {
+      const row = yield* db.remote.machineNamed(name)
+
+      if (row === undefined)
+        return yield* new UnknownMachine({
+          machine: name,
+          machines: (yield* db.remote.machines).map((known) => known.name),
+        })
+      const entry = entries.get(name)
+      const link = entry?.state === "connected" ? entry.link : undefined
+
+      if (link === undefined) return yield* unavailable(name, entry)
+
+      if (link.capabilities.load !== true)
+        return yield* new MachineIncompatible({
+          machine: name,
+          message: `${name} runs a vibestd that cannot read its load; run vibest update there`,
+        })
+
+      return yield* link.call(RpcClient.withHeaders(link.client["Machine.Load"]({}), peerHeaders(self.id))).pipe(
+        Effect.catchTag("NoSuchSession", (e) =>
+          Effect.fail(new MachineUnavailable({ machine: name, message: e.message })),
+        ),
+        Effect.timeoutOrElse({
+          duration: LOAD_TIMEOUT,
+          orElse: () =>
+            Effect.fail(new MachineUnavailable({ machine: name, message: `${name} did not answer in 3 s` })),
+        }),
+      )
     }),
 
     link: Effect.fn("Machines.link")(function* (name: string) {

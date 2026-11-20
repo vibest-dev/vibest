@@ -67,7 +67,7 @@ this one, else `MachineIncompatible` "<name> runs vibest <v> (protocol <n>); run
 supervised one (add dials once); a failure records nothing. It is refused when B answers this vibestd's
 own id ("<name> is this vibestd") or an id another row already has (`AlreadyAdded`: "this is the vibestd already
 added as <name> (<id8>); use that name"), decided from the result of the `INSERT … ON CONFLICT DO NOTHING`.
-`vibest machine ls` shows each row with its connection state, `vibest
+`vibest machine ls` shows each row with its connection state and its load, and `vibest status` shows this machine's load (`Machine.Load` with no machine). Another machine is asked over the peer link (capability `load`) and measures itself; one that is not connected, runs an older vibestd or does not answer in 3 s fails with `MachineUnavailable` or `MachineIncompatible`, which `machine ls` shows as `loadError` instead of `load`. A reading is cached for 5 seconds and not stored. `vibest
 machine rm` stops the connection and deletes the row (`UnknownMachine` when there is none), with no checks: agents and undelivered messages stay on B.
 
 The ssh command is `ssh -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p <port>] <target>
@@ -214,7 +214,8 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   them` when A has no runtime of that kind with `locate`). `vibest peek` prints `terminal here: <address>` or `not
   shown here: <view>` on stderr. `Machine.Add` also answers that core note for each kind of B's that A cannot show.
 - **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
-  {visible, as?, note?}` from `ensure`, and the last hook notes per plugin with their time (`notes`).
+  {visible, as?, note?}` from `ensure`, the last hook notes per plugin with their time (`notes`), and `load`
+  (`Machine.Load`) or `loadError` when it could not be read.
 - **Stepping in.** Keys typed into the terminal on A go through the runtime's own link (A's hc core, B's hc core) to
   the harness on B. B records the typed execution as any local one, and what the session sends to A's entry session reaches it once as the
   `<name>/<id8>: …` notice through B's outbox.

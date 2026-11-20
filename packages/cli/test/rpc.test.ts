@@ -606,6 +606,7 @@ describe("vibest.sock", () => {
         ["Integration.Guard", c["Integration.Guard"]({ harness: "pi", input: "{}" })],
         ["Peer.Hello", c["Peer.Hello"]({ id, name: "x", callsMe: "y" })],
         ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
+        ["Machine.Load", c["Machine.Load"]({})],
         ["Machine.List", c["Machine.List"]()],
         ["Machine.Remove", c["Machine.Remove"]({ name: "m" })],
         [
