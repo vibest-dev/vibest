@@ -118,7 +118,7 @@ export const pluginsHost = (
 ) => {
   const candidates: ReadonlyArray<Candidate> = [
     { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
-    { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
+    { source: "test:vibest.runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
   ]
 
@@ -135,8 +135,8 @@ export const pluginsHost = (
         const loaded = [
           ...candidates,
           {
-            source: "builtin:archive-on-idle",
-            revision: "archive-on-idle",
+            source: "builtin:vibest.archive-on-idle",
+            revision: "vibest.archive-on-idle",
             options: {},
             plugin: archivePlugin,
           },

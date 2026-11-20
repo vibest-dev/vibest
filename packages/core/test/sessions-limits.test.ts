@@ -16,6 +16,7 @@ import { FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
 import { EXECUTIONS, settled, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
+  harnessArgv,
   harnessOf,
   spawnWorking,
   sessionWorktree,
@@ -185,7 +186,7 @@ describe.concurrent("Session", () => {
       const moving = yield* Effect.forkChild(sessions.check(id))
       yield* until(herdr.callsTo("run"), (calls) => calls.length === 1)
       const [run] = yield* herdr.callsTo("run")
-      assert.strictEqual(run!.argv[0], "first")
+      assert.strictEqual(harnessArgv(run!.argv)[0], "first")
       assert.strictEqual(run!.argv.at(-2), "--first")
       assert.include(run!.argv.at(-1)!, "do it")
       const execution = yield* until(db.session.openExecution(id), (open) => open !== undefined)

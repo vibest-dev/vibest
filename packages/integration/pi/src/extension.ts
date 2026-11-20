@@ -311,7 +311,8 @@ export const extension = Layer.unwrap(
 
 const vibestCommand = Layer.effect(
   VibestCommand,
-  Config.schema(Schema.fromJsonString(Schema.Array(Schema.String)), "VIBEST_COMMAND").pipe(
+  Config.String("VIBEST_CLI").pipe(
+    Config.map((cli) => [cli]),
     Config.withDefault(["vibest"]),
   ),
 )
