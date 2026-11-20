@@ -106,9 +106,11 @@ manages it. Items marked planned are not built.
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It is the creator link: a session
   may send only to its creator, to sessions it started and to its teammates, notices and sends to an ended creator go to the nearest
   living one above it, management belongs to the nearest living creator, and a new terminal opens beside the live creator.
-- **Teams are a label.** `session.team` is written once, from `session.created`, and never inherited. A team belongs
-  to one project, and its owner is the creator of its members: the first `vibest run --team <name>` fixes it, and
-  `insertSession` refuses any other creator in the same transaction. Members may send to each other; a send to an
+- **Teams are a label.** `session.team` holds a team id, written once from `session.created` and never inherited. A
+  team is a runtime instance, not a name: `vibest run --team new` makes its id (`t-` and four hex digits, unique in the
+  project) inside `insertSession`'s transaction, and its creator, the creator of all its members, is the only session
+  that may add members with `--team <id>`; `insertSession` refuses any other creator and an unknown id in the same
+  transaction. Members may send to each other; a send to an
   archived member is refused rather than forwarded, since the creator fallback is only for a session's own creator.
   There is no team table and no team command: agents find teammates with `vibest ls --team`.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a

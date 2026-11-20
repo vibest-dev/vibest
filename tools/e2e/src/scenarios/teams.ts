@@ -27,7 +27,7 @@ const inboxFrom = (w: World, sender: string) =>
 const S67: Check = {
   id: "S67",
   title:
-    "three members of one team list each other with vibest ls --team and one sends to another, which arrives from the real sender; another team, a non-member, a second session adding to the team, a member's own child and a send to an archived teammate are each refused or left out",
+    "vibest run --team new makes a team whose id the run prints, --team <id> adds two more; the three list each other with vibest ls --team and one sends to another, which arrives from the real sender; another team, a non-member, another creator's new team, a second session adding to the team, an unknown team id, a member's own child and a send to an archived teammate are each refused or left out",
   run: async (w) => {
     needs()
     const entryModel = recordingModel(() => reply("ok"))
@@ -44,10 +44,10 @@ const S67: Check = {
         { cwd: repo, timeoutMs: 90_000 },
       )
 
-      const id = (JSON.parse(out) as { id: string }).id
+      const { id, team } = JSON.parse(out) as { id: string; team?: string }
       await until(`${name} answered`, () => seen(model).length > 0 && model.requests.length > 0, 90_000)
 
-      return { id, model }
+      return { id, team, model }
     }
 
     let order = 0
@@ -73,9 +73,12 @@ const S67: Check = {
       session = m.session
       repo = m.repo
       const entry = entryIdOf(w)
-      const a = await start("a", "--team", "web")
-      const b = await start("b", "--team", "web")
-      const c = await start("c", "--team", "web")
+      const a = await start("a", "--team", "new")
+      const web = a.team!
+      expect(/^t-[0-9a-f]{4}$/.test(web), `vibest run --team new printed team ${web}`)
+      const b = await start("b", "--team", web)
+      const c = await start("c", "--team", web)
+      expect(b.team === web && c.team === web, `--team ${web} printed ${b.team} and ${c.team}`)
       const ids = [a.id, b.id, c.id].sort()
 
       for (const member of [a, b, c]) {
@@ -85,7 +88,7 @@ const S67: Check = {
         }
 
         expect(
-          listed.team === "web" &&
+          listed.team === web &&
             JSON.stringify(listed.members.map((x) => x.id).sort()) === JSON.stringify(ids) &&
             listed.members.every((x) => x.startedBy === entry && x.agent === "general" && x.title !== ""),
           `vibest ls --team from ${member.id}: ${JSON.stringify(listed)}`,
@@ -94,7 +97,7 @@ const S67: Check = {
 
       const system = text(b.model.requests[0]!.find((x) => x.role === "system" || x.role === "developer"))
       expect(
-        system.includes("member of team web") && system.includes("vibest ls --team"),
+        system.includes(`member of team ${web}`) && system.includes("vibest ls --team"),
         `b's system prompt: ${system}`,
       )
 
@@ -112,8 +115,23 @@ const S67: Check = {
         "a's send to b is not one inbox row from a",
       )
 
-      const other = await start("other", "--team", "api")
+      const other = await start("other", "--team", "new")
       const loner = await start("loner")
+      const strangerDir = await piDir(w, "pi-team-stranger", loner.model.url)
+
+      const stranger = JSON.parse(
+        await tell(loner, `${binary} run pi --team new --env PI_CODING_AGENT_DIR=${strangerDir} -- wait`),
+      ) as { id: string; team: string }
+
+      expect(
+        other.team !== undefined && new Set([web, other.team, stranger.team]).size === 3,
+        `three --team new gave teams ${web}, ${other.team}, ${stranger.team}`,
+      )
+      const toStranger = await tell(a, `${binary} send ${stranger.id} -- not-a-teammate`)
+      expect(
+        toStranger.includes("Forbidden") && toStranger.includes("not in your team"),
+        `send from a to another creator's team: ${toStranger}`,
+      )
 
       for (const sender of [other, loner]) {
         const refused = await tell(sender, `${binary} send ${a.id} -- not-a-teammate`)
@@ -125,17 +143,19 @@ const S67: Check = {
       }
 
       const childDir = await piDir(w, "pi-team-child", other.model.url)
-      const taken = await tell(other, `${binary} run pi --team web --env PI_CODING_AGENT_DIR=${childDir} -- wait`)
-      expect(taken.includes("Forbidden") && taken.includes(`owned by ${entry}`), `a second owner for web: ${taken}`)
+      const taken = await tell(other, `${binary} run pi --team ${web} --env PI_CODING_AGENT_DIR=${childDir} -- wait`)
+      expect(taken.includes("Forbidden") && taken.includes(`owned by ${entry}`), `a second owner for ${web}: ${taken}`)
+      const unknown = await tell(other, `${binary} run pi --team t-0000 --env PI_CODING_AGENT_DIR=${childDir} -- wait`)
+      expect(unknown.includes("Forbidden") && unknown.includes("no team t-0000"), `an unknown team id: ${unknown}`)
 
       const child = JSON.parse(await tell(a, `${binary} run pi --env PI_CODING_AGENT_DIR=${childDir} -- wait`)) as {
         id: string
       }
 
-      const after = JSON.parse(await tell(b, `${binary} ls --team web`)) as { members: Array<{ id: string }> }
+      const after = JSON.parse(await tell(b, `${binary} ls --team ${web}`)) as { members: Array<{ id: string }> }
       expect(
         JSON.stringify(after.members.map((x) => x.id).sort()) === JSON.stringify(ids),
-        `web after a started ${child.id} and another session tried to join: ${JSON.stringify(after)}`,
+        `${web} after a started ${child.id} and another session tried to join: ${JSON.stringify(after)}`,
       )
 
       await w.okViaEntry(["archive", c.id], { cwd: repo, timeoutMs: 90_000 })

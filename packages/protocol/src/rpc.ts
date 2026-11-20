@@ -52,7 +52,7 @@ import {
   ExecutionState,
 } from "@vibest/schema/session"
 import { Subscription } from "@vibest/schema/subscription"
-import { TeamMember, TeamName } from "@vibest/schema/team"
+import { TeamMember } from "@vibest/schema/team"
 import { WorktreeList } from "@vibest/schema/worktree"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
@@ -354,7 +354,7 @@ export class VibestRpcs extends RpcGroup.make(
           machine: Schema.optional(Schema.String),
           project: Schema.optional(Schema.String),
           files: Attachments,
-          team: Schema.optional(TeamName),
+          team: Schema.optional(Schema.String),
         },
         success: Schema.Struct({
           id: Schema.String,
@@ -363,6 +363,7 @@ export class VibestRpcs extends RpcGroup.make(
           model: Schema.optional(Schema.String),
           ...Routing.fields,
           notes: Schema.optional(Schema.Array(MachineNote)),
+          team: Schema.optional(Schema.String),
         }),
         error: Schema.Union([
           InvalidCaller,
@@ -519,7 +520,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     Rpc.make("Team.List", {
-      payload: { team: Schema.optional(TeamName) },
+      payload: { team: Schema.optional(Schema.String) },
       success: Schema.Struct({ team: Schema.String, members: Schema.Array(TeamMember) }),
       error: Schema.Union([Forbidden, NoCallingSession]),
     }),

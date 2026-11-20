@@ -15232,6 +15232,16 @@
                 "type": "null"
               }
             ]
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

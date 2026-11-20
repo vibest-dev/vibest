@@ -20,7 +20,7 @@ import {
   type HarnessId,
 } from "@vibest/schema/session"
 import { Clock, Effect, Predicate } from "effect"
-import { SqlClient } from "effect/sql"
+import { SqlClient, type SqlError } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { type ObservedEnd } from "../replies.ts"
@@ -40,7 +40,9 @@ import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
 import type * as Session from "./session-statements.ts"
 
-export type TeamOwnedBy = { readonly teamOwner: string }
+export type TeamStart = "new" | { readonly join: string }
+
+export type TeamRefusal = { readonly team: string; readonly teamOwner: string } | { readonly teamUnknown: string }
 
 export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
 
@@ -138,6 +140,15 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       sql<{ owner: string | null }>`SELECT parent_session_id AS owner FROM session
         WHERE project_id = ${project} AND team = ${team} LIMIT 1`.pipe(
         Effect.map((rows) => rows[0]?.owner ?? undefined),
+      )
+
+    const unusedTeamId = (project: string): Effect.Effect<string, SqlError.SqlError> =>
+      sql<{ id: string }>`SELECT 't-' || lower(hex(randomblob(2))) AS id`.pipe(
+        Effect.flatMap(([row]) =>
+          teamOwner(project, row!.id).pipe(
+            Effect.flatMap((owner) => (owner === undefined ? Effect.succeed(row!.id) : unusedTeamId(project))),
+          ),
+        ),
       )
 
     return {
@@ -253,9 +264,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly origin?: Remote.PeerStart | undefined
             readonly archiveOnIdle?: boolean
             readonly max?: number | undefined
-            readonly team?: string | undefined
+            readonly team?: TeamStart | undefined
           } = {},
-        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended" | TeamOwnedBy> =>
+        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended" | TeamRefusal> =>
           tx(
             Effect.gen(function* () {
               if (request !== undefined) {
@@ -270,10 +281,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               )
                 return "parent-ended" as const
 
-              if (team !== undefined) {
-                const owner = yield* teamOwner(project, team)
+              const teamId = team === undefined ? undefined : team === "new" ? yield* unusedTeamId(project) : team.join
 
-                if (owner !== undefined && owner !== parentSessionId) return { teamOwner: owner }
+              if (team !== undefined && team !== "new") {
+                const owner = yield* teamOwner(project, team.join)
+
+                if (owner === undefined) return { teamUnknown: team.join }
+
+                if (owner !== parentSessionId) return { team: team.join, teamOwner: owner }
               }
 
               yield* publish(SessionCreated, {
@@ -292,7 +307,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(origin.reportTo !== undefined && { session: origin.reportTo }),
                     },
                   }),
-                  ...(team !== undefined && { team }),
+                  ...(teamId !== undefined && { team: teamId }),
                 },
               })
 

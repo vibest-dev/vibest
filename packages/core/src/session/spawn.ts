@@ -41,6 +41,7 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import type { PeerStart } from "../database/remote.ts"
+import type { TeamStart } from "../database/session.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
@@ -111,7 +112,7 @@ export interface SpawnInput {
   readonly folders?: ReadonlyArray<PinnedFolder> | undefined
   readonly origin?: PeerStart | undefined
   readonly files?: ReadonlyArray<Attachment> | undefined
-  readonly team?: string | undefined
+  readonly team?: TeamStart | undefined
 }
 
 export interface Spawned extends Routing {
@@ -476,7 +477,12 @@ export const make = Effect.gen(function* () {
 
                 if (Predicate.isObject(inserted) && "teamOwner" in inserted)
                   return yield* new TeamRefused({
-                    message: `team ${input.team} is owned by ${inserted.teamOwner}, the session that started its first member; only it adds members`,
+                    message: `team ${inserted.team} is owned by ${inserted.teamOwner}, the session that created it; only it adds members`,
+                  })
+
+                if (Predicate.isObject(inserted) && "teamUnknown" in inserted)
+                  return yield* new TeamRefused({
+                    message: `no team ${inserted.teamUnknown} in this project; start one with --team new`,
                   })
 
                 if (inserted === "waiting") {

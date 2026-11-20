@@ -1,5 +1,4 @@
 import { LaunchFailed, NoCallingSession } from "@vibest/schema/session"
-import { TEAM_NAME } from "@vibest/schema/team"
 import { Effect, Option } from "effect"
 
 import { caller, callerEnvOf, json } from "../../caller.ts"
@@ -15,11 +14,6 @@ export default Runtime.handler(Commands.commands.run, (o) =>
     const prompt = yield* input(raw, "prompt")
     const files = yield* readAttachments(o.file)
     const team = Option.getOrUndefined(o.team)
-
-    if (team !== undefined && !TEAM_NAME.test(team))
-      return yield* new EmptyInput({
-        message: `--team ${team}: a team name is lowercase letters, digits and -, starts with a letter, and has at most 32 characters`,
-      })
 
     const spawned = yield* requested((client, request, ping) =>
       Effect.gen(function* () {
@@ -74,6 +68,6 @@ export default Runtime.handler(Commands.commands.run, (o) =>
       }),
     )
 
-    yield* json({ id: spawned.id })
+    yield* json({ id: spawned.id, ...(spawned.team !== undefined && { team: spawned.team }) })
   }),
 )

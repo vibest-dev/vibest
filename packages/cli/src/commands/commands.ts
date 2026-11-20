@@ -165,7 +165,7 @@ const run = Spec.make("run", {
     ),
     team: Flag.String("team").pipe(
       Flag.withDescription(
-        "Start the session as a member of this team of the project (lowercase letters, digits and -, starting with a letter, at most 32 characters). Members may message each other; vibest ls --team lists them. The session that starts a team's first member owns it: only it adds members",
+        "new: start a new team with this session as its first member (its id, such as t-3f2a, is printed with the session id); a team id: add this session to that team, which only the session that created it may do. Members may message each other; vibest ls --team lists them",
       ),
       Flag.optional,
     ),
@@ -241,10 +241,7 @@ const ls = Spec.make("ls", {
       ),
       Flag.withDefault(false),
     ),
-    name: Argument.String("team name").pipe(
-      Argument.withDescription("With --team: the team to list"),
-      Argument.optional,
-    ),
+    name: Argument.String("team id").pipe(Argument.withDescription("With --team: the team to list"), Argument.optional),
   },
 })
 

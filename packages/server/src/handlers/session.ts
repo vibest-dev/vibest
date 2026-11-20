@@ -146,10 +146,18 @@ export const make = Effect.gen(function* () {
             parentSessionId: c.sessionId,
             request: input.request,
             files: input.files,
-            team: input.team,
+            team: input.team === undefined ? undefined : input.team === "new" ? "new" : { join: input.team },
           })
           .pipe(
             Effect.catchTag("TeamRefused", (e) => Effect.fail(new Forbidden({ method: "Spawn", message: e.message }))),
+            Effect.flatMap((spawned) =>
+              input.team === undefined
+                ? Effect.succeed(spawned)
+                : Effect.map(db.session.sessionIdentity(spawned.id), (identity) => ({
+                    ...spawned,
+                    ...(identity?.team != null && { team: identity.team }),
+                  })),
+            ),
           )
       }),
 
@@ -158,18 +166,18 @@ export const make = Effect.gen(function* () {
         const c = yield* Caller
 
         if (!Predicate.isTagged(c, "Session")) return yield* new NoCallingSession()
-        const name = team ?? (yield* db.session.sessionIdentity(c.sessionId))?.team ?? undefined
+        const id = team ?? (yield* db.session.sessionIdentity(c.sessionId))?.team ?? undefined
 
-        if (name === undefined)
+        if (id === undefined)
           return yield* new Forbidden({
             method: "Team.List",
-            message: "you are in no team; name one: vibest ls --team <name>",
+            message: "you are in no team; name one: vibest ls --team <team id>",
           })
-        const members = yield* db.session.teamMembers(c.projectId, name)
+        const members = yield* db.session.teamMembers(c.projectId, id)
         const infos = new Map((yield* listed(ListScope.Project({ id: c.projectId }), true)).map((i) => [i.id, i]))
 
         return {
-          team: name,
+          team: id,
           members: members.flatMap((m) => {
             const info = infos.get(m.id)
 
