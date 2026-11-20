@@ -29,6 +29,7 @@ import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
+import { Starts } from "./starts.ts"
 
 export * as Reconcile from "./reconcile.ts"
 
@@ -48,6 +49,7 @@ export const make = Effect.gen(function* () {
   const exits = yield* Exits.Service
   const { finishArchive } = yield* Archive.Service
   const { notice, republish } = yield* Placement.Service
+  const starts = yield* Starts.Service
   const scope = yield* Effect.scope
   const reactor = yield* Reactor.make
   const { locked } = locks
@@ -186,7 +188,9 @@ export const make = Effect.gen(function* () {
   const checkSession = (id: string, bound?: number): Effect.Effect<unknown, unknown> => locked(id)(check(id, bound))
 
   const checkLocked = Effect.fn("Reconcile.check")((id: string, bound?: number): Effect.Effect<void> =>
-    logged(`check ${id}`)(checkSession(id, bound)),
+    Effect.flatMap(starts.isWaiting(id), (waiting) =>
+      waiting ? Effect.void : logged(`check ${id}`)(checkSession(id, bound)),
+    ),
   )
 
   const wakes = yield* RunCoordinator.make<string, number | undefined>({
@@ -286,5 +290,6 @@ export const node = LayerNode.make({
     Runtimes.node,
     SessionLive.node,
     SessionLocks.node,
+    Starts.node,
   ],
 })

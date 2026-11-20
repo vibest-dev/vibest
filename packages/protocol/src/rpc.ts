@@ -28,7 +28,6 @@ import {
   AgentListing,
   HarnessUnavailable,
   LaunchFailed,
-  LimitReached,
   MoveRefused,
   NoCallingSession,
   NoHarnessChosen,
@@ -243,6 +242,7 @@ export const SessionInfo = Schema.Struct({
   createdAt: Schema.Number,
   lastActive: Schema.Number,
   task: Schema.NullOr(Schema.String),
+  waitingToStart: Schema.optional(Schema.Literal(true)),
   latest: Schema.NullOr(
     Schema.Struct({
       status: MessageStatus,
@@ -351,7 +351,6 @@ export class VibestRpcs extends RpcGroup.make(
           NoProject,
           NoCommit,
           PromptTooLarge,
-          LimitReached,
           AllocationFailed,
           HarnessUnavailable,
           NotInRepository,
@@ -370,6 +369,15 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   protocol(Rpc.make("Plugins", { success: Schema.Array(PluginInfo) })),
+  protocol(
+    Rpc.make("Concurrency", {
+      success: Schema.Struct({
+        max: Schema.NullOr(Schema.Number),
+        problems: Schema.Array(Schema.String),
+        unsupported: Schema.Array(Schema.String),
+      }),
+    }),
+  ),
   protocol(
     Rpc.make("Harnesses.List", {
       payload: { provider: Schema.optional(Schema.String), machine: Schema.optional(Schema.String) },
@@ -816,7 +824,6 @@ export class VibestRpcs extends RpcGroup.make(
           NoProject,
           NoCommit,
           PromptTooLarge,
-          LimitReached,
           AllocationFailed,
           HarnessUnavailable,
           NoCallingSession,
@@ -869,6 +876,7 @@ type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "peer"
 export const ACCESS = {
   Ping: ["open", "peer"],
   Plugins: "open",
+  Concurrency: "open",
   "Harnesses.List": ["open", "peer"],
   "Agents.List": ["open", "peer"],
   "Integration.Guard": "open",

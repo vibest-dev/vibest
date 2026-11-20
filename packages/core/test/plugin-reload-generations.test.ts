@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
 import { Plugin } from "@vibest/plugin/effect"
@@ -104,6 +105,7 @@ describe("plugins: builtins follow the latest config", () => {
           Layer.provide(Agents.layer),
           Layer.provide(memoryPluginHost),
           Layer.provide(Hooks.layer),
+          Layer.provide(Concurrency.layer),
           Layer.build,
           Effect.map(Context.get(Plugins.Service)),
         )

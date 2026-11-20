@@ -27,6 +27,7 @@ import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+import { Starts } from "./starts.ts"
 
 export * as Archive from "./archive.ts"
 
@@ -41,6 +42,7 @@ export const make = Effect.gen(function* () {
   const locks = yield* SessionLocks.Service
   const sessionLive = yield* SessionLive.Service
   const { notice, recount } = yield* Placement.Service
+  const starts = yield* Starts.Service
   const { interruptAgent, settleAfterInterrupt } = yield* Executions.Service
   const archives = yield* FiberSet.make()
   const { locked } = locks
@@ -98,9 +100,9 @@ export const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       let session = yield* getRow(id)
-      const h = yield* live(session)
+      const h = session.process === null ? undefined : yield* live(session)
       const terminal = terminalOf(session)
-      const seen = yield* agentState(h, terminal)
+      const seen = h === undefined ? ("absent" as const) : yield* agentState(h, terminal)
       const reasons: Array<string> = []
       const working = busyOf(seen)
       const execution = yield* db.session.openExecution(id)
@@ -108,7 +110,7 @@ export const make = Effect.gen(function* () {
       if (working || execution !== undefined) {
         if (options.unlessPending) return undefined
 
-        if (working) {
+        if (working && h !== undefined) {
           const stopped = yield* interruptAgent(h, session, terminal)
           reasons.push(
             stopped
@@ -159,12 +161,18 @@ export const make = Effect.gen(function* () {
   const remove = Effect.fn("Archive.remove")(
     function* (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) {
       yield* getRow(id)
-      const { already } = yield* sessionLive.stop(id)
 
-      if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
-      const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(release(id))))!
+      return yield* Effect.acquireUseRelease(
+        sessionLive.stop(id),
+        ({ already }) =>
+          Effect.gen(function* () {
+            if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
+            yield* starts.remove(id)
 
-      return out
+            return (yield* locked(id)(removeLocked(id, options)))!
+          }),
+        ({ already }) => (already ? Effect.void : release(id)),
+      )
     },
     Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
   )
@@ -289,6 +297,7 @@ export const node = LayerNode.make({
     Executions.node,
     Inbox.node,
     Placement.node,
+    Starts.node,
     Processes.node,
     Runtimes.node,
     SessionLive.node,

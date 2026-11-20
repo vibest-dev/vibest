@@ -204,14 +204,14 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const spawnedBy = (project: string, request: string) =>
     sql<{
       id: string
-      harness: string
+      harness: string | null
       provider: string | null
       model: string | null
-      runtime: string
+      runtime: string | null
       routing: string | null
     }>`SELECT s.id, p.harness, p.provider, p.model, p.runtime, p.routing FROM inbox i
         JOIN session s ON s.id = i.session_id
-        JOIN process p ON p.session_id = s.id AND p.id = (SELECT min(id) FROM process WHERE session_id = s.id)
+        LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT min(id) FROM process WHERE session_id = s.id)
       WHERE i.kind = 'task' AND i.request = ${request} AND s.project_id = ${project}
       ORDER BY s.created_at, s.id LIMIT 1`.pipe(
       Effect.map((rows): SpawnedBefore | undefined => {
@@ -221,10 +221,10 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
         return {
           id: found.id,
-          harness: found.harness,
+          harness: found.harness ?? "",
           provider: found.provider ?? undefined,
           model: found.model ?? undefined,
-          runtime: found.runtime,
+          runtime: found.runtime ?? "",
           routing: found.routing === null ? undefined : decodeRoutingJson(found.routing),
         }
       }),

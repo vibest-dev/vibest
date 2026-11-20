@@ -54,7 +54,10 @@ const ConfigEntry = Schema.Union([
   Schema.Struct({ package: Schema.String, options: Schema.optional(Schema.Record(Schema.String, Schema.Json)) }),
 ])
 
-const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
+const ConfigFile = Schema.Struct({
+  plugins: Schema.optional(Schema.Array(ConfigEntry)),
+  concurrency: Schema.optional(Schema.Json),
+})
 
 type ConfigFile = typeof ConfigFile.Type
 
@@ -311,6 +314,7 @@ export const openSources = Effect.fnUntraced(function* (
   })
 
   const operations = Effect.gen(function* () {
+    const config = yield* readConfig
     const paths = new Set([layout.config, layout.plugins])
     const listings = new Set([layout.plugins])
     const listed = yield* fs.readDirectory(layout.plugins).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
@@ -325,7 +329,7 @@ export const openSources = Effect.fnUntraced(function* (
 
     const configured: Array<Operation> = []
 
-    for (const raw of (yield* readConfig).plugins ?? []) {
+    for (const raw of config.plugins ?? []) {
       const { target, options } = Predicate.isString(raw)
         ? { target: raw, options: {} }
         : { target: raw.package, options: raw.options ?? {} }
@@ -352,6 +356,7 @@ export const openSources = Effect.fnUntraced(function* (
     }
 
     return {
+      concurrency: config.concurrency,
       operations: [...discovered, ...configured],
       watched: { paths, listings } satisfies Collected,
     }

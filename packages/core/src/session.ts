@@ -5,7 +5,6 @@ import type { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AllocationFailed,
   type AmbiguousSession,
-  LimitReached,
   NoCallingSession,
   NoHarnessChosen,
   NoRuntime,
@@ -42,7 +41,6 @@ export * as Session from "./session.ts"
 export {
   AllocationFailed,
   LaunchFailed,
-  LimitReached,
   NoCallingSession,
   NoHarnessChosen,
   NoRuntime,
@@ -99,7 +97,6 @@ export interface Interface {
   ) => Effect.Effect<
     Spawned,
     | AllocationFailed
-    | LimitReached
     | HarnessUnavailable
     | NoCallingSession
     | UnknownAgent

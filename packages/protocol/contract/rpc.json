@@ -749,6 +749,140 @@
         }
       }
     },
+    "Concurrency": {
+      "access": "open",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "null"
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "max": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unsupported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "max",
+          "problems",
+          "unsupported"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "not": {}
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Daemon.Handoff": {
       "access": "cli",
       "stream": false,
@@ -2104,6 +2238,19 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waitingToStart": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
               },
               {
                 "type": "null"
@@ -4815,6 +4962,19 @@
                   "anyOf": [
                     {
                       "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "waitingToStart": {
+                  "anyOf": [
+                    {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     {
                       "type": "null"
@@ -7919,9 +8079,6 @@
                 "$ref": "#/$defs/PromptTooLargeEncoded"
               },
               {
-                "$ref": "#/$defs/LimitReachedEncoded"
-              },
-              {
                 "$ref": "#/$defs/AllocationFailedEncoded"
               },
               {
@@ -8086,37 +8243,6 @@
             "required": [
               "_tag",
               "bytes"
-            ],
-            "additionalProperties": true
-          },
-          "LimitReachedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "LimitReached"
-                ]
-              },
-              "limit": {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
-                ]
-              }
-            },
-            "required": [
-              "_tag",
-              "limit"
             ],
             "additionalProperties": true
           },
@@ -14690,9 +14816,6 @@
                 "$ref": "#/$defs/PromptTooLargeEncoded"
               },
               {
-                "$ref": "#/$defs/LimitReachedEncoded"
-              },
-              {
                 "$ref": "#/$defs/AllocationFailedEncoded"
               },
               {
@@ -14954,37 +15077,6 @@
             "required": [
               "_tag",
               "bytes"
-            ],
-            "additionalProperties": true
-          },
-          "LimitReachedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "LimitReached"
-                ]
-              },
-              "limit": {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
-                ]
-              }
-            },
-            "required": [
-              "_tag",
-              "limit"
             ],
             "additionalProperties": true
           },
@@ -16040,6 +16132,19 @@
                         }
                       ]
                     },
+                    "waitingToStart": {
+                      "anyOf": [
+                        {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "latest": {
                       "anyOf": [
                         {
@@ -16592,6 +16697,19 @@
                     "anyOf": [
                       {
                         "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "waitingToStart": {
+                    "anyOf": [
+                      {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
                       },
                       {
                         "type": "null"

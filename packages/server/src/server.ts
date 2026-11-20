@@ -1,6 +1,7 @@
 import { Agents } from "@vibest/core/agents"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -18,6 +19,7 @@ import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { EntrySession } from "@vibest/core/session/entry"
+import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { VibestRpcs } from "@vibest/protocol/rpc"
 import { Context, Effect, Layer } from "effect"
@@ -89,6 +91,8 @@ export const node = LayerNode.make({
     services,
     Agents.node,
     Bus.node,
+    Concurrency.node,
+    Starts.node,
     Db.node,
     Drain.node,
     Git.node,
