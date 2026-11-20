@@ -133,8 +133,10 @@ export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("No
 export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAgent", {
   agent: Schema.String,
   known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
+  invalid: Schema.optional(Schema.String),
 }) {
   override get message() {
+    if (this.invalid !== undefined) return `agent definition ${this.agent} is invalid: ${this.invalid}`
     const known = this.known.map((definition) => `${definition.id} (${definition.description})`).join("; ")
 
     return `no agent definition ${this.agent}; registered: ${known || "none"}`
@@ -189,3 +191,27 @@ export const HarnessChoice = Schema.Struct({
 })
 
 export type HarnessChoice = typeof HarnessChoice.Type
+
+export const AgentListing = Schema.Struct({
+  agents: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      description: Schema.String,
+      plugin: Schema.String,
+      harness: Schema.optional(Schema.String),
+      provider: Schema.optional(Schema.String),
+      model: Schema.optional(Schema.String),
+      system: Schema.String,
+    }),
+  ),
+  invalid: Schema.Array(
+    Schema.Struct({
+      id: Schema.optional(Schema.String),
+      source: Schema.String,
+      error: Schema.String,
+      plugin: Schema.String,
+    }),
+  ),
+})
+
+export type AgentListing = typeof AgentListing.Type

@@ -62,7 +62,7 @@ const claimEntry = (root: string, terminal: string, fresh = false) =>
       model: undefined,
       routing: undefined,
       pid: 50101,
-      agent: "coordinator",
+      agent: { id: "coordinator", named: false },
     })
   })
 

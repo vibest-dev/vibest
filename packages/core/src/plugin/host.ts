@@ -119,7 +119,7 @@ export const make = Effect.gen(function* () {
 
     return {
       options,
-      agent: { hook, transform: agents.transform },
+      agent: { hook, transform: agents.transformFor(plugin) },
       machine: { hook: machine },
       runtime: { transform: runtimes.transform },
       harness: { transform: harnesses.transform },

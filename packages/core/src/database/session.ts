@@ -63,6 +63,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       currentProcessId,
       findEntrySessions,
       openExecution,
+      workingExecutions,
       startExecution,
       acceptedAt,
       accept,
@@ -681,6 +682,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       openExecution: Effect.fn("Db.session.openExecution")((id: string) => openExecution(id).pipe(Effect.orDie)),
+      workingExecutions: Effect.fn("Db.session.workingExecutions")(() => workingExecutions.pipe(Effect.orDie)),
 
       archive: Effect.fn("Db.session.archive")((id: string) =>
         tx(

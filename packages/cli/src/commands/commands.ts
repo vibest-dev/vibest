@@ -39,6 +39,12 @@ export const entryFlags = {
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
   model: Flag.String("model").pipe(Flag.optional),
+  agent: Flag.String("agent").pipe(
+    Flag.withDescription(
+      "The agent definition a new entry conversation runs as (default coordinator; see vibest agent list). A conversation keeps the agent it started with: naming another needs --new",
+    ),
+    Flag.optional,
+  ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
     Flag.withDescription("Outside herdr: do not attach to the session"),
@@ -146,7 +152,7 @@ const send = Spec.make("send", {
 
 const status = Spec.make("status", {
   description:
-    "vibest's status: this client, vibestd (running or not; never started by this) and the terminal runtimes it has",
+    "vibest's status: this client, vibestd (running or not; never started by this), this machine's load when vibestd is running, and the terminal runtimes it has",
 })
 
 const result = Spec.make("result", {
@@ -244,6 +250,28 @@ const harness = Spec.make("harness", {
     Spec.make("models", {
       description: "The models one harness accepts; same JSON as vibest models",
       params: { harness: Argument.String("harness"), provider: providerFlag },
+    }),
+  ],
+})
+
+const agentMachine = Flag.String("machine").pipe(
+  Flag.withDescription("Ask another machine, whose own definitions its sessions run as"),
+  Flag.optional,
+)
+
+const agent = Spec.make("agent", {
+  description:
+    "The agent definitions sessions run as: the builtin ones, one per file in ~/.vibest/agents (<id>.md) and those plugins add",
+  commands: [
+    Spec.make("list", {
+      alias: "ls",
+      description:
+        "Each agent definition with its description, the plugin that added it and the harness, provider and model it starts on when a run names none; invalid lists each definition file that failed to load and why",
+      params: { machine: agentMachine },
+    }),
+    Spec.make("show", {
+      description: "One agent definition with the full prompt its sessions get before their session facts",
+      params: { id: Argument.String("id"), machine: agentMachine },
     }),
   ],
 })
@@ -371,7 +399,7 @@ const machine = Spec.make("machine", {
     }),
     Spec.make("ls", {
       description:
-        "The machines this vibestd dials, with their connection state, their runtimes and whether this machine shows their terminals (JSON)",
+        "The machines this vibestd dials, with their connection state, their runtimes, whether this machine shows their terminals and their load (cores, CPU in use, memory, working executions; loadError when it cannot be read) (JSON)",
     }),
     Spec.make("rm", {
       description:
@@ -398,6 +426,7 @@ export const Commands = Spec.make("vibest", {
     events,
     models,
     harness,
+    agent,
     project,
     plugins,
     subscriptions,

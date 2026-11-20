@@ -606,6 +606,7 @@ describe("vibest.sock", () => {
         ["Integration.Guard", c["Integration.Guard"]({ harness: "pi", input: "{}" })],
         ["Peer.Hello", c["Peer.Hello"]({ id, name: "x", callsMe: "y" })],
         ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
+        ["Machine.Load", c["Machine.Load"]({})],
         ["Machine.List", c["Machine.List"]()],
         ["Machine.Remove", c["Machine.Remove"]({ name: "m" })],
         [
@@ -652,6 +653,7 @@ describe("vibest.sock", () => {
       yield* bare.Concurrency(undefined, { headers: protocolHeaders() })
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
+      assert.isArray((yield* bare["Agents.List"]({}, { headers: protocolHeaders() })).agents)
       yield* bare.Republish(undefined, { headers: protocolHeaders() })
       yield* bare.ExecutionEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
       assert.strictEqual(
@@ -669,6 +671,7 @@ describe("vibest.sock", () => {
         "Plugins",
         "Concurrency",
         "Harnesses.List",
+        "Agents.List",
         "Runtimes.Doctor",
         "Subscriptions",
         "Republish",

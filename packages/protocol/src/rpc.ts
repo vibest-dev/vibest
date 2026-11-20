@@ -6,6 +6,7 @@ import {
   MachineFailed,
   MachineIncompatible,
   MachineInfo,
+  MachineLoad,
   MachineNote,
   MachineUnavailable,
   NoCommit,
@@ -24,6 +25,7 @@ import {
   AllocationFailed,
   AmbiguousSession,
   HarnessChoice,
+  AgentListing,
   HarnessUnavailable,
   LaunchFailed,
   MoveRefused,
@@ -383,6 +385,13 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, ...LINE_ERRORS]),
     }),
   ),
+  protocol(
+    Rpc.make("Agents.List", {
+      payload: { machine: Schema.optional(Schema.String) },
+      success: AgentListing,
+      error: Schema.Union([Forbidden, ...LINE_ERRORS]),
+    }),
+  ),
   scoped(
     Rpc.make("Integration.Guard", {
       payload: { harness: Schema.String, input: Schema.String },
@@ -404,6 +413,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           argv: Schema.Array(Schema.String),
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           focus: Schema.Boolean,
           callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
@@ -550,6 +560,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           harness: Schema.String,
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           fresh: Schema.Boolean,
           terminal: Schema.String,
           runtime: Schema.optional(Schema.String),
@@ -587,6 +598,8 @@ export class VibestRpcs extends RpcGroup.make(
       payload: {
         harness: Schema.optional(Schema.String),
         agent: Schema.String,
+        agentNamed: Schema.optional(Schema.Boolean),
+        fresh: Schema.optional(Schema.Boolean),
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         runtime: Schema.optional(Schema.String),
@@ -841,6 +854,13 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, MachineFailed, MachineIncompatible, AlreadyAdded]),
     }),
   ),
+  scoped(
+    Rpc.make("Machine.Load", {
+      payload: { machine: Schema.optional(Schema.String) },
+      success: MachineLoad,
+      error: Schema.Union([Forbidden, UnknownMachine, MachineUnavailable, MachineIncompatible]),
+    }),
+  ),
   scoped(Rpc.make("Machine.List", { success: Schema.Array(MachineInfo), error: Forbidden })),
   scoped(
     Rpc.make("Machine.Remove", {
@@ -858,6 +878,7 @@ export const ACCESS = {
   Plugins: "open",
   Concurrency: "open",
   "Harnesses.List": ["open", "peer"],
+  "Agents.List": ["open", "peer"],
   "Integration.Guard": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
@@ -898,6 +919,7 @@ export const ACCESS = {
   "Peer.Outbox": "peer",
   "Peer.Ack": "peer",
   "Machine.Add": "cli",
+  "Machine.Load": ["cli", "peer"],
   "Machine.List": "cli",
   "Machine.Remove": "cli",
 } as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
@@ -913,7 +935,14 @@ export const PEER_CALLS: ReadonlySet<string> = new Set(
 )
 
 export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
-  [...PEER_CALLS].filter((method) => method !== "Ping" && method !== "Harnesses.List" && !method.startsWith("Peer.")),
+  [...PEER_CALLS].filter(
+    (method) =>
+      method !== "Ping" &&
+      method !== "Harnesses.List" &&
+      method !== "Agents.List" &&
+      method !== "Machine.Load" &&
+      !method.startsWith("Peer."),
+  ),
 )
 
 export const CAPABILITIES = {
@@ -926,4 +955,6 @@ export const CAPABILITIES = {
   spawnRuntime: true,
   spawnFiles: true,
   peerSpawnFiles: true,
+  load: true,
+  agents: true,
 } as const

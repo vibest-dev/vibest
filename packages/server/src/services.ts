@@ -27,6 +27,7 @@ import { Spawn } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 
+import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
 import { Remote } from "./machine/remote.ts"
@@ -60,6 +61,7 @@ export const services = LayerNode.group([
   Integration.node,
   Peer.node,
   EntrySession.node,
+  Load.node,
   Machines.node,
   Remote.node,
 ])

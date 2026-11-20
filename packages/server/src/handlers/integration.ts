@@ -1,3 +1,4 @@
+import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/database/db"
 import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { harnessCatalog } from "@vibest/core/harness"
@@ -18,6 +19,7 @@ import { group } from "./group.ts"
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const harnesses = yield* Harnesses.Service
+  const agents = yield* Agents.Service
   const integration = yield* Integration.Service
   const remote = yield* Remote.Service
 
@@ -54,6 +56,32 @@ export const make = Effect.gen(function* () {
         return provider === undefined ? choices : forProvider(choices, harnesses, provider)
       }),
 
+    "Agents.List": ({ machine }, { headers }) =>
+      Effect.gen(function* () {
+        if (machine !== undefined && machine !== LOCAL_MACHINE) {
+          if (reader(headers)(CALLER_HEADER) === "peer")
+            return yield* new Forbidden({
+              method: "Agents.List",
+              message: "a peer asks for this machine's agents only",
+            })
+
+          return yield* remote.agents(machine)
+        }
+
+        return {
+          agents: agents.all.map(({ id, description, plugin, harness, provider, model, system }) => ({
+            id,
+            description,
+            plugin,
+            ...(harness !== undefined && { harness }),
+            ...(provider !== undefined && { provider }),
+            ...(model !== undefined && { model }),
+            system,
+          })),
+          invalid: agents.invalid.map(({ id, source, error, plugin }) => ({ id, source, error, plugin })),
+        }
+      }),
+
     "Integration.Guard": ({ harness, input }: { readonly harness: string; readonly input: string }) =>
       Effect.gen(function* () {
         const definition = harnesses.find(harness)
@@ -88,4 +116,6 @@ export const make = Effect.gen(function* () {
   } satisfies Handlers
 })
 
-export const layer = group(["Harnesses.List", "Integration.Guard", "ExecutionEnd", "Prompt"]).toLayer(make)
+export const layer = group(["Harnesses.List", "Agents.List", "Integration.Guard", "ExecutionEnd", "Prompt"]).toLayer(
+  make,
+)
