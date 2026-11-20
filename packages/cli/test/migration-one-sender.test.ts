@@ -84,6 +84,20 @@ const catalog2 = (ledger: string): ReadonlyArray<Fact> => [
     },
   ],
   [S, 4, "execution.ended", { execution: 3, outcome: "completed" }],
+  [
+    ledger,
+    6,
+    "outbox.queued",
+    {
+      id: "66666666-6666-4666-8666-666666666663",
+      peer: PEER,
+      session: S,
+      recipient: "far",
+      kind: "send",
+      content: "mc/cccccccc: report",
+      from: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", machine: "mc" },
+    },
+  ],
   [E, 3, "inbox.queued", { kind: "notice", sender: S, content: "sub archived", status: "pending" }],
   [E, 4, "inbox.queued", { kind: "send", sender: S, content: "later", status: "pending" }],
   [S, 5, "inbox.queued", { kind: "send", content: "typed by the user", status: "pending" }],
@@ -199,12 +213,13 @@ describe("ledger migration 20261119000000_one_sender", () => {
         )
 
         assert.deepStrictEqual(
-          outbox.map((row) => [JSON.parse(row.data).id, JSON.parse(row.data).execution]),
+          outbox.map((row) => [JSON.parse(row.data).id, JSON.parse(row.data).execution, JSON.parse(row.data).from]),
           [
-            ["66666666-6666-4666-8666-666666666661", 3],
-            ["66666666-6666-4666-8666-666666666662", undefined],
+            ["66666666-6666-4666-8666-666666666661", 3, { session: S }],
+            ["66666666-6666-4666-8666-666666666662", undefined, undefined],
+            ["66666666-6666-4666-8666-666666666663", undefined, undefined],
           ],
-          "a retry of an acknowledged outbox send is one send",
+          "a retry of an acknowledged outbox send is one send; a pending relay is from the relaying session, not the author it wrapped",
         )
 
         assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT session_id, id, sent FROM execution`), [

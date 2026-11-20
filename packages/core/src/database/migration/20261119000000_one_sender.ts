@@ -28,7 +28,15 @@ const InboxQueued = Schema.Struct({
   request: optional(Schema.String),
 })
 
-const OutboxQueued = Schema.Struct({ id: Schema.String, kind: optional(Schema.String), session: Schema.String })
+const OutboxQueued = Schema.Struct({
+  id: Schema.String,
+  kind: optional(Schema.String),
+  session: Schema.String,
+  from: optional(Agent),
+})
+
+const relayed = (data: typeof OutboxQueued.Type) =>
+  data.from !== undefined && (data.from.session !== data.session || data.from.machine !== undefined)
 
 type Row = {
   readonly position: number
@@ -147,7 +155,11 @@ const ledger = (tx: SqlClient.SqlClient) => {
           outboxIds.add(data.id)
           const execution = data.kind === "send" ? open.get(data.session) : undefined
 
-          if (execution !== undefined) yield* patch(row, { execution })
+          if (execution !== undefined || relayed(data))
+            yield* patch(row, {
+              ...(execution !== undefined && { execution }),
+              ...(relayed(data) && { from: null }),
+            })
         }
       }
     })
