@@ -18,7 +18,15 @@ import {
 } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
-import { ProjectActivity, ProjectCreateFailed, ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
+import {
+  CloneFailed,
+  CloneRequest,
+  CloneStep,
+  ProjectActivity,
+  ProjectCreateFailed,
+  ProjectInfoResult,
+  ProjectSearchInput,
+} from "@vibest/schema/project"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
@@ -331,6 +339,7 @@ export class VibestRpcs extends RpcGroup.make(
           runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),
           machine: Schema.optional(Schema.String),
+          project: Schema.optional(Schema.String),
           files: Attachments,
         },
         success: Schema.Struct({
@@ -736,6 +745,16 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   scoped(
+    admitted(
+      Rpc.make("Project.Clone", {
+        payload: CloneRequest,
+        success: CloneStep,
+        error: Schema.Union([Forbidden, CloneFailed]),
+        stream: true,
+      }),
+    ),
+  ),
+  scoped(
     Rpc.make("Daemon.Stop", {
       payload: { instance: Schema.String },
       success: Schema.Struct({ instance: Schema.String }),
@@ -800,6 +819,7 @@ export class VibestRpcs extends RpcGroup.make(
           repository: Schema.optional(Schema.String),
           identity: Schema.optional(Schema.String),
           commit: Schema.optional(Schema.String),
+          project: Schema.optional(Schema.String),
           repositories: Schema.optional(
             Schema.Array(
               Schema.Struct({
@@ -913,6 +933,7 @@ export const ACCESS = {
   "Project.RunningEntry": "agent",
   "Project.StopEntry": "cli",
   "Project.Create": "cli",
+  "Project.Clone": ["agent", "peer"],
   "Project.Info": "agent",
   "Project.Search": "agent",
   Send: ["owner", "session", "peer"],
@@ -951,6 +972,7 @@ export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
       method !== "Harnesses.List" &&
       method !== "Agents.List" &&
       method !== "Machine.Load" &&
+      method !== "Project.Clone" &&
       !method.startsWith("Peer."),
   ),
 )
@@ -966,6 +988,8 @@ export const CAPABILITIES = {
   spawnFiles: true,
   peerSpawnFiles: true,
   peerSpawnRepositories: true,
+  peerSpawnProject: true,
+  projectClone: true,
   load: true,
   agents: true,
 } as const

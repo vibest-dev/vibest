@@ -31,7 +31,9 @@ type Wanted = {
   readonly commit: string
 }
 
-type Checkout = Effect.Success<Db.Interface["remote"]["remoteProjects"]>[number]
+type Checkout = Effect.Success<Db.Interface["remote"]["projectCheckouts"]>[number] & {
+  readonly remote: string | undefined
+}
 
 type Paired = { readonly wanted: Wanted; readonly row: Checkout }
 
@@ -41,7 +43,7 @@ const wantedOf = (input: PayloadOf<"Peer.Spawn">): ReadonlyArray<Wanted> =>
     ? []
     : [{ repository: input.repository, identity: input.identity, commit: input.commit }])
 
-const named = (wanted: ReadonlyArray<Wanted>) => wanted.map((w) => w.repository).join(", ")
+const repositoriesNamed = (wanted: ReadonlyArray<Wanted>) => wanted.map((w) => w.repository).join(", ")
 
 const pinned = ({ wanted, row }: Paired) => ({
   name: wanted.folder ?? row.path.slice(row.path.lastIndexOf("/") + 1),
@@ -91,13 +93,22 @@ const make = Effect.gen(function* () {
 
       if (!folders.every(safeRepositoryDirectory) || clashing)
         return yield* new NoProject({ message: `${self.name} refuses the folder names ${folders.join(", ")}` })
-      const rows = yield* db.remote.remoteProjects
+
+      const rows: ReadonlyArray<Checkout> = yield* Effect.forEach(
+        yield* db.remote.projectCheckouts,
+        (row) => Effect.map(git.remoteUrl(row.path), (remote) => ({ ...row, remote })),
+        { concurrency: 8 },
+      )
 
       const identities = new Map(
         wanted.some((w) => w.identity !== undefined)
           ? yield* Effect.forEach(
               rows,
-              (row) => Effect.map(repositoryIdentity(row.remote), (id) => [row, id] as const),
+              (row) =>
+                Effect.map(
+                  row.remote === undefined ? Effect.succeed(undefined) : repositoryIdentity(row.remote),
+                  (id) => [row, id] as const,
+                ),
               { concurrency: 8 },
             )
           : [],
@@ -112,8 +123,8 @@ const make = Effect.gen(function* () {
         return yield* new NoProject({
           message:
             input.repositories === undefined
-              ? `${self.name} has no checkout of ${named(lacking)}: clone it there and run vibest project add in it`
-              : `${self.name} has no checkout of ${named(lacking)}: clone ${lacking.length === 1 ? "it" : "them"} there beside the project's other repositories and run vibest project add in that folder`,
+              ? `${self.name} has no checkout of ${repositoriesNamed(lacking)}: clone it there and run vibest project add in it`
+              : `${self.name} has no checkout of ${repositoriesNamed(lacking)}: clone ${lacking.length === 1 ? "it" : "them"} there beside the project's other repositories and run vibest project add in that folder`,
         })
 
       const pairedIn = (own: ReadonlyArray<Checkout>) => {
@@ -137,37 +148,68 @@ const make = Effect.gen(function* () {
 
       const projects = [...new Set(rows.map((row) => row.id))].flatMap((id) => {
         const own = rows.filter((row) => row.id === id)
-        const { directory, repositories } = own[0]!
+        const { directory } = own[0]!
 
-        return directory === null ? [] : [{ id, directory, repositories, own }]
+        return directory === null ? [] : [{ id, directory, own }]
       })
 
+      const shown = (list: ReadonlyArray<{ readonly id: string; readonly directory: string }>) =>
+        list.map((p) => `${p.id} (${p.directory})`).join(", ")
+
+      const holding = (list: typeof projects) =>
+        list.flatMap((p) => {
+          const pairs = p.own.length === wanted.length ? pairedIn(p.own) : undefined
+
+          return pairs === undefined ? [] : [{ id: p.id, directory: p.directory, pairs }]
+        })
+
+      const { project: asked } = input
+
+      const scope =
+        asked === undefined
+          ? projects
+          : projects.filter(
+              (p) =>
+                p.id === asked ||
+                (asked.length >= 8 && p.id.startsWith(asked)) ||
+                p.directory.slice(p.directory.lastIndexOf("/") + 1) === asked,
+            )
+
+      if (asked !== undefined && scope.length !== 1)
+        return yield* new NoProject({
+          message:
+            scope.length === 0
+              ? `${self.name} has no project ${asked}; its projects: ${shown(projects)}`
+              : `${asked} names several projects of ${self.name}: ${shown(scope)}`,
+        })
       const legacy = input.repositories === undefined ? wanted[0] : undefined
 
       const candidates =
         legacy === undefined
-          ? projects
-          : projects.filter((p) => p.own.some(rows.some(exactly(legacy)) ? exactly(legacy) : alike(legacy)))
+          ? scope
+          : scope.filter((p) =>
+              p.own.some(scope.some((q) => q.own.some(exactly(legacy))) ? exactly(legacy) : alike(legacy)),
+            )
 
       if (legacy !== undefined && candidates.length > 1)
         return yield* new NoProject({
-          message: `${self.name} has several projects for ${legacy.repository}: ${candidates.map((p) => p.directory).join(", ")}`,
+          message: `${self.name} has several projects for ${legacy.repository}: ${shown(candidates)}; pass --project <id> to choose one`,
         })
-
-      const found = candidates.flatMap((p) => {
-        const pairs = p.repositories === wanted.length ? pairedIn(p.own) : undefined
-
-        return pairs === undefined ? [] : [{ id: p.id, directory: p.directory, pairs }]
-      })
+      const found = holding(candidates)
 
       if (found.length === 0)
         return yield* new NoProject({
-          message: `${self.name} has no project whose repositories are exactly ${named(wanted)}${candidates.length === 1 ? `: its project ${candidates[0]!.directory} holds other repositories too` : ": add one there with vibest project add"}`,
+          message:
+            asked !== undefined
+              ? `${self.name}'s project ${shown(scope)} does not hold exactly ${repositoriesNamed(wanted)}`
+              : legacy !== undefined && candidates.length === 1
+                ? `${self.name} has no project whose repositories are exactly ${repositoriesNamed(wanted)}: its project ${shown(candidates)} holds other repositories too`
+                : `${self.name} has no project whose repositories are exactly ${repositoriesNamed(wanted)}: add one there with vibest project add`,
         })
 
       if (found.length > 1)
         return yield* new NoProject({
-          message: `${self.name} has several projects for ${named(wanted)}: ${found.map((p) => p.directory).join(", ")}`,
+          message: `${self.name} has several projects for ${repositoriesNamed(wanted)}: ${shown(found)}; pass --project <id> to choose one`,
         })
       const target = found[0]!
 

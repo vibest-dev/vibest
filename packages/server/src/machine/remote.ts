@@ -6,14 +6,19 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
+import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin/sources"
+import { cloneDestination } from "@vibest/core/project/clone"
 import { listProjectRepositories } from "@vibest/core/project/create"
+import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
 import { type ListedMachine, MachineFailed, MachineIncompatible } from "@vibest/schema/machine"
-import { Context, Data, Effect, FileSystem, Layer, Path, Predicate } from "effect"
+import { ProjectCloneFailed } from "@vibest/schema/project"
+import { Context, Data, Effect, FileSystem, Layer, Path, Predicate, Stream } from "effect"
 
 import { Machines } from "./machines.ts"
 
@@ -68,6 +73,8 @@ const make = Effect.gen(function* () {
   const runtimes = yield* Runtimes.Service
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const layout = yield* Layout
+  const loader = yield* PluginLoader
 
   const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service>) =>
     effect.pipe(
@@ -138,6 +145,56 @@ const make = Effect.gen(function* () {
         ),
       ),
     ),
+
+    clone: (machine: string | undefined, input: { readonly url: string; readonly directory?: string | undefined }) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          if (machine !== undefined) {
+            const link = yield* machines.link(machine)
+
+            if (link.capabilities.projectClone !== true)
+              return yield* new MachineIncompatible({
+                machine,
+                message: `${machine} runs a vibest that does not clone projects; run vibest update on ${machine}`,
+              })
+
+            return link.stream(
+              link.client["Project.Clone"](
+                { url: input.url, ...(input.directory !== undefined && { directory: input.directory }) },
+                { headers: peerHeaders(self.id) },
+              ),
+            )
+          }
+
+          const { dest } = yield* cloneDestination(input.url, input.directory).pipe(
+            Effect.provideService(Layout, layout),
+            Effect.provideService(PluginLoader, loader),
+            Effect.provideService(FileSystem.FileSystem, fs),
+            Effect.provideService(Path.Path, path),
+          )
+
+          const failed = (e: { readonly message: string }) =>
+            new ProjectCloneFailed({ message: `git clone ${input.url}: ${e.message}` })
+
+          const added = locateProject(dest).pipe(
+            provided,
+            Effect.flatMap((at) => resolveProject(db, at)),
+            Effect.map((project) => ({ projectId: project.id, directory: project.directory })),
+            Effect.mapError(failed),
+          )
+
+          return Stream.concat(
+            Stream.make({ progress: `cloning ${input.url} into ${dest} on ${self.name}` }),
+            Stream.concat(
+              git.clone(input.url, dest).pipe(
+                Stream.map((progress) => ({ progress })),
+                Stream.mapError(failed),
+              ),
+              Stream.fromEffect(added),
+            ),
+          )
+        }),
+      ),
 
     agents: Effect.fn("Remote.agents")(function* (machine: string) {
       const link = yield* machines.link(machine)
@@ -234,10 +291,10 @@ const make = Effect.gen(function* () {
             )
           : undefined
 
-      const pin = Effect.fn("Remote.pin")(function* (path: string, remote: string | null | undefined) {
-        if (remote === null || remote === undefined)
+      const pin = Effect.fn("Remote.pin")(function* (path: string, remote: string | undefined) {
+        if (remote === undefined)
           return yield* new MachineFailed({
-            message: `${path} has no remote; another machine finds its checkout by the remote URL`,
+            message: `${path} has no remote with a network URL; another machine finds its checkout by the remote URL`,
           })
 
         const commit = yield* git
@@ -256,19 +313,26 @@ const make = Effect.gen(function* () {
         folders !== undefined && folders.length > 1
           ? {
               repositories: yield* Effect.forEach(folders, (folder) =>
-                git.originUrl(folder.path).pipe(
+                git.remoteUrl(folder.path).pipe(
                   Effect.flatMap((remote) => pin(folder.path, remote)),
                   Effect.map((entry) => ({ folder: folder.name, ...entry })),
                 ),
               ),
             }
           : child !== undefined
-            ? yield* pin(child.path, yield* git.originUrl(child.path))
+            ? yield* pin(child.path, yield* git.remoteUrl(child.path))
             : folders === undefined && repositories.length === 1 && only !== undefined
-              ? yield* pin(only.path, only.remote)
+              ? yield* pin(only.path, yield* git.remoteUrl(only.path))
               : yield* new MachineFailed({ message: "the project has no repository another machine can run in" })
 
-      if ("repositories" in sent && (yield* machines.link(machine)).capabilities.peerSpawnRepositories !== true)
+      const capabilities = (yield* machines.link(machine)).capabilities
+
+      if (input.project !== undefined && capabilities.peerSpawnProject !== true)
+        return yield* new MachineFailed({
+          message: `${machine} runs a vibest that does not take --project; run vibest update on ${machine}`,
+        })
+
+      if ("repositories" in sent && capabilities.peerSpawnRepositories !== true)
         return yield* new MachineFailed({
           message: `${machine} runs a vibest that does not take a project of several repositories; run vibest update on ${machine}`,
         })
@@ -285,6 +349,7 @@ const make = Effect.gen(function* () {
         client["Peer.Spawn"](
           {
             ...sent,
+            ...(input.project !== undefined && { project: input.project }),
             agent: input.agent,
             prompt: input.prompt,
             ...(input.harness !== undefined && { harness: input.harness }),
@@ -321,5 +386,15 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Db.node, Git.node, Machines.node, Runtimes.node, Identity.node, PlatformNode.fileSystem, PlatformNode.path],
+  deps: [
+    Db.node,
+    Git.node,
+    Machines.node,
+    Runtimes.node,
+    Identity.node,
+    PlatformNode.fileSystem,
+    PlatformNode.path,
+    PlatformNode.layout,
+    pluginLoaderNode,
+  ],
 })

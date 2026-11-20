@@ -162,6 +162,9 @@ interface Link {
   readonly call: <A, E>(
     effect: Effect.Effect<A, E | LineError>,
   ) => Effect.Effect<A, Exclude<E, LineError> | MachineUnavailable | MachineIncompatible>
+  readonly stream: <A, E>(
+    stream: Stream.Stream<A, E | LineError>,
+  ) => Stream.Stream<A, Exclude<E, LineError> | MachineUnavailable | MachineIncompatible>
   readonly exited: Effect.Effect<PipeExit>
   readonly capabilities: Readonly<Record<string, boolean>>
 }
@@ -317,27 +320,39 @@ const make = Effect.gen(function* () {
 
       const unavailable = (message: string) => Effect.fail(new MachineUnavailable({ machine: name, message }))
 
+      const recover =
+        (lost: (reason: string) => string) =>
+        (e: LineError): Effect.Effect<never, MachineUnavailable | MachineIncompatible> =>
+          Match.value(e).pipe(
+            Match.tagsExhaustive({
+              RpcClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              MachineDown: (e) => unavailable(lost(e.message)),
+              ProtocolRejected: (e) =>
+                Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` })),
+              DaemonStopping: (e) => unavailable(`${name}: ${e.message}`),
+              InvalidCaller: (e) => unavailable(`${name}: ${e.message}`),
+            }),
+          )
+
+      const gone = Effect.flatMap(ended, (reason) => Effect.fail(new MachineDown({ message: reason })))
+
       const line =
         (lost: (reason: string) => string) =>
         <A, E>(effect: Effect.Effect<A, E | LineError>) =>
-          Effect.catchIf(
-            Effect.raceFirst(
-              effect,
-              Effect.flatMap(ended, (reason) => Effect.fail(new MachineDown({ message: reason }))),
+          Effect.catchIf(Effect.raceFirst(effect, gone), isLineError, recover(lost))
+
+      const stream = <A, E>(s: Stream.Stream<A, E | LineError>) =>
+        s.pipe(
+          Stream.interruptWhen(gone),
+          Stream.catchIf(isLineError, (e) =>
+            Stream.fromEffect(
+              recover(
+                (reason) =>
+                  `lost the line to ${name} during the call (${reason}); it may have happened there; check, then retry`,
+              )(e),
             ),
-            isLineError,
-            (e): Effect.Effect<never, MachineUnavailable | MachineIncompatible> =>
-              Match.value(e).pipe(
-                Match.tagsExhaustive({
-                  RpcClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
-                  MachineDown: (e) => unavailable(lost(e.message)),
-                  ProtocolRejected: (e) =>
-                    Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` })),
-                  DaemonStopping: (e) => unavailable(`${name}: ${e.message}`),
-                  InvalidCaller: (e) => unavailable(`${name}: ${e.message}`),
-                }),
-              ),
-          )
+          ),
+        )
 
       const call = line(
         (reason) =>
@@ -365,7 +380,7 @@ const make = Effect.gen(function* () {
       return {
         hello,
         version: ping.version,
-        link: { client, call, exited: pipe.exited, capabilities: ping.capabilities ?? {} } satisfies Link,
+        link: { client, call, stream, exited: pipe.exited, capabilities: ping.capabilities ?? {} } satisfies Link,
       }
     })
 

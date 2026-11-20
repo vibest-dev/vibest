@@ -7,7 +7,10 @@ One machine's vibestd (A) can run agents on another machine (B) over ssh. Design
 
 `vibest machine add` records B, B records A as a peer, and a second name for the same B is refused. `vibest run
 --machine`, run by A's entry session, starts a session on B and none on A; A's entry session gets one message from `<machine>/<id>` with what the session sent, and nothing stays
-waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B.
+waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B. Each checkout is known by one remote, chosen the same way on
+both machines (the GitHub CLI default, then `upstream`, then `origin`, then the others by name; network URLs only),
+and the same repository matches across URL forms and ssh aliases for any host; a checkout with no such remote is refused
+naming it.
 
 ## M8. A remote execution end sends nothing
 
@@ -49,6 +52,20 @@ even when B keeps that checkout inside a project folder.
 
 A `vibest run --machine` from a project of several repositories to a B whose vibest does not take a repository list is
 refused on A with `run vibest update on <B>`; B starts nothing.
+
+## M13. Choosing B's project
+
+When B has several projects holding A's repositories, `vibest run --machine` is refused listing each with its id and
+folder and saying to pass `--project`. `vibest run --machine <B> --project <id, id prefix or folder name>` runs in
+that project, which must still hold exactly A's repositories at A's commits; another project's URL spelling does not
+affect it. A CLI whose local vibestd predates `--project` refuses it with `run vibest update` and B starts nothing.
+
+## M14. Cloning a project
+
+`vibest project clone <url> --machine <B>` clones the repository on B into B's `cloneDirectory` (from B's vibest.json,
+default `~/code`) under the repository name, or into `--dir`, shows git's progress, and prints the new project of B.
+Without `--machine` it clones here. The user or an agent may run it; vibest never clones by itself. A folder that is
+not empty is refused. It clones the default branch: a run on B still needs A's commit there.
 
 ## M9. Listing another machine's harnesses
 
