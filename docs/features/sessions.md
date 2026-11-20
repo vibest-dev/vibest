@@ -32,13 +32,6 @@ worktree go and the branch keeps them. `--keep-worktree` keeps a clean worktree 
 because another live session shares it (`--share`), or because some other process works in it, is named in the
 reasons, and the archive is still finished: the session counts as ended, and nothing about it comes back later.
 
-## S7. Archive on idle
-
-`vibest run --archive-on-idle` archives the session the first time it is idle after a completed execution with nothing it sent
-or was sent still waiting, and sends no notice for a clean archive. The builtin plugin `vibest.archive-on-idle` does that;
-`"-vibest.archive-on-idle"` in `vibest.json` removes it, and a session started with the flag then stays until `vibest archive`.
-`--archive-on-completion` is a usage error.
-
 ## S9. A limit on running harnesses
 
 `"concurrency": [{ "max": N }]` in `~/.vibest/vibest.json` lets at most N harness processes run at once on this
@@ -165,13 +158,13 @@ update` there.
 ## S67. Teams
 
 A team is a running group of sessions, as a session is a run of an agent definition: it has an id, not a name.
-`vibest run --team new` starts the session as the first member of a new team whose id vibest makes (`t-` and four hex
+`vibest run --new-team` starts the session as the first member of a new team whose id vibest makes (`t-` and four hex
 digits, unique in the project) and prints it with the session id: `{"id": …, "team": "t-3f2a"}`. `vibest run --team
-<team id>` adds the session to that team and prints the id too. Only the session that created the team may add members;
+<team id>` adds the session to that team and prints the id too; giving both flags is a usage error. Only the session that created the team may add members;
 any other session is refused with an error naming that session, and an id no team in this project has is refused; in both
-cases nothing starts. Two `--team new` always give two teams, whoever runs them. A session's team is set when it is
-created and never changes; a session started without `--team` is in no team, even when its creator is. `--team` with
-`--machine` is refused.
+cases nothing starts. Two `--new-team` always give two teams, whoever runs them. A session's team is set when it is
+created and never changes; a session started without `--team` or `--new-team` is in no team, even when its creator is. `--team` or `--new-team`
+with `--machine` is refused.
 
 Members of one team may `vibest send` to each other while they are unfinished (S46, S47 still refuse everyone else); a
 send to an archived teammate is refused and goes to no one else. Interrupt, peek and archive stay with the session that

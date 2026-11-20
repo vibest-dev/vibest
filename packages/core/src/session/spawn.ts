@@ -104,7 +104,6 @@ export interface SpawnInput {
   readonly env?: Record<string, string> | undefined
   readonly agent: string
   readonly share?: string | undefined
-  readonly archive?: boolean | undefined
   readonly runtime?: string | undefined
   readonly parentSessionId?: string | undefined
   readonly request?: string | undefined
@@ -465,7 +464,6 @@ export const make = Effect.gen(function* () {
                   parentSessionId: input.parentSessionId,
                   request: input.request,
                   origin: input.origin,
-                  archiveOnIdle: input.archive === true,
                   team: input.team,
                 })
 
@@ -482,7 +480,7 @@ export const make = Effect.gen(function* () {
 
                 if (Predicate.isObject(inserted) && "teamUnknown" in inserted)
                   return yield* new TeamRefused({
-                    message: `no team ${inserted.teamUnknown} in this project; start one with --team new`,
+                    message: `no team ${inserted.teamUnknown} in this project; start one with --new-team`,
                   })
 
                 if (inserted === "waiting") {

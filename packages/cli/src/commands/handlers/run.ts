@@ -15,6 +15,9 @@ export default Runtime.handler(Commands.commands.run, (o) =>
     const files = yield* readAttachments(o.file)
     const team = Option.getOrUndefined(o.team)
 
+    if (o.newTeam && team !== undefined)
+      return yield* new EmptyInput({ message: "give --new-team or --team <team id>, not both" })
+
     const spawned = yield* requested((client, request, ping) =>
       Effect.gen(function* () {
         if (Option.isSome(o.runtime) && ping.capabilities?.spawnRuntime !== true)
@@ -32,7 +35,7 @@ export default Runtime.handler(Commands.commands.run, (o) =>
             message: "this vibestd does not take --file on vibest run; run vibest update",
           })
 
-        if (team !== undefined && ping.capabilities?.teams !== true)
+        if ((team !== undefined || o.newTeam) && ping.capabilities?.teams !== true)
           return yield* new LaunchFailed({
             message: "this vibestd does not take --team on vibest run; run vibest update",
           })
@@ -56,7 +59,6 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           model: Option.getOrUndefined(o.model),
           env: Option.getOrUndefined(o.env),
           share: Option.getOrUndefined(o.share),
-          archive: o.archive || undefined,
           runtime: Option.getOrUndefined(o.runtime),
           machine: Option.getOrUndefined(o.machine),
           project: Option.getOrUndefined(o.project),
@@ -64,6 +66,7 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
           ...(files.length !== 0 && { files }),
           ...(team !== undefined && { team }),
+          ...(o.newTeam && { newTeam: true }),
         })
       }),
     )

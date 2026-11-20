@@ -127,12 +127,6 @@ const run = Spec.make("run", {
       ),
       Flag.optional,
     ),
-    archive: Flag.Boolean("archive-on-idle").pipe(
-      Flag.withDescription(
-        "Archive the session the first time it is idle after a completed execution, with nothing it sent or was sent still waiting. The branch is kept; a worktree goes only when git loses nothing",
-      ),
-      Flag.withDefault(false),
-    ),
     runtime: Flag.String("runtime").pipe(
       Flag.withDescription(
         "The terminal runtime for this session. Default: the --share session's, otherwise its parent's",
@@ -163,9 +157,15 @@ const run = Spec.make("run", {
       ),
       Flag.atLeast(0),
     ),
+    newTeam: Flag.Boolean("new-team").pipe(
+      Flag.withDescription(
+        "Start a new team with this session as its first member; its id (such as t-3f2a) is printed with the session id. Members may message each other; vibest ls --team lists them",
+      ),
+      Flag.withDefault(false),
+    ),
     team: Flag.String("team").pipe(
       Flag.withDescription(
-        "new: start a new team with this session as its first member (its id, such as t-3f2a, is printed with the session id); a team id: add this session to that team, which only the session that created it may do. Members may message each other; vibest ls --team lists them",
+        "Add this session to the team with this id (from --new-team); only the session that created the team may",
       ),
       Flag.optional,
     ),

@@ -1,29 +1,12 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { fromPromise } from "@vibest/plugin/promise/adapter"
 import { messageOf } from "@vibest/schema/error"
-import { UnknownFact } from "@vibest/schema/event"
 import { AgentRefused, type Change, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
-import {
-  Clock,
-  Config,
-  Context,
-  Duration,
-  Effect,
-  Exit,
-  Latch,
-  Layer,
-  Option,
-  Predicate,
-  Queue,
-  Scope,
-  Stream,
-} from "effect"
-import { SqlError } from "effect/sql"
+import { Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Predicate, Queue, Scope, Stream } from "effect"
 
 import { Agents } from "./agents.ts"
 import { Bus } from "./bus.ts"
 import { Concurrency } from "./concurrency.ts"
-import { DatabaseOpenFailed, SchemaMismatch } from "./database/db-schema.ts"
 import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -69,14 +52,9 @@ export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plug
   defaultValue: () => [],
 })
 
-const emptyBuiltins: Effect.Effect<
-  ReadonlyArray<Candidate>,
-  Config.ConfigError | DatabaseOpenFailed | SchemaMismatch | SqlError.SqlError | UnknownFact
-> = Effect.succeed([])
-
 export const builtinsNode = LayerNode.make({
   service: Builtins,
-  layer: Layer.effect(Builtins, emptyBuiltins),
+  layer: Layer.succeed(Builtins, []),
   deps: [],
 })
 

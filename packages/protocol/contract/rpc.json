@@ -1,5 +1,5 @@
 {
-  "protocol": 13,
+  "protocol": 14,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -14952,16 +14952,6 @@
               }
             ]
           },
-          "archive": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "runtime": {
             "anyOf": [
               {
@@ -15034,6 +15024,16 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "newTeam": {
+            "anyOf": [
+              {
+                "type": "boolean"
               },
               {
                 "type": "null"

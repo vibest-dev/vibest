@@ -187,7 +187,7 @@ so a repository cloned beside a running project is sent). A repository without a
 does not have the `peerSpawnRepositories` capability is refused on A for a multi-repository project ("<B> runs a
 vibest that does not take a project of several repositories; run vibest update on <B>"), never downgraded to one
 repository; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
-`--env`, `--share`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
+`--env`, `--share`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
 path), which means nothing on B. A sends a runtime kind instead. With `--runtime` it is that one; without it, the

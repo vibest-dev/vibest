@@ -116,9 +116,12 @@ export const make = Effect.gen(function* () {
         if (!Predicate.isTagged(c, "Session")) return yield* new NoCallingSession()
         const project = yield* projectOf(c, "Spawn")
 
-        if (input.machine !== undefined && input.team !== undefined)
+        if (input.newTeam === true && input.team !== undefined)
+          return yield* new Forbidden({ method: "Spawn", message: "give --new-team or --team <team id>, not both" })
+
+        if (input.machine !== undefined && (input.team !== undefined || input.newTeam === true))
           return yield* new MachineFailed({
-            message: "--team is not available with --machine yet; nothing was started",
+            message: "--team and --new-team are not available with --machine yet; nothing was started",
           })
 
         if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
@@ -141,17 +144,16 @@ export const make = Effect.gen(function* () {
             env: input.env,
             agent: input.agent,
             share: input.share === undefined ? undefined : yield* db.session.resolveSession(input.share),
-            archive: input.archive,
             runtime: input.runtime,
             parentSessionId: c.sessionId,
             request: input.request,
             files: input.files,
-            team: input.team === undefined ? undefined : input.team === "new" ? "new" : { join: input.team },
+            team: input.newTeam === true ? "new" : input.team === undefined ? undefined : { join: input.team },
           })
           .pipe(
             Effect.catchTag("TeamRefused", (e) => Effect.fail(new Forbidden({ method: "Spawn", message: e.message }))),
             Effect.flatMap((spawned) =>
-              input.team === undefined
+              input.team === undefined && input.newTeam !== true
                 ? Effect.succeed(spawned)
                 : Effect.map(db.session.sessionIdentity(spawned.id), (identity) => ({
                     ...spawned,

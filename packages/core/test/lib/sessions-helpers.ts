@@ -71,15 +71,12 @@ export const claudeEnd = (reason: string) =>
     last_assistant_message: "",
   })!.end
 
-export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { readonly archive?: boolean } = {}) =>
+export const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
     const db = yield* Db.Service
 
-    const { id } = yield* sessions.spawn({
-      ...(yield* spawnInput(repo, harness)),
-      ...(extra.archive && { archive: true }),
-    })
+    const { id } = yield* sessions.spawn(yield* spawnInput(repo, harness))
 
     yield* until(
       db.session.getSession(id),
@@ -93,10 +90,10 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { r
     return { id, row, sessions, db, entryId: yield* entryOfProject(repo) }
   })
 
-export const idleSession = (repo: string, extra: { readonly archive?: boolean } = {}) =>
+export const idleSession = (repo: string) =>
   Effect.gen(function* () {
     const herdr = yield* FakeRuntime
-    const w = yield* spawnWorking(repo, "pi", extra)
+    const w = yield* spawnWorking(repo, "pi")
     yield* herdr.endExecution(w.id)
     yield* writeEnd(w.id, "pi", { text: "status: completed" })
     yield* w.sessions.check(w.id)

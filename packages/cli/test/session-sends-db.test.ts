@@ -70,7 +70,7 @@ describe("sends from sessions", () => {
   )
 
   it.effect(
-    "--team new makes a fresh team id; only its creator adds members, an unknown id is refused, and only members of one team may send to each other",
+    "a new team gets a fresh team id; only its creator adds members, an unknown id is refused, and only members of one team may send to each other",
     () =>
       memory(
         Effect.gen(function* () {
