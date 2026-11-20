@@ -57,6 +57,13 @@ When B has several projects holding A's repositories, `vibest run --machine` is 
 folder and saying to pass `--project`. `vibest run --machine <B> --project <id, id prefix or folder name>` runs in
 that project, which must still hold exactly A's repositories at A's commits.
 
+## M14. Cloning a project
+
+`vibest project clone <url> --machine <B>` clones the repository on B into B's `cloneDirectory` (from B's vibest.json,
+default `~/code`) under the repository name, or into `--dir`, shows git's progress, and prints the new project of B.
+Without `--machine` it clones here. The user or an agent may run it; vibest never clones by itself. A folder that is
+not empty is refused. It clones the default branch: a run on B still needs A's commit there.
+
 ## M9. Listing another machine's harnesses
 
 `vibest harness ls --machine <name>` prints the harnesses of that machine in the shape of the local list, asked of that

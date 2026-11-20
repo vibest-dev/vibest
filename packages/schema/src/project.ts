@@ -18,6 +18,15 @@ export const ProjectActivity = Schema.Literals(["blocked", "done", "working", "i
 
 export type ProjectActivity = typeof ProjectActivity.Type
 
+export class ProjectCloneFailed extends Schema.TaggedError<ProjectCloneFailed>()("ProjectCloneFailed", {
+  message: Schema.String,
+}) {}
+
+export const CloneStep = Schema.Union([
+  Schema.Struct({ progress: Schema.String }),
+  Schema.Struct({ projectId: Schema.String, directory: Schema.String }),
+])
+
 export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
   message: Schema.String,
 }) {}

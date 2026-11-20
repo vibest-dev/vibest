@@ -1,7 +1,7 @@
 import { Git, GitError, type GitState } from "@vibest/core/git"
 import { parseRemote } from "@vibest/core/repository-url"
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, FileSystem, Layer, PlatformError } from "effect"
+import { Context, Effect, FileSystem, Layer, PlatformError, Stream } from "effect"
 
 export interface RepositoryFacts {
   readonly branch?: string
@@ -124,6 +124,7 @@ export class FakeGit extends Context.Service<
         currentBranch: (dir) => Effect.map(inRepository(["branch", "--show-current"], dir), branchOf),
         uncommitted: (dir) =>
           Effect.map(inRepository(["status"], dir), (found) => found.repository.facts.uncommitted ?? []),
+        clone: () => Stream.fail(new GitError({ args: ["clone"], message: "the fake git does not clone" })),
         copyRepository: ({ source, dest, branch, origin }) =>
           Effect.gen(function* () {
             const found = yield* inRepository(["clone"], source)

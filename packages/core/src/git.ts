@@ -1,7 +1,7 @@
 import { Host } from "@vibest/plugin/host"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect"
-import { ChildProcessSpawner } from "effect/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -40,6 +40,7 @@ export interface Interface {
   readonly currentBranch: (dir: string) => Effect.Effect<string, GitError>
   readonly uncommitted: (dir: string) => Effect.Effect<ReadonlyArray<string>, GitError>
   readonly copyRepository: (copy: RepositoryCopy) => Effect.Effect<void, GitError>
+  readonly clone: (url: string, dest: string) => Stream.Stream<string, GitError>
   readonly addWorktree: (root: string, path: string, commit?: string) => Effect.Effect<void, GitError>
   readonly head: (dir: string) => Effect.Effect<string, GitError>
   readonly hasCommit: (dir: string, commit: string) => Effect.Effect<boolean>
@@ -144,6 +145,35 @@ export const layer = Layer.effect(
           Effect.map((status) => status.split("\n").slice(1).filter(Boolean)),
         ),
       ),
+      clone: (url, dest) => {
+        const args = ["clone", "--progress", "--", url, dest]
+
+        return Stream.unwrap(
+          Effect.gen(function* () {
+            const handle = yield* spawner.spawn(
+              ChildProcess.make("git", args, { env: { GIT_TERMINAL_PROMPT: "0" }, extendEnv: true }),
+            )
+
+            let last = ""
+
+            const lines = Stream.decodeText(handle.stderr).pipe(
+              Stream.map((text) => text.replaceAll("\r", "\n")),
+              Stream.splitLines,
+              Stream.map((line) => line.trim()),
+              Stream.filter((line) => line !== ""),
+              Stream.tap((line) => Effect.sync(() => (last = line))),
+            )
+
+            const ended = Stream.unwrap(
+              Effect.map(handle.exitCode, (code) =>
+                code === 0 ? Stream.empty : Stream.fail(new GitError({ args, message: last || `exit ${code}` })),
+              ),
+            )
+
+            return Stream.concat(lines, ended)
+          }),
+        ).pipe(Stream.catchTag("PlatformError", (e) => Stream.fail(new GitError({ args, message: e.message }))))
+      },
       copyRepository: Effect.fn("Git.copyRepository")(function* ({ source, dest, branch, origin }) {
         yield* git(source, "clone", "--quiet", "--no-hardlinks", "--branch", branch, "--", source, dest)
         yield* git(dest, "remote", "remove", "origin")

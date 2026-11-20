@@ -125,6 +125,21 @@ rows.
 `List`, `Get`, `Send`, `Interrupt`, `Remove` and `Peek` from a peer resolve a session id only among sessions whose
 origin has that peer and that project; any other session is `NoSuchSession`.
 
+## Cloning a project
+
+`vibest project clone <url> [--machine <B>] [--dir <folder>]` (`Project.Clone`, the user or a session; a peer for its
+own machine only) clones a repository and records it as a project, and is the only way vibest clones: `vibest run`
+never clones, fetches or pulls. Without `--machine` it runs in this vibestd; with it, A forwards the call to B over
+the machine's connection (a B without the `projectClone` capability is refused, "run vibest update on <B>"). The
+machine that clones picks the folder: `--dir` (relative to its clone base, or absolute; the CLI makes a local one
+absolute against its own directory), otherwise the repository name (the last path segment of the URL without `.git`)
+under its clone base. The clone base is `cloneDirectory` in that machine's `vibest.json` (absolute or `~/…`),
+default `~/code`. A folder that exists and is not empty is refused before git runs. It runs `git clone --progress --
+<url> <folder>` (any URL git takes: ssh, https, git, any host; no terminal prompt), so it checks out the default
+branch, then records the folder as a project as `vibest project add` does. `Project.Clone` streams git's progress
+lines and ends with `{ projectId, directory }`; the CLI prints the lines on stderr and the result as JSON. A run on
+B still pins A's commit and refuses when the clone does not have it.
+
 ## Repository identity
 
 Which remote a checkout is known by is chosen the same way on both machines (`Git.remoteUrl`, `fetchRemote` in

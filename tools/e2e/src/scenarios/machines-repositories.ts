@@ -174,6 +174,79 @@ const checks: ReadonlyArray<Check> = [
       }
     },
   },
+  {
+    id: "M14",
+    title:
+      "vibest project clone --machine clones a repository served over git:// into B's cloneDirectory, prints git's progress and the new project of B; a second clone into the same folder, asked by an agent, is refused as not empty; without --machine it clones here into --dir",
+    run: async (w) => {
+      let s: Setup | undefined
+      let daemon: ReturnType<typeof Bun.spawn> | undefined
+
+      try {
+        s = await setup(w)
+        const served = path.join(w.root, "served")
+        await fs.mkdir(served)
+        await git(w, w.root, "clone", "-q", "--bare", w.origin, path.join(served, "tools.git"))
+        const probe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() })
+        const port = probe.port
+        probe.stop(true)
+        daemon = Bun.spawn(
+          [
+            "git",
+            "daemon",
+            "--reuseaddr",
+            "--export-all",
+            `--base-path=${served}`,
+            "--listen=127.0.0.1",
+            `--port=${port}`,
+            served,
+          ],
+          { stdout: "ignore", stderr: "ignore" },
+        )
+        const url = `git://127.0.0.1:${port}/tools.git`
+        await until(
+          "git daemon serves",
+          async () => (await w.run(w.root, ["git", "ls-remote", url])).code === 0,
+          15_000,
+        )
+
+        const clones = path.join(s.b, "clones")
+        await fs.writeFile(path.join(s.bEnv.VIBEST_HOME, "vibest.json"), JSON.stringify({ cloneDirectory: clones }))
+        await s.okA(["machine", "add", "mb", "b-host"])
+        const cloned = await s.onA(["project", "clone", url, "--machine", "mb"])
+        expect(cloned.code === 0, `project clone --machine mb: ${cloned.stderr}${cloned.stdout}`)
+        const added = JSON.parse(cloned.stdout) as { projectId: string; directory: string; machine: string }
+        const there = path.join(await fs.realpath(clones), "tools")
+        expect(
+          added.machine === "mb" && added.directory === there && cloned.stderr.includes(`cloning ${url}`),
+          `project clone printed ${cloned.stdout} and ${cloned.stderr}`,
+        )
+        const recorded = s.bDb<{ directory: string }>("SELECT directory FROM project WHERE id = ?", added.projectId)
+        expect(recorded?.directory === there, `B's project row: ${JSON.stringify(recorded)}`)
+        expect(
+          (await git(w, there, "rev-parse", "HEAD")) === (await git(w, w.repository, "rev-parse", "origin/main")),
+          "B's clone is at the default branch",
+        )
+
+        const again = await w.viaEntry(["project", "clone", url, "--machine", "mb"], { env: s.aEnv, asIs: true })
+        expect(
+          again.code !== 0 && again.stderr.includes(`${path.join(clones, "tools")} is not empty`),
+          `second clone: ${again.stderr}`,
+        )
+
+        const here = path.join(w.root, "here-tools")
+        const local = await s.onA(["project", "clone", url, "--dir", here])
+        expect(local.code === 0, `project clone --dir: ${local.stderr}${local.stdout}`)
+        expect(
+          (JSON.parse(local.stdout) as { directory: string }).directory === (await fs.realpath(here)),
+          `local clone: ${local.stdout}`,
+        )
+      } finally {
+        daemon?.kill()
+        await s?.stop()
+      }
+    },
+  },
 ]
 
 export default checks

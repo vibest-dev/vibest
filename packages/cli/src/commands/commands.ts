@@ -299,6 +299,23 @@ const project = Spec.make("project", {
         ),
       },
     }),
+    Spec.make("clone", {
+      description:
+        "Clone a git repository (any URL: ssh or https, any host) and record it as a project, here or with --machine on another machine; it clones the default branch, and vibest run --machine still needs the exact commit there. The folder is --dir, or the repository name under cloneDirectory in vibest.json (default ~/code) of the machine that clones; a folder that is not empty is refused. Prints git's progress on stderr, then the project id and folder",
+      params: {
+        url: Argument.String("url"),
+        machine: Flag.String("machine").pipe(
+          Flag.withDescription("Clone on this machine (vibest machine ls) instead of here"),
+          Flag.optional,
+        ),
+        dir: Flag.String("dir").pipe(
+          Flag.withDescription(
+            "The folder to clone into; with --machine a relative folder is under that machine's cloneDirectory",
+          ),
+          Flag.optional,
+        ),
+      },
+    }),
     Spec.make("add", {
       description:
         "Record a checkout as a project without starting an entry session, so another machine's vibestd can run agents in it",
