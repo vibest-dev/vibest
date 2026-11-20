@@ -6,6 +6,7 @@ import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
+import { Starts } from "@vibest/core/session/starts"
 import { Caller, type CallerIdentity, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import type { AgentFrom, AgentSender } from "@vibest/schema/event"
 import { MachineFailed } from "@vibest/schema/machine"
@@ -31,6 +32,7 @@ export const make = Effect.gen(function* () {
   const watchFeed = yield* WatchFeed.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
+  const starts = yield* Starts.Service
   const seenLocked = yield* KeyedMutex.make<string>()
 
   const peerSender = (caller: Extract<CallerIdentity, { readonly _tag: "Peer" }>, from: AgentFrom | undefined) =>
@@ -201,7 +203,12 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const id = yield* db.session.resolveSession(input, (yield* reach("Get")).scope)
           const row = yield* sessions.get(id)
-          const session = Listing.toInfo(row, (yield* db.session.sessionBriefs([id])).get(id))
+
+          const session = Listing.toInfo(
+            row,
+            (yield* db.session.sessionBriefs([id])).get(id),
+            (yield* starts.choices).get(id),
+          )
 
           return {
             ...session,

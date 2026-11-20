@@ -146,7 +146,7 @@ _Workers cannot escape their role._
 
 - A worker running `vibest run` or `vibest archive`, or reading another Project's folder, is refused by the guard in
   its own CLI (Claude, Pi, Cursor each); its own project folder it reads and writes with its file tools.
-- `VIBEST_MAX_SESSIONS=2`: the third `run` gets `LimitReached`.
+- `"concurrency": [{ "max": 2 }]` in `vibest.json` with the entry session running: a second subagent waits to start until the first one is archived.
 - Typing into a worker's pane by hand works and does not interrupt the main conversation.
 
 Status: now.
