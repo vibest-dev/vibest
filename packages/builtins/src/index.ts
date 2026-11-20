@@ -18,7 +18,7 @@ export interface Builtin {
   readonly options: Schema.JsonObject
   readonly plugin: Plugin.Plugin
   readonly optional?: boolean
-  readonly revise?: Effect.Effect<string>
+  readonly revise?: Effect.Effect<{ readonly revision: string; readonly plugin: Plugin.Plugin }>
 }
 
 const builtin = (plugin: Plugin.Plugin): Builtin => ({
@@ -48,7 +48,7 @@ export const pre = (home: string) =>
       builtin(choicePlugin()),
       builtin(archiveOnIdle),
       builtin(harnessDefaultPlugin()),
-      { ...builtin(agentFiles.plugin), revise: agentFiles.revision },
+      { ...builtin(agentFiles.plugin), revise: agentFiles.revise },
       { ...builtin(reportReminder), optional: true },
     ]
   })

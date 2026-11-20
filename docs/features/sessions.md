@@ -84,7 +84,8 @@ A user defines an agent with one Markdown file, `~/.vibest/agents/<id>.md`: the 
 digits and `-`, starting with a letter, at most 32 characters), the frontmatter holds `description` (required) and
 optionally `name` (equal to the file name), `extends`, `harness`, `provider` and `model`, and the text after it is the
 prompt. With `extends: <id>` the prompt is that definition's prompt, a blank line, then the file's, and that
-definition's guard applies; only one level (a file named by `extends` may itself extend only the builtin of its own id).
+definition's guard applies. `extends` looks at the agents registered before the files (the builtins and nothing a
+config removed) and at the other files, one level only: a file named by `extends` must not extend anything itself.
 
 ```markdown
 ---
@@ -105,11 +106,13 @@ definition with its whole prompt. A session takes an edited file at its next pro
 
 ## S61. An invalid agent file
 
-A file that breaks a rule (a bad file name, an unknown or repeated key, no description, an empty prompt, `provider` or
-`model` without `harness`, `name` unlike the file name, an `extends` that names nothing or goes two levels deep)
-registers nothing and is reported, never dropped: under `invalid` in `vibest agent list` with its path and error, in
-`vibest doctor` with the fix, and by `vibest run --agent <id>`, which is refused with that error. The other files still
-load.
+A file that breaks a rule (a bad file name, an unknown or repeated key, no or a blank description, an empty prompt,
+`provider` or `model` without `harness`, `name` unlike the file name, an `extends` that names nothing, an invalid file
+or goes two levels deep) registers nothing and is reported, never dropped: under `invalid` in `vibest agent list` with its path and error, in
+`vibest doctor` with the fix, and by `vibest run --agent <id>`, which is refused with that error. An invalid file whose id is a builtin's (`general.md`)
+does not fall back to the builtin: starts of that agent, a plain `vibest run` included, are refused with the file's error
+until it is fixed or removed. A folder that cannot be read is reported the same way, with the agents it last read kept.
+The other files still load. Agents cannot read or change the folder; they use `vibest agent list` and `show`.
 
 ## S62. An agent's own harness
 

@@ -42,14 +42,22 @@ interface State {
 const editorFor = (state: State, plugin: string) => {
   const definitions = Registry.listEditor(state.definitions)
 
+  const reject = (agent: InvalidAgent) => {
+    const masked = state.definitions.findIndex((definition) => definition.id === agent.id)
+
+    if (masked >= 0) state.definitions.splice(masked, 1)
+    state.invalid.push({ ...agent, plugin })
+  }
+
   return {
     add: (definition: AgentDefinition) => {
       const problem = agentProblem(definition)
 
       if (problem === undefined) definitions.add({ ...definition, plugin })
-      else state.invalid.push({ id: definition.id, source: plugin, error: problem, plugin })
+      else reject({ id: definition.id, source: plugin, error: problem })
     },
-    invalid: (agent: InvalidAgent) => void state.invalid.push({ ...agent, plugin }),
+    invalid: reject,
+    get: (id: string) => state.definitions.find((definition) => definition.id === id),
   }
 }
 

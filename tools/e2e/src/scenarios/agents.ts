@@ -8,7 +8,7 @@ import { piShadow } from "../world/shadow.ts"
 
 type Listed = {
   agents: Array<{ id: string; description: string; plugin: string; harness?: string }>
-  invalid: Array<{ id: string; source: string; error: string; plugin: string }>
+  invalid: Array<{ id?: string; source: string; error: string; plugin: string }>
 }
 
 type Entry = {
@@ -103,6 +103,106 @@ export default Plugin.define({
 })
 `
 
+const showSystem = async (w: World, id: string) =>
+  (JSON.parse((await w.vibest(["agent", "show", id])).stdout || "{}") as { system?: string }).system
+
+const blockingObserver = (dir: string) => `import fs from "node:fs"
+import { Effect } from "effect"
+import { Plugin } from "@vibest/plugin/effect"
+const dir = ${JSON.stringify(dir)}
+export default Plugin.define({
+  id: "slow-teardown",
+  effect: () =>
+    Effect.gen(function* () {
+      fs.appendFileSync(dir + "/ready", "1")
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          fs.writeFileSync(dir + "/closing", "1")
+          while (!fs.existsSync(dir + "/continue")) yield* Effect.sleep("10 millis")
+        }),
+      )
+    }),
+})
+`
+
+const registersWhatIsOnDisk = async (w: World) => {
+  const dir = path.join(w.root, "slow-teardown")
+  await fs.mkdir(dir, { recursive: true })
+  const prompt = (text: string) => writeAgent(w, "racer.md", `---\ndescription: races\n---\n${text}\n`)
+  await prompt("OLD")
+  await fs.mkdir(path.join(w.vibestHome, "plugins"), { recursive: true })
+  await fs.writeFile(path.join(w.vibestHome, "plugins", "slow-teardown.ts"), blockingObserver(dir))
+  const readyCount = async () => (await fs.readFile(path.join(dir, "ready"), "utf8").catch(() => "")).length
+  await until("the slow plugin active", async () => (await readyCount()) >= 1, 30_000)
+  await until("racer listed", async () => (await showSystem(w, "racer")) === "OLD", 20_000)
+  await prompt("A")
+  await until("the slow plugin closing", () => Bun.file(path.join(dir, "closing")).exists(), 20_000)
+  await prompt("B")
+  await fs.writeFile(path.join(dir, "continue"), "")
+  await until("the slow plugin active again", async () => (await readyCount()) >= 2, 20_000)
+  await prompt("A")
+  await until("the registered prompt is the file's A", async () => (await showSystem(w, "racer")) === "A", 20_000)
+}
+
+const invalidOverrideRefuses = async (w: World) => {
+  const file = await writeAgent(w, "general.md", "---\ndescription: typo in my general\ncolour: red\n---\nMine.\n")
+  await listed(
+    w,
+    "general invalid and not listed",
+    (l) => l.invalid.some((a) => a.id === "general") && l.agents.every((a) => a.id !== "general"),
+  )
+  const show = await w.vibest(["agent", "show", "general"])
+  expect(show.code !== 0 && /general is invalid/.test(show.stderr + show.stdout), `show general: ${show.stdout}`)
+  const plain = await w.viaEntry(["run", "pi", "--", ask("plaingone")])
+  expect(
+    plain.code !== 0 && plain.stdout.includes("general is invalid") && plain.stdout.includes("colour"),
+    `a plain run with an invalid general.md: ${plain.code} ${plain.stdout}`,
+  )
+  await fs.rm(file)
+  await listed(w, "builtin general back", (l) => l.agents.some((a) => a.id === "general"))
+}
+
+const invalidBaseInvalidatesChild = async (w: World) => {
+  const base = await writeAgent(w, "base.md", '---\ndescription: " "\n---\nBase.\n')
+  const child = await writeAgent(w, "child.md", "---\ndescription: valid child\nextends: base\n---\nChild.\n")
+  await listed(
+    w,
+    "base and child invalid with their paths",
+    (l) =>
+      l.invalid.some((a) => a.id === "base" && a.source === base) &&
+      l.invalid.some((a) => a.id === "child" && a.source === child) &&
+      l.agents.every((a) => a.id !== "child"),
+  )
+  await Promise.all([fs.rm(base), fs.rm(child)])
+}
+
+const unreadableFolderReported = async (w: World) => {
+  const folder = path.join(w.vibestHome, "agents")
+  await fs.chmod(folder, 0o000)
+
+  try {
+    await listed(
+      w,
+      "the unreadable folder reported, its agents kept",
+      (l) => l.invalid.some((a) => a.source === folder) && l.agents.some((a) => a.id === "fine"),
+    )
+  } finally {
+    await fs.chmod(folder, 0o755)
+  }
+}
+
+const extendsOnlyRegistered = async (w: World) => {
+  await writeAgent(w, "extender.md", "---\ndescription: extends general\nextends: general\n---\nMore.\n")
+  await listed(w, "extender listed", (l) => l.agents.some((a) => a.id === "extender"))
+  await fs.writeFile(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: ["-vibest.agent"] }))
+  await listed(
+    w,
+    "extender invalid once general is not registered",
+    (l) =>
+      l.agents.every((a) => a.id !== "general" && a.id !== "extender") && l.invalid.some((a) => a.id === "extender"),
+  )
+}
+
 const checks: ReadonlyArray<Check> = [
   {
     id: "S60",
@@ -133,6 +233,7 @@ const checks: ReadonlyArray<Check> = [
         expect(system.includes("reviewer (reviews a change for real bugs)"), "the session facts do not list reviewer")
         await fs.rm(file)
         await listed(w, "reviewer gone", (l) => l.agents.every((a) => a.id !== "reviewer"))
+        await registersWhatIsOnDisk(w)
       } finally {
         model.stop()
       }
@@ -175,6 +276,10 @@ const checks: ReadonlyArray<Check> = [
         const id = await runId(w, ["--agent", "fine", "pi", "--", ask("fine")])
         await resultOf(w, id, "fine")
         expect((model.systemOf("fine") ?? "").includes("FINE-MARK"), "fine's prompt")
+        await invalidOverrideRefuses(w)
+        await invalidBaseInvalidatesChild(w)
+        await unreadableFolderReported(w)
+        await extendsOnlyRegistered(w)
       } finally {
         model.stop()
       }

@@ -5,7 +5,9 @@ import { coordinator, general } from "../src/agent.ts"
 
 const file = (name: string, text: string | undefined) => ({ name, path: `/home/agents/${name}`, text })
 
-const read = (...files: ReadonlyArray<ReturnType<typeof file>>) => agentsFrom(files, [coordinator, general])
+const registered = (id: string) => [coordinator, general].find((definition) => definition.id === id)
+
+const read = (...files: ReadonlyArray<ReturnType<typeof file>>) => agentsFrom(files, registered)
 
 const errorOf = (result: ReturnType<typeof read>, id: string) => result.invalid.find((agent) => agent.id === id)?.error
 
@@ -53,6 +55,17 @@ describe("agent files", () => {
     assert.strictEqual(result.invalid.find((agent) => agent.id === "color")?.source, "/home/agents/color.md")
   })
 
+  it("a base whose quoted description is blank is invalid, and so is its child", () => {
+    const result = read(
+      file("base.md", '---\ndescription: " "\n---\nBase.'),
+      file("child.md", "---\ndescription: c\nextends: base\n---\nChild."),
+    )
+
+    assert.deepStrictEqual(result.definitions, [])
+    assert.include(errorOf(result, "base"), "description is empty")
+    assert.include(errorOf(result, "child"), "invalid")
+  })
+
   it("extends puts the extended prompt first and keeps its guard, one level only", () => {
     const result = read(
       file("general.md", "---\ndescription: mine\nextends: general\n---\nAlso this."),
@@ -67,11 +80,21 @@ describe("agent files", () => {
     const find = (id: string) => result.definitions.find((definition) => definition.id === id)
     assert.strictEqual(find("general")?.system, `${general.system}\n\nAlso this.`)
     assert.strictEqual(find("general")?.guard, general.guard)
-    assert.strictEqual(find("reviewer")?.system, `${general.system}\n\nAlso this.\n\nReview.`)
+    assert.include(errorOf(result, "reviewer"), "only one level")
     assert.strictEqual(find("child")?.system, "Base.\n\nChild.")
     assert.isUndefined(find("child")?.guard)
     assert.include(errorOf(result, "grandchild"), "only one level")
-    assert.include(errorOf(result, "nothing"), "no agent has that id")
-    assert.include(errorOf(result, "self"), "no built-in agent")
+    assert.include(errorOf(result, "nothing"), "no registered agent has that id")
+    assert.include(errorOf(result, "self"), "no registered agent")
+  })
+
+  it("extends looks only at the agents registered before the files", () => {
+    const result = agentsFrom(
+      [file("reviewer.md", "---\ndescription: r\nextends: general\n---\nReview.")],
+      () => undefined,
+    )
+
+    assert.deepStrictEqual(result.definitions, [])
+    assert.include(errorOf(result, "reviewer"), "no registered agent has that id")
   })
 })

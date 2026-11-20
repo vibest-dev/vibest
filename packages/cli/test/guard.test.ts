@@ -425,6 +425,12 @@ layer(
         ] as const)
           assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
 
+        const agentFiles = path.join(vibestHome, "agents")
+        yield* fs.makeDirectory(agentFiles)
+
+        for (const [tool, input] of calls(agentFiles, path.join(agentFiles, "general.md")))
+          assert.match((yield* asSession(tool, input)) ?? "", /agents folder/, `${tool} ${JSON.stringify(input)}`)
+
         for (const [tool, input] of calls(own, path.join(own, "notes.md")))
           assert.strictEqual(yield* asSession(tool, input, null), offLimits, `no project folder: ${tool}`)
         assert.strictEqual(yield* asSession("Read", { file_path: "link/x.md" }, null), offLimits)

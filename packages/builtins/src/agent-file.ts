@@ -74,7 +74,9 @@ const parse = (file: AgentFile): Parsed | Failed => {
   if (fields.name !== undefined && fields.name !== id)
     return failed(`name ${fields.name} differs from the file name ${id}`)
 
-  if (!fields.description) return failed("description is missing")
+  if (fields.description === undefined) return failed("description is missing")
+
+  if (fields.description.trim() === "") return failed("description is empty")
 
   if (fields.harness === undefined && (fields.provider !== undefined || fields.model !== undefined))
     return failed("provider and model need harness")
@@ -93,10 +95,10 @@ const launchFields = ({ fields }: Parsed) => ({
   ...(fields.model !== undefined && { model: fields.model }),
 })
 
-const extendsOnlyItsBuiltin = (parsed: Parsed) =>
-  parsed.fields.extends === undefined || parsed.fields.extends === parsed.id
-
-export const agentsFrom = (files: ReadonlyArray<AgentFile>, builtins: ReadonlyArray<AgentDefinition>) => {
+export const agentsFrom = (
+  files: ReadonlyArray<AgentFile>,
+  registered: (id: string) => AgentDefinition | undefined,
+) => {
   const parsed = files.map((file) => ({ file, result: parse(file) }))
   const valid = new Map<string, Parsed>()
   const invalidIds = new Set<string>()
@@ -104,8 +106,6 @@ export const agentsFrom = (files: ReadonlyArray<AgentFile>, builtins: ReadonlyAr
   for (const { result, file } of parsed)
     if ("error" in result) invalidIds.add(idOf(file))
     else valid.set(result.id, result)
-
-  const builtin = (id: string) => builtins.find((definition) => definition.id === id)
 
   const plain = (agent: Parsed): AgentDefinition => ({
     id: agent.id,
@@ -120,32 +120,22 @@ export const agentsFrom = (files: ReadonlyArray<AgentFile>, builtins: ReadonlyAr
     ...(base.guard !== undefined && { guard: base.guard }),
   })
 
-  const ownBuiltin = (agent: Parsed): AgentDefinition | Failed => {
-    const base = builtin(agent.id)
-
-    return base === undefined ? failed(`extends ${agent.id}, but no built-in agent has that id`) : on(agent, base)
-  }
-
   const resolve = (agent: Parsed): AgentDefinition | Failed => {
     const target = agent.fields.extends
 
     if (target === undefined) return plain(agent)
 
-    if (target === agent.id) return ownBuiltin(agent)
-    const file = valid.get(target)
+    const file = target === agent.id ? undefined : valid.get(target)
 
-    if (file !== undefined) {
-      if (!extendsOnlyItsBuiltin(file))
-        return failed(`extends ${target}, which itself extends ${file.fields.extends}; only one level is allowed`)
-      const base = file.fields.extends === undefined ? plain(file) : ownBuiltin(file)
+    if (file !== undefined)
+      return file.fields.extends === undefined
+        ? on(agent, plain(file))
+        : failed(`extends ${target}, which itself extends ${file.fields.extends}; only one level is allowed`)
 
-      return "error" in base ? failed(`extends ${target}, which is invalid: ${base.error}`) : on(agent, base)
-    }
+    if (target !== agent.id && invalidIds.has(target)) return failed(`extends ${target}, which is invalid`)
+    const base = registered(target)
 
-    if (invalidIds.has(target)) return failed(`extends ${target}, which is invalid`)
-    const base = builtin(target)
-
-    return base === undefined ? failed(`extends ${target}, but no agent has that id`) : on(agent, base)
+    return base === undefined ? failed(`extends ${target}, but no registered agent has that id`) : on(agent, base)
   }
 
   const definitions: Array<AgentDefinition> = []

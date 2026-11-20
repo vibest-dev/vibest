@@ -121,7 +121,7 @@ export interface AgentDefinition {
 }
 
 export interface InvalidAgent {
-  readonly id: string
+  readonly id?: string
   readonly source: string
   readonly error: string
 }
@@ -129,6 +129,7 @@ export interface InvalidAgent {
 export interface AgentEditor {
   add(definition: AgentDefinition): void
   invalid(agent: InvalidAgent): void
+  get(id: string): AgentDefinition | undefined
 }
 
 export interface MachineHooks {

@@ -934,4 +934,5 @@ export const CAPABILITIES = {
   spawnRuntime: true,
   spawnFiles: true,
   peerSpawnFiles: true,
+  agents: true,
 } as const

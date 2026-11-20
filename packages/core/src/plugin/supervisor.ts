@@ -22,7 +22,7 @@ const matches = (selector: string, id: string) =>
 const revised = (candidate: Candidate) =>
   candidate.revise === undefined
     ? Effect.succeed(candidate)
-    : Effect.map(candidate.revise, (revision) => ({ ...candidate, revision }))
+    : Effect.map(candidate.revise, (fresh) => ({ ...candidate, ...fresh }))
 
 const isBuiltin = (candidate: Candidate) => candidate.source.startsWith("builtin:")
 

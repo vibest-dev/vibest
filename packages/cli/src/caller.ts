@@ -33,8 +33,13 @@ export const userOnly = (command: string) =>
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 export const json = <A>(value: A) => Console.log(encodeJson(value))
 
-export const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
-  Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))
+export const vibest = <A, E, R>(
+  f: (
+    client: VibestClient,
+    agent: boolean,
+    ping: Parameters<Parameters<typeof withVibest>[1]>[1],
+  ) => Effect.Effect<A, E, R>,
+) => Effect.flatMap(caller, (c) => withVibest(c.claim, (client, ping) => f(client, c.agent, ping), { start: !c.agent }))
 
 export const titled = <S extends { readonly name: string }>({ name, ...rest }: S) => ({ title: name, ...rest })
 

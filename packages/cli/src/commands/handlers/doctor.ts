@@ -158,7 +158,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
             { mark: "ok", text: listing.agents.map((agent) => agent.id).join(", ") },
             ...listing.invalid.map((agent): Finding => ({
               mark: "problem",
-              text: `${agent.id}: ${agent.error}`,
+              text: `${agent.id ?? agent.source}: ${agent.error}`,
               fix: `fix or remove ${agent.source}`,
             })),
           ],

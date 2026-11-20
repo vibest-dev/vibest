@@ -85,6 +85,9 @@ export default Runtime.handler(Commands, (o) =>
       Effect.gen(function* () {
         yield* noticeFrom(Effect.succeed(Option.some(ping)))
 
+        if (agentNamed && ping.capabilities?.agents !== true)
+          return yield* new LaunchFailed({ message: "this vibestd does not take --agent; run vibest update" })
+
         const [, placed] = yield* Effect.all(
           [
             client["Project.Open"]({}),

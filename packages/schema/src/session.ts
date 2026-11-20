@@ -211,7 +211,12 @@ export const AgentListing = Schema.Struct({
     }),
   ),
   invalid: Schema.Array(
-    Schema.Struct({ id: Schema.String, source: Schema.String, error: Schema.String, plugin: Schema.String }),
+    Schema.Struct({
+      id: Schema.optional(Schema.String),
+      source: Schema.String,
+      error: Schema.String,
+      plugin: Schema.String,
+    }),
   ),
 })
 
