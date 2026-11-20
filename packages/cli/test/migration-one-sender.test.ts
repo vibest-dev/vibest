@@ -105,21 +105,32 @@ const catalog2 = (ledger: string): ReadonlyArray<Fact> => [
 ]
 
 const rewritten = {
-  [`${S} 2`]: { kind: "task", content: "do it", status: "delivered", sender: { session: E } },
+  [`${S} 2`]: { kind: "task", content: "do it", status: "delivered", sender: { type: "agent", session: E } },
   [`${E} 2`]: {
     kind: "send",
     content: "done",
     status: "pending",
-    sender: { session: S, agent: "general", title: "sub" },
+    sender: { type: "agent", session: S, agent: "general", title: "sub" },
     execution: 3,
   },
-  [`${E} 3`]: { kind: "notice", content: "sub archived", status: "pending", sender: "vibest", about: S },
-  [`${E} 4`]: { kind: "send", content: "later", status: "pending", sender: { session: S } },
-  [`${S} 5`]: { kind: "send", content: "typed by the user", status: "pending", sender: "user" },
-  [`${R} 2`]: { kind: "task", content: "remote task", status: "pending", sender: { session: "far", machine: "box" } },
-  [`${E} 5`]: { kind: "notice", content: "far ended", status: "pending", peerItem: "item-1", sender: "vibest" },
-  [`${S} 6`]: { kind: "send", content: "q", status: "dropped", request: "q1", sender: { session: E } },
-  [`${R} 3`]: { kind: "send", content: "q", status: "pending", sender: { session: E } },
+  [`${E} 3`]: { kind: "notice", content: "sub archived", status: "pending", sender: { type: "vibest" }, about: S },
+  [`${E} 4`]: { kind: "send", content: "later", status: "pending", sender: { type: "agent", session: S } },
+  [`${S} 5`]: { kind: "send", content: "typed by the user", status: "pending", sender: { type: "user" } },
+  [`${R} 2`]: {
+    kind: "task",
+    content: "remote task",
+    status: "pending",
+    sender: { type: "agent", session: "far", machine: "box" },
+  },
+  [`${E} 5`]: {
+    kind: "notice",
+    content: "far ended",
+    status: "pending",
+    peerItem: "item-1",
+    sender: { type: "vibest" },
+  },
+  [`${S} 6`]: { kind: "send", content: "q", status: "dropped", request: "q1", sender: { type: "agent", session: E } },
+  [`${R} 3`]: { kind: "send", content: "q", status: "pending", sender: { type: "agent", session: E } },
 }
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))

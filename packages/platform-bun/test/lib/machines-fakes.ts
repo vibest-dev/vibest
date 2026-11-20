@@ -1,6 +1,7 @@
 import { cliHeaders, connect } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
+import { senderOfRow, type SenderSql } from "@vibest/core/database/db-rows"
 import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import type { SpawnInput, Session } from "@vibest/core/session"
@@ -252,14 +253,15 @@ export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: Te
     return { net, a, b, entryId, asEntry }
   })
 
-const decodeSender = Schema.decodeUnknownSync(Schema.fromJsonString(Sender))
+const decodeSender = Schema.decodeUnknownSync(Sender)
 
-export const sendersTo = (recipient: string) =>
+export const sendersTo = (recipient: string, kind = "send") =>
   Effect.flatMap(
     SqlClient.SqlClient,
     (sql) =>
-      sql<{ sender: string }>`SELECT sender FROM inbox WHERE session_id = ${recipient} AND kind = 'send' ORDER BY id`,
-  ).pipe(Effect.map((rows) => rows.map((row) => decodeSender(row.sender))))
+      sql<SenderSql>`SELECT sender_type, sender_session_id, sender_agent, sender_title, sender_machine, sender_plugin
+        FROM inbox WHERE session_id = ${recipient} AND kind = ${kind} ORDER BY id`,
+  ).pipe(Effect.map((rows) => rows.map((row) => decodeSender(senderOfRow(row)))))
 
 export const inboxOf = (recipient: string) =>
   Effect.flatMap(

@@ -109,18 +109,27 @@ export const InboxKind = Schema.Literals(["task", "send", "notice"])
 
 export type InboxKind = typeof InboxKind.Type
 
-export const AgentSender = Schema.Struct({
+export const AgentFrom = Schema.Struct({
   session: Schema.String,
   agent: optional(Schema.String),
   title: optional(Schema.String),
   machine: optional(Schema.String),
 })
 
+export type AgentFrom = typeof AgentFrom.Type
+
+export const AgentSender = Schema.Struct({ type: Schema.Literal("agent"), ...AgentFrom.fields })
+
 export type AgentSender = typeof AgentSender.Type
 
-export const PluginSender = Schema.Struct({ plugin: Text })
+export const PluginSender = Schema.Struct({ type: Schema.Literal("plugin"), plugin: Text })
 
-export const Sender = Schema.Union([AgentSender, PluginSender, Schema.Literal("vibest"), Schema.Literal("user")])
+export const Sender = Schema.Union([
+  AgentSender,
+  PluginSender,
+  Schema.Struct({ type: Schema.Literal("vibest") }),
+  Schema.Struct({ type: Schema.Literal("user") }),
+])
 
 export type Sender = typeof Sender.Type
 
@@ -155,7 +164,7 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
-  from: optional(AgentSender),
+  from: optional(AgentFrom),
   execution: optional(Seq),
 })
 

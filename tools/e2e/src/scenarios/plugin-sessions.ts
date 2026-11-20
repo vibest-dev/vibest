@@ -75,7 +75,7 @@ const probedLines = (file: string) =>
 const pluginRows = (w: World, recipient: string) =>
   rows<{ content: string; status: string }>(
     w,
-    `SELECT content, status FROM inbox WHERE session_id = ? AND sender = '{"plugin":"session-probe"}' ORDER BY id`,
+    `SELECT content, status FROM inbox WHERE session_id = ? AND sender_plugin = 'session-probe' ORDER BY id`,
     recipient,
   )
 
@@ -183,7 +183,7 @@ const REMINDER = "vibest.report-reminder"
 const reminders = (w: World, recipient: string, about: string) =>
   rows<{ content: string; status: string }>(
     w,
-    `SELECT content, status FROM inbox WHERE session_id = ? AND sender = '{"plugin":"vibest.report-reminder"}' AND content LIKE ? ORDER BY id`,
+    `SELECT content, status FROM inbox WHERE session_id = ? AND sender_plugin = 'vibest.report-reminder' AND content LIKE ? ORDER BY id`,
     recipient,
     `%(${about})%`,
   )
@@ -266,7 +266,7 @@ const reminderChecks: ReadonlyArray<Check> = [
             `${reminders(w, entryId, id).length} reminders about ${id}, expected ${count}: ${JSON.stringify(reminders(w, entryId, id))}`,
           )
         expect(
-          inboxRows(w, `sender = '{"plugin":"${REMINDER}"}' AND session_id <> ?`, entryId) === 0,
+          inboxRows(w, `sender_plugin = '${REMINDER}' AND session_id <> ?`, entryId) === 0,
           "a reminder went to a session other than the entry session",
         )
       } finally {

@@ -116,7 +116,9 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       Effect.gen(function* () {
         const local = localSessionOf(sender)
 
-        return local === undefined ? sender : ((yield* remote.senderOf(local)) ?? sender)
+        const found = local === undefined ? undefined : yield* remote.senderOf(local)
+
+        return found === undefined ? sender : { ...found, type: "agent" as const }
       })
 
     const queuedFrom = (sender: Sender, request: string) =>
@@ -155,7 +157,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         yield* queueInbox({
           recipient,
           kind: "notice",
-          sender: "vibest",
+          sender: { type: "vibest" },
           content: noticeEnvelope(content),
           status: "pending",
         })
@@ -173,7 +175,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           queueInbox({
             recipient,
             kind: "notice",
-            sender: "vibest",
+            sender: { type: "vibest" },
             about: row.sessionId,
             content: noticeEnvelope(row.message),
             status,
@@ -219,7 +221,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           recipient: string
           content: string
         }>`SELECT sender_session_id AS sender, session_id AS recipient, content FROM inbox
-          WHERE (${keysIn(keys)}) AND kind = 'send' AND sender_session_id IS NOT NULL ORDER BY session_id, id`
+          WHERE (${keysIn(keys)}) AND kind = 'send' AND sender_session_id IS NOT NULL AND sender_machine IS NULL
+          ORDER BY session_id, id`
 
         const groups = Map.groupBy(sends, (s) => `${s.sender}\n${s.recipient}`)
 
@@ -287,7 +290,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       insertInbox: Effect.fn("Db.inbox.insertInbox")((row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie)),
 
       insertSend: Effect.fn("Db.inbox.insertSend")(
-        (recipient: string, message: string, sender: Sender = "user", request?: string) =>
+        (recipient: string, message: string, sender: Sender = { type: "user" }, request?: string) =>
           tx(
             Effect.gen(function* () {
               const before = request === undefined ? undefined : yield* queuedFrom(sender, request)
@@ -332,7 +335,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         sql<{
           recipient: string
           sender: string | null
-        }>`SELECT session_id AS recipient, coalesce(sender_session_id, about_session_id) AS sender FROM inbox
+        }>`SELECT session_id AS recipient, coalesce(CASE WHEN sender_machine IS NULL THEN sender_session_id END, about_session_id) AS sender FROM inbox
           WHERE session_id = ${sessionId} AND id = ${inboxId}`.pipe(
           Effect.map((rows) =>
             [rows[0]?.recipient, rows[0]?.sender].filter((id): id is string => Predicate.isString(id)),
@@ -380,7 +383,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
                 sender: string | null
                 content: string
               }>`SELECT id, session_id AS recipient,
-                CASE WHEN kind = 'send' THEN sender_session_id END AS sender, content FROM inbox
+                CASE WHEN kind = 'send' AND sender_machine IS NULL THEN sender_session_id END AS sender, content FROM inbox
               WHERE status = 'delivering' ORDER BY session_id, id`
 
               const bySenderAndSession = new Map<string, Array<(typeof cut)[number]>>()

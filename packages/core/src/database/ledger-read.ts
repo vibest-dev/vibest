@@ -13,6 +13,7 @@ import {
   type FromSql,
   fromOf,
   toInbox,
+  type InboxSql,
 } from "./db-rows.ts"
 import type { MachineRow, OutboxRow } from "./remote.ts"
 
@@ -149,14 +150,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
 export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
 
-type InboxColumns = {
-  readonly id: number
-  readonly sessionId: string
-  readonly sender: string
-  readonly kind: string
-  readonly content: string
-  readonly status: string
-}
+type InboxColumns = InboxSql
 
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
@@ -177,7 +171,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender, m.kind, m.content, m.status
+    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_type, m.sender_session_id, m.sender_agent, m.sender_title,
+        m.sender_machine, m.sender_plugin, m.kind, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
   const briefs = (ids: ReadonlyArray<string>) =>
@@ -303,7 +298,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       const [linked] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM inbox
         WHERE session_id = ${id} AND execution_id IS NOT NULL`
 
-      const rows = yield* sql<{ content: string; sender: string }>`SELECT content, sender
+      const rows = yield* sql<{ content: string; sender: string }>`SELECT content, sender_key AS sender
         FROM inbox WHERE session_id = ${id} AND status = 'delivered'
           AND id > ${linked?.id ?? 0}
         ORDER BY id`

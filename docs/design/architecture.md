@@ -848,7 +848,7 @@ subagent's execution completes without the subagent sending a message, it sends 
 | reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `vibest.report-reminder`                         |
 
 1. Only core writes the ledger, through its commands. A plugin changes state only through what the context offers;
-   a plugin send is recorded with the plugin as its sender (`{ plugin }`), filled in by vibestd, never chosen by the
+   a plugin send is recorded with the plugin as its sender (`{ type: "plugin", plugin }`), filled in by vibestd, never chosen by the
    plugin.
 2. An extension holds no authoritative memory. `event.subscribe` is live and best effort (no cursor, no durable
    delivery, no plugin storage): a reaction covers reloads and restarts by a pass over current state when it activates,

@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 16
+export const PROJECTION_VERSION = 17
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -194,9 +194,13 @@ export const PROJECTION_SCHEMA = [
   `CREATE TABLE inbox (
     session_id        TEXT    NOT NULL,
     id                INTEGER NOT NULL,
-    sender            TEXT    NOT NULL,
-    sender_key        TEXT    NOT NULL,
+    sender_type       TEXT    NOT NULL CHECK (sender_type IN ('agent', 'plugin', 'vibest', 'user')),
     sender_session_id TEXT,
+    sender_agent      TEXT,
+    sender_title      TEXT,
+    sender_machine    TEXT,
+    sender_plugin     TEXT,
+    sender_key        TEXT    NOT NULL,
     about_session_id  TEXT,
     kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
     content           TEXT    NOT NULL,

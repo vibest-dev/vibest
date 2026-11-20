@@ -24,30 +24,28 @@ const clip = (s: string) => {
   return cps.length <= PREVIEW ? s : `${cps.slice(0, PREVIEW - 1).join("")}…`
 }
 
-const remote = (address: string) => {
-  const slash = address.indexOf("/")
+const agentHead = (sender: Extract<Taken["detail"][number]["sender"], { readonly type: "agent" }>) => {
+  const id = sender.session.slice(0, 8)
 
-  if (slash <= 0) return `Message from @${titled(address)}`
+  if (sender.agent !== undefined)
+    return `Message from @${titled(sender.agent)} · ${sender.title ?? ""} (${sender.machine === undefined ? id : `${sender.machine}/${id}`})`
 
-  const machine = address.slice(0, slash)
-  const id = address.slice(slash + 1, slash + 9)
-
-  return `Message from @${titled(machine)} · (${machine}/${id})`
+  return sender.machine === undefined
+    ? `Message from @${titled(id)}`
+    : `Message from @${titled(sender.machine)} · (${sender.machine}/${id})`
 }
 
 const head = (sender: Taken["detail"][number]["sender"]) => {
-  if (sender === "vibest") return "Message from Vibest"
-
-  if (sender === "user") return "Message from You"
-
-  if ("machine" in sender)
-    return `Message from @${titled(sender.agent)} · ${sender.title} (${sender.machine}/${sender.session.slice(0, 8)})`
-
-  if ("address" in sender) return remote(sender.address)
-
-  if ("plugin" in sender) return `Message from Vibest · ${sender.plugin}`
-
-  return `Message from @${titled(sender.agent)} · ${sender.title} (${sender.session.slice(0, 8)})`
+  switch (sender.type) {
+    case "vibest":
+      return "Message from Vibest"
+    case "user":
+      return "Message from You"
+    case "plugin":
+      return `Message from Vibest · ${sender.plugin}`
+    case "agent":
+      return agentHead(sender)
+  }
 }
 
 export const shown = (detail: Taken["detail"]) =>

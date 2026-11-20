@@ -60,7 +60,7 @@ const sessionsFor = (
   get: summaries.get,
   sentIn: summaries.sentIn,
   send: (input) =>
-    sends.relay(input.to, input.message, { plugin }, input.request).pipe(
+    sends.relay(input.to, input.message, { type: "plugin", plugin }, input.request).pipe(
       Effect.asVoid,
       Effect.mapError((e) => new VibestPlugin.SessionSendFailed({ message: e.message })),
     ),

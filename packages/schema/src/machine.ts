@@ -1,6 +1,6 @@
 import { Schema, Struct } from "effect"
 
-import { AgentSender } from "./event.ts"
+import { AgentFrom } from "./event.ts"
 
 export class MachineFailed extends Schema.TaggedError<MachineFailed>()("MachineFailed", { message: Schema.String }) {}
 
@@ -110,7 +110,7 @@ export const OutboxItem = Schema.Struct({
   recipient: Schema.String,
   kind: Schema.Literals(["send", "notice"]),
   content: Schema.String,
-  from: Schema.optional(AgentSender),
+  from: Schema.optional(AgentFrom),
   cut: Schema.optional(Schema.Boolean),
 })
 

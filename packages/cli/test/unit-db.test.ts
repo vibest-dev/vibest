@@ -129,10 +129,10 @@ describe("Db", () => {
               },
             })
 
-          yield* inbox("send", { session: parent.sessionId }, "from parent", "delivered")
-          yield* inbox("send", "user", "later send", "delivered")
-          yield* inbox("notice", "vibest", "a notice", "delivered", parent.sessionId)
-          yield* inbox("send", "user", "still pending", "pending")
+          yield* inbox("send", { type: "agent", session: parent.sessionId }, "from parent", "delivered")
+          yield* inbox("send", { type: "user" }, "later send", "delivered")
+          yield* inbox("notice", { type: "vibest" }, "a notice", "delivered", parent.sessionId)
+          yield* inbox("send", { type: "user" }, "still pending", "pending")
           assert.deepStrictEqual(yield* db.session.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "typed",
             delivered: "a notice",
@@ -175,21 +175,21 @@ describe("Db", () => {
               data: { kind, recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", sender, content, status },
             })
 
-          yield* row("send", { session: parent.sessionId }, "from parent")
-          yield* row("send", "user", "and docs")
+          yield* row("send", { type: "agent", session: parent.sessionId }, "from parent")
+          yield* row("send", { type: "user" }, "and docs")
           assert.strictEqual(
             (yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
             "and docs",
           )
-          yield* row("send", "user", "also types")
+          yield* row("send", { type: "user" }, "also types")
           assert.deepStrictEqual(yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), {
             working: "",
             delivered: "and docs\n\nalso types",
             parentSessionId: parent.sessionId,
             since: 5,
           })
-          yield* row("send", "user", "still pending", "pending")
-          yield* row("notice", "vibest", "a notice", "pending")
+          yield* row("send", { type: "user" }, "still pending", "pending")
+          yield* row("notice", { type: "vibest" }, "a notice", "pending")
           assert.strictEqual(
             (yield* db.session.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
             "and docs\n\nalso types",
@@ -276,9 +276,9 @@ describe("Db", () => {
           const first = (yield* db.session.startExecution(child, 2)).execution
           yield* complete(db, child)
           const second = (yield* db.session.startExecution(child, 2)).execution
-          yield* db.inbox.insertSend(parent, "done", { session: child })
+          yield* db.inbox.insertSend(parent, "done", { type: "agent", session: child })
           yield* complete(db, child)
-          yield* db.inbox.insertSend(parent, "between executions", { session: child })
+          yield* db.inbox.insertSend(parent, "between executions", { type: "agent", session: child })
 
           assert.deepStrictEqual([yield* db.inbox.sentIn(child, first), yield* db.inbox.sentIn(child, second)], [0, 1])
         }),
@@ -295,11 +295,11 @@ describe("Db", () => {
           const [x, y] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
           yield* db.session.insertSession(session(x), yield* projectOf("r"))
           yield* db.session.insertSession(session(y), yield* projectOf("r"))
-          const first = yield* db.inbox.insertSend(x, "remind", { plugin: "p" }, "r1")
-          assert.deepStrictEqual(yield* db.inbox.insertSend(y, "remind", { plugin: "p" }, "r1"), first)
-          assert.isDefined(yield* db.inbox.insertSend(y, "remind", { plugin: "other" }, "r1"))
-          assert.isDefined(yield* db.inbox.insertSend(y, "typed", "user", "r1"))
-          assert.isTrue(yield* db.inbox.queuedFrom("user", "r1"))
+          const first = yield* db.inbox.insertSend(x, "remind", { type: "plugin", plugin: "p" }, "r1")
+          assert.deepStrictEqual(yield* db.inbox.insertSend(y, "remind", { type: "plugin", plugin: "p" }, "r1"), first)
+          assert.isDefined(yield* db.inbox.insertSend(y, "remind", { type: "plugin", plugin: "other" }, "r1"))
+          assert.isDefined(yield* db.inbox.insertSend(y, "typed", { type: "user" }, "r1"))
+          assert.isTrue(yield* db.inbox.queuedFrom({ type: "user" }, "r1"))
           assert.deepStrictEqual(
             yield* sql<{
               session: string

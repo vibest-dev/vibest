@@ -10,7 +10,7 @@ const Agent = Schema.Struct({
   machine: optional(Schema.String),
 })
 
-type Agent = typeof Agent.Type
+type Sender = ({ readonly type: "agent" } & typeof Agent.Type) | { readonly type: "user" } | { readonly type: "vibest" }
 
 const Created = Schema.Struct({
   parent: optional(Schema.String),
@@ -53,7 +53,7 @@ const ledger = (tx: SqlClient.SqlClient) => {
   const patch = (
     row: Row,
     changes: {
-      readonly sender?: Agent | "user" | "vibest"
+      readonly sender?: Sender
       readonly about?: string | null
       readonly from?: null
       readonly execution?: number | null
@@ -61,20 +61,22 @@ const ledger = (tx: SqlClient.SqlClient) => {
     },
   ) => tx`UPDATE event SET data = json_patch(data, ${JSON.stringify(changes)}) WHERE position = ${row.position}`
 
-  const senderOf = (data: typeof InboxQueued.Type, recipient: string): Agent | "user" => {
-    if (data.from !== undefined) return data.from
+  const senderOf = (data: typeof InboxQueued.Type, recipient: string): Sender => {
+    if (data.kind === "notice") return { type: "vibest" }
 
-    if (data.sender !== undefined) return { session: data.sender }
+    if (data.from !== undefined) return { type: "agent", ...data.from }
+
+    if (data.sender !== undefined) return { type: "agent", session: data.sender }
     const origin = origins.get(recipient)
 
     return data.kind === "task" && origin !== undefined
-      ? { session: origin.session, machine: nameOf(origin.peer) }
-      : "user"
+      ? { type: "agent", session: origin.session, machine: nameOf(origin.peer) }
+      : { type: "user" }
   }
 
-  const firstRequest = (sender: Agent | "user" | "vibest", request: string | undefined) => {
+  const firstRequest = (sender: Sender, request: string | undefined) => {
     if (request === undefined) return true
-    const key = `${sender === "user" || sender === "vibest" ? sender : `${sender.machine ?? ""}/${sender.session}`}\n${request}`
+    const key = `${sender.type === "agent" ? `${sender.machine ?? ""}/${sender.session}` : sender.type}\n${request}`
 
     if (requests.has(key)) return false
     requests.add(key)
@@ -84,8 +86,8 @@ const ledger = (tx: SqlClient.SqlClient) => {
 
   const inbox = (row: Row, data: typeof InboxQueued.Type) => {
     const notice = data.kind === "notice"
-    const sender = notice ? "vibest" : senderOf(data, row.aggregate)
-    const local = sender !== "user" && sender !== "vibest" && sender.machine === undefined ? sender.session : undefined
+    const sender = senderOf(data, row.aggregate)
+    const local = sender.type === "agent" && sender.machine === undefined ? sender.session : undefined
     const execution = data.kind === "send" && local !== undefined ? open.get(local) : undefined
 
     return patch(row, {

@@ -109,7 +109,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     })
 
   const askEntry = (w: { readonly id: string; readonly entryId: string; readonly db: Db.Interface }) =>
-    w.db.inbox.insertSend(w.entryId, "a question", { session: w.id })
+    w.db.inbox.insertSend(w.entryId, "a question", { type: "agent", session: w.id })
 
   const finishExecution = (
     w: { readonly id: string; readonly sessions: Session.Interface; readonly herdr: FakeRuntime["Service"] },

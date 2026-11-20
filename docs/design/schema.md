@@ -173,9 +173,13 @@ CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NU
 CREATE TABLE inbox (                                  -- id: the seq of its inbox.queued in the recipient session
   session_id        TEXT    NOT NULL,                 -- the recipient
   id                INTEGER NOT NULL,
-  sender            TEXT    NOT NULL,                 -- the inbox.queued sender as JSON
+  sender_type       TEXT    NOT NULL CHECK (sender_type IN ('agent', 'plugin', 'vibest', 'user')),
+  sender_session_id TEXT,                             -- an agent sender: its session, else null
+  sender_agent      TEXT,                             -- an agent sender: its agent, when known
+  sender_title      TEXT,                             -- an agent sender: its title, when known
+  sender_machine    TEXT,                             -- an agent sender received from another vibestd: that machine, else null
+  sender_plugin     TEXT,                             -- a plugin sender: the plugin id, else null
   sender_key        TEXT    NOT NULL,                 -- who sent it, for request dedupe: user, vibest, plugin:<id>, <machine>/<session>
-  sender_session_id TEXT,                             -- the local agent session that sent it, else null
   about_session_id  TEXT,                             -- a notice: the session it is about, else null
   kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
   content           TEXT    NOT NULL,
@@ -209,9 +213,11 @@ session, so a row is named by both.
 | `send`   | a message from the user to any unfinished session of the project, or from a session to its creator or a session it started                        |
 | `notice` | something vibest tells the recipient about a session (`about_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
 
-- `sender` is one of: an agent session `{session, agent?, title?, machine?}` (`machine` set when it was received from
-  another vibestd), a plugin `{plugin}`, `"vibest"` (every notice) or `"user"` (a send or task with no session).
-  `sender_session_id` is the session of a local agent sender and `about_session_id` a notice's `about`; a relay to the
+- The `inbox.queued` `sender` is one tagged value: `{type: "agent", session, agent?, title?, machine?}` (`machine` set
+  when it was received from another vibestd), `{type: "plugin", plugin}`, `{type: "vibest"}` (every notice) or
+  `{type: "user"}` (a send or task with no session). The row keeps the tag in `sender_type` and each field in its own
+  column; a local agent sender has `sender_session_id` set and `sender_machine` null, and `about_session_id` is a
+  notice's `about`; a relay to the
   nearest living ancestor keeps the sender, so both stay right after the recipient changes.
 - A `request` repeats nothing: one sender (`sender_key`) queues one row per request, whatever the recipient, so a
   repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The

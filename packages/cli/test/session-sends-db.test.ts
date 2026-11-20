@@ -41,10 +41,10 @@ describe("sends from sessions", () => {
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
-        assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { session: A }))
+        assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { type: "agent", session: A }))
         assert.deepStrictEqual(
           (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
-          [["send", { session: A, agent: session(A).agent, title: session(A).name }, entryId]],
+          [["send", { type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
         )
       }),
     ),
