@@ -81,6 +81,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     id: saved.sessionId,
     checkout: true,
     projectDir: layout.project(saved.projectId),
+    agents: (yield* Agents.Service).all,
     ...(yield* projectText(layout.project(saved.projectId))),
   })
 

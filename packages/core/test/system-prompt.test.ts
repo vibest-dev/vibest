@@ -6,7 +6,7 @@ import { tempDirectory } from "./lib/directory.ts"
 import * as Platform from "./platform/bun.ts"
 
 const promptOf = (dir: string, text: { preferences: string; memories: string }) =>
-  systemPrompt({ system: "You are an agent.\n", id: "a", projectDir: dir, ...text })
+  systemPrompt({ system: "You are an agent.\n", id: "a", projectDir: dir, agents: [], ...text })
 
 const facts = (extra: Partial<Parameters<typeof systemPrompt>[0]>) =>
   systemPrompt({
@@ -15,6 +15,7 @@ const facts = (extra: Partial<Parameters<typeof systemPrompt>[0]>) =>
     projectDir: "/p",
     preferences: "",
     memories: "",
+    agents: [],
     ...extra,
   })
 

@@ -89,6 +89,7 @@ describe("sends from sessions", () => {
             preferences: "",
             memories: "",
             creator,
+            agents: [],
           })
 
           assert.include(prompt, `send ${A} --`)
