@@ -27,6 +27,7 @@ type HcTerminal = {
   notify?: boolean
   state: string
   labels: Record<string, string>
+  foreground?: { name: string; argv: Array<string> } | null
 }
 
 export const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
@@ -567,6 +568,155 @@ const checks: ReadonlyArray<Check> = [
         model.stop()
         await w.stopDaemon()
         await restore()
+        await core.stop()
+      }
+    },
+  },
+  {
+    id: "S59",
+    title:
+      "herdr-core runtime: a subagent's harness starts after the user's shell rc, with the vibest that started it still first on PATH when the rc puts another vibest first; when it exits before it started working, its terminal is back at the login shell and the creator is told at once with the terminal's last lines",
+    run: async (w) => {
+      for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = delegatingModel("pi")
+      w.ownRuntimes.add("hc")
+      await w.stopDaemon()
+      const piAgentDir = await piDir(w, "pi-hc-exit", model.url)
+      const core = await isolatedCore(w, piAgentDir, "hc-exit")
+      const broken = await piDir(w, "pi-hc-exit-broken", model.url)
+      await fs.rm(path.join(broken, "sessions"), { recursive: true, force: true })
+      await fs.writeFile(path.join(broken, "sessions"), "")
+      const zdotdir = path.join(w.root, "hc-exit-zdotdir")
+      await fs.mkdir(zdotdir, { recursive: true })
+      const other = path.join(w.root, "hc-exit-other-vibest")
+      const ran = path.join(w.root, "hc-exit-other-vibest-ran")
+      await fs.mkdir(other, { recursive: true })
+      await fs.writeFile(path.join(other, "vibest"), `#!/bin/sh\necho "$@" >> '${ran}'\nexit 1\n`, { mode: 0o755 })
+      await fs.writeFile(path.join(zdotdir, ".zshrc"), `echo vbt-rc-ran\nPATH='${other}':$PATH\n`)
+      const zsh = (Bun.env.SHELL ?? "").endsWith("/zsh")
+
+      try {
+        const repo = await project(w, "hc-exit")
+        await w.startEntry({
+          harness: "pi",
+          runtime: "hc",
+          cwd: repo,
+          env: { PI_CODING_AGENT_DIR: piAgentDir },
+          processEnv: { CLAUDE_CONFIG_DIR: undefined },
+          extra: ["--runtime", "hc"],
+          hc: { run: core.hc },
+          timeoutMs: 60_000,
+        })
+        await until(
+          "the entry session in vibest ls",
+          async () =>
+            (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).some(
+              (e) => e.agent === "coordinator",
+            ),
+          60_000,
+        )
+
+        const pinned = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--runtime",
+                "hc",
+                "--env",
+                `PI_CODING_AGENT_DIR=${piAgentDir}`,
+                "--env",
+                `ZDOTDIR=${zdotdir}`,
+                "--title",
+                "Pinned",
+                "--",
+                ask("pinned"),
+              ],
+              { cwd: repo, timeoutMs: 60_000 },
+            ),
+          ) as { id: string }
+        ).id
+
+        await until(
+          "the subagent's plain vibest send reached its creator",
+          () => model.seen.some((m) => m.includes(pinned) && m.includes("done-pinned")),
+          120_000,
+        ).catch(async (e: Error) => {
+          throw new Error(
+            `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
+          )
+        })
+        expect(
+          !(await fs.exists(ran)),
+          `the vibest the rc put first ran: ${await fs.readFile(ran, "utf8").catch(() => "")}`,
+        )
+
+        const sub = (
+          JSON.parse(
+            await w.okViaEntry(
+              [
+                "run",
+                "pi",
+                "--runtime",
+                "hc",
+                "--env",
+                `PI_CODING_AGENT_DIR=${broken}`,
+                "--env",
+                `ZDOTDIR=${zdotdir}`,
+                "--title",
+                "Exit at once",
+                "--",
+                ask("never"),
+              ],
+              { cwd: repo, timeoutMs: 60_000 },
+            ),
+          ) as { id: string }
+        ).id
+
+        const started = Date.now()
+
+        const told = () =>
+          model.seen.find((m) => m.includes(sub.slice(0, 8)) && m.includes("exited before it started working"))
+
+        await until(
+          "the creator told that the subagent exited before it started working",
+          () => told() !== undefined,
+          30_000,
+        ).catch(async (e: Error) => {
+          throw new Error(
+            `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
+          )
+        })
+        const notice = told()!
+        expect(notice.includes("ENOTDIR"), `the notice does not carry the terminal's last lines: ${notice}`)
+        expect(Date.now() - started < 30_000, "the notice came only after the ready timeout")
+
+        const at = JSON.parse(
+          row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, sub)?.runtime ?? "{}",
+        ) as { id?: string }
+
+        const terminal = await core.get(addressOf(at.id!))
+        expect(terminal.state === "live", `the subagent's terminal is gone: ${JSON.stringify(terminal)}`)
+
+        if (zsh) {
+          const screen = (await core.hc("read", terminal.address)).stdout
+          const rc = screen.indexOf("vbt-rc-ran")
+          expect(rc >= 0 && rc < screen.indexOf("ENOTDIR"), `the harness did not start after the rc:\n${screen}`)
+        }
+
+        const typed = await core.hc("send", terminal.address, "echo vbt-shell-$((40+2))")
+        expect(typed.code === 0, `hc send: ${typed.stderr}`)
+        await until(
+          "the subagent's terminal runs a typed command in the user's shell",
+          async () => (await core.hc("read", terminal.address)).stdout.includes("vbt-shell-42"),
+          15_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; screen:\n${(await core.hc("read", terminal.address)).stdout}`)
+        })
+      } finally {
+        model.stop()
+        await w.stopDaemon()
         await core.stop()
       }
     },
