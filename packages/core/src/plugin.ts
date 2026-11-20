@@ -22,6 +22,7 @@ import { SqlError } from "effect/sql"
 
 import { Agents } from "./agents.ts"
 import { Bus } from "./bus.ts"
+import { Concurrency } from "./concurrency.ts"
 import { DatabaseOpenFailed, SchemaMismatch } from "./database/db-schema.ts"
 import { Bounded } from "./effect/bounded.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -517,7 +518,14 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     yield* (yield* PluginLoader).prepare
     const host = yield* makeHost()
-    const sources = yield* openSources(DEFAULT_TIMEOUT)
+    const concurrency = yield* Concurrency.Service
+    const opened = yield* openSources(DEFAULT_TIMEOUT)
+
+    const sources = {
+      ...opened,
+      operations: Effect.tap(opened.operations, (read) => concurrency.configure(read.concurrency)),
+    }
+
     const builtins = yield* Builtins
     yield* supervise(host, builtins, sources)
 
@@ -532,6 +540,7 @@ export const node = LayerNode.make({
     builtinsNode,
     Agents.node,
     Bus.node,
+    Concurrency.node,
     Harnesses.node,
     Hooks.node,
     pluginLoaderNode,

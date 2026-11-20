@@ -78,7 +78,7 @@ login smoke (I5). Prompts are deterministic:
 | 8   | `run --archive-on-idle`                                                            | archived right after the completed result reaches the entry session                                   |
 | 9   | Self-heal                                                                          | kill the daemon mid-execution, restart: execution ends `lost` or resumes; no blind replay             |
 | 10  | Startup failure                                                                    | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane          |
-| 11  | Limits                                                                             | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                         |
+| 11  | Limits                                                                             | `concurrency` max 2: the second subagent waits to start until the first is archived                   |
 | 12  | Entry session                                                                      | `vibest` in the parent workspace, resume after its pane closes, system prompt file written            |
 
 The pattern-level stories that combine these rows are in [e2e-user-stories.md](e2e-user-stories.md).

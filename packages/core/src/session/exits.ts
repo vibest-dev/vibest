@@ -19,23 +19,38 @@ import { Placement } from "./placement.ts"
 
 export * as Exits from "./exits.ts"
 
+const TAIL_LINES = 10
+
+const LINE_CHARS = 200
+
+const TAIL_CHARS = 2000
+
+const shownTail = (text: string) =>
+  text
+    .split("\n")
+    .slice(-TAIL_LINES)
+    .map((line) => line.slice(0, LINE_CHARS))
+    .join("\n")
+    .slice(0, TAIL_CHARS)
+
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const inbox = yield* Inbox.Service
   const { undoCutOffStart } = yield* Archive.Service
   const { notice, recount } = yield* Placement.Service
 
-  const startFailure = (h: Runtime, session: SessionRow, execution: number | undefined) =>
+  const lastScreen = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
-      if (execution === undefined || (yield* db.session.executionTaken(session.id))) return { how: "", output: "" }
-      const tail = yield* paneTail(h, terminalOf(session), 10)
+      const tail = shownTail(yield* paneTail(h, terminalOf(session), TAIL_LINES))
+      const output = tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}`
+      const beforeWork = execution !== undefined && !(yield* db.session.executionTaken(session.id))
 
-      return { how: " before it started working", output: tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}` }
+      return { how: beforeWork ? " before it started working" : "", output }
     })
 
   const announceExit = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
-      const failed = yield* startFailure(h, session, execution)
+      const failed = yield* lastScreen(h, session, execution)
       const queued = yield* db.inbox.pendingInbox(session.id)
       const signed = queued.filter((r) => r.kind === "send" && localSessionOf(r.sender) !== undefined)
       const unsigned = queued.filter((r) => !signed.includes(r))

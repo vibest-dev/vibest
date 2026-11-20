@@ -2,6 +2,7 @@ import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
+import { Concurrency } from "@vibest/core/concurrency"
 import {
   Builtins,
   type Candidate,
@@ -378,6 +379,7 @@ const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
     Layer.provide(Agents.layer),
     Layer.provide(memoryPluginHost),
     Layer.provide(Hooks.layer),
+    Layer.provide(Concurrency.layer),
     Layer.build,
     Effect.map(Context.get(Plugins.Service)),
   )

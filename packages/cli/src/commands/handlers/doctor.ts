@@ -172,6 +172,22 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         sections.push({ title: `Runtime: ${r.name} (where agents run)`, findings })
       }
 
+      const concurrency = yield* ask((c) => c.Concurrency())
+
+      if (Option.isSome(concurrency)) {
+        const { max, problems, unsupported } = concurrency.value
+
+        const findings: Array<Finding> = [
+          ...(max === null
+            ? []
+            : [{ mark: "ok" as const, text: `at most ${max} live harness processes on this machine` }]),
+          ...problems.map((text): Finding => ({ mark: "problem", text, fix: `fix the rule in ${layout.config}` })),
+          ...unsupported.map((text): Finding => ({ mark: "note", text })),
+        ]
+
+        if (findings.length > 0) sections.push({ title: "Concurrency (vibest.json)", findings })
+      }
+
       sections.push({
         title: "Agent definitions",
         findings: yield* agentDefinitionFindings(
