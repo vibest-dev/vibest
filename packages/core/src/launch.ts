@@ -5,7 +5,7 @@ import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema
 import { Effect, FileSystem } from "effect"
 
 import { Agents, unknownAgent } from "./agents.ts"
-import { encodeCommand, Harness } from "./harness.ts"
+import { cliEnv, Harness } from "./harness.ts"
 import { Harnesses } from "./harnesses.ts"
 import type { AgentsDomain } from "./plugin/domains.ts"
 import { addressOf, type Runtime } from "./runtimes.ts"
@@ -71,7 +71,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   const env = {
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
-    VIBEST_COMMAND: encodeCommand(vibest),
+    ...(yield* cliEnv(vibest, input.harness)),
   }
 
   const saved = yield* input.session
@@ -81,7 +81,6 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     id: saved.sessionId,
     checkout: true,
     projectDir: layout.project(saved.projectId),
-    vibest,
     ...(yield* projectText(layout.project(saved.projectId))),
   })
 

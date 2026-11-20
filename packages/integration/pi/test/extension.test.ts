@@ -243,7 +243,7 @@ describe("pi-vibest", () => {
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
           VIBEST_PROJECT_ID: coord.projectId,
-          VIBEST_COMMAND: '["/nonexistent-vibest-fixture"]',
+          VIBEST_CLI: "/nonexistent-vibest-fixture",
         })
 
         yield* s.emit(
@@ -290,7 +290,7 @@ describe("pi-vibest", () => {
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: id,
           VIBEST_PROJECT_ID: project,
-          VIBEST_COMMAND: '["vibest"]',
+          VIBEST_CLI: "vibest",
         })
 
         yield* s.emit("session_start", { reason: "startup" }, tuiStart)
@@ -339,7 +339,7 @@ describe("pi-vibest", () => {
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
           VIBEST_PROJECT_ID: coord.projectId,
-          VIBEST_COMMAND: '["vibest"]',
+          VIBEST_CLI: "vibest",
         })
 
         yield* s.emit(
@@ -381,7 +381,7 @@ describe("pi-vibest", () => {
       for (const env of [
         {
           VIBEST_SESSION_ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-          VIBEST_COMMAND: '["vibest"]',
+          VIBEST_CLI: "vibest",
         },
       ]) {
         for (const _load of ["startup", "reload"]) {
@@ -471,7 +471,7 @@ describe("pi-vibest", () => {
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
         VIBEST_PROJECT_ID: coord.projectId,
-        VIBEST_COMMAND: '["/usr/bin/bun","/src/main.ts"]',
+        VIBEST_CLI: "/opt/vibest/bin/vibest",
       })
 
       assert.deepStrictEqual(
@@ -479,11 +479,9 @@ describe("pi-vibest", () => {
         [undefined],
       )
       const bash = (command: string) => s.emit("tool_call", { toolName: "bash", input: { command } }, { cwd: "/" })
-      assert.deepStrictEqual(yield* bash("/usr/bin/bun /src/main.ts run pi 'Fix it.\nKeep $HOME as text.'"), [
-        undefined,
-      ])
+      assert.deepStrictEqual(yield* bash("/opt/vibest/bin/vibest run pi 'Fix it.\nKeep $HOME as text.'"), [undefined])
       assert.deepStrictEqual(yield* bash("vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd 'more'"), [undefined])
-      assert.deepStrictEqual(yield* bash("/usr/bin/bun /src/main.ts daemon"), [undefined])
+      assert.deepStrictEqual(yield* bash("/opt/vibest/bin/vibest daemon"), [undefined])
       assert.deepStrictEqual(yield* bash("jq . a.json > /tmp/b"), [undefined])
       assert.deepStrictEqual(yield* bash("VIBEST_SESSION_ID= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd"), [
         {
@@ -559,7 +557,7 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "general",
         VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
-        VIBEST_COMMAND: '["vibest"]',
+        VIBEST_CLI: "vibest",
       })
 
       yield* s.emit("input", { type: "input", text: "hello from the pane", source: "interactive" })
@@ -572,7 +570,7 @@ describe("pi-vibest", () => {
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
         VIBEST_PROJECT_ID: coord.projectId,
-        VIBEST_COMMAND: '["vibest"]',
+        VIBEST_CLI: "vibest",
       })
 
       yield* coordinator.emit("input", { type: "input", text: "the normal conversation", source: "interactive" })
@@ -608,7 +606,7 @@ describe("pi-vibest", () => {
         VIBEST_SESSION_ID: launched.sessionId,
         VIBEST_PROJECT_ID: launched.projectId,
         VIBEST_LAUNCH_PID: String(process.pid),
-        VIBEST_COMMAND: '["vibest"]',
+        VIBEST_CLI: "vibest",
       }
 
       const s = yield* session(env)
@@ -708,7 +706,7 @@ describe("pi-vibest", () => {
         VIBEST_SESSION_ID: launched.sessionId,
         VIBEST_PROJECT_ID: launched.projectId,
         VIBEST_LAUNCH_PID: String(process.pid),
-        VIBEST_COMMAND: '["vibest"]',
+        VIBEST_CLI: "vibest",
         VIBEST_HOME: home,
       })
 
@@ -755,7 +753,7 @@ describe("pi-vibest", () => {
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: "L",
           VIBEST_LAUNCH_PID: String(process.pid),
-          VIBEST_COMMAND: '["false"]',
+          VIBEST_CLI: "false",
           VIBEST_HOME: home,
         })
 
