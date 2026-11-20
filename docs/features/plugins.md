@@ -99,7 +99,7 @@ new path. Changing its declared id makes it a new plugin.
 
 `ctx.session.get` and `ctx.session.list` give a plugin a session's id, title, parent, status and its latest ended
 execution with how many messages the session sent during it: 0 for a subagent that only replied, 1 for one that ran
-`vibest send` once. `ctx.session.send` queues a message from the plugin itself: the recipient's model sees it in a
+`vibest send` once; `ctx.session.sentIn` gives that count for any execution of a session. `ctx.session.send` queues a message from the plugin itself: the recipient's model sees it in a
 `<vibest-message>` naming the plugin, and the inbox row's sender is the plugin. A repeat with the same `request` queues
 nothing more, and a message to an archived subagent goes to the session that started it.
 

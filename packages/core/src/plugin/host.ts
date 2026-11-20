@@ -58,6 +58,7 @@ const sessionsFor = (
 ): VibestPlugin.SessionDomain => ({
   list: summaries.list,
   get: summaries.get,
+  sentIn: summaries.sentIn,
   send: (input) =>
     sends.relay(input.to, input.message, { plugin }, input.request).pipe(
       Effect.asVoid,

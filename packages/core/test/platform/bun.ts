@@ -36,7 +36,11 @@ const noSessions = Effect.die(new Error("this test has no sessions"))
 
 export const memoryPluginHost = Layer.mergeAll(
   memoryBus,
-  Layer.succeed(Summaries.Service, { list: () => Effect.succeed([]), get: () => Effect.succeed(undefined) }),
+  Layer.succeed(Summaries.Service, {
+    list: () => Effect.succeed([]),
+    get: () => Effect.succeed(undefined),
+    sentIn: () => Effect.succeed(0),
+  }),
   Layer.succeed(Sends.Service, {
     send: () => noSessions,
     deliverTo: () => noSessions,

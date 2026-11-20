@@ -32,6 +32,7 @@ export const make = Effect.gen(function* () {
       db.session
         .getSession(id)
         .pipe(Effect.flatMap((row) => (row === undefined ? Effect.succeed(undefined) : summary(row)))),
+    sentIn: db.inbox.sentIn,
   }
 })
 

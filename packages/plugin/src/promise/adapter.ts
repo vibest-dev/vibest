@@ -84,6 +84,7 @@ export const fromPromise =
         session: {
           list: () => run(host.session.list()),
           get: (id) => run(host.session.get(id)),
+          sentIn: (id, execution) => run(host.session.sentIn(id, execution)),
           send: (input) => run(host.session.send(input)),
         },
       }
