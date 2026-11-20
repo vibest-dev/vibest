@@ -408,6 +408,26 @@ const connect = Spec.make("connect", {
     "Internal: what another machine's vibestd runs over ssh. Joins stdin and stdout to this machine's vibestd, starting it when it is not running",
 })
 
+const worktree = Spec.make("worktree", {
+  description: "Worktrees vibest made for projects on this machine",
+  commands: [
+    Spec.make("list", {
+      description:
+        "The worktrees vibest made, grouped by project, as JSON. Each has its path, and for every repository in it (one, or one folder each in a project of several) that repository's folder, its branch or detached commit, and its state computed now with git: dirty with the number of changed files, unsaved (commits on no branch, lost if the worktree is removed), or clean. Sessions whose recorded directory is that worktree are listed with their id, title, and whether they are live or archived. --project limits the list to one project. --machine asks another machine, which answers for its own projects",
+      params: {
+        project: Flag.String("project").pipe(
+          Flag.withDescription("Only this project: its id, or its folder (on --machine, a path on that machine)"),
+          Flag.optional,
+        ),
+        machine: Flag.String("machine").pipe(
+          Flag.withDescription("Ask another machine (vibest machine ls); it lists its own worktrees"),
+          Flag.optional,
+        ),
+      },
+    }),
+  ],
+})
+
 const machine = Spec.make("machine", {
   description: "Other machines this vibestd dials over ssh, to run agents there (vibest run --machine)",
   commands: [
@@ -451,6 +471,7 @@ export const Commands = Spec.make("vibest", {
     harness,
     agent,
     project,
+    worktree,
     plugins,
     subscriptions,
     integration,

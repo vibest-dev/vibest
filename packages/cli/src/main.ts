@@ -48,6 +48,9 @@ const Handlers = Runtime.handlers(Commands, {
     info: () => import("./commands/handlers/project/info.ts"),
     search: () => import("./commands/handlers/project/search.ts"),
   },
+  worktree: {
+    list: () => import("./commands/handlers/worktree/list.ts"),
+  },
   plugins: () => import("./commands/handlers/plugins.ts"),
   subscriptions: () => import("./commands/handlers/subscriptions.ts"),
   integration: {

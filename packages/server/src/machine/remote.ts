@@ -207,6 +207,21 @@ const make = Effect.gen(function* () {
 
       return yield* link.call(link.client["Agents.List"]({}, { headers: peerHeaders(self.id) }))
     }),
+    worktrees: Effect.fn("Remote.worktrees")((machine: string, project: string | undefined) =>
+      Effect.gen(function* () {
+        const link = yield* machines.link(machine)
+
+        if (link.capabilities.worktrees !== true)
+          return yield* new MachineIncompatible({
+            machine,
+            message: `${machine} runs a vibest that does not list worktrees; run vibest update there`,
+          })
+
+        return yield* link.call(
+          link.client["Worktree.List"](project === undefined ? {} : { project }, { headers: peerHeaders(self.id) }),
+        )
+      }),
+    ),
 
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
       if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }

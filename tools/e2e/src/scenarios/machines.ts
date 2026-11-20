@@ -386,6 +386,8 @@ const checks: ReadonlyArray<Check> = [
           `B's ls (no --runtime: A sends its entry session's hc): ${JSON.stringify(bRows)}`,
         )
         expect(row(w, "SELECT id FROM session WHERE id LIKE ?", `${id8}%`) === undefined, "A has a session row")
+        const remoteTrees = await s.okA(["worktree", "list", "--machine", "mb"])
+        expect(remoteTrees.includes(`"id":"${id8}`), `worktree list --machine mb: ${remoteTrees}`)
         await until("the message on A", () => s!.notices(address, "mone") === 1, 120_000)
         await until(
           "A's entry session saw it",

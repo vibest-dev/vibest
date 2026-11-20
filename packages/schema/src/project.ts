@@ -47,3 +47,11 @@ export const CloneStep = Schema.Union([
 export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
   message: Schema.String,
 }) {}
+
+export class NoSuchProject extends Schema.TaggedError<NoSuchProject>()("NoSuchProject", {
+  project: Schema.String,
+}) {
+  override get message() {
+    return `no project ${this.project} on this machine`
+  }
+}

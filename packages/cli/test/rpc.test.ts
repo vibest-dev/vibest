@@ -673,6 +673,7 @@ describe("vibest.sock", () => {
         "Concurrency",
         "Harnesses.List",
         "Agents.List",
+        "Worktree.List",
         "Runtimes.Doctor",
         "Subscriptions",
         "Republish",

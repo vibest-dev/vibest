@@ -119,6 +119,7 @@ describe("Shell denials", () => {
       "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "vibest ls",
+      "vibest worktree list",
       "vibest daemon restart",
       "vibest --harness pi",
       "vibest --new",

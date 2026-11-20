@@ -161,3 +161,15 @@ session removes `<project folder>/sessions/<session id>/`. A file over 10 MiB, o
 not a regular file refuses the run. With `--machine`, the files go with the run and the vibestd there copies them into its own project folder, so
 the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest
 update` there.
+
+## S58. Listing worktrees
+
+`vibest worktree list` prints JSON, grouped by project, of the worktrees vibest made for this machine's projects:
+directories under its worktrees root that belong to the project. Each worktree has its path, and for each repository in
+it (one, or one folder per repository in a project of several) that repository's folder, its branch or detached commit,
+and its state computed then with git: dirty with the number of changed files, unsaved (commits on no branch, lost if
+the worktree is removed), or clean. When git cannot read a repository, its state is unknown. The sessions whose
+recorded directory is that worktree are listed with their id, title, and whether they are live or archived. Nothing is
+stored and no process list is read. `--project <id|folder>` limits the list to one project; a project with no worktrees
+is still printed, empty. `--machine <name>` asks that machine, which answers for its own projects. An agent may run it.
+An unknown project or machine fails with its own message and prints no list.
