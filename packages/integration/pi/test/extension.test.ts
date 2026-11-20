@@ -483,7 +483,7 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* bash("vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd 'more'"), [undefined])
       assert.deepStrictEqual(yield* bash("/opt/vibest/bin/vibest daemon"), [undefined])
       assert.deepStrictEqual(yield* bash("jq . a.json > /tmp/b"), [undefined])
-      assert.deepStrictEqual(yield* bash("VIBEST_SESSION_ID= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd"), [
+      assert.deepStrictEqual(yield* bash("VIBEST_SESSION_ID= vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd"), [
         {
           block: true,
           reason: "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",

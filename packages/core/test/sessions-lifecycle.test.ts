@@ -22,19 +22,20 @@ import {
 
 describe.concurrent("Session", () => {
   test(
-    "a resume whose start fails closes the pane it placed; the next resume on the same harness starts a process whose terminal report is accepted",
+    "a resume first closes the terminal its exited harness left, and a start that fails places nothing more to close; the next resume on the same harness starts a process whose terminal report is accepted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
+      const left = terminalOf((yield* (yield* Db.Service).session.getSession(id))!).id
       const placed = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open", id)
       yield* sessions.send(id, "again")
       yield* held.reached
       yield* held.release("failed")
       yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 1)
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [{ terminal: left }])
 
       const notice = yield* until(sqlNotices(id), (rows) =>
         rows.some((message) => message.includes("A message to") && message.includes("again")),
@@ -53,6 +54,33 @@ describe.concurrent("Session", () => {
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
     { hooked: ["pi"] },
+  )
+
+  test(
+    "a resume whose close of the left terminal fails opens no second terminal and keeps the old record; a left terminal already gone counts as closed",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const { id, sessions } = yield* idleSession(yield* makeRepository)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      const left = (yield* db.session.getSession(id))!
+      const placed = (yield* herdr.callsTo("open")).length
+      const notices = (yield* sqlNotices(id)).length
+      const refused = yield* herdr.hold("close", terminalOf(left).id)
+      yield* sessions.send(id, "again")
+      yield* refused.reached
+      yield* refused.release("failed")
+      yield* until(sqlNotices(id), (rows) => rows.length > notices)
+      assert.strictEqual((yield* herdr.callsTo("open")).length, placed)
+      assert.strictEqual(yield* db.session.currentProcessId(id), left.process!.id)
+
+      const gone = yield* herdr.hold("close", terminalOf(left).id)
+      yield* sessions.send(id, "once more")
+      yield* gone.reached
+      yield* gone.release("not_found")
+      yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 1)
+    }),
   )
 
   test(
@@ -75,7 +103,23 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "a Send accepted just before vibest rm does not bring the removed session back; its message fails once",
+    "a stop on the condition of idleness leaves a session that got work since then running",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const { id, sessions } = yield* idleSession(yield* makeRepository)
+      const seen = (yield* db.session.getSession(id))!.lastActive
+      yield* sessions.send(id, "more work")
+      const out = yield* sessions.stop(id, { type: "plugin", plugin: "test" }, seen)
+      assert.isFalse(out.stopped)
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isTrue((yield* sessions.stop(id, { type: "user" })).stopped)
+    }),
+  )
+
+  test(
+    "a Send accepted just before vibest archive does not bring the removed session back; its message fails once",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)

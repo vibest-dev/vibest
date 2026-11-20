@@ -33,7 +33,8 @@ A caller claiming an agent or a session that vibestd does not know is refused (a
 ## D7. Restart while agents work
 
 `vibest daemon restart` while agents work replaces vibestd. The agents keep running, queued messages are kept, and
-results and sends still arrive after the restart; agents on an old integration can be restarted in place. A daemon
+results and sends still arrive after the restart; agents on an old integration can be restarted in place, and each
+shows idle once its harness reports ready again, whether or not its terminal reports a status. A daemon
 operation that has not finished refuses the restart and names itself.
 
 ## D8. Update with work in flight

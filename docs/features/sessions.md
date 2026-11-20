@@ -85,7 +85,7 @@ rules to the ones every agent has. Bare `vibest` opens the entry session as `coo
 `general` session unless `--agent` names another registered id, and on another machine the same id is looked up there. An
 id that is not registered is refused with the registered ids listed (or, for an invalid file, its error), before any
 worktree or pane is made. A session may
-manage (send to, interrupt, peek at, remove) only the sessions it started.
+manage (send to, interrupt, peek at, archive) only the sessions it started.
 
 ## S60. Agents from files
 
@@ -188,3 +188,16 @@ recorded directory is that worktree are listed with their id, title, and whether
 stored and no process list is read. `--project <id|folder>` limits the list to one project; a project with no worktrees
 is still printed, empty. `--machine <name>` asks that machine, which answers for its own projects. An agent may run it.
 An unknown project or machine fails with its own message and prints no list.
+
+## S66. Stopping a session
+
+`vibest stop <id>`, run by the session that started it, ends the session's harness process and closes its terminal; a
+working session is interrupted first, as `vibest archive` does, and that execution ends interrupted. The session, its
+worktree and branch, and its messages stay: `vibest ls --all` lists it as exited, and the next `vibest send` to it
+resumes the same conversation in a new terminal, where the message is answered. A message already waiting for it when
+it stops resumes it at once. If its terminal does not close, the stop fails and the session keeps running with its
+execution as it was. The ledger records the process's end as `stopped` and who stopped it. The entry session
+and an archived session are refused. A session on another machine is stopped the same way when that machine's vibest
+has `vibest stop`; an older one is refused with a hint to update it. A plugin stops a session with
+`ctx.session.stop(id)`, recorded as the plugin; with `{ idleSince }` it stops the session only if it has done nothing
+since then and nothing waits for it, and answers whether it stopped it.

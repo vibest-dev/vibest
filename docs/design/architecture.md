@@ -533,7 +533,15 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
 Rows are never deleted. `vibest ls` lists Agents that have not exited; `vibest ls --all` and `vibest result <id>` still show an exited one.
 
 An archive marks the session archived before anything is closed, so from then no Send, check or resume brings it
-back. A row that already exited is not closed again. A spawn reserves its worktree name with an atomic `mkdir`; a
+back. A session keeps at most one terminal, because a harness that exits leaves the terminal's shell running in the
+worktree: an archive closes the terminal the row records even when its harness already exited, a start that opens a new
+terminal for the session (a resume) first closes the one its previous process left and stops if that close fails
+(a terminal already gone counts as closed), neither of them closes or interrupts a terminal that another
+session used after it (a newer entry session started in the same terminal, running or exited: the last process recorded
+at a terminal owns it), and the ownership check and the close run under a lock on the terminal that an entry session
+starting in place also takes, so the terminal cannot change hands between them, and a start whose harness
+has an integration but never reported ready fails like a launch that could not open (its terminal closed, a new session's
+worktree removed) instead of leaving a session that never ran. A spawn reserves its worktree name with an atomic `mkdir`; a
 start cut off before its terminal was recorded is undone as a failed launch (its worktree goes when nothing can be
 lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
 `--archive-on-idle` decides under the session's lock, at a completed execution end and whenever a row it sent or was sent leaves
@@ -844,14 +852,17 @@ id in `vibest.json` `plugins` (with options, `{ "package": "vibest.<name>", "opt
 place among the builtins, and `"-vibest.<name>"` turns it off again. Today that is `vibest.report-reminder`: when a
 subagent's execution completes without the subagent sending a message, it sends the subagent's creator one message
 (request `vibest.report-reminder:<session>:<execution>`), and on activation it checks each session's latest execution.
+`vibest.idle-stop` looks at the running sessions when it activates and then every few minutes (option `idleMinutes`,
+default 30): it stops each subagent of a creator on this machine idle that long with nothing waiting
+(`session.stop` with `idleSince`, checked again under the session lock) and tells its creator when it stopped it.
 
 **Extension places and rules.** An extension is one of three kinds:
 
-| Kind     | How                                                             | Examples                        |
-| -------- | --------------------------------------------------------------- | ------------------------------- |
-| provider | `transform` adds or changes a definition                        | harness and runtime definitions |
-| decider  | `hook`: core asks, waits up to 5 s, and uses the answer         | `agent.start.before` routing    |
-| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `vibest.report-reminder`        |
+| Kind     | How                                                                    | Examples                                         |
+| -------- | ---------------------------------------------------------------------- | ------------------------------------------------ |
+| provider | `transform` adds or changes a definition                               | harness and runtime definitions                  |
+| decider  | `hook`: core asks, waits up to 5 s, and uses the answer                | `agent.start.before` routing, `agent.fail` moves |
+| reaction | `event.subscribe` plus `session.list`/`get`/`send`/`stop`; nobody asks | `vibest.report-reminder`, `vibest.idle-stop`     |
 
 1. Only core writes the ledger, through its commands. A plugin changes state only through what the context offers;
    a plugin send is recorded with the plugin as its sender (`{ type: "plugin", plugin }`), filled in by vibestd, never chosen by the
@@ -1082,6 +1093,8 @@ in `agent.start.before` (builtin: `local`). A Project runs on another machine on
 remote there; the start commit must be pushed). An offline machine's Agents show `offline`, not failed.
 
 ## 13. Surfaces and protocol
+
+The commands, who calls them, and the lifecycle verbs are in [cli.md](cli.md). The list below is the older draft.
 
 ```
 vibest project create <directory> --from <repository>…   copy repositories into a new Project directory

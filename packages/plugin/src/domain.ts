@@ -9,11 +9,17 @@ export class SessionSendFailed extends Schema.TaggedError<SessionSendFailed>()("
   message: Schema.String,
 }) {}
 
+export class SessionStopFailed extends Schema.TaggedError<SessionStopFailed>()("SessionStopFailed", {
+  message: Schema.String,
+}) {}
+
 export interface PluginSession {
   readonly id: string
   readonly title: string
   readonly parentId: string | null
   readonly status: AgentStatus
+  readonly lastActive: number
+  readonly waiting: boolean
   readonly latest: {
     readonly execution: number
     readonly outcome: ExecutionOutcome
@@ -26,6 +32,10 @@ export interface SessionSend {
   readonly to: string
   readonly message: string
   readonly request?: string
+}
+
+export interface SessionStop {
+  readonly idleSince?: number
 }
 
 export interface SubscriptionReport {

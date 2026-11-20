@@ -269,6 +269,16 @@ export type SessionInfo = typeof SessionInfo.Type
 
 const LINE_ERRORS = [UnknownMachine, MachineUnavailable, MachineIncompatible] as const
 
+const PROCESS_ERRORS = Schema.Union([
+  Forbidden,
+  NoSuchSession,
+  AmbiguousSession,
+  SessionBusy,
+  RuntimeUnreachable,
+  NoRuntime,
+  ...LINE_ERRORS,
+])
+
 export const SessionReply = Schema.Struct({
   execution: Schema.Number,
   status: Schema.String,
@@ -478,15 +488,16 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Interrupt", {
         payload: { id: Schema.String },
         success: Schema.Struct({ id: Schema.String, message: Schema.String }),
-        error: Schema.Union([
-          Forbidden,
-          NoSuchSession,
-          AmbiguousSession,
-          SessionBusy,
-          RuntimeUnreachable,
-          NoRuntime,
-          ...LINE_ERRORS,
-        ]),
+        error: PROCESS_ERRORS,
+      }),
+    ),
+  ),
+  scoped(
+    admitted(
+      Rpc.make("Stop", {
+        payload: { id: Schema.String },
+        success: Schema.Struct({ id: Schema.String, message: Schema.String }),
+        error: PROCESS_ERRORS,
       }),
     ),
   ),
@@ -495,15 +506,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Remove", {
         payload: { id: Schema.String, keepWorktree: Schema.optional(Schema.Boolean) },
         success: Schema.NullOr(RemoveOutcome),
-        error: Schema.Union([
-          Forbidden,
-          NoSuchSession,
-          AmbiguousSession,
-          SessionBusy,
-          RuntimeUnreachable,
-          NoRuntime,
-          ...LINE_ERRORS,
-        ]),
+        error: PROCESS_ERRORS,
       }),
     ),
   ),
@@ -919,81 +922,6 @@ export class VibestRpcs extends RpcGroup.make(
   ),
 ) {}
 
-type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "peer"
-
-export const ACCESS = {
-  Ping: ["open", "peer"],
-  Plugins: "open",
-  Concurrency: "open",
-  "Harnesses.List": ["open", "peer"],
-  "Agents.List": ["open", "peer"],
-  "Worktree.List": ["open", "peer"],
-  "Integration.Guard": "open",
-  "Runtimes.Doctor": "open",
-  Subscriptions: "open",
-  Republish: "open",
-  ExecutionEnd: "open",
-  Prompt: "open",
-  Spawn: "agent",
-  Launch: "cli",
-  List: ["agent", "peer"],
-  "Team.List": "agent",
-  Get: ["agent", "peer"],
-  "Inbox.Subscribe": "session",
-  "Inbox.Take": "session",
-  Watch: "cli",
-  Events: "cli",
-  "Session.Seen": "cli",
-  "Project.Open": "cli",
-  "Project.Move": "cli",
-  "Project.EntryPlace": "cli",
-  "Project.EntrySession": "cli",
-  "Project.StartEntry": "cli",
-  "Project.FocusEntry": "cli",
-  "Project.RunningEntry": "agent",
-  "Project.StopEntry": "cli",
-  "Project.Create": "cli",
-  "Project.Clone": ["agent", "peer"],
-  "Project.Info": "agent",
-  "Project.Search": "agent",
-  Send: ["owner", "session", "peer"],
-  Interrupt: ["owner", "peer"],
-  Peek: ["owner", "peer"],
-  Remove: ["owner", "peer"],
-  "Daemon.Stop": "cli",
-  "Daemon.Handoff": "cli",
-  "Session.Ready": "self",
-  "Agents.Outdated": "cli",
-  "Agents.Restart": "cli",
-  "Peer.Hello": "peer",
-  "Peer.Spawn": "peer",
-  "Peer.Outbox": "peer",
-  "Peer.Ack": "peer",
-  "Machine.Add": "cli",
-  "Machine.Load": ["cli", "peer"],
-  "Machine.List": "cli",
-  "Machine.Remove": "cli",
-} as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
-
 export type PayloadOf<Tag extends RpcGroup.Rpcs<typeof VibestRpcs>["_tag"]> = Rpc.Payload<
   Rpc.ExtractTag<RpcGroup.Rpcs<typeof VibestRpcs>, Tag>
 >
-
-export const PEER_CALLS: ReadonlySet<string> = new Set(
-  Object.entries(ACCESS)
-    .filter(([, access]) => [access].flat().includes("peer"))
-    .map(([method]) => method),
-)
-
-export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
-  [...PEER_CALLS].filter(
-    (method) =>
-      method !== "Ping" &&
-      method !== "Harnesses.List" &&
-      method !== "Agents.List" &&
-      method !== "Machine.Load" &&
-      method !== "Worktree.List" &&
-      method !== "Project.Clone" &&
-      !method.startsWith("Peer."),
-  ),
-)

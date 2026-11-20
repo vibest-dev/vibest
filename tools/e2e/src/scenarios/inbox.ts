@@ -77,11 +77,12 @@ export const dropHerdrSession = async (w: World, session: string) => {
   }
 }
 
-const claudeEntry = async (
+export const claudeEntry = async (
   w: World,
   name: string,
   model: ReturnType<typeof delegatingModel>,
   respond: Parameters<typeof fakeAnthropic>[0] = () => "ok",
+  install?: { readonly wrapper: string; readonly env: Record<string, string> },
 ) => {
   const anthropic = fakeAnthropic(respond)
   const configTheResumeCheckReads = w.config.claude
@@ -91,8 +92,17 @@ const claudeEntry = async (
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
   const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
-  await w.daemon()
-  await w.startEntry({ harness: "claude", session, cwd: repo, env: flags, timeoutMs: 120_000 })
+  await w.stopDaemon()
+  const daemon = await w.run(repo, [install?.wrapper ?? binary, "daemon"], { env: install?.env ?? {} })
+  expect(daemon.code === 0, `vibest daemon exited ${daemon.code}: ${daemon.stderr}${daemon.stdout}`)
+  await w.startEntry({
+    harness: "claude",
+    session,
+    cwd: repo,
+    env: flags,
+    timeoutMs: 120_000,
+    ...(install !== undefined && { bin: install.wrapper, processEnv: install.env }),
+  })
   let entryId = ""
   await until(
     "the entry session in vibest ls",
@@ -169,6 +179,7 @@ const claudeEntry = async (
         await w.okViaEntry(["run", "pi", "--env", env, "--title", title, "--", ask(marker)], {
           cwd: repo,
           timeoutMs: 60_000,
+          ...(install !== undefined && { bin: install.wrapper, env: install.env }),
         }),
       ) as { id: string }
     ).id

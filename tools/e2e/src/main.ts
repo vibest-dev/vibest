@@ -16,6 +16,7 @@ import delivery from "./scenarios/delivery.ts"
 import entrySession from "./scenarios/entry.ts"
 import exits from "./scenarios/exits.ts"
 import harness from "./scenarios/harness.ts"
+import hcTerminals from "./scenarios/hc-terminals.ts"
 import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
@@ -24,6 +25,7 @@ import machinesRepositories from "./scenarios/machines-repositories.ts"
 import machines from "./scenarios/machines.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
+import restartEntry from "./scenarios/restart-entry.ts"
 import restartHc from "./scenarios/restart-hc.ts"
 import restart from "./scenarios/restart.ts"
 import routing from "./scenarios/routing.ts"
@@ -59,8 +61,8 @@ const areas = {
   start,
   inbox,
   exits,
-  restart: [...restart, ...restartHc],
-  hc,
+  restart: [...restart, ...restartEntry, ...restartHc],
+  hc: [...hc, ...hcTerminals],
   sessions,
   delivery: [...delivery, ...teams],
   routing,

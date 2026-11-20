@@ -118,3 +118,17 @@ session it started on another machine does not count as sending: it is not a rep
 Creating `vibest.json` after vibestd is already running loads the plugin file it names, outside the plugins folder,
 without a restart: `vibest doctor` lists that plugin as active, and vibestd is the same process. Editing that file
 reloads it the same way, and `vibest doctor` lists the new plugin.
+
+## G20. Stopping idle subagents
+
+vibest ships the plugin `vibest.idle-stop`, not loaded by default; writing `"vibest.idle-stop"` in `plugins` of
+`~/.vibest/vibest.json` turns it on, and `{ "package": "vibest.idle-stop", "options": { "idleMinutes": <n> } }` sets how
+long a session must be idle (30 minutes by default). It looks at the running sessions every few minutes (every
+`idleMinutes` when that is shorter) and stops, as `vibest stop` does (S66), each subagent idle that long: no
+execution open, nothing it sent or was sent still waiting. The process's end is recorded as stopped by the plugin, and
+the session that started it receives one message from the plugin: "<title> (<id>) was idle for 30 minutes and was
+stopped. Send it a message with vibest send to resume it; archive it with vibest archive when you no longer need it."
+The plugin checks again at the moment it stops a session, and a session that did anything in between, or now has an
+execution open or a message waiting, keeps running and its creator hears nothing. The entry session, a session with an
+open execution, and a session started from another machine (its creator is not on this machine) keep running. The
+plugin keeps no state of its own: it reads each session's last activity, so a vibestd restart changes nothing.

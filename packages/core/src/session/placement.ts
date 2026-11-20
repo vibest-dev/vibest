@@ -42,6 +42,7 @@ import { limitSeen, Subscriptions } from "../subscriptions/service.ts"
 import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions, notStartedMessage, Pickup } from "./executions.ts"
+import { SessionLocks, terminalLock } from "./locks.ts"
 
 export * as Placement from "./placement.ts"
 
@@ -75,6 +76,7 @@ export const make = Effect.gen(function* () {
   const git = yield* Git.Service
   const vibest = yield* VibestCommand
   const { openFirst, launched } = yield* Executions.Service
+  const locks = yield* SessionLocks.Service
 
   const provided = <A, E>(
     effect: Effect.Effect<
@@ -267,6 +269,40 @@ export const make = Effect.gen(function* () {
         ? terminalOf(parent)
         : undefined
     })
+
+  const ownTerminal = Effect.fn("Placement.ownTerminal")(function* (session: SessionRow) {
+    const recorded = terminalOf(session)
+
+    if (recorded.id === "") return undefined
+
+    return (yield* db.session.lastSessionAt(runtimeOf(session), recorded)) === session.id ? recorded : undefined
+  })
+
+  const terminalLocked =
+    (session: SessionRow) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      terminalOf(session).id === ""
+        ? effect
+        : locks.withLock(terminalLock(runtimeOf(session), terminalOf(session)))(effect)
+
+  const closeLeftTerminal = Effect.fn("Placement.closeLeftTerminal")(function* (session: SessionRow) {
+    if (exitedAt(session) === null) return
+
+    yield* terminalLocked(session)(
+      Effect.gen(function* () {
+        const left = yield* ownTerminal(session)
+        const owner = runtimes.find(runtimeOf(session))
+
+        if (left === undefined || owner === undefined) return
+        yield* owner.close(left).pipe(
+          Effect.catchIf(
+            (e) => e.code === "not_found",
+            () => Effect.void,
+          ),
+        )
+      }),
+    )
+  })
 
   const openTerminal = Effect.fn("Placement.openTerminal")(function* (
     h: Runtime,
@@ -522,6 +558,9 @@ export const make = Effect.gen(function* () {
     republish,
     recount,
     openTerminal,
+    closeLeftTerminal,
+    ownTerminal,
+    terminalLocked,
     show,
     locate,
   }
@@ -545,6 +584,7 @@ export const node = LayerNode.make({
     Harnesses.node,
     Inbox.node,
     Runtimes.node,
+    SessionLocks.node,
     Subscriptions.node,
     PlatformNode.childProcessSpawner,
     PlatformNode.crypto,

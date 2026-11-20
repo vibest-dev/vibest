@@ -50,10 +50,13 @@ describe("vibest.report-reminder", () => {
                 title: "sub",
                 parentId: E,
                 status: "idle",
+                lastActive: 0,
+                waiting: false,
                 latest: { execution: 8, outcome: "failed", sent: 0, endedAt: 0 },
               }),
             sentIn: (_, execution) => Effect.succeed(stored.get(execution) ?? 0),
             send: (input) => Effect.sync(() => void requests.push(input.request ?? "")),
+            stop: () => Effect.succeed(false),
           },
         }
 
