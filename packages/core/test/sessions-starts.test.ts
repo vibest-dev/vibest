@@ -4,16 +4,17 @@ import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
 import { LIVE_PROCESS_COUNT } from "@vibest/core/database/session"
 import { Drain } from "@vibest/core/drain"
+import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { EntrySession } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
-import { Effect, Fiber, PubSub, Ref } from "effect"
+import { Deferred, Effect, Fiber, PubSub, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { settled, until, writeEnd } from "./lib/observe.ts"
-import { makeRepository, restartSessions } from "./lib/session.ts"
+import { makeRepository, restartSessions, type TestOptions } from "./lib/session.ts"
 import { entryOfProject, spawnInput, spawnWorking, test } from "./lib/sessions-helpers.ts"
 
 const limitTo = (rules: ReadonlyArray<{ readonly max: number }> | undefined) =>
@@ -91,6 +92,59 @@ const exitedChild = (repo: string) =>
   })
 
 const hooked = { hooked: ["pi", "pulling-pi", "claude"] } as const
+
+const parkedAdmission = () => {
+  const reached = Deferred.makeUnsafe<void>()
+  const go = Deferred.makeUnsafe<void>()
+  const targets = new Set<string>()
+
+  const options: TestOptions = {
+    ...hooked,
+    db: (db) => ({
+      ...db,
+      session: {
+        ...db.session,
+        admitProcess: (id, start, max) =>
+          targets.has(id) && max === 2
+            ? Effect.sync(() => targets.delete(id)).pipe(
+                Effect.andThen(Deferred.succeed(reached, undefined)),
+                Effect.andThen(Deferred.await(go)),
+                Effect.andThen(db.session.admitProcess(id, start, max)),
+              )
+            : db.session.admitProcess(id, start, max),
+      },
+    }),
+  }
+
+  return {
+    options,
+    park: (id: string) =>
+      Effect.sync(() => {
+        targets.add(id)
+      }),
+    reached: Deferred.await(reached),
+    release: Deferred.succeed(go, undefined).pipe(Effect.asVoid),
+  }
+}
+
+const parked = parkedAdmission()
+
+const exitOn = (repo: string, runtime: string) =>
+  Effect.gen(function* () {
+    const herdr = yield* FakeRuntime
+    const sessions = yield* Session.Service
+    const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), runtime })
+    yield* until(placed(id), (yes) => yes)
+    yield* settled
+    yield* writeEnd(id, "pi", { text: "status: completed" })
+    yield* herdr.endExecution(id)
+    yield* sessions.check(id)
+    yield* settled
+    yield* exit(id)
+    yield* settled
+
+    return id
+  })
 
 describe("a cap on live harness processes", () => {
   test(
@@ -377,5 +431,96 @@ describe("a cap on live harness processes", () => {
         JSON.stringify(plan),
       )
     }),
+  )
+  test(
+    "an interrupt racing the admission of one waiting run never drops the run behind it",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      yield* limitTo([{ max: 1 }])
+      const [a, b] = yield* spawnSome(repo, 2)
+      yield* until(waiting, (keys) => keys.length === 2)
+      yield* parked.park(a!)
+
+      yield* Effect.forkChild(limitTo([{ max: 2 }]))
+      yield* parked.reached
+      const interrupting = yield* Effect.forkChild(sessions.interrupt(a!))
+      yield* Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true })
+      yield* parked.release
+      const answer = yield* Fiber.join(interrupting)
+      yield* limitTo([{ max: 3 }])
+      yield* until(placed(b!), (yes) => yes)
+
+      const launchedA = (yield* herdr.callsTo("open")).some((call) => call.env?.VIBEST_SESSION_ID === a)
+      assert.isFalse(launchedA && answer.message.includes("will not start"))
+    }),
+    parked.options,
+  )
+
+  test(
+    "a waiting relaunch whose runtime is gone frees its place for the next run",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const registry = yield* Runtimes.Service
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      const temporary = yield* registry.transform((edit) => edit.add({ ...herdr.runtime, id: "temporary" }))
+      yield* limitTo([{ max: 2 }])
+      const a = yield* exitOn(repo, "temporary")
+      yield* limitTo([{ max: 1 }])
+      yield* sessions.send(a, "resume")
+      yield* until(waiting, (keys) => keys.includes(a))
+      const [next] = yield* spawnSome(repo, 1)
+
+      yield* temporary.dispose
+      yield* limitTo([{ max: 2 }])
+      yield* until(placed(next!), (yes) => yes)
+      assert.isNotNull((yield* db.session.getSession(a))!.process?.endedAt ?? null)
+    }),
+    hooked,
+  )
+
+  test(
+    "a repeated vibest run request for a waiting run answers the first session",
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      yield* liveEntry(repo)
+      yield* limitTo([{ max: 1 }])
+      const input = { ...(yield* spawnInput(repo)), request: "a36df918-31cd-4593-a075-ea60d849fee0" }
+      const first = yield* sessions.spawn(input)
+      yield* until(waiting, (keys) => keys.includes(first.id))
+
+      assert.strictEqual((yield* sessions.spawn(input)).id, first.id)
+      assert.deepStrictEqual(yield* waiting, [first.id])
+    }),
+    hooked,
+  )
+
+  test(
+    "the default list shows a waiting relaunch and hides an archived waiting run",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      yield* liveEntry(repo)
+      yield* limitTo([{ max: 2 }])
+      const a = yield* exitedChild(repo)
+      yield* limitTo([{ max: 1 }])
+      yield* sessions.send(a, "resume")
+      const [b] = yield* spawnSome(repo, 1)
+      yield* until(waiting, (keys) => keys.length === 2)
+      yield* sessions.remove(b!)
+
+      const listed = (yield* db.session.listSessions({ projectId, waiting: yield* waiting })).map((row) => row.id)
+      assert.include(listed, a)
+      assert.notInclude(listed, b)
+    }),
+    hooked,
   )
 })

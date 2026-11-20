@@ -74,10 +74,15 @@ export const sessionListing = (deps: {
     Effect.gen(function* () {
       if (Predicate.isTagged(scope, "Nothing")) return []
 
-      if (Predicate.isTagged(scope, "Peer")) return yield* listedRows(yield* sessions.list({ peer: scope, stopped }))
+      const waiting = yield* starts.waiting
+
+      if (Predicate.isTagged(scope, "Peer"))
+        return yield* listedRows(yield* sessions.list({ peer: scope, stopped, waiting }))
       const projectId = Predicate.isTagged(scope, "Project") ? scope.id : undefined
 
-      return yield* listedRows(yield* sessions.list({ ...(projectId !== undefined && { projectId }), stopped }))
+      return yield* listedRows(
+        yield* sessions.list({ ...(projectId !== undefined && { projectId }), stopped, waiting }),
+      )
     })
 
   const seenAt = (runtime: string, address: RuntimeAddress) =>

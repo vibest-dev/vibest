@@ -170,13 +170,18 @@ export const make = Effect.gen(function* () {
 
   const resumeAdmitted = (id: string) =>
     Effect.gen(function* () {
-      const session = yield* getRow(id)
-      const admitted = session.process?.id
-      const h = yield* runtimes.route(runtimeOf(session))
+      const admitted = (yield* db.session.getSession(id))?.process?.id
 
-      return yield* deliverQueued(h, session, terminalOf(session), (text, onHandover) =>
-        resume(h, session, { text, onHandover }),
-      ).pipe(
+      return yield* Effect.gen(function* () {
+        const session = yield* getRow(id)
+
+        if (archived(session)) return
+        const h = yield* runtimes.route(runtimeOf(session))
+
+        return yield* deliverQueued(h, session, terminalOf(session), (text, onHandover) =>
+          resume(h, session, { text, onHandover }),
+        )
+      }).pipe(
         Effect.ensuring(
           db.session
             .getSession(id)
@@ -191,13 +196,7 @@ export const make = Effect.gen(function* () {
       )
     })
 
-  const relaunch = (id: string) =>
-    locked(id)(
-      Effect.gen(function* () {
-        if (archived(yield* getRow(id))) return
-        yield* resumeAdmitted(id)
-      }),
-    ).pipe(Reactor.logFailure(`relaunch ${id}`))
+  const relaunch = (id: string) => locked(id)(resumeAdmitted(id)).pipe(Reactor.logFailure(`relaunch ${id}`))
 
   const deliver = Effect.fn("Delivery.deliver")(function* (id: string) {
     const session = yield* getRow(id)
@@ -292,7 +291,9 @@ export const make = Effect.gen(function* () {
         return { message: `${id} was waiting for a free slot; it will not start` }
       }
 
-      return { message: `${id} was waiting for a free slot to resume; it stays stopped until it gets another message` }
+      return {
+        message: `${id} was waiting for a free slot to resume; it stays stopped until another message or the next vibestd start delivers its pending ones`,
+      }
     }
 
     return yield* locked(id)(

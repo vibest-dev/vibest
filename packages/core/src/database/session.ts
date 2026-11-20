@@ -45,6 +45,7 @@ export type SessionFilter = {
   readonly projectId?: string
   readonly stopped?: boolean
   readonly peer?: Remote.PeerScope | undefined
+  readonly waiting?: ReadonlyArray<string>
 }
 
 export const make = (session: Session.Statements, inbox: Inbox.Statements, remote: Remote.Statements) =>
@@ -381,7 +382,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             ...(filter.projectId === undefined ? [] : [sql`s.project_id = ${filter.projectId}`]),
             ...(filter.peer === undefined ? [] : [remote.ofPeer(sql`s.id`, filter.peer)]),
           ],
-          filter.stopped ? undefined : running,
+          filter.stopped
+            ? undefined
+            : sql`((${running} AND (p_id IS NOT NULL OR ended_at IS NULL)) OR ${
+                (filter.waiting ?? []).length === 0 ? sql`0` : sql.in("id", filter.waiting!)
+              })`,
         ).pipe(Effect.orDie),
       ),
 

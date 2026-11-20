@@ -488,10 +488,10 @@ export const make = Effect.gen(function* () {
 
         return {
           id: before.id,
-          harness: before.harness,
-          provider: before.provider,
-          model: before.model,
-          runtime: before.runtime,
+          harness: before.harness || harnessId,
+          provider: before.harness === "" ? provider : before.provider,
+          model: before.harness === "" ? model : before.model,
+          runtime: before.runtime || runtimeKind,
           decidedBy: before.routing?.decidedBy ?? {},
           trace: before.routing?.trace ?? [],
         }

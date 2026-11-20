@@ -55,13 +55,15 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.andThen(walk))
 
   const remove = (id: string) =>
-    Effect.sync(() => {
-      const at = list.findIndex((queued) => queued.id === id)
+    lock.withPermits(1)(
+      Effect.sync(() => {
+        const at = list.findIndex((queued) => queued.id === id)
 
-      if (at >= 0) list.splice(at, 1)
+        if (at >= 0) list.splice(at, 1)
 
-      return at >= 0
-    })
+        return at >= 0
+      }),
+    )
 
   yield* reactor.on([ProcessEnded, SessionEnded], () => walk)
   yield* concurrency.limits.pipe(
