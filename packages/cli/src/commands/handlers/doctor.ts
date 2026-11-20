@@ -149,6 +149,22 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         sections.push({ title: `Runtime: ${r.name} (where agents run)`, findings })
       }
 
+      const definitions = yield* ask((c) => c["Agents.List"]({}))
+      sections.push({
+        title: "Agent definitions",
+        findings: Option.match(definitions, {
+          onNone: (): Array<Finding> => [{ mark: "note", text: "vibestd did not list its agent definitions" }],
+          onSome: (listing): Array<Finding> => [
+            { mark: "ok", text: listing.agents.map((agent) => agent.id).join(", ") },
+            ...listing.invalid.map((agent): Finding => ({
+              mark: "problem",
+              text: `${agent.id}: ${agent.error}`,
+              fix: `fix or remove ${agent.source}`,
+            })),
+          ],
+        }),
+      })
+
       const loaded = yield* ask((c) => c.Plugins())
       sections.push({
         title: "Plugins",

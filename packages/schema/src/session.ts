@@ -197,3 +197,22 @@ export const HarnessChoice = Schema.Struct({
 })
 
 export type HarnessChoice = typeof HarnessChoice.Type
+
+export const AgentListing = Schema.Struct({
+  agents: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      description: Schema.String,
+      plugin: Schema.String,
+      harness: Schema.optional(Schema.String),
+      provider: Schema.optional(Schema.String),
+      model: Schema.optional(Schema.String),
+      system: Schema.String,
+    }),
+  ),
+  invalid: Schema.Array(
+    Schema.Struct({ id: Schema.String, source: Schema.String, error: Schema.String, plugin: Schema.String }),
+  ),
+})
+
+export type AgentListing = typeof AgentListing.Type

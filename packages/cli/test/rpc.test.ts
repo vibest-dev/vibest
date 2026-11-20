@@ -651,6 +651,7 @@ describe("vibest.sock", () => {
       yield* bare.Plugins(undefined, { headers: protocolHeaders() })
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
+      assert.isArray((yield* bare["Agents.List"]({}, { headers: protocolHeaders() })).agents)
       yield* bare.Republish(undefined, { headers: protocolHeaders() })
       yield* bare.ExecutionEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
       assert.strictEqual(
@@ -667,6 +668,7 @@ describe("vibest.sock", () => {
         "Ping",
         "Plugins",
         "Harnesses.List",
+        "Agents.List",
         "Runtimes.Doctor",
         "Subscriptions",
         "Republish",

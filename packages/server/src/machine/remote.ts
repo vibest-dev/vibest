@@ -128,6 +128,12 @@ const make = Effect.gen(function* () {
       ),
     ),
 
+    agents: Effect.fn("Remote.agents")((machine: string) =>
+      Effect.flatMap(machines.link(machine), (link) =>
+        link.call(link.client["Agents.List"]({}, { headers: peerHeaders(self.id) })),
+      ),
+    ),
+
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
       if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }
 
