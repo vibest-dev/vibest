@@ -25,6 +25,7 @@ import {
   AllocationFailed,
   AmbiguousSession,
   HarnessChoice,
+  AgentListing,
   HarnessUnavailable,
   LaunchFailed,
   LimitReached,
@@ -376,6 +377,13 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, ...LINE_ERRORS]),
     }),
   ),
+  protocol(
+    Rpc.make("Agents.List", {
+      payload: { machine: Schema.optional(Schema.String) },
+      success: AgentListing,
+      error: Schema.Union([Forbidden, ...LINE_ERRORS]),
+    }),
+  ),
   scoped(
     Rpc.make("Integration.Guard", {
       payload: { harness: Schema.String, input: Schema.String },
@@ -397,6 +405,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           argv: Schema.Array(Schema.String),
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           focus: Schema.Boolean,
           callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
@@ -543,6 +552,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           harness: Schema.String,
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           fresh: Schema.Boolean,
           terminal: Schema.String,
           runtime: Schema.optional(Schema.String),
@@ -580,6 +590,8 @@ export class VibestRpcs extends RpcGroup.make(
       payload: {
         harness: Schema.optional(Schema.String),
         agent: Schema.String,
+        agentNamed: Schema.optional(Schema.Boolean),
+        fresh: Schema.optional(Schema.Boolean),
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         runtime: Schema.optional(Schema.String),
@@ -858,6 +870,7 @@ export const ACCESS = {
   Ping: ["open", "peer"],
   Plugins: "open",
   "Harnesses.List": ["open", "peer"],
+  "Agents.List": ["open", "peer"],
   "Integration.Guard": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
@@ -916,7 +929,11 @@ export const PEER_CALLS: ReadonlySet<string> = new Set(
 export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
   [...PEER_CALLS].filter(
     (method) =>
-      method !== "Ping" && method !== "Harnesses.List" && method !== "Machine.Load" && !method.startsWith("Peer."),
+      method !== "Ping" &&
+      method !== "Harnesses.List" &&
+      method !== "Agents.List" &&
+      method !== "Machine.Load" &&
+      !method.startsWith("Peer."),
   ),
 )
 
@@ -931,4 +948,5 @@ export const CAPABILITIES = {
   spawnFiles: true,
   peerSpawnFiles: true,
   load: true,
+  agents: true,
 } as const

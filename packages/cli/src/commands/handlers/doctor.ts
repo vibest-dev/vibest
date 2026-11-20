@@ -1,5 +1,6 @@
 import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Layout } from "@vibest/schema/layout"
+import type { AgentListing } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Console, Effect, Option } from "effect"
 import { RpcClient } from "effect/rpc"
@@ -28,6 +29,28 @@ export const doctorVerdict = (findings: ReadonlyArray<Finding>) => {
 
   return problems.some((f) => f.fix) ? `${word}; run the fix lines above.` : `${word}.`
 }
+
+export const agentDefinitionFindings = <E, R>(
+  listed: boolean,
+  list: Effect.Effect<Option.Option<AgentListing>, E, R>,
+): Effect.Effect<ReadonlyArray<Finding>, E, R> =>
+  listed
+    ? Effect.map(list, (definitions) =>
+        Option.match(definitions, {
+          onNone: (): Array<Finding> => [{ mark: "note", text: "vibestd did not list its agent definitions" }],
+          onSome: (listing): Array<Finding> => [
+            { mark: "ok", text: listing.agents.map((agent) => agent.id).join(", ") },
+            ...listing.invalid.map((agent): Finding => ({
+              mark: "problem",
+              text: `${agent.id ?? agent.source}: ${agent.error}`,
+              fix: `fix or remove ${agent.source}`,
+            })),
+          ],
+        }),
+      )
+    : Effect.succeed([
+        { mark: "problem", text: "this vibestd is older and does not list agent definitions", fix: "vibest update" },
+      ])
 
 export default Runtime.handler(Commands.commands.doctor, () =>
   Effect.gen(function* () {
@@ -148,6 +171,14 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         if (findings.length === 0) findings.push({ mark: "ok", text: "online" })
         sections.push({ title: `Runtime: ${r.name} (where agents run)`, findings })
       }
+
+      sections.push({
+        title: "Agent definitions",
+        findings: yield* agentDefinitionFindings(
+          ping?.capabilities?.agents === true,
+          ask((c) => c["Agents.List"]({})),
+        ),
+      })
 
       const loaded = yield* ask((c) => c.Plugins())
       sections.push({

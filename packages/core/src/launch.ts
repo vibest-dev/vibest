@@ -23,7 +23,7 @@ export { launchLine, type Launch }
 export const definitionIn = (agents: AgentsDomain, id: string) => {
   const found = agents.find(id)
 
-  return found === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.succeed(found)
+  return found === undefined ? Effect.fail(unknownAgent(id, agents)) : Effect.succeed(found)
 }
 
 export const definitionOf = (id: string) => Effect.flatMap(Agents.Service, (agents) => definitionIn(agents, id))
@@ -81,6 +81,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     id: saved.sessionId,
     checkout: true,
     projectDir: layout.project(saved.projectId),
+    agents: (yield* Agents.Service).all,
     ...(yield* projectText(layout.project(saved.projectId))),
   })
 

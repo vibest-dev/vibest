@@ -10,9 +10,323 @@
     "spawnRuntime": true,
     "spawnFiles": true,
     "peerSpawnFiles": true,
-    "load": true
+    "load": true,
+    "agents": true
   },
   "methods": {
+    "Agents.List": {
+      "access": [
+        "open",
+        "peer"
+      ],
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "plugin": {
+                  "type": "string"
+                },
+                "harness": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "model": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "system": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "description",
+                "plugin",
+                "system"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "invalid": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                },
+                "plugin": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "error",
+                "plugin"
+              ],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "agents",
+          "invalid"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownMachineEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineIncompatibleEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownMachineEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownMachine"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "machines"
+            ],
+            "additionalProperties": true
+          },
+          "MachineUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineUnavailable"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "MachineIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineIncompatible"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Agents.Outdated": {
       "access": "cli",
       "stream": false,
@@ -3670,6 +3984,16 @@
           "agent": {
             "type": "string"
           },
+          "agentNamed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "focus": {
             "type": "boolean"
           },
@@ -3980,6 +4304,16 @@
                   ],
                   "additionalProperties": true
                 }
+              },
+              "invalid": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -7959,6 +8293,16 @@
                   ],
                   "additionalProperties": true
                 }
+              },
+              "invalid": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -9195,6 +9539,16 @@
           "agent": {
             "type": "string"
           },
+          "agentNamed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fresh": {
             "type": "boolean"
           },
@@ -9689,6 +10043,16 @@
                   ],
                   "additionalProperties": true
                 }
+              },
+              "invalid": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -11255,6 +11619,26 @@
           "agent": {
             "type": "string"
           },
+          "agentNamed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fresh": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provider": {
             "anyOf": [
               {
@@ -11718,6 +12102,16 @@
                   ],
                   "additionalProperties": true
                 }
+              },
+              "invalid": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -14786,6 +15180,16 @@
                   ],
                   "additionalProperties": true
                 }
+              },
+              "invalid": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [

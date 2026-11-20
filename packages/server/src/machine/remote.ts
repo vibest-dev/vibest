@@ -10,7 +10,7 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
-import { type ListedMachine, MachineFailed } from "@vibest/schema/machine"
+import { type ListedMachine, MachineFailed, MachineIncompatible } from "@vibest/schema/machine"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
 
 import { Machines } from "./machines.ts"
@@ -127,6 +127,18 @@ const make = Effect.gen(function* () {
         ),
       ),
     ),
+
+    agents: Effect.fn("Remote.agents")(function* (machine: string) {
+      const link = yield* machines.link(machine)
+
+      if (link.capabilities.agents !== true)
+        return yield* new MachineIncompatible({
+          machine,
+          message: `${machine} runs a vibest that does not list agents; run vibest update there`,
+        })
+
+      return yield* link.call(link.client["Agents.List"]({}, { headers: peerHeaders(self.id) }))
+    }),
 
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
       if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }

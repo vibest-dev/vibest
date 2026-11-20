@@ -74,8 +74,72 @@ whether the creator is the entry session or another session, and on another mach
 Every session runs as an agent definition: an id, a description and a system prompt, optionally with a guard that adds
 rules to the ones every agent has. Bare `vibest` opens the entry session as `coordinator`; `vibest run` starts a
 `general` session unless `--agent` names another registered id, and on another machine the same id is looked up there. An
-id that is not registered is refused with the registered ids listed, before any worktree or pane is made. A session may
+id that is not registered is refused with the registered ids listed (or, for an invalid file, its error), before any
+worktree or pane is made. A session may
 manage (send to, interrupt, peek at, remove) only the sessions it started.
+
+## S60. Agents from files
+
+A user defines an agent with one Markdown file, `~/.vibest/agents/<id>.md`: the file name is the id (lowercase letters,
+digits and `-`, starting with a letter, at most 32 characters), the frontmatter holds `description` (required) and
+optionally `name` (equal to the file name), `extends`, `harness`, `provider` and `model`, and the text after it is the
+prompt. With `extends: <id>` the prompt is that definition's prompt, a blank line, then the file's, and that
+definition's guard applies. `extends` looks at the agents registered before the files (the builtins and nothing a
+config removed) and at the other files, one level only: a file named by `extends` must not extend anything itself.
+
+```markdown
+---
+description: reviews a change for real bugs, each with a reproduction; changes no code
+extends: general
+harness: pi
+provider: cpamp
+model: gpt-6.2-astra
+---
+
+You are a reviewer. Read the diff of the branch you are given against main …
+```
+
+A saved file is listed by `vibest agent list` within a few seconds, without restarting vibestd, and removing it
+removes the agent. `vibest run --agent <id>` starts a session with the joined prompt, and the session facts of every
+new session list the agents it can start (`<id> (<description>)`, the first 20). `vibest agent show <id>` prints one
+definition with its whole prompt. A session takes an edited file at its next process start, never mid-conversation.
+
+## S61. An invalid agent file
+
+A file that breaks a rule (a bad file name, an unknown or repeated key, no or a blank description, an empty prompt,
+`provider` or `model` without `harness`, `name` unlike the file name, an `extends` that names nothing, an invalid file
+or goes two levels deep) registers nothing and is reported, never dropped: under `invalid` in `vibest agent list` with its path and error, in
+`vibest doctor` with the fix, and by `vibest run --agent <id>`, which is refused with that error. An invalid file whose id is a builtin's (`general.md`)
+does not fall back to the builtin: starts of that agent, a plain `vibest run` included, are refused with the file's error
+until it is fixed or removed. A folder that cannot be read is reported the same way, with the agents it last read kept.
+The other files still load.
+
+## S62. An agent's own harness
+
+An agent with `harness` (and optionally `provider` and `model`) starts there when the run names no harness, instead of
+the caller's harness, provider and model; a flag still wins over the file, and routing plugins run after it. `vibest ls`
+names `agent:<id>` under `routing` as the decider of each field it chose. A run that names the harness takes nothing
+from the file.
+
+## S63. Replacing a builtin agent
+
+A file whose id is a builtin's (`general.md`, `coordinator.md`) replaces it for every new start; with `extends` naming
+its own id it keeps the builtin's prompt and guard and adds to them. Removing the file restores the builtin.
+
+## S64. The entry session as another agent
+
+`vibest --agent <id>` opens a project's entry session as that agent when it starts a new conversation (none yet, or
+`--new`), on the agent's harness when no flag names one. A conversation keeps the agent it started with: bare `vibest`
+reopens it as that agent, and naming another agent without `--new` is refused and changes nothing.
+
+## S65. Agents from a plugin
+
+A plugin registers agents with `ctx.agent.transform` (`editor.add`, and `editor.invalid` for a source it could not
+read), so a user can support another file format, for example Claude Code's `.claude/agents/<name>.md`. Where the formats
+differ, vibest's fields are the standard: such a plugin maps only what a definition has (`name` to the id,
+`description`, the body to the prompt) and drops the rest (Claude's `tools`, its `model` aliases), and every registered
+definition still passes vibest's own checks. `vibest agent
+list` names the plugin that added each agent; a plugin loaded later replaces an agent of the same id.
 
 ## S57. Attaching files to a run
 
