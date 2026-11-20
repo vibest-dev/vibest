@@ -6,7 +6,6 @@ import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { Concurrency } from "../concurrency.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import type { Slot } from "../database/session.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
@@ -41,8 +40,6 @@ export const Pickup = Data.taggedEnum<Pickup>()
 export const notStartedMessage = (pickup: Pickup) =>
   Predicate.isTagged(pickup, "NotStarted") ? pickup.message : undefined
 
-export type Gate = "slot" | "first"
-
 export const busy = (state: AgentState) => state === "working" || state === "blocked"
 
 export const busyOf = (seen: AgentSeen) => {
@@ -62,10 +59,7 @@ export const make = Effect.gen(function* () {
   const { track } = yield* SessionLive.Service
   const concurrency = yield* Concurrency.Service
 
-  const slotOf = (gate: Gate | undefined) =>
-    Effect.map(concurrency.limit, (limit): Slot | undefined =>
-      gate === undefined || limit === undefined ? undefined : { limit, alone: gate === "first" },
-    )
+  const limitOf = (gated: boolean) => (gated ? concurrency.limit : Effect.succeed(undefined))
 
   const reportedStatus = (id: string) =>
     Effect.map(db.session.getSession(id), (session) => session?.status ?? "unknown")
@@ -210,7 +204,7 @@ export const make = Effect.gen(function* () {
     terminal: Terminal,
     text: string,
     onHandover: Effect.Effect<void> = Effect.void,
-    gate?: Gate,
+    gated = false,
   ) {
     const kept = yield* db.session.openExecution(session.id)
     const adapter = yield* harnesses.get(harnessIdOf(session))
@@ -222,7 +216,7 @@ export const make = Effect.gen(function* () {
     const begun =
       open === undefined
         ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) =>
-            Effect.flatMap(slotOf(gate), (slot) => db.session.startExecutionWithin(session.id, at, slot)),
+            Effect.flatMap(limitOf(gated), (limit) => db.session.startExecutionWithin(session.id, at, limit)),
           )
         : { execution: open, opened: true }
 
@@ -292,10 +286,10 @@ export const make = Effect.gen(function* () {
   const openFirst = Effect.fn("Executions.openFirst")(function* (
     id: string,
     onHandover: Effect.Effect<void>,
-    gate?: Gate,
+    gated = false,
   ) {
-    const slot = yield* slotOf(gate)
-    const begun = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecutionWithin(id, at, slot))
+    const limit = yield* limitOf(gated)
+    const begun = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecutionWithin(id, at, limit))
 
     if (begun === undefined) return undefined
     yield* onHandover

@@ -183,10 +183,10 @@ export const layer = Layer.effectDiscard(
         const sender = senderColumns(data.sender)
 
         return sql`INSERT INTO inbox (session_id, id, sender_type, sender_session_id, sender_agent, sender_title,
-            sender_machine, sender_plugin, sender_key, about_session_id, kind, content, request, peer_item, status, queued_at)
+            sender_machine, sender_plugin, sender_key, about_session_id, kind, content, request, peer_item, status)
           VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
             ${sender.machine}, ${sender.plugin}, ${senderKey(data.sender)}, ${data.about ?? null}, ${data.kind}, ${data.content},
-            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.at})`.pipe(
+            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`.pipe(
           Effect.andThen(countSent(sql, localSessionOf(data.sender), data.kind, data.execution)),
         )
       }),

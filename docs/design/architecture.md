@@ -393,15 +393,17 @@ How these modules keep the rules:
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
   runs twice. A refused text undoes the execution unless the integration wrote a result anyway or a usage-limit move
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
-- A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) is checked in the same
-  transaction that opens a delivered execution (`db.session.startExecutionWithin`, `db.inbox.takeInbox`), counting
-  every open execution in this vibestd's catalog, so two deliveries cannot both take the last slot. A refused delivery
-  leaves its rows pending and its task untaken; a refused first task starts the harness without it. The queue is
-  those rows, so nothing about it is stored. With a limit set, an execution end (and a raised or removed limit) drains
-  the queue in one fiber, oldest waiting row first, until the limit is reached; a session that cannot take its input
-  for another reason is passed over. Typed input and the rerun of a usage-limit move are not gated. A pulling harness
-  takes a free slot when it next asks, outside the queue's order, so first come first served holds for pushed
-  deliveries only.
+- A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) has one door:
+  `admits` in `session-statements.ts`, checked in the transaction that opens an execution from an inbox row (a push,
+  a resume, a launch's first task, a pull take, an entry's generated first input). It admits a session only while open
+  executions of live sessions are below the limit and the session holds the oldest waiting row (`min(inbox.rowid)`,
+  the commit order, which a read-model rebuild replays). A refused input stays queued (pending rows, an untaken task),
+  and a refused first input starts the harness without it; the queue is those rows, so nothing about it is stored.
+  With a limit set, every change that can free a slot or move the head (an execution started or ended, a row queued
+  or moved, a process placed or ready, a session ended, a new limit) wakes one fiber in `Delivery` that offers the
+  head its input (pushing it, or waking a pulling recipient's inbox stream) and moves to the next head once that one
+  is working. A head that cannot take input yet holds the line. Typed input and the rerun of a usage-limit move are not
+  gated.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the

@@ -14,6 +14,7 @@ import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schem
 
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
+import { Concurrency } from "../concurrency.ts"
 import { AddressJson, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
@@ -68,6 +69,7 @@ const make = Effect.gen(function* () {
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
   const processes = yield* Processes.Service
+  const concurrency = yield* Concurrency.Service
   const layout = yield* Layout
   const vibestCommand = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
@@ -256,6 +258,7 @@ const make = Effect.gen(function* () {
                     projectDirectory: root,
                     agent,
                     firstInput: firstInputOf(chosen),
+                    limit: yield* concurrency.limit,
                     ...((existing === undefined || fresh) && { sessionId }),
                   },
                 )
@@ -387,6 +390,7 @@ const make = Effect.gen(function* () {
                   projectDirectory: directory,
                   agent,
                   firstInput: firstInputOf(input.harness),
+                  limit: yield* concurrency.limit,
                 },
               )
 
@@ -481,6 +485,7 @@ export const node = LayerNode.make({
   deps: [
     Agents.node,
     Bus.node,
+    Concurrency.node,
     Db.node,
     Harness.node,
     Harnesses.node,

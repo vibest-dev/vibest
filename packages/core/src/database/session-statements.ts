@@ -144,9 +144,10 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => rows[0]?.id),
     )
 
-  const workingExecutions = sql<{ n: number }>`SELECT count(*) AS n FROM execution WHERE outcome IS NULL`.pipe(
-    Effect.map((rows) => rows[0]?.n ?? 0),
-  )
+  const workingExecutions = sql<{
+    n: number
+  }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
+      WHERE e.outcome IS NULL AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
 
   const waitingSessions = sql<{
     id: string
@@ -154,9 +155,17 @@ export const statements = Effect.gen(function* () {
       WHERE s.ended_at IS NULL
         AND ((i.kind != 'task' AND i.status = 'pending') OR (i.kind = 'task' AND i.execution_id IS NULL))
         AND NOT EXISTS (SELECT 1 FROM execution e WHERE e.session_id = i.session_id AND e.outcome IS NULL)
-      GROUP BY i.session_id ORDER BY min(i.queued_at), i.session_id`.pipe(
-    Effect.map((rows) => rows.map((row) => row.id)),
-  )
+      GROUP BY i.session_id ORDER BY min(i.rowid)`.pipe(Effect.map((rows) => rows.map((row) => row.id)))
+
+  const admits = (sessionId: string, limit: number | undefined) =>
+    limit === undefined
+      ? Effect.succeed(true)
+      : Effect.gen(function* () {
+          if ((yield* workingExecutions) >= limit) return false
+          const [head] = yield* waitingSessions
+
+          return head === undefined || head === sessionId
+        })
 
   const currentProcessId = (sessionId: string) =>
     sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
@@ -440,6 +449,7 @@ export const statements = Effect.gen(function* () {
     openExecution,
     workingExecutions,
     waitingSessions,
+    admits,
     startExecution,
     acceptedAt,
     accept,

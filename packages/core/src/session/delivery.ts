@@ -1,4 +1,12 @@
-import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
+import {
+  ExecutionEnded,
+  ExecutionStarted,
+  InboxMoved,
+  InboxQueued,
+  ProcessPlaced,
+  ProcessReady,
+  SessionEnded,
+} from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, Ref, Stream } from "effect"
 
@@ -73,8 +81,7 @@ export const make = Effect.gen(function* () {
     >,
   ) {
     const into =
-      hand ??
-      ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover, "slot"))
+      hand ?? ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover, true))
 
     const task = yield* db.inbox.untakenTask(session.id)
 
@@ -201,7 +208,7 @@ export const make = Effect.gen(function* () {
         })
 
       return yield* deliverQueued(h, session, terminal, (text, onHandover) =>
-        resume(h, session, { text, onHandover, gate: "slot" }),
+        resume(h, session, { text, onHandover, gated: true }),
       )
     }
 
@@ -250,14 +257,18 @@ export const make = Effect.gen(function* () {
     merge: (pending, next) => ({ rows: new Set([...pending.rows, ...next.rows]), ended: pending.ended || next.ended }),
   })
 
-  const deliverWaiting = Effect.gen(function* () {
-    for (const id of yield* db.inbox.waitingSessions()) {
-      if (yield* full) return
-      yield* deliverWoken(id, { rows: new Set(), ended: true })
-    }
-  })
+  const offerHead = (passed: string | undefined): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const [head] = yield* db.inbox.waitingSessions()
 
-  const queue = yield* RunCoordinator.make<"queue", void>({ drain: () => deliverWaiting, merge: () => undefined })
+      if (head === undefined || head === passed || (yield* full)) return
+      yield* inbox.wake(head)
+      const rows = new Set((yield* db.inbox.pendingInbox(head)).map((r) => r.id))
+      yield* deliverWoken(head, { rows, ended: true })
+      yield* offerHead(head)
+    })
+
+  const queue = yield* RunCoordinator.make<"queue", void>({ drain: () => offerHead(undefined), merge: () => undefined })
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
@@ -330,26 +341,23 @@ export const make = Effect.gen(function* () {
     )
   })
 
+  const limited = (unlimited: Effect.Effect<void>) =>
+    Effect.flatMap(concurrency.limit, (limit) => (limit === undefined ? unlimited : queue.wake("queue", undefined)))
+
   yield* reactor.on([ExecutionEnded], (event) =>
-    Effect.flatMap(concurrency.limit, (limit) =>
-      limit !== undefined
-        ? queue.wake("queue", undefined)
-        : event.data.outcome === "failed"
-          ? Effect.void
-          : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
+    limited(
+      event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
     ),
-  )
-  yield* concurrency.limits.pipe(
-    Stream.drop(1),
-    Stream.runForEach(() => queue.wake("queue", undefined)),
-    Effect.forkScoped,
   )
   yield* reactor.on([InboxQueued], (event) =>
-    Effect.flatMap(concurrency.limit, (limit) =>
-      limit !== undefined
-        ? queue.wake("queue", undefined)
-        : wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),
-    ),
+    limited(wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false })),
+  )
+  yield* reactor.on([ExecutionStarted, InboxMoved, ProcessPlaced, ProcessReady, SessionEnded], () =>
+    limited(Effect.void),
+  )
+  yield* concurrency.limits.pipe(
+    Stream.runForEach(() => limited(Effect.void)),
+    Effect.forkScoped,
   )
 
   yield* db.inbox.recoverDelivering(

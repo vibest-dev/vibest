@@ -276,7 +276,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
     const {
       reads,
       openExecution,
-      workingExecutions,
+      admits,
       waitingSessions,
       acceptedAt,
       observable,
@@ -473,7 +473,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
             if ((yield* openExecution(sessionId)) !== undefined) return undefined
 
-            if (limit !== undefined && (yield* workingExecutions) >= limit) return undefined
+            if (!(yield* admits(sessionId, limit))) return undefined
             const pending = yield* findSend(sessionId, "pending")
 
             if (pending.length === 0) return undefined

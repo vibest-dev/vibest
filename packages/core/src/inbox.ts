@@ -43,6 +43,7 @@ export interface Interface {
   readonly pulls: (harnessId: string) => boolean
   readonly take: (sessionId: string, process: number | undefined) => Effect.Effect<Taken | undefined>
   readonly stream: (sessionId: string) => Stream.Stream<null>
+  readonly wake: (sessionId: string) => Effect.Effect<void>
   readonly claimRetype: (sessionId: string, execution: number) => Effect.Effect<boolean>
   readonly undelivered: (session: SessionRow, rows: Undelivered, reason: string) => Effect.Effect<void>
   readonly dropQueue: (session: SessionRow, reason: string) => Effect.Effect<void>
@@ -162,7 +163,7 @@ export const layer = Layer.effect(
       Effect.sync(() => handedOver.delete(handedKey(sessionId, execution))),
     )
 
-    return Service.of({ enqueue: db.inbox.insertInbox, pulls, take, stream, claimRetype, undelivered, dropQueue })
+    return Service.of({ enqueue: db.inbox.insertInbox, pulls, take, stream, wake, claimRetype, undelivered, dropQueue })
   }),
 )
 

@@ -37,8 +37,6 @@ import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
 import type * as Session from "./session-statements.ts"
 
-export type Slot = { readonly limit: number; readonly alone: boolean }
-
 export type SessionFilter = {
   readonly projectId?: string
   readonly stopped?: boolean
@@ -64,7 +62,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       findEntrySessions,
       openExecution,
       workingExecutions,
-      waitingSessions,
+      admits,
       startExecution,
       acceptedAt,
       accept,
@@ -411,6 +409,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly sessionId?: string | undefined
             readonly agent: string
             readonly firstInput?: string | undefined
+            readonly limit?: number | undefined
           },
         ) =>
           Effect.gen(function* () {
@@ -491,8 +490,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     status: "delivered",
                   })
 
-                if (start.firstInput !== undefined && resume === undefined)
-                  yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
+                const handed =
+                  start.firstInput !== undefined && resume === undefined && (yield* admits(entryId, start.limit))
+
+                if (handed) yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
                 yield* afterCommit(() => void moving.delete(project))
 
                 if (!movingHere || fresh) yield* dropWaiting(entryId)
@@ -502,7 +503,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   harnessSessionId: resume ?? null,
                   projectId: project,
                   process,
-                  firstInput: resume === undefined ? start.firstInput : undefined,
+                  firstInput: handed ? start.firstInput : undefined,
                 }
               }),
             )
@@ -717,16 +718,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       startExecutionWithin: Effect.fn("Db.session.startExecutionWithin")(
-        (id: string, at: number, slot: Slot | undefined) =>
+        (id: string, at: number, limit: number | undefined) =>
           tx(
             Effect.gen(function* () {
               const open = yield* openExecution(id)
 
               if (open !== undefined) return { execution: open, opened: false }
 
-              if (slot !== undefined && (yield* workingExecutions) >= slot.limit) return undefined
-
-              if (slot?.alone === true && (yield* waitingSessions).some((other) => other !== id)) return undefined
+              if (!(yield* admits(id, limit))) return undefined
 
               return { execution: yield* startExecution(id, at), opened: true }
             }),
