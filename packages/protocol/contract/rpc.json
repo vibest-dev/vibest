@@ -10,6 +10,7 @@
     "spawnRuntime": true,
     "spawnFiles": true,
     "peerSpawnFiles": true,
+    "peerSpawnRepositories": true,
     "load": true,
     "agents": true
   },
@@ -7630,7 +7631,14 @@
         "type": "object",
         "properties": {
           "repository": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "identity": {
             "anyOf": [
@@ -7643,7 +7651,54 @@
             ]
           },
           "commit": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repositories": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "folder": {
+                      "type": "string"
+                    },
+                    "repository": {
+                      "type": "string"
+                    },
+                    "identity": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "commit": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "folder",
+                    "repository",
+                    "commit"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "agent": {
             "type": "string"
@@ -7734,8 +7789,6 @@
           }
         },
         "required": [
-          "repository",
-          "commit",
           "agent",
           "prompt",
           "request"
