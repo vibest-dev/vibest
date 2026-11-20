@@ -128,6 +128,12 @@ const run = Spec.make("run", {
       ),
       Flag.optional,
     ),
+    project: Flag.String("project").pipe(
+      Flag.withDescription(
+        "With --machine: the project of that machine to run in, by its id (or a unique prefix of at least 8 characters) or its folder name; it must still hold this project's repositories at these commits. Needed when that machine has several such projects",
+      ),
+      Flag.optional,
+    ),
     agent: Flag.String("agent").pipe(
       Flag.withDescription(
         "The agent definition the session runs as: its system prompt and tool rules. The registered ids are listed when one is unknown",
@@ -290,6 +296,23 @@ const project = Spec.make("project", {
         from: Flag.String("from").pipe(
           Flag.withDescription("A git repository to copy in, as a folder named after it. Repeat for each repository"),
           Flag.atLeast(1),
+        ),
+      },
+    }),
+    Spec.make("clone", {
+      description:
+        "Clone a git repository (any URL: ssh or https, any host) and record it as a project, here or with --machine on another machine; it clones the default branch, and vibest run --machine still needs the exact commit there. The folder is --dir, or the repository name under cloneDirectory in vibest.json (default ~/code) of the machine that clones; a folder that is not empty is refused. Prints git's progress on stderr, then the project id and folder",
+      params: {
+        url: Argument.String("url"),
+        machine: Flag.String("machine").pipe(
+          Flag.withDescription("Clone on this machine (vibest machine ls) instead of here"),
+          Flag.optional,
+        ),
+        dir: Flag.String("dir").pipe(
+          Flag.withDescription(
+            "The folder to clone into; with --machine a relative folder is under that machine's cloneDirectory",
+          ),
+          Flag.optional,
         ),
       },
     }),

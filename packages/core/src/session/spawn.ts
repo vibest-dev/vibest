@@ -36,7 +36,7 @@ import { harnessCatalog, harnessOptions, Harness, preflight } from "../harness.t
 import { Harnesses, unprovided } from "../harnesses.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
 import { Plugins, type Routing } from "../plugin.ts"
-import { listProjectRepositories } from "../project/create.ts"
+import { listProjectRepositories, type PinnedFolder } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, Runtimes } from "../runtimes.ts"
@@ -93,6 +93,7 @@ export interface SpawnInput {
   readonly parentSessionId?: string | undefined
   readonly request?: string | undefined
   readonly commit?: string | undefined
+  readonly folders?: ReadonlyArray<PinnedFolder> | undefined
   readonly origin?: PeerStart | undefined
   readonly files?: ReadonlyArray<Attachment> | undefined
 }
@@ -433,7 +434,12 @@ export const make = Effect.gen(function* () {
             return yield* Effect.uninterruptible(
               Effect.gen(function* () {
                 const launchAgent = (row: SessionRow) =>
-                  launch(rt, target, row, root, task, { splitFrom: input.share, env: input.env, commit: input.commit })
+                  launch(rt, target, row, root, task, {
+                    splitFrom: input.share,
+                    env: input.env,
+                    commit: input.commit,
+                    folders: input.folders,
+                  })
 
                 const inserted = yield* db.session.insertSession(draft, input.projectId, {
                   max: yield* starts.maxForNew,

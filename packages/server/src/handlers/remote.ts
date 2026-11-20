@@ -1,5 +1,6 @@
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
+import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import type { PeerScope } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
@@ -197,6 +198,18 @@ const make = Effect.gen(function* () {
         return yield* peers.spawn(scope.peer, scope.project, scope.session, input)
       }),
 
+    "Project.Clone": ({ url, directory, machine }: PayloadOf<"Project.Clone">) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const away = machine !== undefined && machine !== LOCAL_MACHINE
+
+          if (away && Predicate.isTagged(yield* Caller, "Peer"))
+            return yield* new Forbidden({ method: "Project.Clone", message: "a peer clones only on this machine" })
+
+          return remote.clone(away ? machine : undefined, { url, directory })
+        }),
+      ),
+
     "Peer.Outbox": () => Stream.unwrap(Effect.map(peerOf("Peer.Outbox"), (peer) => peers.outbox(peer))),
 
     "Peer.Ack": ({ ids }: PayloadOf<"Peer.Ack">) => Effect.flatMap(peerOf("Peer.Ack"), (peer) => peers.ack(peer, ids)),
@@ -237,6 +250,7 @@ export const layer = group([
   "List",
   "Peer.Hello",
   "Peer.Spawn",
+  "Project.Clone",
   "Peer.Outbox",
   "Peer.Ack",
   "Machine.Add",

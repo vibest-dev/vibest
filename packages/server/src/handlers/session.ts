@@ -9,6 +9,7 @@ import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session
 import { Starts } from "@vibest/core/session/starts"
 import { Caller, type CallerIdentity, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import type { AgentFrom, AgentSender } from "@vibest/schema/event"
+import { MachineFailed } from "@vibest/schema/machine"
 import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Predicate, Stream } from "effect"
 
@@ -116,6 +117,11 @@ export const make = Effect.gen(function* () {
         const project = yield* projectOf(c, "Spawn")
 
         if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
+
+        if (input.project !== undefined)
+          return yield* new MachineFailed({
+            message: "--project names a project of another machine; give --machine too",
+          })
 
         return yield* sessions.spawn({
           machine: yield* machineFromCaller(input),

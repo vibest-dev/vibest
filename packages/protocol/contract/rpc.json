@@ -10,6 +10,9 @@
     "spawnRuntime": true,
     "spawnFiles": true,
     "peerSpawnFiles": true,
+    "peerSpawnRepositories": true,
+    "peerSpawnProject": true,
+    "projectClone": true,
     "load": true,
     "agents": true,
     "worktrees": true
@@ -7791,7 +7794,14 @@
         "type": "object",
         "properties": {
           "repository": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "identity": {
             "anyOf": [
@@ -7804,7 +7814,64 @@
             ]
           },
           "commit": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repositories": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "folder": {
+                      "type": "string"
+                    },
+                    "repository": {
+                      "type": "string"
+                    },
+                    "identity": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "commit": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "folder",
+                    "repository",
+                    "commit"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "agent": {
             "type": "string"
@@ -7895,8 +7962,6 @@
           }
         },
         "required": [
-          "repository",
-          "commit",
           "agent",
           "prompt",
           "request"
@@ -8986,6 +9051,377 @@
           }
         ],
         "$defs": {
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Project.Clone": {
+      "access": [
+        "agent",
+        "peer"
+      ],
+      "stream": true,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "directory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "progress": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "progress"
+            ],
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string"
+              },
+              "directory": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "projectId",
+              "directory"
+            ],
+            "additionalProperties": true
+          }
+        ]
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ProjectCloneFailedEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/NoSuchSessionEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/UnknownMachineEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/MachineUnavailableEncoded"
+                  },
+                  {
+                    "$ref": "#/$defs/MachineIncompatibleEncoded"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "not": {}
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProjectCloneFailedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProjectCloneFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownMachineEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownMachine"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "machines"
+            ],
+            "additionalProperties": true
+          },
+          "MachineUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineUnavailable"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "MachineIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineIncompatible"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
           "ProtocolRejectedEncoded": {
             "type": "object",
             "properties": {
@@ -14545,6 +14981,16 @@
             ]
           },
           "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project": {
             "anyOf": [
               {
                 "type": "string"

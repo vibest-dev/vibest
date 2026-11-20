@@ -144,7 +144,15 @@ const hcCore = async (w: World, tag: string, env: Record<string, string | undefi
   return hc
 }
 
-const setup = async (w: World, options: { readonly bSession?: boolean; readonly aWithoutCursor?: boolean } = {}) => {
+export const setup = async (
+  w: World,
+  options: {
+    readonly bSession?: boolean
+    readonly aWithoutCursor?: boolean
+    readonly aProject?: string
+    readonly bBinary?: string
+  } = {},
+) => {
   for (const bin of ["pi", "hc", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   w.ownRuntimes.add("hc")
   const bin = path.join(w.root, "bin")
@@ -161,7 +169,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
 
   const bEnv = {
     VIBEST_HOME: path.join(b, "home"),
-    PATH: loginPath,
+    PATH: options.bBinary === undefined ? loginPath : `${path.dirname(options.bBinary)}:${loginPath}`,
     HC_SESSION: `${w.herdrSession.toLowerCase()}-b`,
     XDG_RUNTIME_DIR: path.join(b, "r"),
     XDG_STATE_HOME: path.join(b, "s"),
@@ -191,7 +199,9 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   }
 
   const hcB = await hcCore(w, "b", bEnv)
-  const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [binary, ...args], { env: bEnv })
+
+  const onB = (args: ReadonlyArray<string>, cwd = bRepo) =>
+    w.run(cwd, [options.bBinary ?? binary, ...args], { env: bEnv })
 
   const okB = async (args: ReadonlyArray<string>) => {
     const r = await onB(args)
@@ -225,6 +235,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     processEnv: { CLAUDE_CONFIG_DIR: undefined },
     extra: ["--runtime", "hc"],
     name: "a-main",
+    ...(options.aProject !== undefined && { cwd: options.aProject }),
     hc: { run: hcA },
     timeoutMs: 60_000,
   })
@@ -261,7 +272,11 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   const run = async (marker: string, machine = "mb") => {
     const printed = (
       JSON.parse(
-        await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], { env: aEnv, asIs: true }),
+        await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], {
+          env: aEnv,
+          asIs: true,
+          ...(options.aProject !== undefined && { cwd: options.aProject }),
+        }),
       ) as { id: string }
     ).id
 
@@ -281,10 +296,40 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
   const aSocket = w.hcSocket
   const log = path.join(w.root, "ssh.log")
 
-  return { b, bEnv, aEnv, aSocket, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcA, hcB }
+  const refusedOnA = async (marker: string, ...texts: ReadonlyArray<string>) => {
+    const r = await w.viaEntry(["run", "--machine", "mb", "pi", "--", ask(marker)], {
+      env: aEnv,
+      asIs: true,
+      ...(options.aProject !== undefined && { cwd: options.aProject }),
+    })
+
+    expect(r.code !== 0 && texts.every((text) => r.stderr.includes(text)), `run --machine mb: ${r.code} ${r.stderr}`)
+  }
+
+  return {
+    b,
+    bEnv,
+    aEnv,
+    aSocket,
+    onA,
+    okA,
+    onB,
+    okB,
+    bDb,
+    identity,
+    notices,
+    run,
+    refusedOnA,
+    subs,
+    main,
+    log,
+    stop,
+    hcA,
+    hcB,
+  }
 }
 
-type Setup = Awaited<ReturnType<typeof setup>>
+export type Setup = Awaited<ReturnType<typeof setup>>
 
 const checks: ReadonlyArray<Check> = [
   {

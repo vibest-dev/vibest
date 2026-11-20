@@ -615,6 +615,7 @@ describe("vibest.sock", () => {
         ],
         ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
         ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
+        ["Project.Clone", Stream.runDrain(c["Project.Clone"]({ url: "git://x/y.git" }))],
       ]
 
       const bare = yield* client
