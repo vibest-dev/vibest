@@ -80,8 +80,14 @@ export interface HarnessDomain {
   readonly transform: Transform<HarnessEditor>
 }
 
-export const harnessArgv = (definition: HarnessDefinition, input: LaunchInput, message?: string) => [
-  definition.binary,
-  ...definition.launchArgs(input),
-  ...(message === undefined ? [] : [...definition.promptArgs, message]),
-]
+const CLI_FIRST_ON_PATH = 'PATH=${VIBEST_CLI%/*}:$PATH exec "$@"'
+
+export const harnessArgv = (definition: HarnessDefinition, input: LaunchInput, message?: string) => {
+  const argv = [
+    definition.binary,
+    ...definition.launchArgs(input),
+    ...(message === undefined ? [] : [...definition.promptArgs, message]),
+  ]
+
+  return input.env.VIBEST_CLI === undefined ? argv : ["sh", "-c", CLI_FIRST_ON_PATH, "sh", ...argv]
+}

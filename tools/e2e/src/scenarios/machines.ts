@@ -181,7 +181,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     return r.stdout
   }
 
-  if (options.aWithoutCursor) await configurePlugins(w, (plugins) => [...plugins, "-harness-cursor"])
+  if (options.aWithoutCursor) await configurePlugins(w, (plugins) => [...plugins, "-vibest.harness-cursor"])
   await okB(["project", "add"])
 
   const aEnv = {
@@ -316,7 +316,7 @@ const checks: ReadonlyArray<Check> = [
         )
         await until(
           "B's outbox empty",
-          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 0,
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 0,
           30_000,
         )
         await s.okA(["send", address, "--", ask("mtwo")])
@@ -467,7 +467,11 @@ const checks: ReadonlyArray<Check> = [
         await until("B's model got the first task", () => s!.subs.asked("heldone"), 120_000)
         await w.stopDaemon()
         s.subs.release("heldone")
-        await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
+        await until(
+          "B's outbox row",
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 1,
+          60_000,
+        )
         await s.okA(["daemon"])
         await until("the first notice", () => s!.notices(first, "heldone") === 1, 60_000)
 
@@ -485,7 +489,11 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         s.subs.release("heldtwo")
-        await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
+        await until(
+          "B's outbox row",
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 1,
+          60_000,
+        )
         await fs.rm(path.join(w.root, "down"))
         await until("the second notice", () => s!.notices(second, "heldtwo") === 1, 120_000)
         await Bun.sleep(2_000)
@@ -539,7 +547,11 @@ const checks: ReadonlyArray<Check> = [
         await until("B's model got the task", () => s!.subs.asked("heldfour"), 120_000)
         await s.okA(["machine", "rm", "mb"])
         s.subs.release("heldfour")
-        await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
+        await until(
+          "B's outbox row",
+          () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")?.n === 1,
+          60_000,
+        )
         await s.okA(["machine", "add", "mb2", "b-host"])
         await until(
           "the notice under the new name",

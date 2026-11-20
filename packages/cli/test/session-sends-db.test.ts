@@ -41,10 +41,10 @@ describe("sends from sessions", () => {
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
-        assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", undefined, A))
+        assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { type: "agent", session: A }))
         assert.deepStrictEqual(
           (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
-          [["send", A, entryId]],
+          [["send", { type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
         )
       }),
     ),
@@ -86,7 +86,6 @@ describe("sends from sessions", () => {
             system: "",
             id: B,
             projectDir: "/w",
-            vibest: ["vibest"],
             preferences: "",
             memories: "",
             creator,
@@ -114,6 +113,7 @@ describe("sends from sessions", () => {
           })
           yield* db.session.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: B })
           yield* db.session.archive(B)
+          const { execution } = yield* db.session.startExecution(X, 1)
           const heir = yield* db.session.nearestAlive(X)
           assert.deepStrictEqual(heir, { peer, session: reportTo })
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "report"))
@@ -124,6 +124,17 @@ describe("sends from sessions", () => {
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
           assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
           assert.lengthOf(yield* db.remote.outboxOf(peer), 2)
+          yield* db.remote.ackOutbox(
+            peer,
+            (yield* db.remote.outboxOf(peer)).map((row) => row.id),
+          )
+          assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
+          assert.lengthOf(yield* db.remote.outboxOf(peer), 0, "a retry of an acknowledged request is not sent again")
+          assert.strictEqual(
+            yield* db.inbox.sentIn(X, execution),
+            2,
+            "both sends count in X's execution, also once acked",
+          )
         }),
       ),
   )
@@ -161,7 +172,11 @@ describe("sends from sessions", () => {
         const out = yield* db.remote.outboxOf(peer)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
-        assert.deepStrictEqual(out[0]!.from, item.from, "the relay keeps the original sender, not the ended recipient")
+        assert.deepInclude(
+          out[0]!,
+          { sessionId: ended, from: null },
+          "the relay wrote the new message, so it is the sender",
+        )
       }).pipe(memory),
   )
 })

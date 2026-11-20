@@ -16,6 +16,7 @@ import { FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
 import { EXECUTIONS, settled, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
+  harnessArgv,
   harnessOf,
   spawnWorking,
   sessionWorktree,
@@ -185,7 +186,7 @@ describe.concurrent("Session", () => {
       const moving = yield* Effect.forkChild(sessions.check(id))
       yield* until(herdr.callsTo("run"), (calls) => calls.length === 1)
       const [run] = yield* herdr.callsTo("run")
-      assert.strictEqual(run!.argv[0], "first")
+      assert.strictEqual(harnessArgv(run!.argv)[0], "first")
       assert.strictEqual(run!.argv.at(-2), "--first")
       assert.include(run!.argv.at(-1)!, "do it")
       const execution = yield* until(db.session.openExecution(id), (open) => open !== undefined)
@@ -533,7 +534,7 @@ describe.concurrent("Session", () => {
 
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE about_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
 
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)
@@ -627,7 +628,7 @@ describe.concurrent("Session", () => {
 
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE about_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
 
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)

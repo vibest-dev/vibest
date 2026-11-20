@@ -19,7 +19,9 @@ import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
+import { Sends } from "@vibest/core/session/sends"
 import { Spawn } from "@vibest/core/session/spawn"
+import { Summaries } from "@vibest/core/session/summaries"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
@@ -118,7 +120,7 @@ export const pluginsHost = (
 ) => {
   const candidates: ReadonlyArray<Candidate> = [
     { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
-    { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
+    { source: "test:vibest.runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
   ]
 
@@ -135,8 +137,8 @@ export const pluginsHost = (
         const loaded = [
           ...candidates,
           {
-            source: "builtin:archive-on-idle",
-            revision: "archive-on-idle",
+            source: "builtin:vibest.archive-on-idle",
+            revision: "vibest.archive-on-idle",
             options: {},
             plugin: archivePlugin,
           },
@@ -162,8 +164,10 @@ export const pluginsHost = (
       Harnesses.node,
       Hooks.node,
       Runtimes.node,
+      Sends.node,
       SessionLive.node,
       Subscriptions.node,
+      Summaries.node,
       platform,
       home,
     ],

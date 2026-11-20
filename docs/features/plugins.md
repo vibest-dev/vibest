@@ -27,8 +27,8 @@ fails and prints the reason. A hook that throws instead of returning an Effect b
 
 ## G5. A routing plugin picks the harness
 
-A plugin can pick the harness for `vibest run`. The builtin plugin `harness-default` picks Claude when nothing else has
-chosen (no `--harness`, nothing to inherit) and Claude is available; with `"-harness-default"` in `plugins` and no
+A plugin can pick the harness for `vibest run`. The builtin plugin `vibest.harness-default` picks Claude when nothing else has
+chosen (no `--harness`, nothing to inherit) and Claude is available; with `"-vibest.harness-default"` in `plugins` and no
 plugin of one's own, such a run fails saying there is no harness to inherit. With a plugin that picks Pi, the same run starts a Pi session, `vibest ls`
 names the plugin as the one that decided the harness (the `routing` field of `vibest ls` and `vibest result`; `vibest
 run` itself prints only `{"id":"<session id>"}`), and the result arrives.
@@ -82,7 +82,7 @@ plugin into the `setup` form reloads it like any edit (G2).
 
 ## G14. A builtin plugin can be removed
 
-`"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-harness-default"`); `"-*"` and
+`"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-vibest.harness-default"`); `"-*"` and
 `"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts. While user plugins
 are still importing, a start is refused with `PluginsNotActive`, naming the plugins still loading, and does not run on
 a partial set. Once they are active, `vibest plugins` shows the builtin gone, and deleting the line brings it back
@@ -94,7 +94,26 @@ A plugin is identified by its declared id and the content of its files, not by w
 plugin folder and updating `vibest.json` to the new path does not set it up again; `vibest plugins` lists it under the
 new path. Changing its declared id makes it a new plugin.
 
-## G17. A config file created after vibestd started
+## G17. A plugin reads sessions and sends a message
+
+`ctx.session.get` and `ctx.session.list` give a plugin a session's id, title, parent, status and its latest ended
+execution with how many messages the session sent during it: 0 for a subagent that only replied, 1 for one that ran
+`vibest send` once; `ctx.session.sentIn` gives that count for any execution of a session. `ctx.session.send` queues a message from the plugin itself: the recipient's model sees it in a
+`<vibest-message>` naming the plugin, and the inbox row's sender is the plugin. A repeat with the same `request` queues
+nothing more, and a message to an archived subagent goes to the session that started it.
+
+## G18. A reminder when a subagent's execution sends nothing
+
+vibest ships the plugin `vibest.report-reminder`, not loaded by default; writing its id `"vibest.report-reminder"` in
+`plugins` of `~/.vibest/vibest.json` turns it on. Then, when a subagent's execution completes without the subagent
+sending a message, the session that started it receives one message from the plugin ("Message from Vibest ·
+vibest.report-reminder") naming the subagent and the execution. A subagent that sent a
+message during the execution, an entry session, and a failed or interrupted execution get nothing. An execution that
+ended while the plugin was not loaded, or while vibestd was restarting, is reported once when it loads: the plugin
+checks each session's latest execution then. Without the plugin, nothing is sent. A message the subagent sends to a
+session it started on another machine does not count as sending: it is not a report to the session that started it.
+
+## G19. A config file created after vibestd started
 
 Creating `vibest.json` after vibestd is already running loads the plugin file it names, outside the plugins folder,
 without a restart: `vibest doctor` lists that plugin as active, and vibestd is the same process. Editing that file

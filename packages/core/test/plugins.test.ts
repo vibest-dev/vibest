@@ -19,7 +19,7 @@ import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
 import { until, yieldToIo } from "./lib/observe.ts"
 import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
-import { memoryBus } from "./platform/bun.ts"
+import { memoryPluginHost } from "./platform/bun.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
@@ -181,7 +181,7 @@ describe("plugins: spawn hook", () => {
       const plugins = yield* Plugins.Service
       const listed = yield* plugins.list
       const byId = (id: string) => listed.filter((q) => q.id === id)
-      assert.deepInclude(byId("runtime-choice")[0], { status: "active" })
+      assert.deepInclude(byId("vibest.runtime-choice")[0], { status: "active" })
       assert.deepInclude(byId("broken")[0], { id: "broken", status: "failed" })
       assert.include(byId("broken")[0]!.error, "setup boom")
       assert.deepInclude(byId("ok")[0], { id: "ok", status: "active", calls: 0 })
@@ -221,7 +221,7 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(
         s.trace.map((t) => [t.plugin, t.outcome]),
         [
-          ["runtime-choice", "ok"],
+          ["vibest.runtime-choice", "ok"],
           ["current", "ok"],
         ],
       )
@@ -231,13 +231,13 @@ describe("plugins: spawn hook", () => {
         listed.map((p) => [p.id, p.status]),
         [
           ["vibest.agent", "active"],
-          ["runtime-choice", "active"],
+          ["vibest.runtime-choice", "active"],
           ["session", "failed"],
           ["worker", "failed"],
           ["typo", "failed"],
           ["proto", "failed"],
           ["current", "active"],
-          ["archive-on-idle", "active"],
+          ["vibest.archive-on-idle", "active"],
         ],
       )
       const supported = "agent.start.before, agent.fail"
@@ -286,7 +286,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(memoryBus),
+      Effect.provide(memoryPluginHost),
     ),
   )
 
@@ -318,7 +318,7 @@ describe("plugins: spawn hook", () => {
       Effect.provide(harnessesLayer()),
       Effect.provide(runtimesLayer),
       Effect.provide(Agents.layer),
-      Effect.provide(memoryBus),
+      Effect.provide(memoryPluginHost),
     ),
   )
 
@@ -365,7 +365,7 @@ describe("plugins: spawn hook", () => {
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Agents.layer),
-        Effect.provide(memoryBus),
+        Effect.provide(memoryPluginHost),
       ),
   )
 })
@@ -393,7 +393,7 @@ const loaded = (dir: string) =>
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(runtimesLayer),
     Layer.provide(Agents.layer),
-    Layer.provide(memoryBus),
+    Layer.provide(memoryPluginHost),
     Layer.provide(Hooks.layer),
     Layer.build,
     Effect.map(Context.get(Plugins.Service)),

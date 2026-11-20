@@ -11,9 +11,9 @@ import { ArchiveOnIdle } from "@vibest/builtins/archive-on-idle"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
-import { checkReplay } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
+import { checkLedger } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
@@ -26,6 +26,7 @@ import { SessionLive } from "@vibest/core/session/live"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
+import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
@@ -140,8 +141,8 @@ export const checkDatabase: Host["checkDatabase"] = (filename) =>
   Effect.gen(function* () {
     if (!(yield* Effect.promise(() => Bun.file(filename).exists()))) return
 
-    if ((yield* inspectFile(filename)) !== "ready") return
-    yield* checkReplay(yield* readOnly(filename)).pipe(
+    if ((yield* inspectFile(filename)) === "empty") return
+    yield* checkLedger(yield* readOnly(filename)).pipe(
       Effect.provide(Projectors.replay.pipe(Layer.provideMerge(sqliteLayer(":memory:", false)))),
       Effect.catchTag("SqlError", (e) => new DatabaseOpenFailed({ file: filename, message: e.message })),
     )
@@ -155,6 +156,7 @@ const provided = new Map<string, ModuleExports>([
   ["effect", effect],
   ["@vibest/plugin", VibestPlugin],
   ["@vibest/plugin/effect", VibestPluginEffect],
+  ["@vibest/plugin/host", VibestPluginHost],
   ["effect/process/ChildProcess", ChildProcess],
   ["effect/process/ChildProcessSpawner", ChildProcessSpawner],
   ...Object.entries(effect).flatMap(([name, value]): ReadonlyArray<readonly [string, ModuleExports]> =>

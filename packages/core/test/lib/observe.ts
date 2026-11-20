@@ -92,7 +92,9 @@ export const lastSentBy = (id: string) =>
     const sql = yield* SqlClient.SqlClient
 
     const [row] = yield* sql<{ id: number; kind: string; status: string; content: string }>`SELECT id, kind, status,
-        content FROM inbox WHERE sender_session_id = ${id} ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+        content FROM inbox WHERE sender_session_id = ${id} OR about_session_id = ${id} ORDER BY id DESC LIMIT 1`.pipe(
+      Effect.orDie,
+    )
 
     return row
   })

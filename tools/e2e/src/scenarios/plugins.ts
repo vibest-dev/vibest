@@ -4,6 +4,7 @@ import url from "node:url"
 
 import type { Check } from "../check.ts"
 import { expect, until, type World } from "../world.ts"
+import pluginSessions from "./plugin-sessions.ts"
 
 type Info = {
   id: string
@@ -120,7 +121,7 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "G17",
+    id: "G19",
     title:
       "a vibest.json created after vibestd started loads the plugin file it names, and vibest doctor shows it active",
     run: async (w) => {
@@ -382,4 +383,4 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
   },
 ]
 
-export default checks
+export default [...checks, ...pluginSessions]

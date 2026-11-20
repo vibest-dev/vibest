@@ -1,3 +1,5 @@
+import childProcess from "node:child_process"
+
 import { assert, describe, it } from "@effect/vitest"
 import { Harness } from "@vibest/plugin/effect"
 import type { Schema } from "effect"
@@ -45,6 +47,17 @@ describe("HarnessAdapter", () => {
           "--",
           message,
         ])
+  })
+
+  it("run directly by a runtime, with no shell of its own, a launch finds the vibest that started it first on PATH", () => {
+    const argv = Harness.harnessArgv(pi, { ...input, env: { ...input.env, VIBEST_CLI: "/opt/vibest/bin/vibest" } })
+    const [file, ...args] = [...argv.slice(0, argv.indexOf(pi.binary)), "sh", "-c", 'echo "$PATH"']
+
+    const run = childProcess.spawnSync(file!, args, {
+      env: { PATH: "/usr/bin:/bin", VIBEST_CLI: "/opt/vibest/bin/vibest" },
+    })
+
+    assert.strictEqual(run.stdout.toString().trim(), "/opt/vibest/bin:/usr/bin:/bin")
   })
 
   it("claude gets its project folder through --settings additionalDirectories and Read/Edit rules, never --add-dir", () => {

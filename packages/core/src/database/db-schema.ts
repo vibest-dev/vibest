@@ -7,6 +7,11 @@ export const APPLICATION_ID = 0x76696265
 
 export const MIGRATION_TABLE = "migration"
 
+export const MIN_CATALOG = 2
+
+export const APPEND_ONLY_TRIGGER = `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
+    BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`
+
 export const LOG_SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,
   `CREATE TABLE event (
@@ -18,8 +23,7 @@ export const LOG_SCHEMA = [
     data      TEXT    NOT NULL,
     UNIQUE (aggregate, seq)
   ) STRICT`,
-  `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
-    BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`,
+  APPEND_ONLY_TRIGGER,
   `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`,
 ]
 
@@ -97,9 +101,10 @@ export const inspectSchema = Effect.gen(function* () {
 
   if (catalog > CATALOG_VERSION) return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
 
-  if (catalog < CATALOG_VERSION || (yield* ledgerOf(sql)) === undefined)
+  if (catalog < MIN_CATALOG || (yield* ledgerOf(sql)) === undefined)
     return yield* new SchemaMismatch({ version: userVersion, applicationId, oldEvents: true })
-  const rebuilt = (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
+  const migrate = catalog < CATALOG_VERSION
+  const rebuilt = migrate || (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
 
   const absent = objectsOf(rebuilt ? LOG_SCHEMA : [...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find(
     (object) => !has(object.type, object.name),
@@ -107,7 +112,7 @@ export const inspectSchema = Effect.gen(function* () {
 
   if (absent !== undefined) return yield* mismatch(userVersion, applicationId, `missing ${absent.name}`)
 
-  return "ready" as const
+  return migrate ? ("migrate" as const) : ("ready" as const)
 })
 
 export const objectCount = SqlClient.SqlClient.pipe(
@@ -115,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 11
+export const PROJECTION_VERSION = 17
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -182,17 +187,21 @@ export const PROJECTION_SCHEMA = [
     failure_kind TEXT CHECK (failure_kind IN ('limit')),
     reply        TEXT,
     ended_at     INTEGER,
+    sent         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL`,
   `CREATE TABLE inbox (
     session_id        TEXT    NOT NULL,
     id                INTEGER NOT NULL,
+    sender_type       TEXT    NOT NULL CHECK (sender_type IN ('agent', 'plugin', 'vibest', 'user')),
     sender_session_id TEXT,
-    from_session      TEXT,
-    from_agent        TEXT,
-    from_title        TEXT,
-    from_machine      TEXT,
+    sender_agent      TEXT,
+    sender_title      TEXT,
+    sender_machine    TEXT,
+    sender_plugin     TEXT,
+    sender_key        TEXT    NOT NULL,
+    about_session_id  TEXT,
     kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
     content           TEXT    NOT NULL,
     request           TEXT,
@@ -203,8 +212,10 @@ export const PROJECTION_SCHEMA = [
   ) STRICT`,
   `CREATE INDEX inbox_status ON inbox (status, session_id)`,
   `CREATE INDEX inbox_kind ON inbox (session_id, kind, id)`,
+  `CREATE INDEX inbox_sender ON inbox (sender_session_id) WHERE sender_session_id IS NOT NULL`,
+  `CREATE INDEX inbox_about ON inbox (about_session_id) WHERE about_session_id IS NOT NULL`,
   `CREATE INDEX inbox_execution ON inbox (session_id, execution_id) WHERE execution_id IS NOT NULL`,
-  `CREATE INDEX inbox_request ON inbox (request) WHERE request IS NOT NULL`,
+  `CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request) WHERE request IS NOT NULL`,
   `CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL`,
   `CREATE TABLE machine (
     name         TEXT PRIMARY KEY,
@@ -230,9 +241,10 @@ export const PROJECTION_SCHEMA = [
     from_agent   TEXT,
     from_title   TEXT,
     from_machine TEXT,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    acked_at   INTEGER
   ) STRICT`,
-  `CREATE INDEX outbox_peer ON outbox (peer_id, seq)`,
+  `CREATE INDEX outbox_peer ON outbox (peer_id, seq) WHERE acked_at IS NULL`,
   `CREATE INDEX outbox_session ON outbox (session_id)`,
 ]
 

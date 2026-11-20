@@ -1,4 +1,4 @@
-import { ExecutionOutcome, ProcessEndReason, type Sender } from "@vibest/schema/event"
+import { ExecutionOutcome, ProcessEndReason, type AgentFrom, type Sender } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
 import { Routing } from "@vibest/schema/plugin"
 import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
@@ -191,6 +191,42 @@ export const attemptsOf = (raw: string | null) => {
   return seen
 }
 
+export const senderKey = (sender: Sender) => {
+  if (sender.type === "plugin") return `plugin:${sender.plugin}`
+
+  return sender.type === "agent" ? `${sender.machine ?? ""}/${sender.session}` : sender.type
+}
+
+export const localSessionOf = (sender: Sender) =>
+  sender.type === "agent" && sender.machine === undefined ? sender.session : undefined
+
+export type SenderSql = {
+  readonly senderType: string
+  readonly senderSessionId: string | null
+  readonly senderAgent: string | null
+  readonly senderTitle: string | null
+  readonly senderMachine: string | null
+  readonly senderPlugin: string | null
+}
+
+export const senderColumns = (sender: Sender) => ({
+  type: sender.type,
+  session: sender.type === "agent" ? sender.session : null,
+  agent: sender.type === "agent" ? (sender.agent ?? null) : null,
+  title: sender.type === "agent" ? (sender.title ?? null) : null,
+  machine: sender.type === "agent" ? (sender.machine ?? null) : null,
+  plugin: sender.type === "plugin" ? sender.plugin : null,
+})
+
+export const senderOfRow = (row: SenderSql) => ({
+  type: row.senderType,
+  ...(row.senderSessionId !== null && { session: row.senderSessionId }),
+  ...(row.senderAgent !== null && { agent: row.senderAgent }),
+  ...(row.senderTitle !== null && { title: row.senderTitle }),
+  ...(row.senderMachine !== null && { machine: row.senderMachine }),
+  ...(row.senderPlugin !== null && { plugin: row.senderPlugin }),
+})
+
 export type FromSql = {
   readonly fromSession: string | null
   readonly fromAgent: string | null
@@ -198,7 +234,7 @@ export type FromSql = {
   readonly fromMachine: string | null
 }
 
-export const fromOf = (row: FromSql): Sender | null =>
+export const fromOf = (row: FromSql): AgentFrom | null =>
   row.fromSession === null
     ? null
     : {
@@ -208,11 +244,10 @@ export const fromOf = (row: FromSql): Sender | null =>
         ...(row.fromMachine !== null && { machine: row.fromMachine }),
       }
 
-export type InboxSql = FromSql & {
+export type InboxSql = SenderSql & {
   readonly id: number
   readonly sessionId: string
   readonly kind: string
-  readonly senderSessionId: string | null
   readonly content: string
   readonly status: string
 }
@@ -227,15 +262,16 @@ export type ExecutionEnd = {
 export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
   error === undefined || error === "" ? undefined : { message: error }
 
-export const toInbox = (row: InboxSql) => ({
-  id: row.id,
-  sender: row.senderSessionId,
-  from: fromOf(row),
-  recipient: row.sessionId,
-  kind: row.kind,
-  message: row.content,
-  status: row.status,
-})
+export const toInbox = (row: InboxSql) => {
+  return {
+    id: row.id,
+    sender: senderOfRow(row),
+    recipient: row.sessionId,
+    kind: row.kind,
+    message: row.content,
+    status: row.status,
+  }
+}
 
 export const isMessageStatus = Schema.is(MessageStatus)
 

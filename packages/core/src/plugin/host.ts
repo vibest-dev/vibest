@@ -1,4 +1,4 @@
-import type * as VibestPlugin from "@vibest/plugin/effect"
+import * as VibestPlugin from "@vibest/plugin/effect"
 import { Catalog, type FactOf, type FactType } from "@vibest/schema/event"
 import { Effect, Predicate, type Scope, Stream } from "effect"
 
@@ -6,6 +6,8 @@ import { Agents } from "../agents.ts"
 import { Bus } from "../bus.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Runtimes } from "../runtimes.ts"
+import { Sends } from "../session/sends.ts"
+import { Summaries } from "../session/summaries.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
 import { Hooks } from "./hooks.ts"
 
@@ -49,6 +51,21 @@ const factsFor =
     )
   }
 
+const sessionsFor = (
+  summaries: Summaries.Interface,
+  sends: Sends.Interface,
+  plugin: string,
+): VibestPlugin.SessionDomain => ({
+  list: summaries.list,
+  get: summaries.get,
+  sentIn: summaries.sentIn,
+  send: (input) =>
+    sends.relay(input.to, input.message, { type: "plugin", plugin }, input.request).pipe(
+      Effect.asVoid,
+      Effect.mapError((e) => new VibestPlugin.SessionSendFailed({ message: e.message })),
+    ),
+})
+
 export interface Input {
   readonly plugin: string
   readonly activation: Hooks.Activation
@@ -63,6 +80,8 @@ export const make = Effect.gen(function* () {
   const harnesses = yield* Harnesses.Service
   const agents = yield* Agents.Service
   const bus = yield* Bus.Service
+  const summaries = yield* Summaries.Service
+  const sends = yield* Sends.Service
 
   return ({ plugin, activation, options, stats }: Input): VibestPlugin.Context => {
     const register = <N extends Hooks.Name>(
@@ -107,6 +126,7 @@ export const make = Effect.gen(function* () {
       harness: { transform: harnesses.transform },
       subscription: { report: (input) => subscriptions.report(input) },
       event: { subscribe: factsFor(bus, plugin) },
+      session: sessionsFor(summaries, sends, plugin),
     }
   }
 })

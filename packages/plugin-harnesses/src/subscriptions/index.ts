@@ -1,4 +1,4 @@
-import { capture } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { Effect, Schema } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
@@ -21,7 +21,7 @@ export const parseJson = (text: string | undefined): Schema.Json | undefined => 
 }
 
 export const runCli = (spawner: Spawner, command: string, args: ReadonlyArray<string>, cwd: string) =>
-  capture(command, args, {
+  Host.capture(command, args, {
     stdin: "ignore",
     cwd,
     env: { HOME: cwd },

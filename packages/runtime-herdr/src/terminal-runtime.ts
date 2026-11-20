@@ -1,6 +1,7 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { typedLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { typedLine } from "@vibest/plugin/effect/launch"
 import type { RuntimeLocation, RuntimeUnreachable } from "@vibest/schema/session"
 import {
   Cause,

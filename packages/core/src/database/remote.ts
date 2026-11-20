@@ -5,7 +5,7 @@ import {
   OutboxAcked,
   OutboxQueued,
   PeerSeen,
-  type Sender,
+  type AgentFrom,
 } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Effect } from "effect"
@@ -39,7 +39,7 @@ export type OutboxRow = {
   readonly sessionId: string
   readonly content: string
   readonly kind: "send" | "notice"
-  readonly from: Sender | null
+  readonly from: AgentFrom | null
   readonly createdAt: number
   readonly reportTo: string
 }
@@ -73,7 +73,7 @@ export const statements = Effect.gen(function* () {
       readonly sessionId: string
       readonly content: string
       readonly kind: "send" | "notice"
-      readonly from?: Sender | undefined
+      readonly from?: AgentFrom | undefined
       readonly at?: number
       readonly request?: string | undefined
     },
@@ -85,6 +85,12 @@ export const statements = Effect.gen(function* () {
       const id = row.request ?? randomId()
 
       if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
+
+      const [open] =
+        row.kind === "send"
+          ? yield* sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${row.sessionId} AND outcome IS NULL`
+          : []
+
       yield* publish(OutboxQueued, {
         ...(row.at !== undefined && { at: row.at }),
         data: {
@@ -95,6 +101,7 @@ export const statements = Effect.gen(function* () {
           kind: row.kind,
           content: row.content,
           ...(row.from !== undefined && { from: row.from }),
+          ...(open !== undefined && { execution: open.id }),
         },
       })
 
@@ -103,10 +110,14 @@ export const statements = Effect.gen(function* () {
 
   const senderOf = (sessionId: string) =>
     sql<{ agent: string; name: string }>`SELECT agent, name FROM session WHERE id = ${sessionId}`.pipe(
-      Effect.map(([row]): Sender | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
+      Effect.map(([row]): AgentFrom | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
     )
 
-  return { ofPeer, origins, queueForPeer, senderOf }
+  const peerName = (id: string) =>
+    sql<{ name: string }>`SELECT name FROM machine WHERE vibestd_id = ${id}
+      UNION ALL SELECT name FROM peer WHERE id = ${id}`.pipe(Effect.map((rows) => rows[0]?.name))
+
+  return { ofPeer, origins, queueForPeer, senderOf, peerName }
 })
 
 export type Statements = Effect.Success<typeof statements>
@@ -173,7 +184,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           readonly recipient: string
           readonly kind: "send" | "notice"
           readonly sender: string
-          readonly from: Sender
+          readonly from: AgentFrom
           readonly content: string
         }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
           tx(
@@ -196,8 +207,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 yield* inbox.queueInbox({
                   recipient: item.recipient,
                   kind: item.kind,
-                  sender: null,
-                  from: item.from,
+                  sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                   content,
                   status: "dropped",
                   peerItem: item.id,
@@ -206,7 +216,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
-                  from: item.from,
                 })
 
                 return "queued" as const
@@ -221,8 +230,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               yield* inbox.queueInbox({
                 recipient: target ?? item.recipient,
                 kind: item.kind,
-                sender: null,
-                from: item.from,
+                sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                 content,
                 status: here ? "pending" : "dropped",
                 peerItem: item.id,
@@ -249,7 +257,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           : tx(
               Effect.gen(function* () {
                 const found = yield* sql<{ id: string }>`SELECT id FROM outbox WHERE peer_id = ${peer}
-                  AND ${sql.in("id", ids)} ORDER BY seq`
+                  AND acked_at IS NULL AND ${sql.in("id", ids)} ORDER BY seq`
 
                 const [first, ...rest] = found.map((row) => row.id)
 
@@ -265,13 +273,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       senderOf: Effect.fn("Db.remote.senderOf")((sessionId: string) => remote.senderOf(sessionId).pipe(Effect.orDie)),
 
-      nameForPeer: Effect.fn("Db.remote.nameForPeer")((id: string) =>
-        sql<{ name: string }>`SELECT name FROM machine WHERE vibestd_id = ${id}
-          UNION ALL SELECT name FROM peer WHERE id = ${id}`.pipe(
-          Effect.map((rows) => rows[0]?.name),
-          Effect.orDie,
-        ),
-      ),
+      nameForPeer: Effect.fn("Db.remote.nameForPeer")((id: string) => remote.peerName(id).pipe(Effect.orDie)),
 
       peerKnown: Effect.fn("Db.remote.peerKnown")((id: string) =>
         sql`SELECT 1 FROM peer WHERE id = ${id}`.pipe(
