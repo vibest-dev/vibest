@@ -10,6 +10,7 @@ import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
+  alive,
   sessionState,
   type AgentState,
   paneTail,
@@ -17,7 +18,6 @@ import {
   stateOf,
   type Terminal,
   type AgentSeen,
-  Runtimes,
 } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 
@@ -55,7 +55,6 @@ export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const harnesses = yield* Harnesses.Service
   const bus = yield* Bus.Service
-  const runtimes = yield* Runtimes.Service
   const { track } = yield* SessionLive.Service
 
   const reportedStatus = (id: string) =>
@@ -310,15 +309,16 @@ export const make = Effect.gen(function* () {
       return yield* db.session.executionAccepted(session.id)
     })
 
-    const current = yield* db.session.getSession(session.id)
-    const process = current?.process?.id
-    const since = current?.openExecution?.startedAt ?? 0
+    const process = (yield* db.session.getSession(session.id))?.process?.id
+
+    const gone = Effect.gen(function* () {
+      if ((yield* db.session.getSession(session.id))?.process?.id !== process) return Option.none<Pickup>()
+
+      return (yield* alive(h, terminal)) ? Option.none<Pickup>() : Option.some(Pickup.Exited())
+    })
 
     const exitedHere = (event: BusEvent) =>
-      event.type === "terminal.exited" &&
-      event.runtime === h.id &&
-      sameTerminal(event.terminal, terminal) &&
-      event.processes.some((bound) => bound.sessionId === session.id && bound.process === process)
+      event.type === "terminal.exited" && event.runtime === h.id && sameTerminal(event.terminal, terminal)
 
     const signalExit = Effect.flatMap(db.session.processesAt(h.id, terminal), (processes) =>
       bus.observe({ type: "terminal.exited", runtime: h.id, terminal, processes }),
@@ -327,10 +327,8 @@ export const make = Effect.gen(function* () {
     const exited = Effect.flatMap(bus.subscribe(), (subscription) =>
       awaitOn(
         subscription,
-        Effect.map(runtimes.exitedSince(h.id, terminal, since), (gone) =>
-          gone ? Option.some(Pickup.Exited()) : Option.none(),
-        ),
-        (event) => Effect.succeed(exitedHere(event) ? Option.some(Pickup.Exited()) : Option.none()),
+        gone,
+        (event) => (exitedHere(event) ? gone : Effect.succeedNone),
         READY_TIMEOUT,
         Effect.never,
       ),
@@ -373,5 +371,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, Harnesses.node, Bus.node, Runtimes.node, SessionLive.node],
+  deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
 })

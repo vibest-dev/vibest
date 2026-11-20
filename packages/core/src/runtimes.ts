@@ -2,7 +2,7 @@ import * as VibestPlugin from "@vibest/plugin/effect"
 import { reconnectSchedule } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
 
 import { type BoundProcess, Bus, type Signal } from "./bus.ts"
 import { Db } from "./database/db.ts"
@@ -77,8 +77,6 @@ const sameMembers = (a: Runtime, b: Runtime) => {
   return members.length === others.size && members.every(([key, value]) => others.get(key) === value)
 }
 
-const EXIT_MEMORY = Duration.minutes(10)
-
 const RESUBSCRIBE_BACKOFF = reconnectSchedule({ first: Duration.seconds(1), max: Duration.seconds(30) })
 
 export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | TerminalProcesses | HostEnv | Scope.Scope> =
@@ -89,24 +87,10 @@ export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | TerminalPr
     const followers = yield* FiberMap.make<string>()
     const defined = new Map<string, Runtime>()
     const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
-    const exits = new Map<string, number>()
-    const exitKey = (runtime: string, terminal: Terminal) => JSON.stringify([runtime, terminal.machine, terminal.id])
-
-    const recordExit = (runtime: string, event: RuntimeEvent) =>
-      event.type !== "exited"
-        ? Effect.void
-        : Effect.map(Clock.currentTimeMillis, (now) => {
-            for (const [key, at] of exits) if (now - at > Duration.toMillis(EXIT_MEMORY)) exits.delete(key)
-            exits.set(exitKey(runtime, addressOf(event.terminal)), now)
-          })
 
     const follow = (runtime: Runtime) =>
       runtime.events.pipe(
-        Stream.tap((event) =>
-          recordExit(runtime.id, event).pipe(
-            Effect.andThen(Effect.flatMap(live(processesAt, runtime.id, event), bus.observe)),
-          ),
-        ),
+        Stream.tap((event) => Effect.flatMap(live(processesAt, runtime.id, event), bus.observe)),
         Stream.filter((event) => event.type === "reset"),
         Stream.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
@@ -194,7 +178,6 @@ export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | TerminalPr
         ),
       ),
       added: Stream.fromPubSub(added),
-      exitedSince: (runtime, terminal, at) => Effect.sync(() => (exits.get(exitKey(runtime, terminal)) ?? -1) >= at),
       callers: Effect.sync(() =>
         registry.get().flatMap((runtime) =>
           runtime.caller === undefined

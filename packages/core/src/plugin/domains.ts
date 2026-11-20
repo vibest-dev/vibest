@@ -6,7 +6,7 @@ import type {
   SubscriptionReport,
   Transform,
 } from "@vibest/plugin/effect"
-import type { HarnessUnavailable, NoRuntime, RuntimeAddress } from "@vibest/schema/session"
+import type { HarnessUnavailable, NoRuntime } from "@vibest/schema/session"
 import type { Subscription } from "@vibest/schema/subscription"
 import type { Effect, Stream } from "effect"
 
@@ -28,7 +28,6 @@ export interface RuntimesDomain extends PluginRuntime.RuntimeDomain {
   readonly online: (runtime: RuntimeDefinition) => Effect.Effect<void, NoRuntime>
   readonly callers: Effect.Effect<ReadonlyArray<Caller>>
   readonly added: Stream.Stream<ReadonlyArray<string>>
-  readonly exitedSince: (runtime: string, terminal: RuntimeAddress, at: number) => Effect.Effect<boolean>
 }
 
 export interface HarnessesDomain extends PluginHarness.HarnessDomain {

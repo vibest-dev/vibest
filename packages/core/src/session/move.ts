@@ -392,10 +392,11 @@ export const make = Effect.gen(function* () {
       const prompted = yield* plan.deliver(h, row, terminal).pipe(Effect.exit)
 
       if (Exit.isFailure(prompted) || !Predicate.isTagged(prompted.value, "Taken")) {
-        skip(
-          next.harness,
-          Exit.isSuccess(prompted) && Predicate.isTagged(prompted.value, "Exited") ? "start_failed" : "not_confirmed",
-        )
+        const exitedFirst = Exit.isSuccess(prompted) && Predicate.isTagged(prompted.value, "Exited")
+        const opened = yield* plan.opened
+
+        if (exitedFirst && opened !== undefined) yield* db.session.closeExecution(row.id, opened, "not_started")
+        skip(next.harness, exitedFirst ? "start_failed" : "not_confirmed")
         continue
       }
 

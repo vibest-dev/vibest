@@ -13,7 +13,7 @@ import { TestClock } from "effect/testing"
 import { entryPending } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
-import { EXECUTIONS, settled, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
+import { EXECUTIONS, settled, until, untilVirtual, writeEnd, systemPromptFile, yieldToIo } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
   harnessArgv,
@@ -202,6 +202,32 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* herdr.callsTo("send")).filter((call) => call.text !== undefined).length, typed)
     }),
     { plugins: [chooseNext], harnesses: [PI, FIRST_IN_ARGV] },
+  )
+
+  test(
+    "a usage-limit move in place is not undone by the exit of the harness it replaces: the replacement starts once",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* herdr.endExecution(id)
+      yield* writeEnd(id, "pi", { error: "rate_limit" })
+      const terminal = (yield* herdr.terminalOf(id))!
+      yield* Ref.set(herdr.skipPromptUpdates, 1)
+      const held = yield* herdr.hold("run", id)
+      const moving = yield* Effect.forkChild(sessions.check(id))
+      yield* held.reached
+      yield* PubSub.publish(herdr.events, { type: "exited", terminal })
+      yield* yieldToIo
+      yield* held.release()
+      yield* yieldToIo
+      yield* herdr.updateAgent(id, (agent) => ({ ...agent, status: "working" }))
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(moving)
+      assert.lengthOf(yield* herdr.callsTo("run"), 1)
+      assert.lengthOf(yield* herdr.callsTo("open"), 1)
+      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "claude")
+    }),
+    { plugins: [chooseNext] },
   )
 
   test(
@@ -423,6 +449,7 @@ describe.concurrent("Session", () => {
       const row = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "cursor")
       assert.strictEqual(executionStateOf(row), "open")
+      assert.strictEqual(row.openExecution?.process, row.process?.id)
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude", "cursor"],
