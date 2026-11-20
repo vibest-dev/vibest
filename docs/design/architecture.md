@@ -1130,8 +1130,7 @@ answers how many), the hooks' `ExecutionEnd` and `Prompt` (verbatim harness JSON
 prompt from the entry session or from vibest's own delivery is ignored). Of the rest:
 
 - `Spawn`: `harness` is optional when a routing plugin picks it; `agent` defaults to general and may not be the
-  entry session; `machine` defaults to `local`; `share` shares that session's worktree in a split of its pane;
-  `archive` archives the session once a completed result reached its entry session.
+  entry session; `machine` defaults to `local`; `share` shares that session's worktree in a split of its pane.
 - `Send` queues and returns; vibestd delivers once the session is idle, and failures reach its entry session as
   notices. An `id` is a session id or a unique prefix of at least 8 characters, and the answer names the full id.
 - `Remove`: only the session's own entry session or the user's command line. `Get` never waits. `Peek` reads the last
