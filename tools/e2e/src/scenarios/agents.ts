@@ -332,6 +332,11 @@ const checks: ReadonlyArray<Check> = [
         await listed(w, "code-reviewer from the plugin", (l) =>
           l.agents.some((a) => a.id === "code-reviewer" && a.plugin === "claude-agents"),
         )
+        const mapped = (await listing(w)).agents.find((a) => a.id === "code-reviewer")
+        expect(
+          mapped?.description === "Reviews code for quality" && mapped.harness === undefined,
+          `only vibest fields are taken from the Claude file: ${JSON.stringify(mapped)}`,
+        )
         const id = await runId(w, ["--agent", "code-reviewer", "pi", "--", ask("claudefmt")])
         await resultOf(w, id, "claudefmt")
         expect((model.systemOf("claudefmt") ?? "").includes("CLAUDE-FORMAT-MARK"), "the Claude-format prompt")

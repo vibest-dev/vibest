@@ -132,7 +132,10 @@ reopens it as that agent, and naming another agent without `--new` is refused an
 ## S65. Agents from a plugin
 
 A plugin registers agents with `ctx.agent.transform` (`editor.add`, and `editor.invalid` for a source it could not
-read), so a user can support another file format, for example Claude Code's `.claude/agents/<name>.md`. `vibest agent
+read), so a user can support another file format, for example Claude Code's `.claude/agents/<name>.md`. Where the formats
+differ, vibest's fields are the standard: such a plugin maps only what a definition has (`name` to the id,
+`description`, the body to the prompt) and drops the rest (Claude's `tools`, its `model` aliases), and every registered
+definition still passes vibest's own checks. `vibest agent
 list` names the plugin that added each agent; a plugin loaded later replaces an agent of the same id.
 
 ## S57. Attaching files to a run
