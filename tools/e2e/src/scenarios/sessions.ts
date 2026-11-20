@@ -326,7 +326,7 @@ const checks: ReadonlyArray<Check> = [
 
         const waiting = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE (sender_session_id = ?1 OR session_id = ?1) AND status IN ('pending', 'delivering')",
+          "SELECT count(*) AS n FROM inbox WHERE ?1 IN (sender_session_id, about_session_id, session_id) AND status IN ('pending', 'delivering')",
           auto,
         )
 

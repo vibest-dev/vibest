@@ -3,7 +3,8 @@ import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/db-rows"
 import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
-import { isLimited, Plugin, stillLimited } from "@vibest/plugin/effect"
+import { Plugin } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import type { HarnessId } from "@vibest/schema/session"
 import { Effect, type Scope } from "effect"
 import { SqlClient } from "effect/sql"
@@ -144,7 +145,9 @@ export const executionAndSentCounts = (sessionId: string) =>
 
     const [sent] = yield* sql<{
       n: number
-    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId}`.pipe(Effect.orDie)
+    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId} OR about_session_id = ${sessionId}`.pipe(
+      Effect.orDie,
+    )
 
     return { executions: executions!.n, sent: sent!.n }
   })
@@ -155,7 +158,7 @@ export const sqlNotices = (sessionId: string) =>
 
     const rows = yield* sql<{
       message: string
-    }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.sender_session_id = ${sessionId} ORDER BY m.id`.pipe(
+    }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.about_session_id = ${sessionId} ORDER BY m.id`.pipe(
       Effect.orDie,
     )
 
@@ -178,7 +181,7 @@ export const chooseNext = Plugin.define({
           if (attempt.outcome !== "limited") continue
 
           if (attempt.provider === undefined) excludedHarnesses.add(attempt.harness)
-          else if (stillLimited(attempt, event.subscriptions))
+          else if (Host.stillLimited(attempt, event.subscriptions))
             excludedPairs.add(pair(attempt.harness, attempt.provider))
         }
 
@@ -197,7 +200,7 @@ export const chooseNext = Plugin.define({
           const rows = event.subscriptions.filter(
             (row) =>
               row.harness === option.harness &&
-              !isLimited(row) &&
+              !Host.isLimited(row) &&
               !excludedPairs.has(pair(option.harness, row.provider)),
           )
 

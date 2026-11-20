@@ -416,7 +416,7 @@ describe("vibest.sock", () => {
         id: launch.sessionId,
       })
       const fromUser = yield* db.inbox.latestInbox(launch.sessionId, "send")
-      assert.deepInclude(fromUser, { message: "from the user", sender: null })
+      assert.deepInclude(fromUser, { message: "from the user", sender: { type: "user" } })
       yield* raw["Session.Ready"](
         { id: launch.sessionId, conversation: { harness: "claude", id: "stale" } },
         {

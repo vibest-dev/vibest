@@ -1,4 +1,4 @@
-import { capture } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { Context, Duration, Effect, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -45,7 +45,7 @@ export const layer = Layer.effect(
     const known = new Map<string, string>()
 
     const ask = (alias: string) =>
-      capture("ssh", ["-G", "--", alias], { timeout: Duration.seconds(5) }).pipe(
+      Host.capture("ssh", ["-G", "--", alias], { timeout: Duration.seconds(5) }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.map((run) => {
           if (run === undefined || run.exitCode !== 0) return alias

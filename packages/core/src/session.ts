@@ -26,13 +26,14 @@ import { Git, type GitState } from "./git.ts"
 import { projectRoot, workspaceGit } from "./project/create.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
 import { Archive } from "./session/archive.ts"
-import { Delivery, type SendRefused, unreachable } from "./session/delivery.ts"
+import { Delivery, unreachable } from "./session/delivery.ts"
 import { SessionLive } from "./session/live.ts"
 import type { Restarted } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
 import { type Outdated, Restart } from "./session/restart.ts"
+import type { SendRefused } from "./session/sends.ts"
 import { Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
 import { gitState, mainCheckout } from "./worktree.ts"
 
@@ -108,19 +109,12 @@ export interface Interface {
     | PluginsNotActive
     | NoSuchSession
   >
-  readonly send: (
-    id: string,
-    message: string,
-    request?: string,
-    sender?: string,
-    from?: Sender,
-  ) => Effect.Effect<void, NoSuchSession>
+  readonly send: (id: string, message: string, sender?: Sender, request?: string) => Effect.Effect<void, NoSuchSession>
   readonly deliverTo: (
     id: string,
     message: string,
+    sender?: Sender,
     request?: string,
-    sender?: string,
-    from?: Sender,
   ) => Effect.Effect<void, NoSuchSession>
   readonly admit: (
     sender: { readonly sessionId: string; readonly projectId: string },

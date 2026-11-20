@@ -18,6 +18,7 @@ import { SqlClient } from "effect/sql"
 import * as Platform from "#platform"
 
 const ENTRY = { agent: "coordinator" } as const
+const builtIn = migrations.map((migration) => migration.id)
 
 describe("Db", () => {
   const fileAt = (dir: string, name: string) => Path.Path.pipe(Effect.map((path) => path.join(dir, name)))
@@ -134,7 +135,10 @@ describe("Db", () => {
           }
         }).pipe(Effect.provide(Platform.sqlite(file)))
 
-        assert.deepStrictEqual(kept, { ids: ["20270101000000_kept"], projection: String(PROJECTION_VERSION) })
+        assert.deepStrictEqual(kept, {
+          ids: [...builtIn, "20270101000000_kept"],
+          projection: String(PROJECTION_VERSION),
+        })
       }).pipe(Effect.provide(Platform.services)),
   )
 
@@ -200,7 +204,7 @@ describe("Db", () => {
       assert.isTrue(Exit.isFailure(yield* Effect.exit(failing.pipe(Effect.provide(runner(file))))))
       assert.deepStrictEqual(yield* ledgerOf(file), before, "the failed open rolled everything back")
       assert.deepStrictEqual(yield* state.pipe(Effect.provide(Platform.sqlite(file))), {
-        ids: ["20270101000000_a", "20270102000000_b"],
+        ids: [...builtIn, "20270101000000_a", "20270102000000_b"],
         marks: ["later_a", "later_b"],
       })
     }).pipe(Effect.provide(Platform.services)),

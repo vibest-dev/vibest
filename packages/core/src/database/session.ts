@@ -288,7 +288,19 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 yield* queueInbox({
                   recipient: row.id,
                   kind: "task",
-                  sender: parentSessionId ?? null,
+                  sender:
+                    parentSessionId !== undefined
+                      ? {
+                          type: "agent",
+                          ...((yield* remote.senderOf(parentSessionId)) ?? { session: parentSessionId }),
+                        }
+                      : origin?.reportTo !== undefined
+                        ? {
+                            type: "agent",
+                            session: origin.reportTo,
+                            machine: (yield* remote.peerName(origin.peer)) ?? origin.peer,
+                          }
+                        : { type: "user" },
                   content: task,
                   status: "delivered",
                   request,
@@ -482,7 +494,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   yield* queueInbox({
                     recipient: entryId,
                     kind: "task",
-                    sender: null,
+                    sender: { type: "user" },
                     content: start.firstInput,
                     status: "delivered",
                   })

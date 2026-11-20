@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { Peer } from "@vibest/server/machine/peer"
-import { Effect, Queue, Stream } from "effect"
+import { Effect, Stream } from "effect"
 import { RpcClient } from "effect/rpc"
 import { SqlClient, Statement } from "effect/sql"
 
@@ -12,7 +12,7 @@ import { until } from "./lib/fakes.ts"
 import { onB, peerSession, repoStack, twoMachines } from "./lib/machines-fakes.ts"
 
 const outboxCount = Effect.flatMap(SqlClient.SqlClient, (sql) =>
-  sql`SELECT id FROM outbox`.pipe(Effect.map((r) => r.length)),
+  sql`SELECT id FROM outbox WHERE acked_at IS NULL`.pipe(Effect.map((r) => r.length)),
 )
 
 const inboxCount = (recipient: string) =>
@@ -68,26 +68,6 @@ describe("a Send retried with the same request across machines", () => {
       yield* arrived(2)
       yield* sendTwice(child, middle, pastEnded)
       yield* arrived(2)
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-  )
-
-  it.effect("an item queued again right after its ack is sent again, not held back as already sent", () =>
-    Effect.gen(function* () {
-      const b = yield* repoStack()
-      const peer = randomId()
-      const a1 = yield* b.as(peer, "p1")
-      const item = randomId()
-      const sent = yield* Queue.unbounded<string>()
-      yield* a1.outbox.pipe(
-        Stream.runForEach((row) => Queue.offer(sent, row.id)),
-        Effect.forkScoped,
-      )
-      const queue = b.db.remote.sendToPeer(randomId(), peer, randomId(), "x", item)
-      yield* queue
-      assert.strictEqual(yield* Queue.take(sent), item)
-      yield* b.db.remote.ackOutbox(peer, [item])
-      yield* queue
-      assert.strictEqual(yield* Queue.take(sent), item)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

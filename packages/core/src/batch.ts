@@ -1,11 +1,10 @@
 import type { InboxRow } from "@vibest/schema/session"
 
-export const senderKey = (row: InboxRow) =>
-  row.kind === "notice" ? "vibestd" : (row.from?.session ?? row.sender ?? "")
+import { senderKey } from "./database/db-rows.ts"
 
 export const nextBatch = (pending: ReadonlyArray<InboxRow>) => {
-  const first = pending[0] ? senderKey(pending[0]) : undefined
-  const other = pending.findIndex((r) => senderKey(r) !== first)
+  const first = pending[0] ? senderKey(pending[0].sender) : undefined
+  const other = pending.findIndex((r) => senderKey(r.sender) !== first)
 
   return other === -1 ? pending : pending.slice(0, other)
 }

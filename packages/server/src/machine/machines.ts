@@ -6,7 +6,8 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
 import { Runtimes } from "@vibest/core/runtimes"
-import { reconnectSchedule, type Runtime } from "@vibest/plugin/effect"
+import { type Runtime } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -62,7 +63,7 @@ const ADD_TIMEOUT = Duration.seconds(30)
 export const RETRY_FIRST = Duration.millis(500)
 const RETRY_MAX = Duration.seconds(120)
 const RETRY_RESET = Duration.seconds(60)
-const RETRY = reconnectSchedule({ first: RETRY_FIRST, max: RETRY_MAX })
+const RETRY = Host.reconnectSchedule({ first: RETRY_FIRST, max: RETRY_MAX })
 const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 

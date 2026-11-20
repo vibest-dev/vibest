@@ -26,6 +26,7 @@ import { SessionLive } from "@vibest/core/session/live"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
+import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
@@ -155,6 +156,7 @@ const provided = new Map<string, ModuleExports>([
   ["effect", effect],
   ["@vibest/plugin", VibestPlugin],
   ["@vibest/plugin/effect", VibestPluginEffect],
+  ["@vibest/plugin/host", VibestPluginHost],
   ["effect/process/ChildProcess", ChildProcess],
   ["effect/process/ChildProcessSpawner", ChildProcessSpawner],
   ...Object.entries(effect).flatMap(([name, value]): ReadonlyArray<readonly [string, ModuleExports]> =>

@@ -1,4 +1,4 @@
-import { capture } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -58,14 +58,14 @@ export const layer = Layer.effect(
     const path = yield* Path.Path
 
     const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: ReadonlyArray<number> = [0]) =>
-      capture("git", ["--no-optional-locks", ...args], {
+      Host.capture("git", ["--no-optional-locks", ...args], {
         cwd,
         ...(input !== undefined && { stdin: Stream.make(new TextEncoder().encode(input)) }),
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.flatMap((run) =>
           run === undefined
-            ? Effect.die("capture without a timeout returned undefined")
+            ? Effect.die("Host.capture without a timeout returned undefined")
             : ok.includes(run.exitCode)
               ? Effect.succeed(run.stdout)
               : Effect.fail(new GitError({ args, message: run.stderr.trim() || `exit ${run.exitCode}` })),

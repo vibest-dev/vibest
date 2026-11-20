@@ -5,7 +5,7 @@ import { harnessDefaultPlugin } from "../../builtins/src/harness-default.ts"
 import { Agents } from "../src/agents.ts"
 import { makePlugins } from "../src/plugin.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
-import { memoryBus } from "./platform/bun.ts"
+import { memoryPluginHost } from "./platform/bun.ts"
 
 const event = (harness: string | undefined, claude: boolean) => ({
   project: "/r",
@@ -37,7 +37,7 @@ const chosen = (harness: string | undefined, claude: boolean) =>
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Agents.layer),
-    Effect.provide(memoryBus),
+    Effect.provide(memoryPluginHost),
     Effect.provide(Agents.layer),
     Effect.scoped,
   )

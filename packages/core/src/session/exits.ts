@@ -1,7 +1,15 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { Context, Effect, Layer } from "effect"
 
-import { type SessionRow, harnessIdOf, runtimeOf, terminalOf, exitedAt, executionStateOf } from "../database/db-rows.ts"
+import {
+  type SessionRow,
+  harnessIdOf,
+  localSessionOf,
+  runtimeOf,
+  terminalOf,
+  exitedAt,
+  executionStateOf,
+} from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Inbox } from "../inbox.ts"
@@ -57,7 +65,7 @@ export const make = Effect.gen(function* () {
   const announceExit = (session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
       const queued = yield* db.inbox.pendingInbox(session.id)
-      const signed = queued.filter((r) => r.kind === "send" && r.sender)
+      const signed = queued.filter((r) => r.kind === "send" && localSessionOf(r.sender) !== undefined)
       const unsigned = queued.filter((r) => !signed.includes(r))
 
       if (signed.length > 0) yield* inbox.undelivered(session, signed, "it exited")
