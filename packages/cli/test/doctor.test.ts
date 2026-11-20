@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Effect, Option } from "effect"
 
-import { doctorVerdict, plainHarnessProblem } from "../src/commands/handlers/doctor.ts"
+import { agentDefinitionFindings, doctorVerdict, plainHarnessProblem } from "../src/commands/handlers/doctor.ts"
 
 const signedOut =
   "agy model discovery failed: agy gave no model list: Error: Please sign in to view available models. Launch the CLI without arguments to sign in."
@@ -61,4 +62,22 @@ describe("doctor text", () => {
       "2 problems; run the fix lines above.",
     )
   })
+})
+
+describe("doctor agent definitions", () => {
+  it.effect("a vibestd without the agents capability is not asked, and the section says to update", () =>
+    Effect.gen(function* () {
+      const findings = yield* agentDefinitionFindings(false, Effect.die("Unknown request tag: Agents.List"))
+      assert.deepStrictEqual(findings, [
+        { mark: "problem", text: "this vibestd is older and does not list agent definitions", fix: "vibest update" },
+      ])
+
+      const listed = yield* agentDefinitionFindings(
+        true,
+        Effect.succeed(Option.some({ agents: [], invalid: [{ source: "/a", error: "e", plugin: "p" }] })),
+      )
+
+      assert.deepStrictEqual(listed[1], { mark: "problem", text: "/a: e", fix: "fix or remove /a" })
+    }),
+  )
 })
