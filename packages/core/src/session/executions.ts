@@ -59,7 +59,7 @@ export const make = Effect.gen(function* () {
   const { track } = yield* SessionLive.Service
   const concurrency = yield* Concurrency.Service
 
-  const limitOf = (gated: boolean) => (gated ? concurrency.limit : Effect.succeed(undefined))
+  const admissionOf = (gated: boolean) => (gated ? concurrency.admission : Effect.succeed(undefined))
 
   const reportedStatus = (id: string) =>
     Effect.map(db.session.getSession(id), (session) => session?.status ?? "unknown")
@@ -216,7 +216,9 @@ export const make = Effect.gen(function* () {
     const begun =
       open === undefined
         ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) =>
-            Effect.flatMap(limitOf(gated), (limit) => db.session.startExecutionWithin(session.id, at, limit)),
+            Effect.flatMap(admissionOf(gated), (admission) =>
+              db.session.startExecutionWithin(session.id, at, admission),
+            ),
           )
         : { execution: open, opened: true }
 
@@ -288,8 +290,11 @@ export const make = Effect.gen(function* () {
     onHandover: Effect.Effect<void>,
     gated = false,
   ) {
-    const limit = yield* limitOf(gated)
-    const begun = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecutionWithin(id, at, limit))
+    const admission = yield* admissionOf(gated)
+
+    const begun = yield* Effect.flatMap(Clock.currentTimeMillis, (at) =>
+      db.session.startExecutionWithin(id, at, admission),
+    )
 
     if (begun === undefined) return undefined
     yield* onHandover

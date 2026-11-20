@@ -257,18 +257,37 @@ export const make = Effect.gen(function* () {
     merge: (pending, next) => ({ rows: new Set([...pending.rows, ...next.rows]), ended: pending.ended || next.ended }),
   })
 
-  const offerHead = (passed: string | undefined): Effect.Effect<void> =>
+  const offer = (id: string, ready: boolean) =>
     Effect.gen(function* () {
-      const [head] = yield* db.inbox.waitingSessions()
+      const session = yield* db.session.getSession(id)
 
-      if (head === undefined || head === passed || (yield* full)) return
-      yield* inbox.wake(head)
-      const rows = new Set((yield* db.inbox.pendingInbox(head)).map((r) => r.id))
-      yield* deliverWoken(head, { rows, ended: true })
-      yield* offerHead(head)
+      if (session === undefined) return
+
+      if (inbox.pulls(harnessIdOf(session)) && (yield* db.inbox.untakenTask(id)) === undefined)
+        return yield* inbox.wake(id)
+
+      if (!ready) return
+      const rows = new Set((yield* db.inbox.pendingInbox(id)).map((r) => r.id))
+      yield* deliverWoken(id, { rows, ended: true })
+      yield* concurrency.pass(id, (yield* db.inbox.waitingSessions()).includes(id))
     })
 
-  const queue = yield* RunCoordinator.make<"queue", void>({ drain: () => offerHead(undefined), merge: () => undefined })
+  const offerReady = Effect.gen(function* () {
+    const ready = yield* db.inbox.readyWaiting()
+
+    for (const id of yield* db.inbox.waitingSessions()) {
+      if (yield* full) return
+      yield* offer(id, ready.includes(id))
+    }
+  })
+
+  const queue = yield* RunCoordinator.make<"queue", void>({ drain: () => offerReady, merge: () => undefined })
+
+  const wakeEvery = Effect.flatMap(db.inbox.waitingSessions(), (ids) =>
+    Effect.forEach(ids, (id) => Effect.andThen(inbox.wake(id), wakes.wake(id, { rows: new Set(), ended: true })), {
+      discard: true,
+    }),
+  )
 
   const interrupt = Effect.fn("Delivery.interrupt")(function* (id: string) {
     const known = yield* getRow(id)
@@ -356,7 +375,10 @@ export const make = Effect.gen(function* () {
     limited(Effect.void),
   )
   yield* concurrency.limits.pipe(
-    Stream.runForEach(() => limited(Effect.void)),
+    Stream.zipWithPrevious,
+    Stream.runForEach(([before, limit]) =>
+      limit !== undefined ? queue.wake("queue", undefined) : Option.isSome(before) ? wakeEvery : Effect.void,
+    ),
     Effect.forkScoped,
   )
 

@@ -110,7 +110,7 @@ export const layer = Layer.effect(
 
       const taken = yield* drain.work(
         `take inbox of ${sessionId}`,
-        Effect.flatMap(concurrency.limit, (limit) => db.inbox.takeInbox(sessionId, process, limit)),
+        Effect.flatMap(concurrency.admission, (admission) => db.inbox.takeInbox(sessionId, process, admission)),
       )
 
       if (taken === undefined) return undefined

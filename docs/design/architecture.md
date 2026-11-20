@@ -395,15 +395,18 @@ How these modules keep the rules:
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
 - A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) has one door:
   `admits` in `session-statements.ts`, checked in the transaction that opens an execution from an inbox row (a push,
-  a resume, a launch's first task, a pull take, an entry's generated first input). It admits a session only while open
-  executions of live sessions are below the limit and the session holds the oldest waiting row (`min(inbox.rowid)`,
-  the commit order, which a read-model rebuild replays). A refused input stays queued (pending rows, an untaken task),
-  and a refused first input starts the harness without it; the queue is those rows, so nothing about it is stored.
-  With a limit set, every change that can free a slot or move the head (an execution started or ended, a row queued
-  or moved, a process placed or ready, a session ended, a new limit) wakes one fiber in `Delivery` that offers the
-  head its input (pushing it, or waking a pulling recipient's inbox stream) and moves to the next head once that one
-  is working. A head that cannot take input yet holds the line. Typed input and the rerun of a usage-limit move are not
-  gated.
+  a resume, a launch's first task, a pull take, an entry's generated first input). It admits a session while open
+  executions of live sessions are below the limit and no session that can take input now holds an older waiting row
+  (`min(inbox.rowid)`, the commit order, which a read-model rebuild replays). A session can take input now when it
+  is live, its process is ready and not ended, and its last offer did not fail (the `passed` set in `Concurrency`,
+  kept in memory). So a child that never becomes ready, a closed session or an unreachable runtime does not hold the
+  line, and once able it competes again by its original row. A refused input stays queued (pending rows, an untaken
+  task), and a refused first input starts the harness without it; the queue is those rows, so nothing about it is
+  stored. A pull take waits while its session's first task is untaken. With a limit set, every change that can free
+  a slot or move the order (an execution started or ended, a row queued or moved, a process placed or ready, a
+  session ended, a new limit) wakes one fiber in `Delivery` that walks the waiting sessions in order: it wakes a
+  pulling recipient's inbox stream, pushes to a ready one, and marks a push that did not land as passed until its next
+  offer. Removing the limit wakes every waiting session. Typed input and the rerun of a usage-limit move are not gated.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the

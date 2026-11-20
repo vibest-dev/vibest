@@ -5,6 +5,7 @@ import { SqlClient, type Statement } from "effect/sql"
 
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
+import type { Admission } from "../concurrency.ts"
 import { envelopeFrom, noticeEnvelope } from "../replies.ts"
 import { archived, localSessionOf, type NewInboxRow, senderKey } from "./db-rows.ts"
 import type * as Remote from "./remote.ts"
@@ -278,6 +279,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       openExecution,
       admits,
       waitingSessions,
+      readyWaiting,
       acceptedAt,
       observable,
       fromOldProcess,
@@ -369,6 +371,8 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       untakenTask: Effect.fn("Db.inbox.untakenTask")((id: string) => reads.untakenTask(id).pipe(Effect.orDie)),
 
       waitingSessions: Effect.fn("Db.inbox.waitingSessions")(() => waitingSessions.pipe(Effect.orDie)),
+
+      readyWaiting: Effect.fn("Db.inbox.readyWaiting")(() => readyWaiting.pipe(Effect.orDie)),
 
       hasQueued: Effect.fn("Db.inbox.hasQueued")((id: string) =>
         sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${id}
@@ -466,31 +470,34 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         ).pipe(Effect.orDie),
       ),
 
-      takeInbox: Effect.fn("Db.inbox.takeInbox")((sessionId: string, process: number | undefined, limit?: number) =>
-        tx(
-          Effect.gen(function* () {
-            if (!(yield* observable(sessionId)) || (yield* fromOldProcess(sessionId, process))) return undefined
+      takeInbox: Effect.fn("Db.inbox.takeInbox")(
+        (sessionId: string, process: number | undefined, admission?: Admission) =>
+          tx(
+            Effect.gen(function* () {
+              if (!(yield* observable(sessionId)) || (yield* fromOldProcess(sessionId, process))) return undefined
 
-            if ((yield* openExecution(sessionId)) !== undefined) return undefined
+              if ((yield* openExecution(sessionId)) !== undefined) return undefined
 
-            if (!(yield* admits(sessionId, limit))) return undefined
-            const pending = yield* findSend(sessionId, "pending")
+              if (!(yield* admits(sessionId, admission))) return undefined
 
-            if (pending.length === 0) return undefined
-            const batch = nextBatch(pending)
-            const execution = yield* startExecution(sessionId, yield* now)
-            yield* moveInbox(
-              sql`session_id = ${sessionId} AND ${sql.in(
-                "id",
-                batch.map((r) => r.id),
-              )}`,
-              "delivered",
-              execution,
-            )
+              if (admission !== undefined && (yield* reads.untakenTask(sessionId)) !== undefined) return undefined
+              const pending = yield* findSend(sessionId, "pending")
 
-            return { execution, rows: batch }
-          }),
-        ).pipe(Effect.orDie),
+              if (pending.length === 0) return undefined
+              const batch = nextBatch(pending)
+              const execution = yield* startExecution(sessionId, yield* now)
+              yield* moveInbox(
+                sql`session_id = ${sessionId} AND ${sql.in(
+                  "id",
+                  batch.map((r) => r.id),
+                )}`,
+                "delivered",
+                execution,
+              )
+
+              return { execution, rows: batch }
+            }),
+          ).pipe(Effect.orDie),
       ),
 
       setInboxStatus: Effect.fn("Db.inbox.setInboxStatus")(

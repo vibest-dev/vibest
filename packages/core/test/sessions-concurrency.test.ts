@@ -5,10 +5,12 @@ import { Concurrency } from "@vibest/core/concurrency"
 import { Db, SQL_NAMES } from "@vibest/core/database/db"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Inbox } from "@vibest/core/inbox"
+import { Integration } from "@vibest/core/integration"
+import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { EntrySession } from "@vibest/core/session/entry"
 import type { HarnessId } from "@vibest/schema/session"
-import { Clock, Effect, FileSystem, Layer, Stream } from "effect"
+import { Clock, Effect, FileSystem, Layer, Ref, Stream } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf, tempDirectory } from "./lib/directory.ts"
@@ -39,6 +41,7 @@ const entryIn = (directory: string, terminal: string, harness: HarnessId = PULLI
     )
 
     yield* (yield* FakeRuntime).seedAgent(terminal)
+    yield* (yield* Integration.Service).ready(sessionId, undefined)
 
     return sessionId
   })
@@ -149,6 +152,7 @@ describe("one admission queue under a concurrency limit", () => {
       assert.strictEqual(yield* db.session.workingExecutions(), 1)
       assert.isUndefined(yield* db.session.openExecution(sessionId))
       assert.deepStrictEqual(yield* db.inbox.waitingSessions(), [sessionId])
+      yield* (yield* Integration.Service).ready(sessionId, undefined)
 
       yield* release
       yield* until(db.session.openExecution(sessionId), (open) => open !== undefined)
@@ -188,6 +192,164 @@ describe("one admission queue under a concurrency limit", () => {
   )
 })
 
+describe("sessions that cannot take input do not hold the line", () => {
+  const claimIn = (terminal: string, harness: HarnessId = PULLING_PI.id, runtime = "herdr") =>
+    Effect.gen(function* () {
+      const directory = yield* makeRepository
+      const projectId = yield* projectOf(directory)
+
+      const { sessionId } = yield* (yield* EntrySession.Service).claim({
+        directory,
+        projectId,
+        terminal,
+        harness,
+        runtime,
+        agent: "general",
+        fresh: false,
+        ...unset,
+      })
+
+      return { id: sessionId, directory, projectId }
+    })
+
+  const machine = Effect.gen(function* () {
+    const db = yield* Db.Service
+    const inbox = yield* Inbox.Service
+    const runtime = yield* FakeRuntime
+    yield* runtime.seedAgent("test/a")
+    yield* runtime.seedAgent("test/b")
+    const a = yield* claimIn("test/a")
+    const b = yield* claimIn("test/b")
+    yield* limitTo(1)
+    yield* (yield* Session.Service).userPrompt(a.id, "hold the only slot")
+    const held = (yield* db.session.openExecution(a.id))!
+    const pulls = yield* Ref.make(0)
+    yield* inbox.stream(b.id).pipe(
+      Stream.runForEach(() =>
+        Effect.andThen(
+          inbox.take(b.id, undefined),
+          Ref.update(pulls, (n) => n + 1),
+        ),
+      ),
+      Effect.forkScoped,
+    )
+    yield* until(Ref.get(pulls), (n) => n >= 1)
+
+    return { a, b, pulls, release: db.session.closeExecution(a.id, held, "completed") }
+  })
+
+  const bGetsTheSlot = (b: string, release: Effect.Effect<unknown>) =>
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      yield* (yield* Session.Service).deliverTo(b, "unrelated work")
+      yield* release
+      yield* until(db.inbox.pendingInbox(b), (rows) => rows.length === 0)
+      assert.isDefined(yield* db.session.openExecution(b))
+    })
+
+  test(
+    "a child that never becomes ready",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const runtime = yield* FakeRuntime
+      const { a, b, release } = yield* machine
+      yield* Ref.set(runtime.onStarted, () => Effect.void)
+
+      const { id } = yield* (yield* Session.Service).spawn({
+        machine: { id: "local" },
+        agent: "general",
+        root: a.directory,
+        parentSessionId: a.id,
+        projectId: a.projectId,
+        name: "queued",
+        prompt: "do the original task",
+        harness: PULLING_PI.id,
+        runtime: "herdr",
+      })
+
+      yield* until(db.session.getSession(id), (row) => (row?.process?.placedAt ?? null) !== null)
+
+      yield* bGetsTheSlot(b.id, release)
+      assert.include(yield* db.inbox.waitingSessions(), id)
+    }),
+  )
+
+  test(
+    "a new Cursor entry closed before its generated first input got a slot",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const runtime = yield* FakeRuntime
+      const { b, release } = yield* machine
+      yield* runtime.seedAgent("test/first")
+      const { id } = yield* claimIn("test/first", "cursor")
+      yield* runtime.updateAgent("test/first", (agent) => ({ ...agent, alive: false }))
+      yield* (yield* Session.Service).check(id)
+      assert.isNotNull((yield* db.session.getSession(id))!.process!.endedAt)
+
+      yield* bGetsTheSlot(b.id, release)
+    }),
+  )
+
+  test(
+    "a ready entry whose runtime became unreachable",
+    Effect.gen(function* () {
+      const { b, release } = yield* machine
+      const other = yield* FakeRuntime.make({})
+      yield* (yield* Runtimes.Service).transform((editor) => editor.add({ ...other.runtime, id: "other-runtime" }))
+      yield* other.seedAgent("test/first")
+      const { id } = yield* claimIn("test/first", "cursor", "other-runtime")
+      yield* (yield* Integration.Service).ready(id, undefined)
+      yield* (yield* Session.Service).deliverTo(id, "first in line")
+      yield* Ref.set(other.reachable, false)
+
+      yield* bGetsTheSlot(b.id, release)
+    }),
+  )
+
+  test(
+    "removing the limit wakes every waiting session",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const { b, pulls } = yield* machine
+      yield* (yield* Session.Service).deliverTo(b.id, "work")
+      yield* until(Ref.get(pulls), (n) => n >= 2)
+      assert.lengthOf(yield* db.inbox.pendingInbox(b.id), 1)
+
+      yield* (yield* Concurrency.Service).configure(undefined)
+      yield* until(db.inbox.pendingInbox(b.id), (rows) => rows.length === 0)
+    }),
+  )
+
+  test(
+    "a follow-up to a pulling child is not taken before the child's first task",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const { a, release } = yield* machine
+
+      const { id } = yield* sessions.spawn({
+        machine: { id: "local" },
+        agent: "general",
+        root: a.directory,
+        parentSessionId: a.id,
+        projectId: a.projectId,
+        name: "queued",
+        prompt: "do the original task",
+        harness: PULLING_PI.id,
+        runtime: "herdr",
+      })
+
+      yield* until(db.session.getSession(id), (row) => (row?.process?.placedAt ?? null) !== null)
+      assert.isDefined(yield* db.inbox.untakenTask(id))
+      yield* sessions.send(id, "follow-up referring to the original task")
+
+      yield* release
+      const taken = yield* (yield* Inbox.Service).take(id, undefined)
+      assert.isTrue(taken === undefined || (yield* db.inbox.untakenTask(id)) === undefined)
+    }),
+  )
+})
+
 describe("restart under a concurrency limit", () => {
   it.live("the slot a restart finds free goes to the oldest waiting message, not to the first session reconciled", () =>
     Effect.gen(function* () {
@@ -218,6 +380,7 @@ describe("restart under a concurrency limit", () => {
           )
 
           yield* runtime.seedAgent(name)
+          yield* (yield* Integration.Service).ready(sessionId, undefined)
 
           return sessionId
         })

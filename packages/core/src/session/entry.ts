@@ -258,7 +258,7 @@ const make = Effect.gen(function* () {
                     projectDirectory: root,
                     agent,
                     firstInput: firstInputOf(chosen),
-                    limit: yield* concurrency.limit,
+                    admission: yield* concurrency.admission,
                     ...((existing === undefined || fresh) && { sessionId }),
                   },
                 )
@@ -390,7 +390,7 @@ const make = Effect.gen(function* () {
                   projectDirectory: directory,
                   agent,
                   firstInput: firstInputOf(input.harness),
-                  limit: yield* concurrency.limit,
+                  admission: yield* concurrency.admission,
                 },
               )
 

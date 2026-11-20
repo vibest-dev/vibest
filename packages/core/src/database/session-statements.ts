@@ -17,6 +17,7 @@ import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus } from "../bus.ts"
+import type { Admission } from "../concurrency.ts"
 import { SessionLive } from "../session/live.ts"
 import { archived, SessionRow, type ProcessStart, type Integration, type ExecutionEnd } from "./db-rows.ts"
 import { decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
@@ -149,22 +150,35 @@ export const statements = Effect.gen(function* () {
   }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
       WHERE e.outcome IS NULL AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
 
-  const waitingSessions = sql<{
-    id: string
-  }>`SELECT i.session_id AS id FROM inbox i JOIN session s ON s.id = i.session_id
-      WHERE s.ended_at IS NULL
-        AND ((i.kind != 'task' AND i.status = 'pending') OR (i.kind = 'task' AND i.execution_id IS NULL))
-        AND NOT EXISTS (SELECT 1 FROM execution e WHERE e.session_id = i.session_id AND e.outcome IS NULL)
-      GROUP BY i.session_id ORDER BY min(i.rowid)`.pipe(Effect.map((rows) => rows.map((row) => row.id)))
+  const queued = sql`((i.kind != 'task' AND i.status = 'pending') OR (i.kind = 'task' AND i.execution_id IS NULL))`
 
-  const admits = (sessionId: string, limit: number | undefined) =>
-    limit === undefined
+  const waiting = (ready: boolean) =>
+    sql<{ id: string; first: number }>`SELECT i.session_id AS id, min(i.rowid) AS first FROM inbox i
+        JOIN session s ON s.id = i.session_id
+        LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+      WHERE s.ended_at IS NULL AND ${queued}
+        ${ready ? sql`AND p.ready_at IS NOT NULL AND p.ended_at IS NULL` : sql``}
+        AND NOT EXISTS (SELECT 1 FROM execution e WHERE e.session_id = i.session_id AND e.outcome IS NULL)
+      GROUP BY i.session_id ORDER BY first`
+
+  const waitingSessions = waiting(false).pipe(Effect.map((rows) => rows.map((row) => row.id)))
+
+  const readyWaiting = waiting(true).pipe(Effect.map((rows) => rows.map((row) => row.id)))
+
+  const admits = (sessionId: string, admission: Admission | undefined) =>
+    admission === undefined
       ? Effect.succeed(true)
       : Effect.gen(function* () {
-          if ((yield* workingExecutions) >= limit) return false
-          const [head] = yield* waitingSessions
+          if ((yield* workingExecutions) >= admission.limit) return false
 
-          return head === undefined || head === sessionId
+          const [mine] = yield* sql<{ first: number | null }>`SELECT min(i.rowid) AS first FROM inbox i
+            WHERE i.session_id = ${sessionId} AND ${queued}`
+
+          const first = mine?.first ?? Number.POSITIVE_INFINITY
+
+          return !(yield* waiting(true)).some(
+            (other) => other.id !== sessionId && other.first < first && !admission.passed.includes(other.id),
+          )
         })
 
   const currentProcessId = (sessionId: string) =>
@@ -449,6 +463,7 @@ export const statements = Effect.gen(function* () {
     openExecution,
     workingExecutions,
     waitingSessions,
+    readyWaiting,
     admits,
     startExecution,
     acceptedAt,

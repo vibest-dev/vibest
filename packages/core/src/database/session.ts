@@ -22,6 +22,7 @@ import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
+import type { Admission } from "../concurrency.ts"
 import { type ObservedEnd } from "../replies.ts"
 import { SessionLive } from "../session/live.ts"
 import {
@@ -409,7 +410,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly sessionId?: string | undefined
             readonly agent: string
             readonly firstInput?: string | undefined
-            readonly limit?: number | undefined
+            readonly admission?: Admission | undefined
           },
         ) =>
           Effect.gen(function* () {
@@ -491,7 +492,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   })
 
                 const handed =
-                  start.firstInput !== undefined && resume === undefined && (yield* admits(entryId, start.limit))
+                  start.firstInput !== undefined && resume === undefined && (yield* admits(entryId, start.admission))
 
                 if (handed) yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
                 yield* afterCommit(() => void moving.delete(project))
@@ -718,14 +719,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       startExecutionWithin: Effect.fn("Db.session.startExecutionWithin")(
-        (id: string, at: number, limit: number | undefined) =>
+        (id: string, at: number, admission: Admission | undefined) =>
           tx(
             Effect.gen(function* () {
               const open = yield* openExecution(id)
 
               if (open !== undefined) return { execution: open, opened: false }
 
-              if (!(yield* admits(id, limit))) return undefined
+              if (!(yield* admits(id, admission))) return undefined
 
               return { execution: yield* startExecution(id, at), opened: true }
             }),

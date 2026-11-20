@@ -56,15 +56,26 @@ export const rulesOf = (raw: Schema.Json | undefined): Rules => {
   return { max: maxima.length === 0 ? undefined : Math.min(...maxima), problems, unsupported }
 }
 
+export interface Admission {
+  readonly limit: number
+  readonly passed: ReadonlyArray<string>
+}
+
 export const atLimit = (limit: number | undefined, working: number) => limit !== undefined && working >= limit
 
 export const make = Effect.gen(function* () {
   const current = yield* SubscriptionRef.make(NO_RULES)
   const limit = Effect.map(SubscriptionRef.get(current), (rules) => rules.max)
+  const passed = new Set<string>()
 
   return {
     rules: SubscriptionRef.get(current),
     limit,
+    admission: Effect.map(limit, (max): Admission | undefined =>
+      max === undefined ? undefined : { limit: max, passed: [...passed] },
+    ),
+    pass: (sessionId: string, cannotTake: boolean) =>
+      Effect.sync(() => void (cannotTake ? passed.add(sessionId) : passed.delete(sessionId))),
     limits: SubscriptionRef.changes(current).pipe(
       Stream.map((rules) => rules.max),
       Stream.changes,
