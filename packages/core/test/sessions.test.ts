@@ -2,9 +2,11 @@ import { assert, describe } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, startOf } from "@vibest/core/database/db-rows"
+import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
-import { Effect, Fiber } from "effect"
+import { SessionLocks, terminalLock } from "@vibest/core/session/locks"
+import { Effect, Fiber, Ref } from "effect"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
@@ -13,7 +15,47 @@ import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { entryOfProject, sessionWorktree, spawnInput, spawnWorking, test, sqlNotices } from "./lib/sessions-helpers.ts"
+import {
+  entryOfProject,
+  idleSession,
+  sessionWorktree,
+  spawnInput,
+  spawnWorking,
+  test,
+  sqlNotices,
+} from "./lib/sessions-helpers.ts"
+
+const entriesAtOneTerminal = Effect.gen(function* () {
+  const herdr = yield* FakeRuntime
+  const sessions = yield* Session.Service
+  const db = yield* Db.Service
+  const repo = yield* makeRepository
+  const project = yield* projectOf(repo)
+  const location = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } }
+
+  const endEntry = (id: string) =>
+    Effect.gen(function* () {
+      yield* herdr.updateAgent("test/coord", (agent) => ({ ...agent, alive: false }))
+      yield* sessions.check(id)
+      yield* until(db.session.getSession(id), (now) => (now?.process?.endedAt ?? null) !== null)
+    })
+
+  const exitedEntry = (fresh: boolean) =>
+    Effect.gen(function* () {
+      const { sessionId } = yield* db.session.startEntry(project, "pi", fresh, location, {
+        agent: "coordinator",
+        projectDirectory: repo,
+      })
+
+      yield* herdr.seedAgent("test/coord")
+      yield* endEntry(sessionId)
+      yield* herdr.seedAgent("test/coord")
+
+      return sessionId
+    })
+
+  return { exitedEntry, endEntry }
+})
 
 describe.concurrent("Session", () => {
   test(
@@ -132,6 +174,62 @@ describe.concurrent("Session", () => {
       assert.strictEqual(row.process!.id, next)
       assert.isNull(row.process!.endedAt)
       assert.isDefined(yield* db.inbox.insertSend(entryId, "after the exit"))
+    }),
+  )
+
+  test(
+    "a restarted session whose terminal reports no state shows idle once its harness reports ready; a state the runtime already reported stays",
+    Effect.gen(function* () {
+      const { id, db } = yield* idleSession(yield* makeRepository)
+      const integration = yield* Integration.Service
+      yield* db.session.restartProcess(id)
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "unknown")
+      yield* integration.ready(id, 4343)
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
+
+      yield* db.session.restartProcess(id)
+      yield* db.session.setStatus(id, "blocked")
+      yield* integration.ready(id, 4344)
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "blocked")
+    }),
+  )
+
+  test(
+    "archiving an entry session that exited leaves alone the terminal it recorded once a newer entry session used it, even after that one exited too",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const { exitedEntry, endEntry } = yield* entriesAtOneTerminal
+      const old = yield* exitedEntry(false)
+      yield* endEntry(yield* exitedEntry(true))
+      assert.include(yield* sessions.remove(old, { keepWorktree: true }), { pane: "none" })
+      assert.notDeepInclude(yield* herdr.callsTo("close"), { terminal: "test/coord" })
+    }),
+  )
+
+  test(
+    "a newer entry session cannot take the terminal while an archive of its last session decides to close it",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const locks = yield* SessionLocks.Service
+      const { exitedEntry } = yield* entriesAtOneTerminal
+      const old = yield* exitedEntry(false)
+      const looking = yield* herdr.hold("state", "test/coord")
+      const archiving = yield* Effect.forkChild(sessions.remove(old, { keepWorktree: true }))
+      yield* looking.reached
+      const taken = yield* Ref.make(false)
+
+      const claiming = yield* Effect.forkChild(
+        locks.withLock(terminalLock(RUNTIME, { id: "test/coord" }))(Ref.set(taken, true)),
+      )
+
+      yield* TestClock.withLive(Effect.sleep("100 millis"))
+      assert.isFalse(yield* Ref.get(taken))
+      yield* looking.release()
+      assert.include(yield* Fiber.join(archiving), { pane: "closed" })
+      yield* Fiber.join(claiming)
+      assert.isTrue(yield* Ref.get(taken))
     }),
   )
 

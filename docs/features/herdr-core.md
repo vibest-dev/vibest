@@ -28,3 +28,10 @@ instead of after the ready timeout.
 
 A session execution that ended while nobody watched shows as done, for the session and its project; once it is seen, it is
 idle.
+
+## S68. A session keeps one terminal
+
+A session has at most one terminal. A harness that exits before it reports ready leaves no terminal behind; a session
+sent a message after its harness exited starts again in a new terminal under the same name, and the old one is gone;
+`vibest archive` closes the session's terminal even when its harness had already exited, so the worktree is not kept for
+the shell left in it.

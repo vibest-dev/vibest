@@ -13,7 +13,7 @@ const checks: ReadonlyArray<Check> = [
     id: "U6-hc",
     covers: ["D7"],
     title:
-      "vibest daemon restart onto another vibest restarts an old Pi entry session in place in its herdr-core terminal, on the same session and conversation as a new process, and a subagent result still reaches it",
+      "vibest daemon restart onto another vibest restarts an old Pi entry session in place in its herdr-core terminal, on the same session and conversation as a new process, restarts its subagent too, both show idle once their harnesses report ready, and a subagent result still reaches it",
     run: async (w) => {
       for (const bin of ["pi", "hc", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = holdsSlowMessageModel()
@@ -58,12 +58,15 @@ const checks: ReadonlyArray<Check> = [
           })
 
         const delegate = async (marker: string) => {
-          await w.okViaEntry(["run", "pi", "--runtime", "hc", "--env", piEnv, ask(marker)], {
+          const started = await w.okViaEntry(["run", "pi", "--runtime", "hc", "--env", piEnv, ask(marker)], {
             cwd: repo,
             env,
             bin: wrapper,
           })
+
           await reached(`the entry session's execution on the result of ${marker}`, `done-${marker}`)
+
+          return (JSON.parse(started) as { id: string }).id
         }
 
         await w.startEntry({
@@ -76,7 +79,7 @@ const checks: ReadonlyArray<Check> = [
           hc: { run: core.hc },
           timeoutMs: 60_000,
         })
-        await delegate("zero")
+        const sub = await delegate("zero")
         await until(
           "the entry session reports the old integration and its conversation",
           () => {
@@ -115,6 +118,30 @@ const checks: ReadonlyArray<Check> = [
           `the conversation changed: ${before.harness_session_id} -> ${after.harness_session_id}`,
         )
         expect(!alive(before.pid!), `the old harness ${before.pid} still runs`)
+
+        const restarted = (id: string) =>
+          rows<{ reason: string | null }>(w, "SELECT end_reason AS reason FROM process WHERE session_id = ?", id).some(
+            (p) => p.reason === "restart",
+          )
+
+        expect(restarted(sub), `the subagent ${sub} was not restarted in place: ${out}`)
+
+        const statuses = async () =>
+          (await w.json<{ sessions: Array<{ id: string; status: string }> }>(["ls"], { cwd: repo })).sessions.filter(
+            (s) => s.id === before.id || s.id === sub,
+          )
+
+        await until(
+          "the entry session and the subagent idle once their restarted harnesses reported ready",
+          async () => {
+            const now = await statuses()
+
+            return now.length === 2 && now.every((s) => s.status === "idle")
+          },
+          30_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}: ${JSON.stringify(await statuses())}\nterminals:\n${await core.screens()}`)
+        })
         await delegate("after")
 
         const ends = rows<{ reason: string | null }>(
