@@ -110,6 +110,10 @@ const S67: Check = {
         `b's system prompt: ${system}`,
       )
 
+      const toSelf = await tell(a, `${binary} send ${a.id} -- to-myself`)
+      expect(toSelf.includes("Forbidden") && toSelf.includes("does not send to itself"), `a send to oneself: ${toSelf}`)
+      expect(inboxFrom(w, a.id) === 0, "a's send to itself was queued")
+
       await tell(a, `${binary} send ${b.id} -- hello-from-a`)
       await until("b got a's message", () => seen(b.model).includes("hello-from-a"), 90_000)
       const got = text(b.model.requests.find((r) => text(r.at(-1)).includes("hello-from-a"))!.at(-1))
@@ -169,8 +173,15 @@ const S67: Check = {
       const childDir = await piDir(w, "pi-team-child", other.model.url)
       const taken = await tell(other, `${binary} run pi --team ${web} --env PI_CODING_AGENT_DIR=${childDir} -- wait`)
       expect(taken.includes("Forbidden") && taken.includes(`owned by ${entry}`), `a second owner for ${web}: ${taken}`)
-      const unknown = await tell(other, `${binary} run pi --team t-0000 --env PI_CODING_AGENT_DIR=${childDir} -- wait`)
-      expect(unknown.includes("Forbidden") && unknown.includes("no team t-0000"), `an unknown team id: ${unknown}`)
+      const held = new Set([web, other.team, stranger.team])
+      const nobody = ["t-0000", "t-0001", "t-0002", "t-0003"].find((id) => !held.has(id))!
+
+      const unknown = await tell(
+        other,
+        `${binary} run pi --team ${nobody} --env PI_CODING_AGENT_DIR=${childDir} -- wait`,
+      )
+
+      expect(unknown.includes("Forbidden") && unknown.includes(`no team ${nobody}`), `an unknown team id: ${unknown}`)
 
       const child = JSON.parse(await tell(a, `${binary} run pi --env PI_CODING_AGENT_DIR=${childDir} -- wait`)) as {
         id: string

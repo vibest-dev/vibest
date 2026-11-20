@@ -82,6 +82,9 @@ export const make = Effect.gen(function* () {
 
     if (toOrigin === true) return { id: input }
     const id = yield* db.session.resolveSession(input)
+
+    if (id === sender.sessionId)
+      return yield* new SendRefused({ message: `${id} is you; a session does not send to itself` })
     const target = yield* db.session.sessionIdentity(id)
 
     if (target?.projectId !== sender.projectId)

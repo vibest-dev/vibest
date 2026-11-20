@@ -80,6 +80,7 @@ describe("sends from sessions", () => {
           assert.isTrue(yield* db.session.insertSession(session(B), project, { ...start, team: "new" }))
           const team = (yield* teamOf(B))!
           assert.match(team, /^t-[0-9a-f]{4}$/)
+          const unknown = team === "t-0000" ? "t-0001" : "t-0000"
           assert.isTrue(yield* db.session.insertSession(session(X), project, { ...start, team: { join: team } }))
           assert.deepStrictEqual(
             yield* db.session.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), project, {
@@ -92,9 +93,9 @@ describe("sends from sessions", () => {
           assert.deepStrictEqual(
             yield* db.session.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), project, {
               ...start,
-              team: { join: "t-0000" },
+              team: { join: unknown },
             }),
-            { teamUnknown: "t-0000" },
+            { teamUnknown: unknown },
           )
           assert.isTrue(
             yield* db.session.insertSession(session("ffffffff-ffff-4fff-8fff-ffffffffffff"), project, {
