@@ -181,7 +181,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean; readonly 
     return r.stdout
   }
 
-  if (options.aWithoutCursor) await configurePlugins(w, (plugins) => [...plugins, "-harness-cursor"])
+  if (options.aWithoutCursor) await configurePlugins(w, (plugins) => [...plugins, "-vibest.harness-cursor"])
   await okB(["project", "add"])
 
   const aEnv = {

@@ -16,7 +16,14 @@ import { CLAUDE, PULLING_PI } from "./harnesses.ts"
 import { settled, EXECUTIONS, until, writeEnd } from "./observe.ts"
 import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
-export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ? "cursor" : argv[0])
+export const harnessArgv = (argv: ReadonlyArray<string>) =>
+  argv[0] === "sh" && argv[1] === "-c" && argv[2]?.includes("VIBEST_CLI") ? argv.slice(4) : argv
+
+export const harnessOf = (argv: ReadonlyArray<string>) => {
+  const binary = harnessArgv(argv)[0]
+
+  return binary === "cursor-agent" ? "cursor" : binary
+}
 
 export const entryOfProject = (repo: string) =>
   Effect.gen(function* () {

@@ -15,7 +15,7 @@ import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { CURSOR, FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
 import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
+import { harnessArgv, spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Session", () => {
   test(
@@ -350,7 +350,7 @@ describe.concurrent("Session", () => {
       const starts = (yield* herdr.callsTo("open")).length
       yield* sessions.send(id, "next")
       const calls = yield* until(herdr.callsTo("open"), (c) => c.length > starts)
-      assert.deepStrictEqual(calls.at(-1)!.argv.slice(0, 2), ["cursor-agent", "--resume=c-123"])
+      assert.deepStrictEqual(harnessArgv(calls.at(-1)!.argv).slice(0, 2), ["cursor-agent", "--resume=c-123"])
       yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* writeEnd(id, "cursor", { conversation_id: "c-other", text: "status: completed" }, 5000)
       yield* herdr.endExecution(id)

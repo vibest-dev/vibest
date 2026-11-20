@@ -28,8 +28,8 @@ fails and prints the reason. A hook that throws instead of returning an Effect b
 
 ## G5. A routing plugin picks the harness
 
-A plugin can pick the harness for `vibest run`. The builtin plugin `harness-default` picks Claude when nothing else has
-chosen (no `--harness`, nothing to inherit) and Claude is available; with `"-harness-default"` in `plugins` and no
+A plugin can pick the harness for `vibest run`. The builtin plugin `vibest.harness-default` picks Claude when nothing else has
+chosen (no `--harness`, nothing to inherit) and Claude is available; with `"-vibest.harness-default"` in `plugins` and no
 plugin of one's own, such a run fails saying there is no harness to inherit. With a plugin that picks Pi, the same run starts a Pi session, `vibest ls`
 names the plugin as the one that decided the harness (the `routing` field of `vibest ls` and `vibest result`; `vibest
 run` itself prints only `{"id":"<session id>"}`), and the result arrives.
@@ -83,7 +83,7 @@ plugin into the `setup` form reloads it like any edit (G2).
 
 ## G14. A builtin plugin can be removed
 
-`"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-harness-default"`); `"-*"` and
+`"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-vibest.harness-default"`); `"-*"` and
 `"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts. While user plugins
 are still importing, a start is refused with `PluginsNotActive`, naming the plugins still loading, and does not run on
 a partial set. Once they are active, `vibest plugins` shows the builtin gone, and deleting the line brings it back

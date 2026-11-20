@@ -86,7 +86,6 @@ describe("sends from sessions", () => {
             system: "",
             id: B,
             projectDir: "/w",
-            vibest: ["vibest"],
             preferences: "",
             memories: "",
             creator,
