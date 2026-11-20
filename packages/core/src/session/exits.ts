@@ -19,6 +19,20 @@ import { Placement } from "./placement.ts"
 
 export * as Exits from "./exits.ts"
 
+const TAIL_LINES = 10
+
+const LINE_CHARS = 200
+
+const TAIL_CHARS = 2000
+
+const shownTail = (text: string) =>
+  text
+    .split("\n")
+    .slice(-TAIL_LINES)
+    .map((line) => line.slice(0, LINE_CHARS))
+    .join("\n")
+    .slice(0, TAIL_CHARS)
+
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const inbox = yield* Inbox.Service
@@ -27,7 +41,7 @@ export const make = Effect.gen(function* () {
 
   const lastScreen = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
-      const tail = yield* paneTail(h, terminalOf(session), 10)
+      const tail = shownTail(yield* paneTail(h, terminalOf(session), TAIL_LINES))
       const output = tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}`
       const beforeWork = execution !== undefined && !(yield* db.session.executionTaken(session.id))
 

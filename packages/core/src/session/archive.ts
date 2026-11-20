@@ -22,7 +22,7 @@ import { errorMessage } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
 import * as Remove from "../remove.ts"
-import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
+import { agentState, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
 import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
@@ -80,6 +80,24 @@ export const make = Effect.gen(function* () {
     yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
   })
 
+  const leftOpenBecause = (h: Runtime, session: SessionRow, terminal: Terminal) =>
+    Effect.gen(function* () {
+      const others = (yield* db.session.processesAt(runtimeOf(session), terminal)).filter(
+        (p) => p.sessionId !== session.id,
+      )
+
+      if (others.length > 0) return `session ${others.map((p) => p.sessionId).join(", ")} runs in it`
+
+      return yield* h.process(terminal).pipe(
+        Effect.map((p) => (p.running ? "a program other than its shell runs in it" : undefined)),
+        Effect.catchTag("RuntimeError", (error) =>
+          Effect.succeed(
+            error.code === "not_found" ? undefined : `vibest could not tell what runs in it: ${error.message}`,
+          ),
+        ),
+      )
+    })
+
   const release = (id: string) =>
     db.session.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
 
@@ -127,11 +145,16 @@ export const make = Effect.gen(function* () {
         .remove(layout.sessionFolder(session.projectId, id), { recursive: true, force: true })
         .pipe(Effect.ignore)
 
+      const notOurs =
+        exitedAt(session) !== null && terminal.id !== "" ? yield* leftOpenBecause(h, session, terminal) : undefined
+
+      if (notOurs !== undefined) reasons.push(`terminal ${terminal.id} left open: ${notOurs}`)
+
       const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(id)) ?? ""))(
         removal.release({
           h,
           session,
-          terminal,
+          terminal: notOurs === undefined ? terminal : undefined,
           keepWorktree: options.keepWorktree,
           reasons,
         }),

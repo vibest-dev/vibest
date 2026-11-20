@@ -16,8 +16,9 @@ peek and resume it, and the text of every send that was queued for it and not de
 ## S22. Harness killed
 
 When a session's harness process is killed and its pane stays, the same happens as in S21, the pane still exists, and the
-notice ends with the last lines its terminal shows. `vibest archive` of that session then closes the pane, so a day of
-exits leaves no terminals open behind it.
+notice ends with the last lines its terminal shows (at most 10, each cut to 200 characters, 2000 in all). `vibest
+archive` of that session then closes the pane, so a day of exits leaves no terminals open behind it; when another live
+session or a program other than the leftover shell now runs there, archive leaves the pane open and its reasons say why.
 
 ## S23. vibestd restarted or killed around an execution end
 
