@@ -2,7 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, compiled, expect, harnesses, until, type World } from "../world.ts"
+import { binary, expect, until, type World } from "../world.ts"
+import { olderBuild } from "../world/older-build.ts"
 import { setup, type Setup } from "./machines.ts"
 
 const git = async (w: World, cwd: string, ...args: ReadonlyArray<string>) => {
@@ -30,26 +31,7 @@ const twoRepositories = async (w: World) => {
   return { combo, shop, admin }
 }
 
-const withoutRepositoryList = async (w: World) => {
-  const dir = path.join(w.root, "older-b")
-  const bin = path.join(dir, "bin", "vibest")
-  await fs.mkdir(path.dirname(bin), { recursive: true })
-  const bytes = Buffer.from(await fs.readFile(compiled))
-  const from = "peerSpawnRepositories: true"
-  const at = bytes.indexOf(from)
-  expect(at >= 0 && bytes.indexOf(from, at + 1) < 0, `${compiled} has not exactly one ${from}`)
-  bytes.write("peerSpawnRepositorieX: true", at)
-  await fs.writeFile(bin, bytes, { mode: 0o755 })
-
-  if (process.platform === "darwin") {
-    const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
-    expect(signed.code === 0, `codesign: ${signed.stderr}`)
-  }
-
-  await fs.cp(harnesses, path.join(dir, "harnesses"), { recursive: true })
-
-  return bin
-}
+const BEFORE_REPOSITORY_LISTS = "55868c318d60222aa0c6a8c3e417bf8ce2b8dd54"
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -117,13 +99,13 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M12",
     title:
-      "a project of two repositories and a B whose vibest does not take a repository list: run --machine is refused on A with run vibest update on B, and B starts nothing",
+      "a project of two repositories and a B running an unmodified vibest built from before repository lists: run --machine is refused on A with run vibest update on B, and B starts nothing",
     run: async (w) => {
       let s: Setup | undefined
 
       try {
         const a = await twoRepositories(w)
-        s = await setup(w, { aProject: a.combo, bBinary: await withoutRepositoryList(w) })
+        s = await setup(w, { aProject: a.combo, bBinary: await olderBuild(BEFORE_REPOSITORY_LISTS) })
         await s.okA(["machine", "add", "mb", "b-host"])
         await s.refusedOnA("mold", "run vibest update on mb")
         const started = s.bDb<{ n: number }>("SELECT count(*) AS n FROM session")?.n
