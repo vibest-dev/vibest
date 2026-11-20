@@ -4,7 +4,7 @@ import type { OutboxRow } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
-import { safeRepositoryDirectory } from "@vibest/core/paths"
+import { safeRepositoryDirectory, sameWorktreeBucket } from "@vibest/core/paths"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { defaultSessionName, Session } from "@vibest/core/session"
 import type { PayloadOf } from "@vibest/protocol/rpc"
@@ -43,7 +43,11 @@ const wantedOf = (input: PayloadOf<"Peer.Spawn">): ReadonlyArray<Wanted> =>
 
 const named = (wanted: ReadonlyArray<Wanted>) => wanted.map((w) => w.repository).join(", ")
 
-const pinned = ({ wanted, row }: Paired) => ({ name: wanted.folder ?? "", path: row.path, commit: wanted.commit })
+const pinned = ({ wanted, row }: Paired) => ({
+  name: wanted.folder ?? row.path.slice(row.path.lastIndexOf("/") + 1),
+  path: row.path,
+  commit: wanted.commit,
+})
 
 const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = {
@@ -83,29 +87,25 @@ const make = Effect.gen(function* () {
       if (wanted.length === 0) return yield* new NoProject({ message: `${self.name} got no repository to run in` })
       const folders = wanted.flatMap((w) => (w.folder === undefined ? [] : [w.folder]))
 
-      if (!folders.every(safeRepositoryDirectory) || new Set(folders).size !== folders.length)
+      const clashing = folders.some((f, i) => folders.findIndex((g) => sameWorktreeBucket(f, g)) !== i)
+
+      if (!folders.every(safeRepositoryDirectory) || clashing)
         return yield* new NoProject({ message: `${self.name} refuses the folder names ${folders.join(", ")}` })
       const rows = yield* db.remote.remoteProjects
-      const exact = (w: Wanted) => rows.filter((row) => row.remote === w.repository)
-      const byIdentity = wanted.some((w) => w.identity !== undefined && exact(w).length === 0)
 
       const identities = new Map(
-        byIdentity
+        wanted.some((w) => w.identity !== undefined)
           ? yield* Effect.forEach(
               rows,
               (row) => Effect.map(repositoryIdentity(row.remote), (id) => [row, id] as const),
-              {
-                concurrency: 8,
-              },
+              { concurrency: 8 },
             )
           : [],
       )
 
-      const holds = (w: Wanted) => (row: Checkout) =>
-        exact(w).length > 0
-          ? row.remote === w.repository
-          : w.identity !== undefined && identities.get(row) === w.identity
-
+      const exactly = (w: Wanted) => (row: Checkout) => row.remote === w.repository
+      const alike = (w: Wanted) => (row: Checkout) => w.identity !== undefined && identities.get(row) === w.identity
+      const holds = (w: Wanted) => (row: Checkout) => exactly(w)(row) || alike(w)(row)
       const lacking = wanted.filter((w) => !rows.some(holds(w)))
 
       if (lacking.length > 0)
@@ -117,32 +117,52 @@ const make = Effect.gen(function* () {
         })
 
       const pairedIn = (own: ReadonlyArray<Checkout>) => {
-        const left = [...own]
-        const pairs: Array<Paired> = []
+        const left = new Set(own)
+        const taken = new Map<Wanted, Checkout>()
 
-        for (const w of wanted) {
-          const at = left.findIndex(holds(w))
+        const take = (w: Wanted, fits: (row: Checkout) => boolean) => {
+          const row = own.find((r) => left.has(r) && fits(r))
 
-          if (at === -1) return undefined
-          pairs.push({ wanted: w, row: left.splice(at, 1)[0]! })
+          if (row === undefined) return
+          left.delete(row)
+          taken.set(w, row)
         }
 
-        return pairs
+        for (const w of wanted) take(w, exactly(w))
+
+        for (const w of wanted) if (!taken.has(w)) take(w, alike(w))
+
+        return wanted.every((w) => taken.has(w)) ? wanted.map((w) => ({ wanted: w, row: taken.get(w)! })) : undefined
       }
 
-      const found = [...new Set(rows.map((row) => row.id))].flatMap((id) => {
+      const projects = [...new Set(rows.map((row) => row.id))].flatMap((id) => {
         const own = rows.filter((row) => row.id === id)
         const { directory, repositories } = own[0]!
 
-        if (directory === null || repositories !== wanted.length) return []
-        const pairs = pairedIn(own)
+        return directory === null ? [] : [{ id, directory, repositories, own }]
+      })
 
-        return pairs === undefined ? [] : [{ id, directory, pairs }]
+      const legacy = input.repositories === undefined ? wanted[0] : undefined
+
+      const candidates =
+        legacy === undefined
+          ? projects
+          : projects.filter((p) => p.own.some(rows.some(exactly(legacy)) ? exactly(legacy) : alike(legacy)))
+
+      if (legacy !== undefined && candidates.length > 1)
+        return yield* new NoProject({
+          message: `${self.name} has several projects for ${legacy.repository}: ${candidates.map((p) => p.directory).join(", ")}`,
+        })
+
+      const found = candidates.flatMap((p) => {
+        const pairs = p.repositories === wanted.length ? pairedIn(p.own) : undefined
+
+        return pairs === undefined ? [] : [{ id: p.id, directory: p.directory, pairs }]
       })
 
       if (found.length === 0)
         return yield* new NoProject({
-          message: `${self.name} has no project whose repositories are exactly ${named(wanted)}: add one there with vibest project add`,
+          message: `${self.name} has no project whose repositories are exactly ${named(wanted)}${candidates.length === 1 ? `: its project ${candidates[0]!.directory} holds other repositories too` : ": add one there with vibest project add"}`,
         })
 
       if (found.length > 1)
@@ -173,7 +193,7 @@ const make = Effect.gen(function* () {
           model: input.model,
           runtime: input.runtime,
           request: input.request,
-          ...(input.repositories === undefined
+          ...(input.repositories === undefined && target.pairs[0]!.row.path === target.directory
             ? { commit: target.pairs[0]!.wanted.commit }
             : { folders: target.pairs.map(pinned) }),
           origin: { peer, project, reportTo },

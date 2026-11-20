@@ -41,7 +41,9 @@ own message.
 one project that holds exactly those repositories, in one worktree with A's folder names, each repository detached at
 A's commit. B lacking one of the repositories is refused naming it and `vibest project add`; B lacking a commit is
 refused naming the checkout and the commit; several such projects on B are listed and refused; nothing is started
-for a refused run. A single-repository project runs as in M1.
+for a refused run. A reads the folder at each run, so a repository cloned beside a running project is included. Folder
+names that would collide on B's file system are refused. A single-repository project runs as in M1, at A's commit
+even when B keeps that checkout inside a project folder.
 
 ## M12. A B too old for several repositories
 
