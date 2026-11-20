@@ -15,7 +15,8 @@
     "projectClone": true,
     "load": true,
     "agents": true,
-    "worktrees": true
+    "worktrees": true,
+    "stop": true
   },
   "methods": {
     "Agents.List": {
@@ -15839,6 +15840,415 @@
             "required": [
               "_tag",
               "method"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Stop": {
+      "access": [
+        "owner",
+        "peer"
+      ],
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "message"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              },
+              {
+                "$ref": "#/$defs/AmbiguousSessionEncoded"
+              },
+              {
+                "$ref": "#/$defs/SessionBusyEncoded"
+              },
+              {
+                "$ref": "#/$defs/RuntimeUnreachableEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoRuntimeEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownMachineEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineIncompatibleEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "AmbiguousSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "AmbiguousSession"
+                ]
+              },
+              "prefix": {
+                "type": "string"
+              },
+              "matches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "prefix",
+              "matches"
+            ],
+            "additionalProperties": true
+          },
+          "SessionBusyEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "SessionBusy"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "RuntimeUnreachableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "RuntimeUnreachable"
+                ]
+              },
+              "session": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "session",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoRuntimeEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoRuntime"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownMachineEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownMachine"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "machines"
+            ],
+            "additionalProperties": true
+          },
+          "MachineUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineUnavailable"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "MachineIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineIncompatible"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
             ],
             "additionalProperties": true
           },

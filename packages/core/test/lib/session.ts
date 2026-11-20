@@ -17,6 +17,7 @@ import { Processes } from "@vibest/core/processes"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
+import { Archive } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sends } from "@vibest/core/session/sends"
 import { Summaries } from "@vibest/core/session/summaries"
@@ -142,6 +143,7 @@ export const pluginsHost = (
     ),
     deps: [
       Agents.node,
+      Archive.node,
       Bus.node,
       Db.node,
       Harnesses.node,

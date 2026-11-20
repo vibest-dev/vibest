@@ -18,6 +18,7 @@ import { alive, expect, row, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
 import { dropHerdrSession } from "./inbox.ts"
+import sessionStop from "./session-stop.ts"
 
 type ListedGit = {
   branch: string
@@ -865,4 +866,4 @@ const checks: ReadonlyArray<Check> = [
   },
 ]
 
-export default checks
+export default [...checks, ...sessionStop]

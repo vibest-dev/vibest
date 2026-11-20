@@ -1,4 +1,5 @@
 import { agyPlugin, claudePlugin, cursorPlugin, piPlugin } from "@vibest/plugin-harnesses"
+import idleStop from "@vibest/plugin-idle-stop"
 import reportReminder from "@vibest/plugin-report-reminder"
 import type { Plugin } from "@vibest/plugin/effect"
 import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
@@ -47,6 +48,7 @@ export const pre = (home: string) =>
       builtin(harnessDefaultPlugin()),
       { ...builtin(agentFiles.plugin), revise: agentFiles.revise },
       { ...builtin(reportReminder), optional: true },
+      { ...builtin(idleStop), optional: true },
     ]
   })
 

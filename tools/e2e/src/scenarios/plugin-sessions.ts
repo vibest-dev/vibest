@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { reply } from "../fake-model.ts"
+import { ask, heldModel, reply } from "../fake-model.ts"
 import { expect, rows, until, type World } from "../world.ts"
 import { configurePlugins } from "../world/plugins.ts"
 import {
@@ -279,4 +279,83 @@ const reminderChecks: ReadonlyArray<Check> = [
   },
 ]
 
-export default [...pluginSessionChecks, ...reminderChecks]
+const IDLE_STOP = "vibest.idle-stop"
+
+const idleStopChecks: ReadonlyArray<Check> = [
+  {
+    id: "G20",
+    title:
+      "the shipped idle-stop plugin, once vibest.idle-stop is added to vibest.json with a short idleMinutes, stops a subagent idle that long, recorded as stopped by the plugin, and sends its creator one message from the plugin saying how to resume or archive it; a subagent with an open execution and the entry session keep running",
+    run: async (w) => {
+      needs()
+      const entryModel = recordingModel(() => reply("ok"))
+      const quietModel = recordingModel(() => reply("done-quiet\nstatus: completed"))
+      const busyModel = heldModel()
+      let session = ""
+
+      const processOf = (id: string) =>
+        rows<{ reason: string | null }>(
+          w,
+          "SELECT end_reason AS reason FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+          id,
+        )[0]
+
+      const idleMessages = (recipient: string, about: string) =>
+        rows<{ content: string; status: string }>(
+          w,
+          "SELECT content, status FROM inbox WHERE session_id = ? AND sender_type = 'plugin' AND sender_plugin = ? AND content LIKE ?",
+          recipient,
+          IDLE_STOP,
+          `%(${about})%`,
+        )
+
+      try {
+        const m = await piEntry(w, "idle-stop", entryModel.url)
+        session = m.session
+        const entryId = entryIdOf(w)
+        const quiet = await runSub(w, m.repo, session, quietModel.url, "pi-idle-quiet", "reply only")
+        const busy = await runSub(w, m.repo, session, busyModel.url, "pi-idle-busy", ask("g19busy"))
+        await completed(w, quiet)
+        await until("the busy subagent's model call held", () => busyModel.held() > 0, 60_000)
+
+        await configurePlugins(w, (list) => [...list, { package: IDLE_STOP, options: { idleMinutes: 0.05 } }])
+        await until("the idle subagent stopped", () => processOf(quiet)?.reason === "stopped", 60_000)
+
+        const by = rows<{ data: string }>(
+          w,
+          "SELECT data FROM event WHERE aggregate = ? AND type = 'process.ended' ORDER BY seq DESC LIMIT 1",
+          quiet,
+        ).map((r) => (JSON.parse(r.data) as { by?: unknown }).by)[0]
+
+        expect(
+          JSON.stringify(by) === JSON.stringify({ type: "plugin", plugin: IDLE_STOP }),
+          `stopped by ${JSON.stringify(by)}`,
+        )
+        await until(
+          "the entry session's model saw the idle-stop message",
+          () => seen(entryModel).includes(`<plugin>${IDLE_STOP}</plugin>`) && seen(entryModel).includes(quiet),
+          60_000,
+        )
+        await Bun.sleep(5_000)
+        const told = idleMessages(entryId, quiet)
+
+        expect(
+          told.length === 1 &&
+            told[0]!.content.includes("was idle for 0.05 minutes and was stopped") &&
+            told[0]!.content.includes("vibest send") &&
+            told[0]!.content.includes("vibest archive"),
+          `messages about ${quiet}: ${JSON.stringify(told)}`,
+        )
+        expect(processOf(busy)?.reason === null, `the busy subagent's process ended ${processOf(busy)?.reason}`)
+        expect(processOf(entryId)?.reason === null, `the entry session's process ended ${processOf(entryId)?.reason}`)
+      } finally {
+        entryModel.stop()
+        quietModel.stop()
+        busyModel.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+]
+
+export default [...pluginSessionChecks, ...reminderChecks, ...idleStopChecks]

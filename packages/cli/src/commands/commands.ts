@@ -184,6 +184,11 @@ const interrupt = Spec.make("interrupt", {
   params: { id },
 })
 
+const stop = Spec.make("stop", {
+  description: "End the session process and keep the session; the next vibest send resumes it",
+  params: { id },
+})
+
 const peek = Spec.make("peek", {
   description:
     "Print the last lines of a session's terminal, as plain text, read now. Look here when a result says the execution ended without a reply or did not start. Not the entry session",
@@ -476,6 +481,7 @@ export const Commands = Spec.make("vibest", {
     status,
     result,
     interrupt,
+    stop,
     peek,
     archive,
     ls,

@@ -1,6 +1,7 @@
+import type { Sender } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
-import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
+import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import { Context, Duration, Effect, FileSystem, Layer } from "effect"
 
 import { type SessionRow, sessionEnded, runtimeOf, terminalOf, exitedAt, archived } from "../database/db-rows.ts"
@@ -12,14 +13,19 @@ import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
 import * as Remove from "../remove.ts"
-import { agentState, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
-import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
+import { agentState, Runtimes, sessionState, stateOf, type Runtime, type Terminal } from "../runtimes.ts"
+import { busy, busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { Starts } from "./starts.ts"
 
 export * as Archive from "./archive.ts"
+
+const interruptNote = (stopped: boolean) =>
+  stopped
+    ? "it was working: interrupted, then "
+    : `it did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; `
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
@@ -166,6 +172,68 @@ export const make = Effect.gen(function* () {
     Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
   )
 
+  const stop = Effect.fn("Archive.stop")(function* (id: string, by: Sender, idleSince?: number) {
+    const known = yield* getRow(id)
+
+    return yield* locked(id)(
+      Effect.gen(function* () {
+        const session = yield* getRow(id)
+
+        if (session.entry)
+          return yield* new NoSuchSession({ id, message: `${id} is an entry session; stop it in its terminal` })
+
+        if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+
+        if ((session.process === null || session.process.endedAt !== null) && (yield* starts.isWaiting(id)))
+          return { stopped: false, message: `${id} has no process to stop because it is waiting to start` }
+
+        if (exitedAt(session) !== null) return { stopped: false, message: `${id} is not running; a message resumes it` }
+        const h = yield* live(session)
+        const terminal = terminalOf(session)
+        const execution = yield* db.session.openExecution(id)
+        const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
+
+        if (
+          idleSince !== undefined &&
+          (session.lastActive > idleSince || execution !== undefined || busy(state) || (yield* db.inbox.waitingOn(id)))
+        )
+          return { stopped: false, message: `${id} is not idle; it keeps running` }
+        const working = busy(state) || (yield* db.session.executionAccepted(id))
+        const interrupted = working ? yield* interruptAgent(h, session, terminal) : false
+
+        if (interrupted && execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
+
+        const failed = yield* h.close(terminal).pipe(
+          Effect.as(undefined),
+          Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.code === "not_found" ? undefined : error)),
+        )
+
+        if (failed?.code === "unreachable")
+          return yield* new RuntimeUnreachable({ session: runtimeOf(session), message: failed.message })
+
+        if (failed !== undefined)
+          return yield* new SessionBusy({
+            id,
+            message: `closing its terminal failed: ${failed.message}; it still runs`,
+          })
+
+        if (execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
+        yield* db.session.stopProcess(id, by)
+        yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
+        const before = working ? interruptNote(interrupted) : ""
+
+        return {
+          stopped: true,
+          message: `${id} stopped: ${before}its terminal closed; its worktree, branch and messages are kept, and the next message resumes its conversation`,
+        }
+      }),
+    ).pipe(
+      Effect.catchTag("RuntimeError", (e) =>
+        Effect.fail(new RuntimeUnreachable({ session: runtimeOf(known), message: e.message })),
+      ),
+    )
+  })
+
   const finishArchive = Effect.fn("Archive.finishArchive")((id: string) =>
     locked(id)(
       Effect.gen(function* () {
@@ -189,7 +257,7 @@ export const make = Effect.gen(function* () {
     ).pipe(logged(`archive ${id}`)),
   )
 
-  return { undoCutOffStart, remove, finishArchive }
+  return { undoCutOffStart, remove, stop, finishArchive }
 })
 
 export type Interface = Effect.Success<typeof make>

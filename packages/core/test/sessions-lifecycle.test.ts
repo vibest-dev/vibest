@@ -103,6 +103,22 @@ describe.concurrent("Session", () => {
   )
 
   test(
+    "a stop on the condition of idleness leaves a session that got work since then running",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const { id, sessions } = yield* idleSession(yield* makeRepository)
+      const seen = (yield* db.session.getSession(id))!.lastActive
+      yield* sessions.send(id, "more work")
+      const out = yield* sessions.stop(id, { type: "plugin", plugin: "test" }, seen)
+      assert.isFalse(out.stopped)
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isTrue((yield* sessions.stop(id, { type: "user" })).stopped)
+    }),
+  )
+
+  test(
     "a Send accepted just before vibest archive does not bring the removed session back; its message fails once",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

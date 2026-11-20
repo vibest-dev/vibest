@@ -242,6 +242,12 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         yield* tellSendersOf(dropped, "the entry session is not running")
       })
 
+    const waitingOn = (id: string) =>
+      sql<{ id: number }>`SELECT id FROM inbox
+        WHERE ((session_id = ${id} OR sender_session_id = ${id} OR about_session_id = ${id}) AND status IN ('pending', 'delivering'))
+          OR (session_id = ${id} AND kind = 'task' AND execution_id IS NULL)
+        LIMIT 1`.pipe(Effect.map((rows) => rows.length > 0))
+
     return {
       inbox,
       inboxIn,
@@ -255,6 +261,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       tellSender,
       insertInboxRow,
       dropWaiting,
+      waitingOn,
     }
   })
 
@@ -277,6 +284,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       liveRecipient,
       tellSender,
       insertInboxRow,
+      waitingOn,
     } = inbox
 
     return {
@@ -335,6 +343,8 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       untakenTask: Effect.fn("Db.inbox.untakenTask")((id: string) => reads.untakenTask(id).pipe(Effect.orDie)),
+
+      waitingOn: Effect.fn("Db.inbox.waitingOn")((id: string) => waitingOn(id).pipe(Effect.orDie)),
 
       hasQueued: Effect.fn("Db.inbox.hasQueued")((id: string) =>
         sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${id}
