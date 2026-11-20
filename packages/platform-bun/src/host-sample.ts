@@ -82,6 +82,14 @@ const hostShare = (before: CpuTimes, after: CpuTimes) => {
   return before.count === after.count && total > 0 && idle >= 0 ? Math.min(1, Math.max(0, 1 - idle / total)) : null
 }
 
+export const cgroupsUpFrom = (path: string) => {
+  const parts = path.split("/").filter((part) => part !== "")
+
+  return parts.map((_, i) => `/sys/fs/cgroup/${parts.slice(0, parts.length - i).join("/")}`).concat("/sys/fs/cgroup")
+}
+
+const share = (max: RegExpExecArray) => Number(max[1]) / Number(max[2])
+
 const cappedCpu = (
   max: RegExpExecArray,
   count: number,
@@ -106,20 +114,33 @@ const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const readFile = (path: string) => fs.readFileString(path).pipe(Effect.orElseSucceed(() => ""))
 
-  const ownCgroup = Effect.map(readFile("/proc/self/cgroup"), (text) => {
+  const ownCgroups = Effect.map(readFile("/proc/self/cgroup"), (text) => {
     const path = /^0::(\/.*)$/m.exec(text)?.[1]
 
-    return path === undefined ? undefined : `/sys/fs/cgroup${path.replace(/\/$/, "")}`
+    return path === undefined ? [] : cgroupsUpFrom(path)
   })
 
-  const cpuOf = (cgroup: string | undefined, linux: boolean) =>
+  const tightestCpuMax = (groups: ReadonlyArray<string>) =>
     Effect.gen(function* () {
-      const cpuMax = cgroup === undefined ? null : /^(\d+) (\d+)$/.exec((yield* readFile(`${cgroup}/cpu.max`)).trim())
+      let tightest: { readonly group: string; readonly max: RegExpExecArray } | undefined
+
+      for (const group of groups) {
+        const max = /^(\d+) (\d+)$/.exec((yield* readFile(`${group}/cpu.max`)).trim())
+
+        if (max !== null && (tightest === undefined || share(max) < share(tightest.max))) tightest = { group, max }
+      }
+
+      return tightest
+    })
+
+  const cpuOf = (groups: ReadonlyArray<string>, linux: boolean) =>
+    Effect.gen(function* () {
+      const limit = yield* tightestCpuMax(groups)
 
       const usage =
-        cpuMax === null
+        limit === undefined
           ? Effect.succeed(undefined)
-          : Effect.map(readFile(`${cgroup}/cpu.stat`), (stat) => numberIn(stat, /^usage_usec (\d+)$/m))
+          : Effect.map(readFile(`${limit.group}/cpu.stat`), (stat) => numberIn(stat, /^usage_usec (\d+)$/m))
 
       const allowed = linux
         ? parseCpuList(/^Cpus_allowed_list:\s*(\S+)$/m.exec(yield* readFile("/proc/self/status"))?.[1] ?? "")
@@ -139,10 +160,10 @@ const make = Effect.gen(function* () {
       const elapsedMicros = ((yield* Clock.currentTimeMillis) - startedAt) * 1000
       const host = hostShare(before, after)
 
-      if (cpuMax === null) return { count: after.count, utilization: host }
+      if (limit === undefined) return { count: after.count, utilization: host }
       const used = usageBefore === undefined || usageAfter === undefined ? undefined : usageAfter - usageBefore
 
-      return cappedCpu(cpuMax, after.count, host, used, elapsedMicros)
+      return cappedCpu(limit.max, after.count, host, used, elapsedMicros)
     })
 
   const vmStat = spawner.string(ChildProcess.make("/usr/bin/vm_stat", [], { stdin: "ignore", stderr: "ignore" })).pipe(
@@ -163,24 +184,40 @@ const make = Effect.gen(function* () {
       return os.freemem()
     })
 
-  const memoryOf = (cgroup: string | undefined, platform: NodeJS.Platform) =>
+  const memoryLimit = (group: string) =>
+    Effect.gen(function* () {
+      const max = numberIn(yield* readFile(`${group}/memory.max`), /^(\d+)$/m)
+      const current = max === undefined ? undefined : numberIn(yield* readFile(`${group}/memory.current`), /^(\d+)$/m)
+
+      if (max === undefined || current === undefined) return undefined
+      const reclaimable = numberIn(yield* readFile(`${group}/memory.stat`), /^inactive_file (\d+)$/m) ?? 0
+
+      return { total: max, available: max - (current - reclaimable) }
+    })
+
+  const memoryOf = (groups: ReadonlyArray<string>, platform: NodeJS.Platform) =>
     Effect.gen(function* () {
       const host = { total: os.totalmem(), available: yield* hostAvailable(platform) }
-      const max = cgroup === undefined ? undefined : numberIn(yield* readFile(`${cgroup}/memory.max`), /^(\d+)$/m)
-      const current = max === undefined ? undefined : numberIn(yield* readFile(`${cgroup}/memory.current`), /^(\d+)$/m)
+      const limits = yield* Effect.forEach(groups, memoryLimit)
 
-      if (max === undefined || current === undefined) return host
-      const reclaimable = numberIn(yield* readFile(`${cgroup}/memory.stat`), /^inactive_file (\d+)$/m) ?? 0
-
-      return { total: Math.min(host.total, max), available: Math.min(host.available, max - (current - reclaimable)) }
+      return limits.reduce<{ total: number; available: number }>(
+        (tightest, limit) =>
+          limit === undefined
+            ? tightest
+            : {
+                total: Math.min(tightest.total, limit.total),
+                available: Math.min(tightest.available, limit.available),
+              },
+        host,
+      )
     })
 
   const read = Effect.gen(function* () {
     const platform = os.platform()
     const linux = platform === "linux"
-    const cgroup = linux ? yield* ownCgroup : undefined
-    const cpu = yield* cpuOf(cgroup, linux)
-    const { total, available } = yield* memoryOf(cgroup, platform)
+    const groups = linux ? yield* ownCgroups : []
+    const cpu = yield* cpuOf(groups, linux)
+    const { total, available } = yield* memoryOf(groups, platform)
 
     return { cpu, memory: { total, available: Math.min(total, Math.max(0, available)) } }
   })

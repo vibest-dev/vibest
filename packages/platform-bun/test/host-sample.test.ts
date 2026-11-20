@@ -20,18 +20,24 @@ Pages wired down:                         1024.
 const busyFirstCpu = (now: number) =>
   Array.from({ length: 8 }, (_, i) => `cpu${i} ${i === 0 ? now : 0} 0 0 ${i === 0 ? 0 : now} 0 0 0 0`).join("\n")
 
-const linuxRead = (cgroupPath: string, pinned: boolean) => {
-  const root = `/sys/fs/cgroup${cgroupPath.replace(/\/$/, "")}`
+const linuxRead = (cgroupPath: string, pinned: boolean, limitedAt: string, reclaimableMib: number) => {
+  const own = `/sys/fs/cgroup${cgroupPath.replace(/\/$/, "")}`
+  const root = `/sys/fs/cgroup${limitedAt.replace(/\/$/, "")}`
 
-  const files = new Map([
+  const files = new Map<string, string>([
     ["/proc/self/cgroup", `0::${cgroupPath}\n`],
     ["/proc/meminfo", "MemAvailable: 2097152 kB\n"],
     ["/proc/self/status", `Cpus_allowed_list:\t${pinned ? "0" : "0-7"}\n`],
     [`${root}/cpu.max`, pinned ? "max 100000" : "100000 100000"],
     [`${root}/memory.max`, String(1024 * MIB)],
     [`${root}/memory.current`, String(600 * MIB)],
-    [`${root}/memory.stat`, `inactive_file ${100 * MIB}\n`],
+    [`${root}/memory.stat`, `inactive_file ${reclaimableMib * MIB}\n`],
   ])
+
+  if (own !== root) {
+    files.set(`${own}/cpu.max`, "max 100000")
+    files.set(`${own}/memory.max`, "max")
+  }
 
   const fs = FileSystem.layerNoop({
     readFileString: (path) =>
@@ -64,7 +70,7 @@ describe("host sample", () => {
     assert.strictEqual(darwinAvailableBytes("Pages free: 1.\n"), undefined)
   })
 
-  it("on linux it reads what this process may use: its own cgroup, its CPUs, reclaimable cache", async () => {
+  it("on linux it reads what this process may use: the tightest limit from its own cgroup up, its CPUs, reclaimable cache", async () => {
     vi.spyOn(os, "platform").mockReturnValue("linux")
     vi.spyOn(os, "totalmem").mockReturnValue(4096 * MIB)
     vi.spyOn(os, "cpus").mockImplementation(() => {
@@ -77,18 +83,19 @@ describe("host sample", () => {
       }))
     })
 
-    for (const [cgroup, pinned] of [
-      ["/user.slice/vibest.scope", false],
-      ["/", false],
-      ["/", true],
+    for (const [cgroup, pinned, limitedAt, reclaimable] of [
+      ["/user.slice/vibest.scope", false, "/user.slice/vibest.scope", 100],
+      ["/", false, "/", 100],
+      ["/", true, "/", 100],
+      ["/system.slice/vibest.service", false, "/", 0],
     ] as const) {
-      const reading = await linuxRead(cgroup, pinned)
+      const reading = await linuxRead(cgroup, pinned, limitedAt, reclaimable)
       const shown = `${cgroup} ${pinned ? "pinned" : "quota"}: ${JSON.stringify(reading)}`
 
       assert.strictEqual(reading.cpu.count, 1, shown)
       assert.isAbove(reading.cpu.utilization ?? 0, 0.97, shown)
       assert.strictEqual(reading.memory.total, 1024 * MIB, shown)
-      assert.strictEqual(reading.memory.available, 524 * MIB, shown)
+      assert.strictEqual(reading.memory.available, (1024 - (600 - reclaimable)) * MIB, shown)
     }
   })
 })
