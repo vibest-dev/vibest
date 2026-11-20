@@ -15,13 +15,14 @@ import {
   setMeta,
 } from "./db-schema.ts"
 import { migration as oneSender } from "./migration/20261119000000_one_sender.ts"
+import { migration as limitedEndIsExited } from "./migration/20261120000000_limited_end_is_exited.ts"
 
 export type Migration = {
   readonly id: string
   readonly up: (tx: SqlClient.SqlClient) => Effect.Effect<void, SqlError.SqlError>
 }
 
-export const migrations: ReadonlyArray<Migration> = [oneSender]
+export const migrations: ReadonlyArray<Migration> = [oneSender, limitedEndIsExited]
 
 const createTable = (sql: SqlClient.SqlClient) =>
   sql.unsafe(`CREATE TABLE IF NOT EXISTS ${MIGRATION_TABLE} (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)

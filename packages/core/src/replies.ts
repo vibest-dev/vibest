@@ -88,6 +88,9 @@ export type ObservedEnd = {
   readonly reply: string
   readonly failure: string | undefined
   readonly limited: boolean
+  readonly resetAt?: number | undefined
+  readonly provider?: string | undefined
+  readonly windows?: ReadonlyArray<string> | undefined
   readonly conversation: string | undefined
   readonly needsReady: boolean
 }

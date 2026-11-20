@@ -80,7 +80,7 @@ last pane closes its workspace, and a main checkout's workspace takes its linked
 `reset` when the runtime lost track; core then reads each of its terminals once. `events` emits `reset` as its first element once its subscription is acquired (build it with `Runtime.eventsFrom` over a PubSub), so core reads state after the subscription exists; when `events` fails, core logs it and subscribes again with a capped exponential backoff that starts over after each `reset`. `state` answers `not_found` when it
 names no agent in that terminal, which core reads as absent. `run(terminal, argv)` runs a command in an existing
 terminal once its program ended and its shell is back, the counterpart of `open`; without it there is no restart in
-place, and `vibest update` and a usage-limit move leave that terminal's agent for the user to restart. `present` gets
+place, and `vibest update` leaves that terminal's agent for the user to restart. `present` gets
 the keys `agent`, `harness`, `title`, `definition` and `session` for the terminal and `project` and `live` for the
 project's workspace; any other key is the caller's own, and a runtime shows only the keys it knows.
 
@@ -158,7 +158,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   the system prompt in a prompt) is in its launch argv the same way: `startEntry` opens its execution with the
   process, and `entryCommand` builds the line with `Harness.harnessArgv`.
 - Every start names its process: every launch line is `env VIBEST_PROCESS=<n> <identity pairs> <command>`
-  (`Launch.launchLine`), in a new terminal or typed into one it reuses (a restart, a usage-limit move in place), entry
+  (`Launch.launchLine`), in a new terminal or typed into one it reuses (a restart), entry
   sessions included. A plugin that keeps state per process (agy's root conversation) needs no special case.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). A process that exits before its execution ends
@@ -168,8 +168,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   confirmed (the harness reported ready or the runtime was seen running it); before that it means a typed command has
   not started yet. A stale exit of the harness a restart in place replaced does not count either. The wait then signals
   the exit with the process bound, so it is recorded
-  once the start releases the session lock instead of after the ready timeout; a usage-limit move closes that execution
-  `not_started` and tries its next harness. When a harness exits with an execution it never started working on, the exit notice to
+  once the start releases the session lock instead of after the ready timeout. When a harness exits with an execution it never started working on, the exit notice to
   its creator says so and carries the last 10 lines of its terminal.
 - Empty input box before typing: when a harness definition gives `clearKeys`, vibestd sends them right before it types
   a message (a first task, delivered messages, a retype), whatever the box holds: a draft the user left there is

@@ -43,22 +43,22 @@ Reference implementations:
 
 ## 0. Fixed decisions
 
-| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | The runtime (herdr first) runs panes and processes. What happens inside a CLI agent reaches vibest first through harness integrations (hooks, plugins, extensions); the runtime's state detection and screen reading are the fallback. Per-CLI differences live only in harness adapters.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| D2  | The core defines the domain (schema contracts, lifecycles, execution, scheduling framework). Implementations and rules are plugins, builtin by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| D3  | The execution unit is the **Run**: one or more subagents working on one input. The core defines no orchestration patterns and no roles. Every Run is controlled by the entry session (or the user) that started it. A flow over several subagents is a skill the entry session follows; there is no workflow engine or program controller. Plugins observe, refuse, transform, schedule, and enforce rules (such as "a writing subagent is done only when the tests pass"); they never start or steer Runs.                                                                                                                                                                                                |
-| D4  | `vibest` runs inside a Project directory and opens that Project's entry session; there is always exactly one, with one active conversation and earlier ones kept (`vibest --new`). There is no separate `launch` command: the entry session starts through the same path as every Agent, placed in the current terminal. `vibest run` starts subagents, and only the entry session (or the user) can run it: subagents never start Agents, so there is no nesting. Every result, and every exchange the user has directly with a subagent, returns to the entry session. Status: this describes today and the default mode; D13 and §1.1 plan an optional entry session, nested leads and routing as data. |
-| D5  | Plugins follow OpenCode V2: `{ id, effect }` or `{ id, setup }` with Promises.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| D6  | Products are composed per host from shared packages; hosts are fully isolated (no shared daemon, database, or Runs). The Herdr TUI product comes first; the herdr-core desktop application comes after the base capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| D7  | Machine and multi-repository Project dimensions exist from the first commit; one machine and one repository are special cases. Several repositories are composed by copying them into one directory, never by symlinks (Node and other toolchains break on symlinked folders).                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| D8  | In scope now: delegation (entry session and subagents); the `pipeline` skill (plan → implement → review → pull request); multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription for now).                                                                                                                                                                                                                                                                |
-| D9  | Names are spelled out (`repository`, never `repo`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| D10 | vibest keeps a **Subscription** for every supported harness on every machine, with its usage limits, and hands the current set to plugins in each Run's context. Choosing a harness, waiting, or switching is plugin scheduling. Usage limits come only from official or CLI-provided sources, so a harness that offers none keeps an empty limits list and that is fine; a Subscription is per (harness, provider, machine), provider empty for a single-login harness (Claude Code, Cursor) and set for Pi; vibest does not read a harness token or call a usage API, so a harness that offers no limits keeps an empty list (unknown, not full). Any vibest plugin may report a Subscription's limits.  |
-| D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest send` carries what it decides to say; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| D12 | Where omac's implementation is good, vibest copies its code and tests and refactors them (session → Agent and Run, inbox row → Message, plugin hooks → §7 kinds) instead of designing again. §15 lists every part.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| D13 | The engine knows one kind of session, described by an agent definition. Routing, permissions and whether a session may spawn are data and plugin policy, never branches in the code. The coordinator mode (one entry session and its subagents) is the configuration of the default plugin (§1.1). Status: built for agent definitions (`coordinator` and `general` are definitions a builtin plugin registers; no code branch on either); the other planned parts of §1 are not.                                                                                                                                                                                                                          |
-| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/effect/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                        |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | The runtime (herdr first) runs panes and processes. What happens inside a CLI agent reaches vibest first through harness integrations (hooks, plugins, extensions); the runtime's state detection and screen reading are the fallback. Per-CLI differences live only in harness adapters.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| D2  | The core defines the domain (schema contracts, lifecycles, execution, scheduling framework). Implementations and rules are plugins, builtin by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| D3  | The execution unit is the **Run**: one or more subagents working on one input. The core defines no orchestration patterns and no roles. Every Run is controlled by the entry session (or the user) that started it. A flow over several subagents is a skill the entry session follows; there is no workflow engine or program controller. Plugins observe, refuse, transform, schedule, and enforce rules (such as "a writing subagent is done only when the tests pass"); they never start or steer Runs.                                                                                                                                                                                                                                            |
+| D4  | `vibest` runs inside a Project directory and opens that Project's entry session; there is always exactly one, with one active conversation and earlier ones kept (`vibest --new`). There is no separate `launch` command: the entry session starts through the same path as every Agent, placed in the current terminal. `vibest run` starts subagents, and only the entry session (or the user) can run it: subagents never start Agents, so there is no nesting. Every result, and every exchange the user has directly with a subagent, returns to the entry session. Status: this describes today and the default mode; D13 and §1.1 plan an optional entry session, nested leads and routing as data.                                             |
+| D5  | Plugins follow OpenCode V2: `{ id, effect }` or `{ id, setup }` with Promises.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| D6  | Products are composed per host from shared packages; hosts are fully isolated (no shared daemon, database, or Runs). The Herdr TUI product comes first; the herdr-core desktop application comes after the base capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| D7  | Machine and multi-repository Project dimensions exist from the first commit; one machine and one repository are special cases. Several repositories are composed by copying them into one directory, never by symlinks (Node and other toolchains break on symlinked folders).                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| D8  | In scope now: delegation (entry session and subagents); the `pipeline` skill (plan → implement → review → pull request); multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription for now).                                                                                                                                                                                                                                                                                                            |
+| D9  | Names are spelled out (`repository`, never `repo`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| D10 | vibest keeps a **Subscription** for every supported harness on every machine, with its usage limits, and hands the current set to plugins in each Run's context. Choosing a harness at start is plugin scheduling; after a usage limit the creator agent or a plugin decides. Usage limits come only from official or CLI-provided sources, so a harness that offers none keeps an empty limits list and that is fine; a Subscription is per (harness, provider, machine), provider empty for a single-login harness (Claude Code, Cursor) and set for Pi; vibest does not read a harness token or call a usage API, so a harness that offers no limits keeps an empty list (unknown, not full). Any vibest plugin may report a Subscription's limits. |
+| D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest send` carries what it decides to say; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| D12 | Where omac's implementation is good, vibest copies its code and tests and refactors them (session → Agent and Run, inbox row → Message, plugin hooks → §7 kinds) instead of designing again. §15 lists every part.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| D13 | The engine knows one kind of session, described by an agent definition. Routing, permissions and whether a session may spawn are data and plugin policy, never branches in the code. The coordinator mode (one entry session and its subagents) is the configuration of the default plugin (§1.1). Status: built for agent definitions (`coordinator` and `general` are definitions a builtin plugin registers; no code branch on either); the other planned parts of §1 are not.                                                                                                                                                                                                                                                                      |
+| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/effect/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                                                                    |
 
 ## 1. A multi-CLI agent engine
 
@@ -345,7 +345,7 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
   resumes the CLI conversation with the adapter's resume arguments; without a known conversation id it fails.
 - **Restart.** Started Agents (`time.start` set, no `time.end`) with no herdr agent end with `outcome: failed`; open Messages are checked again by the
   rules above; orphan worktrees are logged, never deleted.
-- Decision points (`agent.fail`, `run.end`) are recorded before their hook runs;
+- Decision points (`run.end`) are recorded before their hook runs;
   after a restart an unfinished decision runs again, so plugin decisions must be idempotent.
 
 Session work lives in `packages/core/src/session/`, one `Context.Service` per module, each depending only on the ones
@@ -357,12 +357,11 @@ below it and subscribing to the events it handles itself:
 | `live.ts` (`SessionLive`)      | per-session memory: tracked flags, restarting, statuses, integrations, `--archive-on-idle` marks |
 | `executions.ts` (`Executions`) | typing a prompt, waiting for ready, interrupting a harness, closing an execution                 |
 | `placement.ts` (`Placement`)   | the worktree, environment, system prompt and argv of a start; opening the terminal; notices      |
-| `move.ts` (`Move`)             | moving a session to another harness after a usage limit                                          |
 | `archive.ts` (`Archive`)       | remove, the idle-archive check, finishing an archive vibestd stopped in                          |
 | `sends.ts` (`Sends`)           | send, admit, and relay to the nearest living ancestor; what plugins send through                 |
 | `summaries.ts` (`Summaries`)   | a session's title, parent, status and latest execution with its sent count, for plugins          |
 | `delivery.ts` (`Delivery`)     | queued inbox rows, the next batch after an execution, interrupt, typed prompts                   |
-| `exits.ts` (`Exits`)           | recording a harness exit and what a usage limit leaves behind                                    |
+| `exits.ts` (`Exits`)           | recording a harness exit                                                                         |
 | `spawn.ts` (`Spawn`)           | admitting and starting a session                                                                 |
 | `reconcile.ts` (`Reconcile`)   | checking a session against its runtime, timers, startup `republish` and `reconcile("all")`       |
 | `restart.ts` (`Restart`)       | restarting sessions whose harness or vibest is outdated, the entry argv                          |
@@ -391,8 +390,7 @@ How these modules keep the rules:
   subscription to its state taken, before the runtime gets the text, so the paste's own prompt hook is ignored and
   no execution start can come before the wait on it. Only this execution's acceptance confirms pickup: the previous
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
-  runs twice. A refused text undoes the execution unless the integration wrote a result anyway or a usage-limit move
-  will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
+  runs twice. A refused text undoes the execution unless the integration wrote a result anyway; a broken connection is not a refusal (the text may have arrived), so the execution stays.
 - A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) caps live harness
   processes on this machine: placed, not ended processes of live sessions, entry sessions included. Only starting a
   process waits (`starts.ts`): a `vibest run` launch (the session and its task are recorded, the harness is not
@@ -455,18 +453,13 @@ How an execution ends:
 
 - An execution end the harness reports (`db.session.endObserved`) is written as it arrives, without the session lock, in one
   transaction: the `execution.ended` with the reply and the conversation, the session idle, and the error notice for a
-  failed end that is not a usage limit. It is ignored for the entry session, for a harness the session no longer
+  failed end (for a usage limit, the limit and its reset time). It is ignored for the entry session, for a harness the session no longer
   runs, before the current process's ready report when its harness reports ready, and when it is interrupted with no
   execution open. A completed or failed end with no execution open is an execution of its own (an execution typed in the terminal whose
   start was missed). vibestd's own closes (`lost`, `not_started`, `interrupted`, an exit) are conditional on the
   execution they decided about still being open (`db.session.closeExecution`), so an observed end that came first wins and the close
   writes nothing, notice included. A reply that arrives after vibestd closed the execution as `lost` is a new execution; it
-  is not attached back. A usage-limit end closes its execution `failed` with failure kind `limit`; check then moves the session to the
-  next harness, which resends the input in a new execution, so a limit is two executions. A move vibestd stopped part
-  way through is finished by the next check, from the limited execution's process and the current one: the limited
-  process still current is moved; a next process that runs gets the input handed to it, with no other started; a
-  next process that ended, or a limited process that ended with none after it, is moved again (a session whose process
-  ended this way is checked at start too); a move that finds no harness tells the parent.
+  is not attached back. A usage-limit end closes its execution `failed` with failure kind `limit` (§9) and starts nothing else.
 - Reports from a harness carry the process id vibestd started it as, and an execution end or start from an earlier
   process of the session is dropped (schema.md). An end that arrives while the open execution is not accepted yet is
   earlier activity and changes nothing.
@@ -502,7 +495,7 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   is removed; a row with no directory recorded closes nothing and removes nothing.
 - vibest never signals a process it found or recorded. The runtime's close sees a terminal's processes off (by
   contract; vibestd still proves it by cwd before the worktree goes), and a close that failed proves nothing. The
-  only signal vibest sends is SIGTERM to one harness pid it was told (a restart, a usage-limit move, an entry session
+  only signal vibest sends is SIGTERM to one harness pid it was told (a restart, an entry session
   moving terminal), never its group. A reused pid reads as alive, which can only keep more.
 - Before that close, on this machine only, the session's process tree is read (`ps -x -o pid=,ppid=,comm=`): the
   harness pid recorded for the session, its descendants, and the shell that is that pid's parent (not the shell's
@@ -762,26 +755,23 @@ and facts committed between that and the next revision's subscription are not de
 its own copy of a fact. A plugin runs its consumer in its own scope (`Effect.forkScoped`); the 5 s setup bound covers
 starting it, not its life.
 
-**Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
+**Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before", ...)`):
 
-| Hook                 | Changes (by assigning to the event)                                   | Runs                                                     |
-| -------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
-| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every Agent starts, the entry session included    |
-| `agent.fail`         | `move` (`{ harness, provider?, model? }`)                             | a started Agent's execution failed (today a usage limit) |
+| Hook                 | Changes (by assigning to the event)                                   | Runs                                                  |
+| -------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every Agent starts, the entry session included |
 
-Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. `agent.start.before` also carries `files`, the absolute paths of the copies of the files attached with `vibest run --file`; it is read only. A callback returns
+Every event carries the Project, the caller and the current Subscriptions. `agent.start.before` also carries `files`, the absolute paths of the copies of the files attached with `vibest run --file`; it is read only. A callback returns
 nothing and changes the event by assigning to its fields (OpenCode's shared mutated event). Each callback gets its own
 copy of the event as decided so far and core copies the changed fields back only when the callback succeeded within
 its deadline, so a callback that times out, fails or writes after its deadline leaves no partial or late write. Callbacks
 run sequentially in plugin order, so a later plugin sees (and may override) what an earlier one decided. On
 `agent.start.before` an assigned `undefined` unsets `harness`, `provider`, `model` or `runtime`, and is ignored for
-`prompt` and `machine`; fields outside that list are not copied back; on `agent.fail` the last `move` assigned wins.
+`prompt` and `machine`; fields outside that list are not copied back.
 The trace attributes each field to the plugin that changed it
 last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
-crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On
-`agent.fail` an `AgentRefused` counts as a crash: a crash or a timeout fails that operation (the execution is left
-failed with the plugin error, no move). Nothing is skipped silently.
+crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. Nothing is skipped silently.
 
 **Default harness.** No builtin chooses or refuses a harness by quota. A new agent without a harness inherits its
 caller's harness, provider and model in core, before `agent.start.before` (§9); subscriptions are data in the hook
@@ -794,10 +784,8 @@ plugin, so a plugin imports both normally and bundles neither. A plugin's `effec
 own scope; what it registers (hooks, runtime and harness transforms) and acquires lasts until unload, and a hook name
 not in `Hooks` fails its setup. An `effect` or a hook callback that throws instead of returning an Effect counts as that
 plugin's failure (a failed setup, or `plugin <id> crashed: ...`), never as a defect of the activation or the call. In `subscriptions`, `provider` is empty for Claude Code and Cursor and set for Pi; empty `limits` means
-unknown, not unlimited, and a login is limited when any of its usage windows is. A remembered limit rules its login
-out until that login's own row was refreshed after it and reads fine again; a login with no row, or none named by the
-attempt, keeps the plain memory. `subscription.report` replaces one `(harness, provider)` row's limits until the next usage
-poll of a harness that reads usage. `agent.fail`'s `reason` is a union with one member today, `limited`.
+unknown, not unlimited, and a login is limited when any of its usage windows is. `subscription.report` replaces one `(harness, provider)` row's limits until the next usage
+poll of a harness that reads usage.
 
 **Counters and traces** (omac `plugins.ts`): per plugin and hook, calls, changes, crashes, timeouts, refusals,
 and the last error, shown by `vibest plugins`; every trace entry is `{ plugin, hook, ms, outcome:
@@ -814,7 +802,7 @@ running one as it is (not torn down or set up again, and neither are the plugins
 both revisions, while with changed options it is failed and the old one is not restored; one whose setup fails falls
 back to the previous one; neither is retried until it changes; a plugin file found in the plugins
 directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
-last mention; an activation latch gates `agent.start.before` and `agent.fail`. They wait up to 10 s
+last mention; an activation latch gates `agent.start.before`. It waits up to 10 s
 for the pending generation; if it is still not active the operation fails with `PluginsNotActive`, naming the
 plugins still loading, and does not run on the plugins already active. The hooks for that call are the ones
 active at the gate, so a reload during the reads that follow does not change them. `vibest plugins` reads the plugins
@@ -850,11 +838,11 @@ subagent's execution completes without the subagent sending a message, it sends 
 
 **Extension places and rules.** An extension is one of three kinds:
 
-| Kind     | How                                                             | Examples                                         |
-| -------- | --------------------------------------------------------------- | ------------------------------------------------ |
-| provider | `transform` adds or changes a definition                        | harness and runtime definitions                  |
-| decider  | `hook`: core asks, waits up to 5 s, and uses the answer         | `agent.start.before` routing, `agent.fail` moves |
-| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `vibest.report-reminder`                         |
+| Kind     | How                                                             | Examples                        |
+| -------- | --------------------------------------------------------------- | ------------------------------- |
+| provider | `transform` adds or changes a definition                        | harness and runtime definitions |
+| decider  | `hook`: core asks, waits up to 5 s, and uses the answer         | `agent.start.before` routing    |
+| reaction | `event.subscribe` plus `session.list`/`get`/`send`; nobody asks | `vibest.report-reminder`        |
 
 1. Only core writes the ledger, through its commands. A plugin changes state only through what the context offers;
    a plugin send is recorded with the plugin as its sender (`{ type: "plugin", plugin }`), filled in by vibestd, never chosen by the
@@ -952,7 +940,7 @@ The cost: a harness started by hand does not load it, which is the intent. vibes
 | `agent.prompt`                 | `prompt.submit` (origin) | `beforeSubmitPrompt` (see below) | `agent_start`                   |
 | `agent.tool`                   | `tool.call`              | `preToolUse`                     | `tool_call`, `tool_execution_*` |
 | execution end with last reply  | `turn.complete` (answer) | `afterAgentResponse`             | `agent_end`, `agent_settled`    |
-| `agent.fail`                   | `turn.complete` (error)  | none                             | `agent_end` with error          |
+| execution end with an error    | `turn.complete` (error)  | none                             | `agent_end` with error          |
 | `agent.blocked`                | `Notification`           | to verify                        | —                               |
 | `agent.exit`                   | `SessionEnd`             | herdr                            | `session_shutdown`              |
 | native delivery into the agent | plugin hooks module      | none (herdr typing)              | extension                       |
@@ -966,7 +954,7 @@ end (Claude `session_id`, Cursor `conversation_id`), at Cursor's `sessionStart` 
 vibest's Claude plugin uses the hooks module's native `turn.complete`, `prompt.submit` and `tool.call`, not the
 classic `Stop`, `StopFailure`, `UserPromptSubmit` and `PreToolUse`: Claude fires no `Stop` for an execution stopped with Esc,
 and `prompt.submit` names its origin. `turn.complete` carries no API error kind (`StopFailure`'s `rate_limit`, ...),
-so a Claude usage limit is a failed result, not a usage-limit move.
+so a Claude usage limit is a failed result without failure kind `limit`.
 
 **Claude Code: the plugin only.** vibest writes nothing into `~/.claude/settings.json`. The plugin (omac
 `packages/claude`, copied) is a hooks module (`hooks/hooks.json` → `register.mjs`, no command hooks, no shell) whose native
@@ -1033,39 +1021,14 @@ plugin in order, each able to keep or overwrite what came before. There is no de
 chooses or refuses by quota. vibestd validates the final harness (a plugin provides it, its plugin directory is there,
 its model list reads, the model is offered) and refuses a start that never settled on one.
 
-A usage limit is the same decision in reverse, on `agent.fail`: the execution that failed stays the execution that
-finishes, and the session restarts — same id, same worktree, same task (the open execution's input, else the text
-the launch was about to send, else the trailing delivered batch) — on the harness the chain returns as its
-move. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
-harness/provider/model and the session's real attempts prefilled: a refusal skips that candidate (recorded as a
-`refused` try), and what the chain decides — including a rewritten harness or prompt — is what gets patched and
-started, so a start policy plugin governs a moved Agent exactly like a first start. vibest itself does not
-move: when no callback returns a move the execution fails, naming that harness and each exhausted limit with its reset time,
-and no other harness starts. A plugin may still return a move. The pairs that already hit a limit are remembered per (harness, provider) in
-`process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
-restart. Within one execution (since it started; for a launch's own limit, since the last execution ended or the
-session began) vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now:
-an execution that hit limits on every login it may use fails instead of cycling, and a later execution may use such a login
-again once its reading is free. A preflight miss, or a start or prompt that fails, is not a limit — the next move
-may use that harness again. A login already limited before start is left to `agent.start.before`: without a plugin
-that routes by quota, the agent starts and fails its execution the usual way when the limit hits.
-
-How the move runs (`session/move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
-a login limited in this execution, a harness this move skipped) ends the move, since asking the same plugins again cannot
-change the answer; a limit from an earlier execution no longer rules a login out once its own usage row, refreshed after
-it, says it is free. The move stays on the session's own runtime and machine. It ends the old agent before the next
-starts: a refused SIGTERM (sent to the harness pid alone, never its group, which is the terminal's shell) or a failed
-close keeps the session where it was, so no second agent ever runs. With a runtime that can `run` in a terminal the
-next harness starts in the session's own terminal, and the row names it first so what it reports while starting is its
-own; otherwise the terminal closes and a new one opens before the row names the new harness, so a failed placement
-leaves the row on the last live one. `open` failing with code `failed` is the start dying inside the terminal (its
-own limit, a crash) and skips to the next candidate; any other code is a placement refusal and ends the move. A
-prompt the runtime took whose execution never started counts as a failed prompt: the execution stays working and the next
-harness prompts it again. Giving up with no terminal of its own (the execution-end path) fails the execution but leaves the
-agent running, so check keeps polling it.
-
-A move does not carry the model named for the old harness, which the new one would not list: the move starts on the
-new harness's default. The memory of tried pairs is per harness when no login was named and per login when one was.
+A usage limit is not a routing decision: vibest never moves the work to another harness or login. The execution the
+limit ended closes `failed` with failure kind `limit` and, when the harness's Subscription row reports an exhausted
+window with a reset time, its `resetAt` (the earliest one); the creator gets one notice naming the limit and the
+reset time, and the harness process stays as it is, so the next send resumes the same session on the same harness. A
+limit at launch (the harness dies in its terminal on a usage-limit error) is a launch failure with the same failure
+kind. Whatever follows a limit is the creator agent's decision; a user who wants it automatic writes a plugin that
+reacts to `execution.ended` with failure kind `limit` (for example, waits for `resetAt` and sends the session a
+message to continue).
 
 ## 10. Ports
 
@@ -1360,7 +1323,7 @@ Paths are in `anomalyco/opencode` at `f0944f0`. These are sources to read when i
 | Plugin API (§7)                                | `Plugin.define`, `Registration`, `transform` / `reload`, `hook`, domains as `Pick`s of client APIs              | `packages/plugin/src/effect/plugin.ts`, `registration.ts`, `packages/plugin/AGENTS.md`                                                             |
 | Catalog state (§7)                             | synchronous editors replayed in registration order, batched change notification                                 | `packages/core/src/state.ts`, `packages/plugin/src/effect/provider.ts`                                                                             |
 | Hook dispatch (§7)                             | sequential, single mutable event, decision fields, no timeout (transform, refuse, decision)                     | `packages/core/src/plugin/hooks.ts`                                                                                                                |
-| `agent.fail`, `agent.prompt` (§7)              | retry decision, prompt rewrite                                                                                  | `retry`, `prompt` in `packages/plugin/src/effect/session.ts`                                                                                       |
+| `agent.prompt` (§7)                            | retry decision, prompt rewrite                                                                                  | `retry`, `prompt` in `packages/plugin/src/effect/session.ts`                                                                                       |
 | Registry, supervisor, order (§7)               | `(id, revision)`, prefix reactivation, fallback, latch, builtin / user / configuration order                    | `packages/core/src/plugin.ts`, `plugin/supervisor.ts:152-162`, `plugin/internal.ts`                                                                |
 | AgentDefinition (§3)                           | definition with `mode`                                                                                          | `packages/schema/src/agent.ts`                                                                                                                     |
 | Subscription limits (§3)                       | per-window meter (V2: `{ percent, limited, resetsAt }`)                                                         | `packages/schema/src/usage-limits.ts`                                                                                                              |

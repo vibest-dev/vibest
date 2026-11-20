@@ -526,7 +526,6 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           runtime: undefined,
           parentRuntime: undefined,
           machines: [],
-          attempts: [],
           harnesses: [{ harness: "pi", available: true }],
         })
 

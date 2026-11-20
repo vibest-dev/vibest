@@ -254,10 +254,10 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                                                                                                                 |
 | process.pid                         | process, pid: a pid report that is not a ready report                                                                                                                                                             |
 | process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                                         |
-| process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                                                                                                                              |
+| process.ended                       | process, reason: exited, restart, move (an entry session moving terminal), archived, launch_failed, superseded                                                                                                    |
 | execution.started                   | process?, typed? (the text typed into the pane)                                                                                                                                                                   |
 | execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)                                                                                                       |
-| execution.ended                     | execution, outcome, failure? {message, kind?: limit}, conversation?, reply? (the harness's reply, when it reported)                                                                                               |
+| execution.ended                     | execution, outcome, failure? {message, kind?: limit, resetAt? (epoch ms)}, conversation?, reply? (the harness's reply, when it reported)                                                                          |
 | inbox.queued                        | kind: task, send or notice, recipient?, sender, about? (a notice: the session it is about), content, status: pending, delivered or dropped, request?, peerItem?, execution? (a send: the sender's open execution) |
 | inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                                                                                                             |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                                                                                                     |
@@ -308,8 +308,7 @@ type or key changes or removes rows, in the same pull request.
   `inbox.ts` and `remote.ts`. The session row
   callers read (`SessionRow`) is built from the read model plus the memory listed below (`database/ledger-read.ts` holds the
   reads the import's referee shares). It carries `endedAt`, `parentId`, `entry`, the current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
-  session with neither never ran an execution. `attempts` lists the harness and provider of each of its processes that
-  ended `limited`, in process order, once per pair.
+  session with neither never ran an execution.
 - Writes go through intent methods, one per fact: `startProcess` opens a process, except that it reuses a live process
   that has no terminal yet when the harness, provider, model, runtime and routing are identical; `placeProcess` only
   gives the current one its terminal (never a new process id); `startExecution`, `noteConversation`, `rename` and
@@ -324,9 +323,6 @@ type or key changes or removes rows, in the same pull request.
   it is refused. A repeat of a request id returns the row it queued, checked before the archive (it was accepted).
 - An entry session moving to another terminal has no place, but its rows wait for it. Rows for an absent entry session are
   dropped only while it still has no place, so a launch that landed in between keeps them.
-- A usage-limit move resends the open execution's input (its typed text or the rows it consumed); when that is empty, the
-  trailing run of delivered `task` and `send` rows from one sender that no execution consumed, oldest first, joined with a
-  blank line.
 - A task is queued `delivered` with no execution; one with no `execution_id` was never handed over: the only move a
   task gets is its handover, which names the execution. An execution that ended before its handover (vibestd stopped while
   waiting for ready, or one the user typed meanwhile) took nothing, so the task is still handed over: it is the head
@@ -385,7 +381,6 @@ E2E runs it on every world's database at the end of each check.
 - Open execution of a session: `execution_open`. Live process and pid: `session.process_id`, or `process_live`.
 - Session or entry session by terminal: `process_terminal`, joined to `session.process_id` and
   `project.entry_session_id`.
-- Usage-limit attempts: the session's processes that ended `limited`, with their harness and provider.
 - In-place restart after an update: live sessions (`session_live`), their live process, compare the integration.
   Order: restarting mark in memory, SIGTERM, then `execution.ended` (interrupted) and `process.ended` (restart), then the new
   `process.started`. A refused SIGTERM writes nothing.

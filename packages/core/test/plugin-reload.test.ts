@@ -74,7 +74,6 @@ const event = {
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   harnesses: [
     { harness: "pi", available: true },
     { harness: "claude", available: true },
@@ -700,54 +699,6 @@ describe("plugins: supervisor", () => {
               (yield* Fiber.join(starting)).trace.map((t) => t.plugin),
               ["a"],
             )
-          }),
-        ),
-        Effect.scoped,
-        Effect.provide(blockedSubscriptions(entered, release)),
-        Effect.provide(Hooks.layer),
-        Effect.provide(harnessesLayer()),
-        Effect.provide(runtimesLayer),
-        Effect.provide(Agents.layer),
-        Effect.provide(memoryPluginHost),
-      )
-    }),
-  )
-
-  it.effect("a reload while subscriptions are read keeps the fail hook captured with readiness", () =>
-    Effect.gen(function* () {
-      const entered = yield* Deferred.make<void>()
-      const release = yield* Deferred.make<void>()
-
-      const failing = Plugin.define({
-        id: "a",
-        effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => void (e.move = { harness: "pi" }))),
-      })
-
-      yield* makeHost().pipe(
-        Effect.flatMap((h) =>
-          Effect.gen(function* () {
-            yield* h.activate([candidate("a", "1", failing)])
-
-            const moved = yield* Effect.forkChild(
-              h.service.fail({
-                project: "/r",
-                agent: "general",
-                parentSessionId: undefined,
-                harnesses: event.harnesses,
-                attempts: [],
-                sessionId: "s",
-                reason: "limited",
-                error: "limited",
-                input: "p",
-                harness: "claude",
-                provider: undefined,
-              }),
-            )
-
-            yield* Deferred.await(entered)
-            yield* h.activate([])
-            yield* Deferred.succeed(release, undefined)
-            assert.strictEqual((yield* Fiber.join(moved)).move?.harness, "pi")
           }),
         ),
         Effect.scoped,

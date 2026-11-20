@@ -19,7 +19,6 @@ const event = (harness: string | undefined, claude: boolean) => ({
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   subscriptions: [],
   harnesses: [
     { harness: "pi", available: true },

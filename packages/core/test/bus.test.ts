@@ -152,7 +152,7 @@ const story = Effect.gen(function* () {
       yield* emit(Catalog["process.ended"], {
         sessionId: SUB,
         at: 330,
-        data: { process: subProcess, reason: "limited" },
+        data: { process: subProcess, reason: "restart" },
       })
 
       const placeholder = yield* emit(Catalog["process.started"], {
@@ -401,7 +401,7 @@ describe("projectors", () => {
         placedAt: 302,
         readyAt: null,
         endedAt: 330,
-        endReason: "limited",
+        endReason: "restart",
       })
       assert.strictEqual(rows[2]!.endReason, "launch_failed")
       assert.strictEqual(rows[2]!.placedAt, null)

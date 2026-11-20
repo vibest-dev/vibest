@@ -16,7 +16,7 @@ type Refusals = {
   readonly [N in keyof AgentHooks]: (refusal: AgentRefused) => Effect.Effect<never, AgentFailures[N]>
 }
 
-const refusalAs: Refusals = { "start.before": Effect.fail, fail: Effect.die }
+const refusalAs: Refusals = { "start.before": Effect.fail }
 
 const refusable = <N extends keyof AgentHooks, A>(name: N, callback: () => Awaitable<A>) =>
   Effect.tryPromise({ try: () => Promise.resolve().then(callback), catch: (e) => e }).pipe(

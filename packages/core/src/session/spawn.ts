@@ -12,11 +12,11 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import { Clock, Context, Crypto, Deferred, Effect, Exit, FileSystem, Layer, Option, Path, Predicate, Ref } from "effect"
+import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Predicate, Ref } from "effect"
 import { Hex } from "effect/encoding"
 
 import { Agents, unknownAgent } from "../agents.ts"
-import { type NewSession, type SessionRow, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
+import { type NewSession, harnessIdOf, runtimeOf, terminalOf, archived } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import type { PeerStart } from "../database/remote.ts"
 import { Drain } from "../drain.ts"
@@ -30,12 +30,10 @@ import { Plugins, type Routing } from "../plugin.ts"
 import { listProjectRepositories } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
 import { sessionEnvelope } from "../replies.ts"
-import { machinesListing as machines, type Runtime, Runtimes } from "../runtimes.ts"
+import { machinesListing as machines, Runtimes } from "../runtimes.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
-import { Archive } from "./archive.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
-import { Move } from "./move.ts"
-import { type LaunchOptions, Placement } from "./placement.ts"
+import { Placement } from "./placement.ts"
 import { Starts } from "./starts.ts"
 
 export * as Spawn from "./spawn.ts"
@@ -113,9 +111,7 @@ export const make = Effect.gen(function* () {
   const git = yield* Git.Service
   const scope = yield* Effect.scope
   const locks = yield* SessionLocks.Service
-  const { worktreeOf, launch, launchFailed } = yield* Placement.Service
-  const { abandonLaunch } = yield* Archive.Service
-  const { rerun } = yield* Move.Service
+  const { worktreeOf, launch } = yield* Placement.Service
   const starts = yield* Starts.Service
   const logged = Reactor.logFailure
 
@@ -124,31 +120,6 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
       Effect.provideService(Git.Service, git),
-    )
-
-  const launchOwned = (
-    h: Runtime,
-    target: string | undefined,
-    row: SessionRow,
-    root: string,
-    task: string,
-    options: LaunchOptions,
-  ) =>
-    launch(h, target, row, root, task, options).pipe(
-      Effect.flatMap((outcome) =>
-        Predicate.isTagged(outcome, "Limited")
-          ? rerun(h, row, undefined, outcome.input, false, outcome.error, outcome.execution).pipe(
-              Effect.onExit((exit) =>
-                Exit.isFailure(exit)
-                  ? launchFailed(row, exit.cause).pipe(
-                      Effect.andThen(abandonLaunch(row.id)),
-                      logged(`abandon ${row.id}`),
-                    )
-                  : Effect.void,
-              ),
-            )
-          : Effect.void,
-      ),
     )
 
   const machinesListing = machines(
@@ -279,7 +250,6 @@ export const make = Effect.gen(function* () {
           Effect.provideService(Harness.Service, harness),
           Effect.provideService(Harnesses.Service, harnesses),
         ),
-        attempts: [],
         machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
         runtime: followedShare === undefined ? input.runtime : runtimeOf(followedShare),
         parentRuntime,
@@ -447,7 +417,7 @@ export const make = Effect.gen(function* () {
                 const launchNow = Effect.flatMap(db.session.getSession(id), (now) =>
                   now === undefined || archived(now)
                     ? Effect.void
-                    : launchOwned(rt, target, now, root, task, {
+                    : launch(rt, target, now, root, task, {
                         splitFrom: input.share,
                         env: input.env,
                         commit: input.commit,
@@ -520,13 +490,11 @@ export const deps = [
   Git.node,
   Harness.node,
   Harnesses.node,
-  Archive.node,
-  Move.node,
   Placement.node,
+  Starts.node,
   Plugins.node,
   Runtimes.node,
   SessionLocks.node,
-  Starts.node,
   PlatformNode.crypto,
   PlatformNode.fileSystem,
   PlatformNode.layout,

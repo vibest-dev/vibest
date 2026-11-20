@@ -47,7 +47,6 @@ const event = {
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   harnesses: [],
 }
 
