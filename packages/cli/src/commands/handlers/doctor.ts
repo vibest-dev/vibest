@@ -15,9 +15,8 @@ export const plainHarnessProblem = (harness: string, problem: string) => {
   const failed = `${harness} model discovery failed: `
   const discovered = problem.startsWith(failed) ? problem.slice(failed.length) : problem
   const reported = discovered.replace(/^\S+ gave no model list: /, "").replace(/^\S+ did not list its models: /, "")
-  const text = reported.startsWith("Error: ") ? reported.slice("Error: ".length) : reported
 
-  return text === "" ? problem : text
+  return reported === "" ? problem : reported
 }
 
 export const doctorVerdict = (findings: ReadonlyArray<Finding>) => {

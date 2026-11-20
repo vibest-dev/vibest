@@ -9,25 +9,25 @@ describe("doctor text", () => {
   it("shows the harness message once, without guessing what it means", () => {
     assert.strictEqual(
       plainHarnessProblem("agy", signedOut),
-      "Please sign in to view available models. Launch the CLI without arguments to sign in.",
+      "Error: Please sign in to view available models. Launch the CLI without arguments to sign in.",
     )
     assert.strictEqual(
       plainHarnessProblem(
         "agy",
         "agy model discovery failed: agyx gave no model list: Error: Please sign in to view available models.",
       ),
-      "Please sign in to view available models.",
+      "Error: Please sign in to view available models.",
     )
   })
 
-  it("drops the discovery wrappers and the harness Error label", () => {
+  it("drops only the wrappers vibest adds, and keeps the harness text", () => {
     assert.strictEqual(
       plainHarnessProblem("agy", "agy model discovery failed: agy gave no model list: Error: connection reset"),
-      "connection reset",
+      "Error: connection reset",
     )
     assert.strictEqual(
       plainHarnessProblem("agy", "agy model discovery failed: agyx did not list its models: Error: timed out"),
-      "timed out",
+      "Error: timed out",
     )
   })
 
