@@ -195,6 +195,9 @@ export const make = Effect.gen(function* () {
 
         if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
 
+        if ((session.process === null || session.process.endedAt !== null) && (yield* starts.isWaiting(id)))
+          return { stopped: false, message: `${id} has no process to stop because it is waiting to start` }
+
         if (exitedAt(session) !== null) return { stopped: false, message: `${id} is not running; a message resumes it` }
         const h = yield* live(session)
         const terminal = terminalOf(session)
