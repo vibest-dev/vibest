@@ -6,7 +6,8 @@ Implementation notes for the [plugin architecture](architecture.md#7-plugin-arch
 
 Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`vibest.harness-pi`, `vibest.harness-claude`,
 `vibest.runtime-herdr-core`, `vibest.runtime-herdr`, `vibest.runtime-choice`, `vibest.archive-on-idle`, `vibest.harness-default`,
-then the optional `vibest.report-reminder` when `vibest.json` names its id), then the plugins directory, then
+`vibest.agent-files`, then the optional `vibest.report-reminder` when `vibest.json` names its id), then the plugins
+directory, then
 `vibest.json` in the order written. Registration order is detection order for runtime callers (herdr-core before
 herdr) and the order of `transform`s on a registry, so a user plugin sees and may change the builtin definitions.
 `vibest plugins` lists them in that order.
@@ -17,6 +18,18 @@ Builtin plugins and harness integrations are written like a user plugin: `packag
 CLI. `.oxlintrc.json` enforces it with `no-restricted-imports` overrides (static, type-only and dynamic imports alike),
 and `vibest/no-restricted-disable` reports a disable comment for that rule. What a builtin needs from the platform
 (child processes, files, HTTP) it provides itself from `@effect/platform-node-shared`.
+
+## A builtin that reads files
+
+`vibest.agent-files` reads `~/.vibest/agents/*.md` when it activates and registers each file through
+`ctx.agent.transform`, as a user plugin would; core knows only the agent registry and checks each added definition
+(id, description, prompt, `provider`/`model` only with `harness`). It sits after `vibest.agent`, so a file replaces a
+builtin of its id, and before user plugins, so a plugin replaces a file. To pick up an edited file without a loop of
+its own, a builtin may give its revision as an effect (`revise`): the plugin scan, which already rereads the sources
+every second, recomputes it (here a hash of the folder's files) and reactivates the plugin when it changes, which
+restarts the plugins after it in load order, as any changed plugin does. A file that cannot be registered goes to
+`editor.invalid({ id, source, error })`, which `vibest agent list`, `vibest doctor` and the refusal of
+`vibest run --agent` report.
 
 ## Loading and watching
 
