@@ -6,6 +6,7 @@ import { Concurrency } from "../concurrency.ts"
 import { archived, type ProcessStart } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
+import { Inbox } from "../inbox.ts"
 import * as Reactor from "../reactor.ts"
 import { Placement } from "./placement.ts"
 
@@ -20,6 +21,7 @@ export interface Waiting {
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const placement = yield* Placement.Service
+  const inbox = yield* Inbox.Service
   const concurrency = yield* Concurrency.Service
   const reactor = yield* Reactor.make
   const scope = yield* Effect.scope
@@ -58,14 +60,21 @@ export const make = Effect.gen(function* () {
           continue
         }
 
-        const closed = yield* closeLeft(next.id).pipe(
-          Effect.as(true),
-          Effect.catchTag("RuntimeError", (error) =>
-            Effect.logError(`resume left terminal: ${error.message}`).pipe(Effect.as(false)),
-          ),
+        const failedClose = yield* closeLeft(next.id).pipe(
+          Effect.as<string | undefined>(undefined),
+          Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.message)),
         )
 
-        if (!closed) return
+        if (failedClose !== undefined) {
+          list.shift()
+          yield* db.session.startProcess(next.id, next.start)
+          yield* db.session.endProcess(next.id, "launch_failed")
+          const session = yield* db.session.getSession(next.id)
+          const pending = session === undefined ? [] : yield* db.inbox.pendingInbox(next.id)
+
+          if (session !== undefined && pending.length > 0) yield* inbox.undelivered(session, pending, failedClose)
+          continue
+        }
 
         if (!(yield* db.session.admitProcess(next.id, next.start, yield* concurrency.limit))) return
         list.shift()
@@ -116,5 +125,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Bus.node, Concurrency.node, Db.node, Placement.node],
+  deps: [Bus.node, Concurrency.node, Db.node, Inbox.node, Placement.node],
 })
