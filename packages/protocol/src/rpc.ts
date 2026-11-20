@@ -18,7 +18,13 @@ import {
 } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
-import { ProjectActivity, ProjectCreateFailed, ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
+import {
+  NoSuchProject,
+  ProjectActivity,
+  ProjectCreateFailed,
+  ProjectInfoResult,
+  ProjectSearchInput,
+} from "@vibest/schema/project"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
@@ -44,6 +50,7 @@ import {
   ExecutionState,
 } from "@vibest/schema/session"
 import { Subscription } from "@vibest/schema/subscription"
+import { WorktreeList } from "@vibest/schema/worktree"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 
@@ -382,6 +389,13 @@ export class VibestRpcs extends RpcGroup.make(
       payload: { machine: Schema.optional(Schema.String) },
       success: AgentListing,
       error: Schema.Union([Forbidden, ...LINE_ERRORS]),
+    }),
+  ),
+  protocol(
+    Rpc.make("Worktree.List", {
+      payload: { project: Schema.optional(Schema.String), machine: Schema.optional(Schema.String) },
+      success: WorktreeList,
+      error: Schema.Union([Forbidden, NoSuchProject, ...LINE_ERRORS]),
     }),
   ),
   scoped(
@@ -871,6 +885,7 @@ export const ACCESS = {
   Plugins: "open",
   "Harnesses.List": ["open", "peer"],
   "Agents.List": ["open", "peer"],
+  "Worktree.List": ["open", "peer"],
   "Integration.Guard": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
@@ -933,6 +948,7 @@ export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
       method !== "Harnesses.List" &&
       method !== "Agents.List" &&
       method !== "Machine.Load" &&
+      method !== "Worktree.List" &&
       !method.startsWith("Peer."),
   ),
 )
@@ -949,4 +965,5 @@ export const CAPABILITIES = {
   peerSpawnFiles: true,
   load: true,
   agents: true,
+  worktrees: true,
 } as const

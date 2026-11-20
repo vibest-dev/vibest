@@ -33,6 +33,7 @@ import * as IntegrationHandlers from "./handlers/integration.ts"
 import * as ProjectHandlers from "./handlers/project.ts"
 import * as RemoteHandlers from "./handlers/remote.ts"
 import * as SessionHandlers from "./handlers/session.ts"
+import * as WorktreeHandlers from "./handlers/worktree.ts"
 import * as Listing from "./listing.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
@@ -52,6 +53,7 @@ export const handlers = Layer.mergeAll(
   EntryHandlers.layer,
   ProjectHandlers.layer,
   RemoteHandlers.layer,
+  WorktreeHandlers.layer,
 ).pipe(
   Layer.provide(
     Layer.mergeAll(

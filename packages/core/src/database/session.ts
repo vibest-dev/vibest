@@ -143,6 +143,16 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ),
       ),
 
+      worktreeSessions: Effect.fn("Db.session.worktreeSessions")(() =>
+        sql<{
+          id: string
+          projectId: string
+          name: string
+          directory: string
+          endedAt: number | null
+        }>`SELECT id, project_id, name, directory, ended_at FROM session WHERE directory != ''`.pipe(Effect.orDie),
+      ),
+
       startedByPeer: Effect.fn("Db.session.startedByPeer")((id: string) =>
         sql`SELECT 1 FROM session WHERE id = ${id} AND origin_peer IS NOT NULL`.pipe(
           Effect.map((rows) => rows.length > 0),
