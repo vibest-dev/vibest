@@ -9,6 +9,7 @@ import type { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
+import { Load } from "../machine/load.ts"
 import { Machines } from "../machine/machines.ts"
 import { Peer } from "../machine/peer.ts"
 import { address, type At, ListScope, Remote } from "../machine/remote.ts"
@@ -136,6 +137,7 @@ const make = Effect.gen(function* () {
   const self = yield* Identity.Service
   const { version } = yield* App.Service
   const machines = yield* Machines.Service
+  const load = yield* Load.Service
   const peers = yield* Peer.Service
   const remote = yield* Remote.Service
   const runtimes = yield* Runtimes.Service
@@ -202,6 +204,28 @@ const make = Effect.gen(function* () {
     "Machine.Add": ({ name, target }: PayloadOf<"Machine.Add">) =>
       cliOnly("Machine.Add").pipe(Effect.andThen(machines.add(name, target))),
 
+    "Machine.Load": ({ machine }: PayloadOf<"Machine.Load">) =>
+      Effect.gen(function* () {
+        const caller = yield* Caller
+
+        if (Predicate.isTagged(caller, "Peer")) {
+          if (machine !== undefined)
+            return yield* new Forbidden({ method: "Machine.Load", message: "a peer reads its own machine" })
+
+          return yield* load.read()
+        }
+
+        if (!Predicate.isTagged(caller, "Cli"))
+          return yield* new Forbidden({
+            method: "Machine.Load",
+            message: "only the user or another machine reads the load",
+          })
+
+        if (machine === undefined) return yield* load.read()
+
+        return yield* machines.reading(machine)
+      }),
+
     "Machine.List": () => cliOnly("Machine.List").pipe(Effect.andThen(machines.listing)),
 
     "Machine.Remove": ({ name }: PayloadOf<"Machine.Remove">) =>
@@ -216,6 +240,7 @@ export const layer = group([
   "Peer.Outbox",
   "Peer.Ack",
   "Machine.Add",
+  "Machine.Load",
   "Machine.List",
   "Machine.Remove",
 ]).toLayer(make)

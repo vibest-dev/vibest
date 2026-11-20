@@ -13,6 +13,9 @@ const TIMEOUT = 30_000
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
+const unknownMethodLine = (id: string | undefined) =>
+  `{"jsonrpc":"2.0","id":${JSON.stringify(id)},"error":{"_tag":"Cause","code":0,"message":"Unknown request tag: Machine.Load","data":[{"_tag":"Die","defect":"Unknown request tag: Machine.Load"}]}}\n`
+
 describe("vibest CLI without vibestd", () => {
   it.effect(
     "an agent's vibest does not start vibestd: it fails DaemonUnavailable and creates no home",
@@ -33,7 +36,11 @@ describe("vibest CLI without vibestd", () => {
     TIMEOUT,
   )
 
-  const fakeDaemon = (capabilities: Record<string, boolean>, answer: (n: number) => Schema.JsonObject | undefined) =>
+  const fakeDaemon = (
+    capabilities: Record<string, boolean>,
+    answer: (n: number) => Schema.JsonObject | undefined,
+    load: "silent" | "unknown" = "silent",
+  ) =>
     Effect.gen(function* () {
       const home = yield* tempDirectory("vibest-requests-")
       const sends: Array<{ id: string; request?: string }> = []
@@ -58,7 +65,7 @@ describe("vibest CLI without vibestd", () => {
 
               if (out === undefined) sock.destroy()
               else reply(out)
-            }
+            } else if (req.method === "Machine.Load" && load === "unknown") sock.write(unknownMethodLine(req.id))
           }
         })
       })
@@ -75,10 +82,31 @@ describe("vibest CLI without vibestd", () => {
         "hi",
       ])
 
-      return { sends, send }
+      const status = vibest(home, { HOME: home, VIBEST_HOME: home }, ["status"])
+
+      return { sends, send, status }
     })
 
   const id = "abcd1234-abcd-4abc-8abc-abcd1234abcd"
+
+  it.effect(
+    "status prints a running vibestd without its load when the load does not come in time or that vibestd cannot read it",
+    () =>
+      Effect.gen(function* () {
+        for (const [capabilities, load] of [
+          [{ load: true }, "silent"],
+          [{}, "unknown"],
+        ] as const) {
+          const d = yield* fakeDaemon(capabilities, () => undefined, load)
+          const r = yield* d.status.pipe(Effect.timeout("10 seconds"))
+          assert.strictEqual(r.code, 0, `${load}: ${r.stderr}`)
+          const status = decodeJson(r.stdout) as { daemon: { status: string; load?: unknown } }
+          assert.strictEqual(status.daemon.status, "running", load)
+          assert.isUndefined(status.daemon.load, load)
+        }
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
   it.effect(
     "send whose connection drops after the request: sent once more with the same request id, the output unchanged",
     () =>

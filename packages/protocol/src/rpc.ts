@@ -6,6 +6,7 @@ import {
   MachineFailed,
   MachineIncompatible,
   MachineInfo,
+  MachineLoad,
   MachineNote,
   MachineUnavailable,
   NoCommit,
@@ -846,6 +847,13 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, MachineFailed, MachineIncompatible, AlreadyAdded]),
     }),
   ),
+  scoped(
+    Rpc.make("Machine.Load", {
+      payload: { machine: Schema.optional(Schema.String) },
+      success: MachineLoad,
+      error: Schema.Union([Forbidden, UnknownMachine, MachineUnavailable, MachineIncompatible]),
+    }),
+  ),
   scoped(Rpc.make("Machine.List", { success: Schema.Array(MachineInfo), error: Forbidden })),
   scoped(
     Rpc.make("Machine.Remove", {
@@ -903,6 +911,7 @@ export const ACCESS = {
   "Peer.Outbox": "peer",
   "Peer.Ack": "peer",
   "Machine.Add": "cli",
+  "Machine.Load": ["cli", "peer"],
   "Machine.List": "cli",
   "Machine.Remove": "cli",
 } as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
@@ -920,7 +929,11 @@ export const PEER_CALLS: ReadonlySet<string> = new Set(
 export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
   [...PEER_CALLS].filter(
     (method) =>
-      method !== "Ping" && method !== "Harnesses.List" && method !== "Agents.List" && !method.startsWith("Peer."),
+      method !== "Ping" &&
+      method !== "Harnesses.List" &&
+      method !== "Agents.List" &&
+      method !== "Machine.Load" &&
+      !method.startsWith("Peer."),
   ),
 )
 
@@ -934,5 +947,6 @@ export const CAPABILITIES = {
   spawnRuntime: true,
   spawnFiles: true,
   peerSpawnFiles: true,
+  load: true,
   agents: true,
 } as const
