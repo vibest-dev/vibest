@@ -119,6 +119,44 @@ describe("sends from sessions", () => {
       ),
   )
 
+  it.effect("a team whose members have all ended is over: adding to its id is refused", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, entryId } = yield* setup
+        const start = { cwd: "/w", task: "t", parentSessionId: entryId }
+        assert.isTrue(yield* db.session.insertSession(session(B), project, { ...start, team: "new" }))
+        const team = (yield* db.session.sessionIdentity(B))!.team!
+        yield* db.session.archive(B)
+        assert.deepStrictEqual(
+          yield* db.session.insertSession(session(X), project, { ...start, team: { join: team } }),
+          {
+            teamEnded: team,
+          },
+        )
+      }),
+    ),
+  )
+
+  it.effect("a team is listed only for its creator and its members", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, entryId } = yield* setup
+        assert.isTrue(
+          yield* db.session.insertSession(session(B), project, {
+            cwd: "/w",
+            task: "t",
+            parentSessionId: entryId,
+            team: "new",
+          }),
+        )
+        const team = (yield* db.session.sessionIdentity(B))!.team!
+        assert.isTrue(yield* db.session.mayListTeam(project, team, entryId))
+        assert.isTrue(yield* db.session.mayListTeam(project, team, B))
+        assert.isFalse(yield* db.session.mayListTeam(project, team, A))
+      }),
+    ),
+  )
+
   it.effect(
     "a session whose creator has ended still names it as its creator, and its notices go to the nearest creator above that is running",
     () =>

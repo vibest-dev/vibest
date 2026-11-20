@@ -42,7 +42,10 @@ import type * as Session from "./session-statements.ts"
 
 export type TeamStart = "new" | { readonly join: string }
 
-export type TeamRefusal = { readonly team: string; readonly teamOwner: string } | { readonly teamUnknown: string }
+export type TeamRefusal =
+  | { readonly team: string; readonly teamOwner: string }
+  | { readonly teamUnknown: string }
+  | { readonly teamEnded: string }
 
 export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
 
@@ -151,7 +154,20 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ),
       )
 
+    const teamLive = (project: string, team: string) =>
+      sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+      )
+
     return {
+      mayListTeam: Effect.fn("Db.session.mayListTeam")((project: string, team: string, caller: string) =>
+        sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team}
+          AND (id = ${caller} OR parent_session_id = ${caller}) LIMIT 1`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
+      ),
+
       teamMembers: Effect.fn("Db.session.teamMembers")((project: string, team: string) =>
         sql<{ id: string; parent: string | null }>`SELECT id, parent_session_id AS parent FROM session
           WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL ORDER BY created_at, rowid`.pipe(
@@ -285,6 +301,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 const owner = yield* teamOwner(project, team.join)
 
                 if (owner === undefined) return { teamUnknown: team.join }
+
+                if (!(yield* teamLive(project, team.join))) return { teamEnded: team.join }
 
                 if (owner !== parentSessionId) return { team: team.join, teamOwner: owner }
               }

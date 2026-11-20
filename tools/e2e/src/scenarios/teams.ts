@@ -27,7 +27,7 @@ const inboxFrom = (w: World, sender: string) =>
 const S67: Check = {
   id: "S67",
   title:
-    "vibest run --new-team makes a team whose id the run prints, --team <id> adds two more; the three list each other with vibest ls --team and one sends to another, which arrives from the real sender; another team, a non-member, another creator's new team, a second session adding to the team, an unknown team id, a member's own child and a send to an archived teammate are each refused or left out",
+    "vibest run --new-team makes a team whose id the run prints, --team <id> adds two more; the three list each other with vibest ls --team and one sends to another, which arrives from the real sender; another team, a non-member, another creator's new team, a second session adding to the team, an unknown team id, a member's own child, a send to an archived teammate, ls --team from outside the team and adding to a team whose members have all ended are each refused or left out; its creator lists it",
   run: async (w) => {
     needs()
     const entryModel = recordingModel(() => reply("ok"))
@@ -151,6 +151,21 @@ const S67: Check = {
         expect(inboxFrom(w, sender.id) === 0, `${sender.id}'s refused send was queued`)
       }
 
+      const peeked = await tell(loner, `${binary} ls --team ${web}`)
+      expect(
+        peeked.includes("Forbidden") && peeked.includes("only for the session that created it and its members"),
+        `vibest ls --team ${web} from a session outside it: ${peeked}`,
+      )
+
+      const byCreator = JSON.parse(await w.okViaEntry(["ls", "--team", web], { cwd: repo })) as {
+        members: Array<{ id: string }>
+      }
+
+      expect(
+        JSON.stringify(byCreator.members.map((x) => x.id).sort()) === JSON.stringify(ids),
+        `vibest ls --team ${web} from its creator: ${JSON.stringify(byCreator)}`,
+      )
+
       const childDir = await piDir(w, "pi-team-child", other.model.url)
       const taken = await tell(other, `${binary} run pi --team ${web} --env PI_CODING_AGENT_DIR=${childDir} -- wait`)
       expect(taken.includes("Forbidden") && taken.includes(`owned by ${entry}`), `a second owner for ${web}: ${taken}`)
@@ -174,6 +189,13 @@ const S67: Check = {
       expect(inboxFrom(w, a.id) === before, "the send to archived c was queued for someone")
       const listedNow = JSON.parse(await tell(a, `${binary} ls --team`)) as { members: Array<{ id: string }> }
       expect(!listedNow.members.some((x) => x.id === c.id), `archived c is still listed: ${JSON.stringify(listedNow)}`)
+
+      for (const member of [a, b]) await w.okViaEntry(["archive", member.id], { cwd: repo, timeoutMs: 90_000 })
+      const ended = await w.viaEntry(["run", "pi", "--team", web, "--session", session, "--", "wait"], { cwd: repo })
+      expect(
+        ended.code !== 0 && ended.stdout.includes(`team ${web} has ended`),
+        `--team ${web} after its last member was archived: ${ended.stdout}`,
+      )
     } finally {
       entryModel.stop()
 

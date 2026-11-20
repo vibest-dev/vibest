@@ -175,6 +175,12 @@ export const make = Effect.gen(function* () {
             method: "Team.List",
             message: "you are in no team; name one: vibest ls --team <team id>",
           })
+
+        if (!(yield* db.session.mayListTeam(c.projectId, id, c.sessionId)))
+          return yield* new Forbidden({
+            method: "Team.List",
+            message: `team ${id} is listed only for the session that created it and its members`,
+          })
         const members = yield* db.session.teamMembers(c.projectId, id)
         const infos = new Map((yield* listed(ListScope.Project({ id: c.projectId }), true)).map((i) => [i.id, i]))
 

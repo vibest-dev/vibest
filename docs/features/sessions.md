@@ -162,14 +162,17 @@ A team is a running group of sessions, as a session is a run of an agent definit
 digits, unique in the project) and prints it with the session id: `{"id": …, "team": "t-3f2a"}`. `vibest run --team
 <team id>` adds the session to that team and prints the id too; giving both flags is a usage error. Only the session that created the team may add members;
 any other session is refused with an error naming that session, and an id no team in this project has is refused; in both
-cases nothing starts. Two `--new-team` always give two teams, whoever runs them. A session's team is set when it is
+cases nothing starts. A team whose members have all been archived has ended: `--team <id>` is then refused and the id
+never comes back; this is checked in the same transaction as the new member, so a last archive and an addition happen in
+one order. Two `--new-team` always give two teams, whoever runs them. A session's team is set when it is
 created and never changes; a session started without `--team` or `--new-team` is in no team, even when its creator is. `--team` or `--new-team`
 with `--machine` is refused.
 
 Members of one team may `vibest send` to each other while they are unfinished (S46, S47 still refuse everyone else); a
 send to an archived teammate is refused and goes to no one else. Interrupt, peek and archive stay with the session that
 started each one. `vibest ls --team [<team id>]` prints JSON `{team, members}`: each unfinished member's id, agent,
-title, status and `startedBy`; without an id it is the caller's own team, and a session in no team gets an error. A
+title, status and `startedBy`; without an id it is the caller's own team, and a session in no team gets an error. It answers only the session that
+created the team and its members; any other session is refused, even when it knows the id. A
 member's system prompt names its team id and says that `vibest ls --team` lists who is in it now.
 
 ## S58. Listing worktrees

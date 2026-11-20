@@ -109,8 +109,9 @@ manages it. Items marked planned are not built.
 - **Teams are a label.** `session.team` holds a team id, written once from `session.created` and never inherited. A
   team is a runtime instance, not a name: `vibest run --new-team` makes its id (`t-` and four hex digits, unique in the
   project) inside `insertSession`'s transaction, and its creator, the creator of all its members, is the only session
-  that may add members with `--team <id>`; `insertSession` refuses any other creator and an unknown id in the same
-  transaction. Members may send to each other; a send to an
+  that may add members with `--team <id>`; `insertSession` refuses any other creator, an unknown id and a team with no
+  unfinished member (it has ended for good) in the same transaction. `vibest ls --team` answers only the creator and the
+  members. Members may send to each other; a send to an
   archived member is refused rather than forwarded, since the creator fallback is only for a session's own creator.
   There is no team table and no team command: agents find teammates with `vibest ls --team`.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
