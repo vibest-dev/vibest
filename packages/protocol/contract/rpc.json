@@ -3976,6 +3976,16 @@
           "agent": {
             "type": "string"
           },
+          "agentNamed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "focus": {
             "type": "boolean"
           },
@@ -9114,6 +9124,16 @@
           "agent": {
             "type": "string"
           },
+          "agentNamed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fresh": {
             "type": "boolean"
           },
@@ -11183,6 +11203,26 @@
           },
           "agent": {
             "type": "string"
+          },
+          "agentNamed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fresh": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "provider": {
             "anyOf": [

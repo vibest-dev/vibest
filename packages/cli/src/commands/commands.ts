@@ -39,6 +39,12 @@ export const entryFlags = {
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
   model: Flag.String("model").pipe(Flag.optional),
+  agent: Flag.String("agent").pipe(
+    Flag.withDescription(
+      "The agent definition a new entry conversation runs as (default coordinator; see vibest agent list). A conversation keeps the agent it started with: naming another needs --new",
+    ),
+    Flag.optional,
+  ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
     Flag.withDescription("Outside herdr: do not attach to the session"),

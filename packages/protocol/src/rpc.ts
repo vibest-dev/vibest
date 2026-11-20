@@ -404,6 +404,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           argv: Schema.Array(Schema.String),
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           focus: Schema.Boolean,
           callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
@@ -550,6 +551,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           harness: Schema.String,
           agent: Schema.String,
+          agentNamed: Schema.optional(Schema.Boolean),
           fresh: Schema.Boolean,
           terminal: Schema.String,
           runtime: Schema.optional(Schema.String),
@@ -587,6 +589,8 @@ export class VibestRpcs extends RpcGroup.make(
       payload: {
         harness: Schema.optional(Schema.String),
         agent: Schema.String,
+        agentNamed: Schema.optional(Schema.Boolean),
+        fresh: Schema.optional(Schema.Boolean),
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         runtime: Schema.optional(Schema.String),
