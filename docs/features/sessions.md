@@ -162,7 +162,7 @@ not a regular file refuses the run. With `--machine`, the files go with the run 
 the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest
 update` there.
 
-## S66. Teams
+## S67. Teams
 
 `vibest run --team <name>` starts the session as a member of team `<name>` in this project. A name is lowercase letters,
 digits and `-`, starts with a letter, and has at most 32 characters; any other is refused before anything starts. A

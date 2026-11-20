@@ -206,7 +206,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 4
+export const CATALOG_VERSION = 5
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

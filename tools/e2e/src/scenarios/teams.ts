@@ -24,8 +24,8 @@ type Ordered = ReturnType<typeof orderedModel>
 const inboxFrom = (w: World, sender: string) =>
   row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send'", sender)?.n ?? 0
 
-const S66: Check = {
-  id: "S66",
+const S67: Check = {
+  id: "S67",
   title:
     "three members of one team list each other with vibest ls --team and one sends to another, which arrives from the real sender; another team, a non-member, a second session adding to the team, a member's own child and a send to an archived teammate are each refused or left out",
   run: async (w) => {
@@ -154,4 +154,4 @@ const S66: Check = {
   },
 }
 
-export default [S66]
+export default [S67]

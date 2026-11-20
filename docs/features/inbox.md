@@ -75,7 +75,7 @@ it as an `<vibest-agent-message>` naming the session by id, once, whichever way 
 ## S46. A session cannot send to a sibling
 
 `vibest send` from a session to another session of the same project is refused when that session is not the one that
-started it, not one it started, and not a member of its own team (S66). Nothing is queued.
+started it, not one it started, and not a member of its own team (S67). Nothing is queued.
 
 ## S47. A send stays inside its project
 
