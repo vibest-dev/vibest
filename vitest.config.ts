@@ -20,6 +20,8 @@ export default defineConfig({
       "packages/core/test/**/*.test.ts",
       "packages/plugin-harnesses/test/**/*.test.ts",
       "packages/plugin/test/**/*.test.ts",
+      "packages/builtins/test/**/*.test.ts",
+      "packages/plugins/*/test/**/*.test.ts",
       "tools/oxlint/**/*.test.mjs",
     ],
     fileParallelism: true,

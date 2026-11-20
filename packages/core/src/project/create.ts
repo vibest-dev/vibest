@@ -21,6 +21,12 @@ export interface ProjectFolder {
   readonly uncommitted: ReadonlyArray<string>
 }
 
+export interface PinnedFolder {
+  readonly name: string
+  readonly path: string
+  readonly commit: string
+}
+
 export interface CreatedProject {
   readonly directory: string
   readonly folders: ReadonlyArray<ProjectFolder>
@@ -248,7 +254,7 @@ export const projectRepositories = Effect.fn("Project.projectRepositories")(func
     const path = yield* fs.realPath(checkout)
 
     if (places.some((place) => place.path === path)) continue
-    places.push({ path, remote: yield* Git.Service.use((git) => git.originUrl(path)) })
+    places.push({ path, remote: yield* Git.Service.use((git) => git.remoteUrl(path)) })
   }
 
   return places
@@ -269,7 +275,7 @@ const removeWorktrees = (
   })
 
 export const createIsolatedWorktrees = Effect.fn("Project.createIsolatedWorktrees")(function* (
-  folders: ReadonlyArray<Pick<ProjectFolder, "name" | "path">>,
+  folders: ReadonlyArray<Pick<ProjectFolder, "name" | "path"> | PinnedFolder>,
   workspace: string,
 ) {
   const fs = yield* FileSystem.FileSystem
@@ -280,7 +286,7 @@ export const createIsolatedWorktrees = Effect.fn("Project.createIsolatedWorktree
     for (const folder of folders) {
       const worktree = path.join(workspace, folder.name)
       made.push({ repository: folder.path, worktree })
-      yield* addWorktree(folder.path, worktree)
+      yield* addWorktree(folder.path, worktree, "commit" in folder ? folder.commit : undefined)
       yield* copyIncluded(folder.path, worktree)
     }
   }).pipe(

@@ -18,7 +18,14 @@ const allowed = {
     "@vibest/builtins",
     "effect-herdr-sdk",
   ],
-  builtins: ["@vibest/plugin", "@vibest/plugin-harnesses", "@vibest/runtime-herdr", "@vibest/runtime-herdr-core"],
+  builtins: [
+    "@vibest/plugin",
+    "@vibest/plugin-harnesses",
+    "@vibest/plugin-report-reminder",
+    "@vibest/runtime-herdr",
+    "@vibest/runtime-herdr-core",
+  ],
+  "plugins/report-reminder": ["@vibest/plugin"],
   cli: [
     "@vibest/schema",
     "@vibest/protocol",
@@ -69,7 +76,7 @@ const specifierOf = (source) => {
 export const packageImports = {
   create(context) {
     const file = context.filename.replaceAll("\\", "/")
-    const match = /^(.*\/(?:packages\/((?:integration\/)?[^/]+)|(tools\/verify)))\/src\//.exec(file)
+    const match = /^(.*\/(?:packages\/((?:integration\/|plugins\/)?[^/]+)|(tools\/verify)))\/src\//.exec(file)
 
     if (match === null) return {}
     const [, root, packageName, tool] = match

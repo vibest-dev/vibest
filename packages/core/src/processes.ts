@@ -1,4 +1,4 @@
-import { type Captured, capture } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { Context, Duration, Effect, Layer, Match, Predicate } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -47,7 +47,7 @@ export const lsofArgs = (uid: number) => ["+w", "-a", "-u", String(uid), "-d", "
 
 const PS_ARGS = ["-x", "-o", "pid=,ppid=,comm="]
 
-export type ProcessRun = Captured
+export type ProcessRun = Host.Captured
 
 export interface Interface {
   readonly liveness: (pid: number) => Effect.Effect<Liveness>
@@ -116,7 +116,9 @@ export const node = LayerNode.make({
 
 export const runFor = Effect.fn("Processes.runFor")(
   (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>
-    capture(command, args, { timeout, forceKillAfter: LSOF_KILL_AFTER }).pipe(Effect.orElseSucceed(() => undefined)),
+    Host.capture(command, args, { timeout, forceKillAfter: LSOF_KILL_AFTER }).pipe(
+      Effect.orElseSucceed(() => undefined),
+    ),
 )
 
 export type ProcessRow = { readonly pid: number; readonly ppid: number; readonly command: string }

@@ -1,5 +1,4 @@
 import type { Sender } from "@vibest/schema/event"
-import { shortId } from "@vibest/schema/id"
 import type { Detail, HarnessId } from "@vibest/schema/session"
 import { Option, Predicate, Schema } from "effect"
 
@@ -52,6 +51,19 @@ export const sessionEnvelope = (id: string, message: string) =>
 
 export const noticeEnvelope = (message: string) => envelope("vibest-message", [], ["message", message])
 
+export const envelopeFrom = (sender: Sender, message: string) => {
+  switch (sender.type) {
+    case "user":
+      return message
+    case "vibest":
+      return noticeEnvelope(message)
+    case "plugin":
+      return envelope("vibest-message", [["plugin", sender.plugin]], ["message", message])
+    case "agent":
+      return sessionEnvelope(sender.session, message)
+  }
+}
+
 const ENVELOPED =
   /^<(vibest-agent-message|vibest-message)>\n(?:<[a-z-]+>[^\n]*<\/[a-z-]+>\n)*<message>\n([\s\S]*)\n<\/message>\n<\/\1>$/
 
@@ -59,32 +71,15 @@ export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? 
 
 type Delivered = {
   readonly kind: string
-  readonly sender: string | null
-  readonly from: Sender | null
+  readonly sender: Sender
   readonly message: string
 }
 
-const shownSender = (row: Delivered): Detail["sender"] => {
-  if (row.kind === "notice") return "vibest"
-  const from = row.from ?? (row.sender === null ? undefined : { session: row.sender })
-
-  if (from === undefined) return "user"
-
-  if (from.agent === undefined)
-    return {
-      address: from.machine === undefined ? shortId(from.session) : `${from.machine}/${shortId(from.session)}`,
-    }
-  const agent = { agent: from.agent, title: from.title ?? "", session: from.session }
-
-  return from.machine === undefined ? agent : { ...agent, machine: from.machine }
-}
-
 export const detailOf = (batch: ReadonlyArray<Delivered>): ReadonlyArray<Detail> =>
-  batch.map((row) => {
-    const sender = shownSender(row)
-
-    return { sender, message: sender === "user" ? row.message : unwrapped(row.message) }
-  })
+  batch.map((row) => ({
+    sender: row.sender,
+    message: row.sender.type === "user" ? row.message : unwrapped(row.message),
+  }))
 
 export type ObservedEnd = {
   readonly harness: HarnessId
@@ -93,6 +88,9 @@ export type ObservedEnd = {
   readonly reply: string
   readonly failure: string | undefined
   readonly limited: boolean
+  readonly resetAt?: number | undefined
+  readonly provider?: string | undefined
+  readonly windows?: ReadonlyArray<string> | undefined
   readonly conversation: string | undefined
   readonly needsReady: boolean
 }

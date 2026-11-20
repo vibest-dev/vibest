@@ -40,6 +40,12 @@ provider null meaning the harness's default provider and `default` the model it 
 passes the chosen `harness`, `provider` and `model` to `vibest` unchanged. With `provider`, only that provider's
 models are listed, and a harness that refuses the provider or lists none for it gives that as its `problem`.
 
+`Agents.List` (`open`, payload `{machine?}`): the agent definitions sessions can run as, `{agents, invalid}`. Each agent is
+`{id, description, plugin, harness?, provider?, model?, system}`: `plugin` is the id of the plugin that added it
+(`vibest.agent-files` for a file in `~/.vibest/agents`), the launch fields are what a start without them uses, and
+`system` is the full definition prompt. `invalid` lists `{id, source, error, plugin}` for each definition a plugin
+could not register; `source` is where it came from, such as the file path.
+
 `Integration.Guard` (`open`) `{harness, agent, input}`: a harness's pre-tool hook input, judged by the guard rules of
 `agent` in vibestd. `answer` is what the harness's hook prints (its own JSON shape), or for a harness without one the
 reason the call is refused; no `answer` means the call is allowed.

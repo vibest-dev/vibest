@@ -1,13 +1,15 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Plugins } from "@vibest/core/plugin"
 import { machinesListing, Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { Caller, CAPABILITIES, type DaemonIdentity, Forbidden, WrongInstance } from "@vibest/protocol/rpc"
+import { CAPABILITIES } from "@vibest/protocol/protocol"
+import { Caller, type DaemonIdentity, Forbidden, WrongInstance } from "@vibest/protocol/rpc"
 import { shellQuote } from "@vibest/schema/layout"
 import { LaunchFailed } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
@@ -35,6 +37,7 @@ export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const plugins = yield* Plugins.Service
+  const concurrency = yield* Concurrency.Service
   const subscriptions = yield* Subscriptions.Service
   const identity = yield* Identity
   const updateStatus = yield* UpdateCheck.Service
@@ -69,6 +72,8 @@ export const make = Effect.gen(function* () {
       ),
 
     Plugins: () => plugins.list,
+
+    Concurrency: () => Effect.map(concurrency.rules, (rules) => ({ ...rules, max: rules.max ?? null })),
 
     "Runtimes.Doctor": ({ harnesses }) =>
       Effect.flatMap(runtimes.statuses, (rows) =>
@@ -136,6 +141,7 @@ export const make = Effect.gen(function* () {
 export const layer = group([
   "Ping",
   "Plugins",
+  "Concurrency",
   "Runtimes.Doctor",
   "Subscriptions",
   "Daemon.Stop",

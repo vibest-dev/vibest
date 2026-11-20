@@ -45,4 +45,4 @@ Nothing to install. The plugin ships inside `@vibest/cli` (`harnesses/cursor`, w
 `src/plugin.ts`), and vibest starts each Cursor session with `cursor-agent --plugin-dir <that directory>`: loaded for that
 session only, beside your own hooks and plugins. Your `~/.cursor` is not changed.
 
-The hooks run the vibest that started the session (`VIBEST_COMMAND`).
+The hooks run the vibest that started the session (`"$VIBEST_CLI"`).

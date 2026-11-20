@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { exitedAt, executionStateOf, harnessIdOf } from "@vibest/core/database/db-rows"
+import { exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
@@ -9,7 +9,7 @@ import { SqlClient } from "effect/sql"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { replyOf, eventsOf, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
-import { idleSession, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
+import { idleSession, spawnWorking, test } from "./lib/sessions-helpers.ts"
 
 const observedEnd = (harness: string, payload: Schema.JsonObject) =>
   Effect.gen(function* () {
@@ -122,29 +122,6 @@ describe("observed execution end", () => {
 
       assert.isDefined(handed)
       assert.strictEqual(row!.execution, handed)
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
-    "a usage limit is not moved when an execution the user typed opened while check looked at the runtime",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeEnd(id, "pi", { text: "", error: "rate_limit" })
-      yield* herdr.endExecution(id)
-      const held = yield* herdr.hold("state", id)
-      const checking = yield* Effect.forkChild(sessions.check(id))
-      yield* held.reached
-      yield* sessions.userPrompt(id, "typed during the check")
-      const typed = yield* db.session.openExecution(id)
-      yield* held.release()
-      yield* Fiber.join(checking)
-      assert.isDefined(typed)
-      assert.strictEqual(yield* db.session.openExecution(id), typed)
-      assert.strictEqual(harnessIdOf((yield* db.session.getSession(id))!), "pi")
-      assert.lengthOf(yield* herdr.callsTo("open"), 1)
-      assert.isEmpty(yield* sqlNotices(id))
     }),
     { hooked: ["pi"] },
   )

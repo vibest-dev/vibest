@@ -20,8 +20,19 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
+import { localSessionOf, senderColumns, senderKey } from "../database/db-rows.ts"
 
 const sessionIdOf = (fact: Fact) => fact.sessionId!
+
+export const countSent = (
+  sql: SqlClient.SqlClient,
+  session: string | undefined,
+  kind: string,
+  execution: number | undefined,
+) =>
+  session === undefined || kind !== "send" || execution === undefined
+    ? Effect.void
+    : sql`UPDATE execution SET sent = sent + 1 WHERE session_id = ${session} AND id = ${execution}`
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -57,7 +68,7 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(SessionEnded, (fact) =>
       Effect.andThen(
         sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
-        sql`DELETE FROM outbox WHERE session_id = ${sessionIdOf(fact)}`,
+        sql`DELETE FROM outbox WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
       ),
     )
 
@@ -169,9 +180,15 @@ export const layer = Layer.effectDiscard(
       active((fact) => {
         const { data } = fact
 
-        return sql`INSERT INTO inbox (session_id, id, sender_session_id, from_session, from_agent, from_title, from_machine, kind, content, request, peer_item, status)
-          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${data.sender ?? null}, ${data.from?.session ?? null}, ${data.from?.agent ?? null}, ${data.from?.title ?? null}, ${data.from?.machine ?? null}, ${data.kind}, ${data.content},
-            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`
+        const sender = senderColumns(data.sender)
+
+        return sql`INSERT INTO inbox (session_id, id, sender_type, sender_session_id, sender_agent, sender_title,
+            sender_machine, sender_plugin, sender_key, about_session_id, kind, content, request, peer_item, status)
+          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
+            ${sender.machine}, ${sender.plugin}, ${senderKey(data.sender)}, ${data.about ?? null}, ${data.kind}, ${data.content},
+            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`.pipe(
+          Effect.andThen(countSent(sql, localSessionOf(data.sender), data.kind, data.execution)),
+        )
       }),
     )
     yield* bus.project(

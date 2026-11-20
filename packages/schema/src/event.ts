@@ -75,7 +75,6 @@ export const ProcessConversation = fact("process.conversation", "session", { pro
 
 export const ProcessEndReason = Schema.Literals([
   "exited",
-  "limited",
   "restart",
   "move",
   "archived",
@@ -95,10 +94,14 @@ export const ExecutionStarted = fact("execution.started", "session", {
 export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
 
+export type ExecutionOutcome = typeof ExecutionOutcome.Type
+
 export const ExecutionEnded = fact("execution.ended", "session", {
   execution: Seq,
   outcome: ExecutionOutcome,
-  failure: optional(Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")) })),
+  failure: optional(
+    Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")), resetAt: optional(Schema.Number) }),
+  ),
   conversation: optional(Text),
   reply: optional(Schema.String),
 })
@@ -107,24 +110,40 @@ export const InboxKind = Schema.Literals(["task", "send", "notice"])
 
 export type InboxKind = typeof InboxKind.Type
 
-export const Sender = Schema.Struct({
+export const AgentFrom = Schema.Struct({
   session: Schema.String,
   agent: optional(Schema.String),
   title: optional(Schema.String),
   machine: optional(Schema.String),
 })
 
+export type AgentFrom = typeof AgentFrom.Type
+
+export const AgentSender = Schema.Struct({ type: Schema.Literal("agent"), ...AgentFrom.fields })
+
+export type AgentSender = typeof AgentSender.Type
+
+export const PluginSender = Schema.Struct({ type: Schema.Literal("plugin"), plugin: Text })
+
+export const Sender = Schema.Union([
+  AgentSender,
+  PluginSender,
+  Schema.Struct({ type: Schema.Literal("vibest") }),
+  Schema.Struct({ type: Schema.Literal("user") }),
+])
+
 export type Sender = typeof Sender.Type
 
 export const InboxQueued = fact("inbox.queued", "session", {
   kind: InboxKind,
   recipient: optional(Text),
-  sender: optional(Text),
-  from: optional(Sender),
+  sender: Sender,
+  about: optional(Text),
   content: Schema.String,
   status: Schema.Literals(["pending", "delivered", "dropped"]),
   request: optional(Text),
   peerItem: optional(Text),
+  execution: optional(Seq),
 })
 
 export const InboxMoved = fact("inbox.moved", "session", {
@@ -146,7 +165,8 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
-  from: optional(Sender),
+  from: optional(AgentFrom),
+  execution: optional(Seq),
 })
 
 export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
@@ -185,7 +205,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 2
+export const CATALOG_VERSION = 4
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

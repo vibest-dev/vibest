@@ -1,5 +1,8 @@
 # @vibest/plugin
 
+**Experimental.** This API may change in any release, without aliases or a deprecation period, until vibest declares it
+stable.
+
 The authoring API for vibest plugins. vibestd provides this module and `effect` to a plugin when it loads it, so a
 plugin imports both normally and bundles neither.
 
@@ -36,20 +39,24 @@ export default Plugin.define({
 })
 ```
 
-Drop the file into `$VIBEST_HOME/plugins/`, or put it in a folder (`index.ts`, or a `package.json` with `exports`) and add the folder to `plugins` in `vibest.json`. `context.options` holds the
+Drop the file into `$VIBEST_HOME/plugins/`, or add the file or a folder (`index.ts`, or a `package.json` with `exports`) to `plugins` in `vibest.json`. `context.options` holds the
 options its entry gives (`{ "package": "./my-plugin", "options": { … } }`); they reload live. `vibest plugins`
 lists every plugin, builtins first, with its status and counters.
 
 ## Context
 
-| Member                | What it does                                                                                                                                                                                                                                       |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `options`             | the plugin's options                                                                                                                                                                                                                               |
-| `agent.hook`          | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`; read `files`, the absolute paths of the files attached with `vibest run --file`) and `fail` (assign `move`) |
-| `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                                                                                                 |
-| `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                                                                                                 |
-| `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                                                                                                               |
-| `event.subscribe`     | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                                                                                                             |
+| Member                | What it does                                                                                                                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options`             | the plugin's options                                                                                                                                                                                                                                                      |
+| `agent.hook`          | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`; read `files`, the absolute paths of the files attached with `vibest run --file`) and `fail` (assign `move`)                        |
+| `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                                                                                                                        |
+| `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                                                                                                                        |
+| `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                                                                                                                                      |
+| `session.list`        | the running sessions as `PluginSession`: `id`, `title`, `parentId`, `status`, and `latest` (the latest ended execution: `execution`, `outcome`, `sent`, the messages the session sent during it, and `endedAt`)                                                           |
+| `session.get`         | one running session by id, or `undefined`                                                                                                                                                                                                                                 |
+| `session.sentIn`      | `(id, execution)`: how many messages the session sent during that execution                                                                                                                                                                                               |
+| `session.send`        | `{ to, message, request? }`: queue a message from this plugin (shown "Message from Vibest · <plugin id>"); one to a session that ended goes to the nearest running session above it on this machine; a repeat of `request` queues nothing; fails with `SessionSendFailed` |
+| `event.subscribe`     | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                                                                                                                                    |
 
 **Hooks** run in plugin order; each callback gets the event, changes it by assigning to its fields, and has 5 seconds. A callback that times out or fails changes nothing. **Transforms** take a synchronous
 editor (`add`; the harness editor also has `update`) and apply in registration order, so a later plugin sees and may

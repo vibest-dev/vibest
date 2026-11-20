@@ -233,6 +233,9 @@ importers:
       '@vibest/plugin-harnesses':
         specifier: workspace:*
         version: link:../plugin-harnesses
+      '@vibest/plugin-report-reminder':
+        specifier: workspace:*
+        version: link:../plugins/report-reminder
       '@vibest/runtime-herdr':
         specifier: workspace:*
         version: link:../runtime-herdr
@@ -479,6 +482,15 @@ importers:
       '@vibest/schema':
         specifier: workspace:*
         version: link:../schema
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
+  packages/plugins/report-reminder:
+    dependencies:
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../../plugin
       effect:
         specifier: 4.0.2
         version: 4.0.2

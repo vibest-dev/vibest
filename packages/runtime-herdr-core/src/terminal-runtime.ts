@@ -1,8 +1,25 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
-import { reconnectSchedule, typedLine, Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { launchLine, typedLine } from "@vibest/plugin/effect/launch"
+import { Host } from "@vibest/plugin/host"
 import { ID, shortId } from "@vibest/schema/id"
-import { Clock, Deferred, Duration, Effect, Predicate, PubSub, type Scope, Schedule, Schema, Stream } from "effect"
+import {
+  Clock,
+  Config,
+  Deferred,
+  Duration,
+  Effect,
+  type FileSystem,
+  Option,
+  type Path,
+  Predicate,
+  PubSub,
+  type Scope,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect"
 import { api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export type Terminal = VibestPlugin.Runtime.Terminal
@@ -62,11 +79,23 @@ export const PRESENT_PROJECT_ID = "projectId"
 
 const INTERACTIVE_SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
 
-export const atShell = (foreground: api.Foreground | null | undefined): boolean => {
+export const atShell = (foreground: Pick<api.Foreground, "name" | "argv"> | null | undefined): boolean => {
   if (foreground === null || foreground === undefined) return false
   const name = foreground.name.replace(/^-/, "").replace(/^.*\//, "")
 
   return INTERACTIVE_SHELLS.has(name) && foreground.argv.slice(1).every((arg) => arg.startsWith("-"))
+}
+
+const POSIX_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
+
+export const inLoginShell = (shell: string, argv: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const name = shell.replace(/^.*\//, "")
+
+  if (POSIX_SHELLS.has(name)) return [shell, "-lic", '"$@"; exec "$0" -li', shell, ...argv]
+
+  if (name === "fish") return [shell, "-lic", "command $argv[2..]; exec $argv[1] -li", shell, ...argv]
+
+  return ["/bin/sh", "-c", '"$@"; exec "$0" -i', shell, ...argv]
 }
 
 const slug = (text: string) =>
@@ -132,7 +161,7 @@ const failWith = <A, R>(effect: Effect.Effect<A, HcFailure, R>) => effect.pipe(E
 const SHELL_WAIT = Duration.seconds(30)
 export const FOLLOW_ATTEMPTS = 8
 
-const FOLLOW_BACKOFF = reconnectSchedule({ first: Duration.millis(500), max: Duration.seconds(30) })
+const FOLLOW_BACKOFF = Host.reconnectSchedule({ first: Duration.millis(500), max: Duration.seconds(30) })
 
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 
@@ -159,6 +188,9 @@ export const make = (deps: {
     const cores = new Map<string, Core>()
     const home = yield* connect(deps.socket)
 
+    const shell =
+      Option.getOrElse(yield* Config.option(Config.String("SHELL")).pipe(Effect.orDie), () => "") || "/bin/sh"
+
     const wake = (core: Core, address: string) =>
       Effect.forEach(core.waiting.get(address) ?? [], (waiter) => Deferred.succeed(waiter, undefined), {
         discard: true,
@@ -173,7 +205,8 @@ export const make = (deps: {
     }
 
     const track = (core: Core, t: api.Terminal) => {
-      if (t.state === "live" && t.foreground && !atShell(t.foreground)) core.busy.add(t.address)
+      if (t.state === "live" && !atShell(t.foreground ?? { name: t.argv[0] ?? "", argv: t.argv }))
+        core.busy.add(t.address)
     }
 
     const onNotice = (socket: string, core: Core, notice: Notice): Effect.Effect<void, HcFailure> => {
@@ -318,12 +351,19 @@ export const make = (deps: {
     const typeLine = (hc: HcClient, address: string, text: string) =>
       failWith(hc.call("terminal.send", { terminal: address, text })).pipe(Effect.asVoid)
 
-    const typed = (launch: VibestPlugin.Launch) =>
-      typedLine(launch).pipe(
+    const written = <A>(line: Effect.Effect<A, { readonly message: string }, FileSystem.FileSystem | Path.Path>) =>
+      line.pipe(
         Effect.mapError((e) => new RuntimeApi.RuntimeError({ code: "failed", message: e.message })),
         Effect.provide(NodeFileSystem.layer),
         Effect.provide(NodePath.layer),
       )
+
+    const typed = (launch: VibestPlugin.Launch) => written(typedLine(launch))
+
+    const argvOf = (launch: VibestPlugin.Launch) =>
+      launch.argv.length === 0
+        ? Effect.succeed([])
+        : written(launchLine(launch)).pipe(Effect.map((argv) => inLoginShell(shell, argv)))
 
     const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
@@ -333,11 +373,13 @@ export const make = (deps: {
         const hc = core.hc
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
+        const argv = yield* argvOf(input.launch)
         let attempt = 0
 
         const started = yield* failWith(
           Effect.suspend(() =>
             hc.call("terminal.run", {
+              argv: [...argv],
               name: terminalName(input, attempt++),
               cwd: input.cwd,
               env: { ...input.launch.env },
@@ -346,7 +388,6 @@ export const make = (deps: {
                 [LABEL.seen]: "0",
                 ...(project !== undefined && { [LABEL.project]: project }),
                 ...(session !== undefined && { [LABEL.session]: session }),
-                ...(input.launch.argv.length > 0 && { [LABEL.typed]: String(Date.now()) }),
               },
               keep: true,
               no_notify: true,
@@ -360,15 +401,7 @@ export const make = (deps: {
           ),
         )
 
-        const terminal: Terminal = { id: terminalId(socket, started.address) }
-
-        if (input.launch.argv.length > 0) {
-          yield* typeLine(hc, started.address, yield* typed(input.launch)).pipe(
-            Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
-          )
-        }
-
-        return terminal
+        return { id: terminalId(socket, started.address) } satisfies Terminal
       })
 
     const send: Runtime["send"] = (terminal, { text, keys }) =>

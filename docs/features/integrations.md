@@ -64,8 +64,10 @@ as blocked on herdr-core.
 
 ## I11. Another vibest first on PATH
 
-When another `vibest` comes first on PATH, the integrations still reach the vibest that started them: a Pi entry session
-reports ready, Pi and Claude subagents deliver their messages, an entry session restarts, and the other vibest never runs.
+When another `vibest` comes first on PATH, even when the pane's login shell puts it first again (as fnm does), the
+integrations still reach the vibest that started them: a Pi entry session reports ready, Pi and Claude subagents deliver
+their messages, an entry session restarts, and the other vibest never runs. A plain `vibest` an agent types reaches the
+same vibest: every session starts with `VIBEST_CLI` set to it and its directory first on PATH.
 
 ## I12. Cursor never waits on its own approval dialog
 

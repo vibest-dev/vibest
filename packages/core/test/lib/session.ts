@@ -19,7 +19,8 @@ import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { Archive, archiveOnIdle } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
-import { Spawn } from "@vibest/core/session/spawn"
+import { Sends } from "@vibest/core/session/sends"
+import { Summaries } from "@vibest/core/session/summaries"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
@@ -46,6 +47,7 @@ import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { ArchiveOnIdle, archiveOnIdlePlugin } from "../../../builtins/src/archive-on-idle.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
+import { Load } from "../../../server/src/machine/load.ts"
 import { Machines } from "../../../server/src/machine/machines.ts"
 import { services } from "../../../server/src/services.ts"
 import { UpdateCheck } from "../../../server/src/update-check.ts"
@@ -118,7 +120,7 @@ export const pluginsHost = (
 ) => {
   const candidates: ReadonlyArray<Candidate> = [
     { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
-    { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
+    { source: "test:vibest.runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
   ]
 
@@ -135,8 +137,8 @@ export const pluginsHost = (
         const loaded = [
           ...candidates,
           {
-            source: "builtin:archive-on-idle",
-            revision: "archive-on-idle",
+            source: "builtin:vibest.archive-on-idle",
+            revision: "vibest.archive-on-idle",
             options: {},
             plugin: archivePlugin,
           },
@@ -162,8 +164,10 @@ export const pluginsHost = (
       Harnesses.node,
       Hooks.node,
       Runtimes.node,
+      Sends.node,
       SessionLive.node,
       Subscriptions.node,
+      Summaries.node,
       platform,
       home,
     ],
@@ -191,8 +195,6 @@ const noTransport: Machines.MachineTransport["Service"] = () =>
 const defaultSsh = Layer.succeed(RepositoryUrl.Service, { hostName: (alias) => Effect.succeed(alias) })
 
 const defaultTransport = Layer.succeed(Machines.MachineTransport, noTransport)
-
-const defaultSpawn = Spawn.configured({ maxSessions: undefined })
 
 const sessionsDecorated = (decorate: (sessions: Session.Interface, db: Db.Interface) => Session.Interface) =>
   Session.node.replace(
@@ -282,9 +284,16 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
       Plugins.node.replace(plugins),
-      Spawn.node.replace(defaultSpawn),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),
+      Load.hostSampleNode.replace(
+        Layer.succeed(Load.HostSample, {
+          read: Effect.succeed({
+            cpu: { count: 4, utilization: 0.25 },
+            memory: { total: 8_000_000_000, available: 4_000_000_000 },
+          }),
+        }),
+      ),
       Runtimes.hostEnvNode.replace(noHostEnv),
       Identity.node.replace(Layer.sync(Identity.Service, () => ({ id: randomId(), name: "test-host" }))),
       DaemonHandlers.identityNode.replace(Layer.succeed(DaemonHandlers.Identity, {})),
@@ -303,7 +312,6 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly hooked?: ReadonlyArray<string>
   readonly unusable?: ReadonlyArray<string>
   readonly models?: ReadonlyArray<string>
-  readonly maxSessions?: number
   readonly plugins?: ReadonlyArray<
     VibestPlugin.Plugin.Plugin | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Schema.JsonObject }
   >
@@ -362,7 +370,6 @@ export const sessionFrom = (options: TestOptions = {}) =>
       runtimeNode.replace(FakeRuntime.layer(options)),
       Harness.node.replace(harnessLayer(harnessStandIn(options))),
       Harnesses.node.replace(harnessesLayer(options.harnesses)),
-      Spawn.node.replace(Spawn.configured({ maxSessions: options.maxSessions })),
       ...(options.version === undefined
         ? []
         : [App.node.replace(Layer.succeed(App.Service, { version: options.version }))]),
@@ -407,7 +414,6 @@ export const restartSessions = Effect.gen(function* () {
     PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
     App.node.replace(Layer.succeed(App.Service, yield* App.Service)),
     PlatformNode.path.replace(Layer.succeed(Path.Path, yield* Path.Path)),
-    Spawn.node.replace(defaultSpawn),
   ]
 
   const fresh = yield* Layer.build(

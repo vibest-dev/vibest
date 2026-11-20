@@ -1,10 +1,10 @@
-import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued } from "@vibest/schema/event"
+import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued, type Sender } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
-import { type NewInboxRow, type SessionRow, harnessIdOf } from "./database/db-rows.ts"
+import { type NewInboxRow, type SessionRow, harnessIdOf, localSessionOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -34,7 +34,7 @@ export type Undelivered = ReadonlyArray<{
   readonly id: number
   readonly message: string
   readonly kind?: string
-  readonly sender?: string | null
+  readonly sender?: Sender
 }>
 
 export interface Interface {
@@ -127,7 +127,11 @@ export const layer = Layer.effect(
         .pipe(
           Effect.andThen(
             Effect.forEach(
-              [...Map.groupBy(rows, (r) => (r.kind === "send" ? (r.sender ?? null) : null))],
+              [
+                ...Map.groupBy(rows, (r) =>
+                  r.kind === "send" && r.sender !== undefined ? (localSessionOf(r.sender) ?? null) : null,
+                ),
+              ],
               ([sender, group]) => {
                 const message = `A message to ${sessionLabel(session)} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
 

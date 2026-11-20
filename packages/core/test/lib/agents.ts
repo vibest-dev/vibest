@@ -6,7 +6,7 @@ import { coordinator, general } from "../../../builtins/src/agent.ts"
 export const agentsLayer = Layer.effect(
   Agents.Service,
   Effect.tap(Agents.make, (agents) =>
-    agents.transform((editor) => {
+    agents.transformFor("test")((editor) => {
       editor.add(coordinator)
       editor.add(general)
     }),

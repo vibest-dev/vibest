@@ -27,7 +27,7 @@ const hcSession = Effect.gen(function* () {
 })
 
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
-  id: "runtime-herdr-core",
+  id: "vibest.runtime-herdr-core",
   effect: (context) =>
     Effect.gen(function* () {
       const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)

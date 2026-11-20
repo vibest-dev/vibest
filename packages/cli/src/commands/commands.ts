@@ -39,6 +39,12 @@ export const entryFlags = {
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
   model: Flag.String("model").pipe(Flag.optional),
+  agent: Flag.String("agent").pipe(
+    Flag.withDescription(
+      "The agent definition a new entry conversation runs as (default coordinator; see vibest agent list). A conversation keeps the agent it started with: naming another needs --new",
+    ),
+    Flag.optional,
+  ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
     Flag.withDescription("Outside herdr: do not attach to the session"),
@@ -122,6 +128,12 @@ const run = Spec.make("run", {
       ),
       Flag.optional,
     ),
+    project: Flag.String("project").pipe(
+      Flag.withDescription(
+        "With --machine: the project of that machine to run in, by its id (or a unique prefix of at least 8 characters) or its folder name; it must still hold this project's repositories at these commits. Needed when that machine has several such projects",
+      ),
+      Flag.optional,
+    ),
     agent: Flag.String("agent").pipe(
       Flag.withDescription(
         "The agent definition the session runs as: its system prompt and tool rules. The registered ids are listed when one is unknown",
@@ -146,7 +158,7 @@ const send = Spec.make("send", {
 
 const status = Spec.make("status", {
   description:
-    "vibest's status: this client, vibestd (running or not; never started by this) and the terminal runtimes it has",
+    "vibest's status: this client, vibestd (running or not; never started by this), this machine's load when vibestd is running, and the terminal runtimes it has",
 })
 
 const result = Spec.make("result", {
@@ -248,6 +260,28 @@ const harness = Spec.make("harness", {
   ],
 })
 
+const agentMachine = Flag.String("machine").pipe(
+  Flag.withDescription("Ask another machine, whose own definitions its sessions run as"),
+  Flag.optional,
+)
+
+const agent = Spec.make("agent", {
+  description:
+    "The agent definitions sessions run as: the builtin ones, one per file in ~/.vibest/agents (<id>.md) and those plugins add",
+  commands: [
+    Spec.make("list", {
+      alias: "ls",
+      description:
+        "Each agent definition with its description, the plugin that added it and the harness, provider and model it starts on when a run names none; invalid lists each definition file that failed to load and why",
+      params: { machine: agentMachine },
+    }),
+    Spec.make("show", {
+      description: "One agent definition with the full prompt its sessions get before their session facts",
+      params: { id: Argument.String("id"), machine: agentMachine },
+    }),
+  ],
+})
+
 const project = Spec.make("project", {
   description:
     "This repository's project folder (VIBEST_PROJECT_DIR for agents): preferences.md, docs/, memories/ and artifacts/, read and written with file tools",
@@ -262,6 +296,23 @@ const project = Spec.make("project", {
         from: Flag.String("from").pipe(
           Flag.withDescription("A git repository to copy in, as a folder named after it. Repeat for each repository"),
           Flag.atLeast(1),
+        ),
+      },
+    }),
+    Spec.make("clone", {
+      description:
+        "Clone a git repository (any URL: ssh or https, any host) and record it as a project, here or with --machine on another machine; it clones the default branch, and vibest run --machine still needs the exact commit there. The folder is --dir, or the repository name under cloneDirectory in vibest.json (default ~/code) of the machine that clones; a folder that is not empty is refused. Prints git's progress on stderr, then the project id and folder",
+      params: {
+        url: Argument.String("url"),
+        machine: Flag.String("machine").pipe(
+          Flag.withDescription("Clone on this machine (vibest machine ls) instead of here"),
+          Flag.optional,
+        ),
+        dir: Flag.String("dir").pipe(
+          Flag.withDescription(
+            "The folder to clone into; with --machine a relative folder is under that machine's cloneDirectory",
+          ),
+          Flag.optional,
         ),
       },
     }),
@@ -357,6 +408,26 @@ const connect = Spec.make("connect", {
     "Internal: what another machine's vibestd runs over ssh. Joins stdin and stdout to this machine's vibestd, starting it when it is not running",
 })
 
+const worktree = Spec.make("worktree", {
+  description: "Worktrees vibest made for projects on this machine",
+  commands: [
+    Spec.make("list", {
+      description:
+        "The worktrees vibest made, grouped by project, as JSON. Each has its path, and for every repository in it (one, or one folder each in a project of several) that repository's folder, its branch or detached commit, and its state computed now with git: dirty with the number of changed files, unsaved (commits on no branch, lost if the worktree is removed), or clean. Sessions whose recorded directory is that worktree are listed with their id, title, and whether they are live or archived. --project limits the list to one project. --machine asks another machine, which answers for its own projects",
+      params: {
+        project: Flag.String("project").pipe(
+          Flag.withDescription("Only this project: its id, or its folder (on --machine, a path on that machine)"),
+          Flag.optional,
+        ),
+        machine: Flag.String("machine").pipe(
+          Flag.withDescription("Ask another machine (vibest machine ls); it lists its own worktrees"),
+          Flag.optional,
+        ),
+      },
+    }),
+  ],
+})
+
 const machine = Spec.make("machine", {
   description: "Other machines this vibestd dials over ssh, to run agents there (vibest run --machine)",
   commands: [
@@ -371,7 +442,7 @@ const machine = Spec.make("machine", {
     }),
     Spec.make("ls", {
       description:
-        "The machines this vibestd dials, with their connection state, their runtimes and whether this machine shows their terminals (JSON)",
+        "The machines this vibestd dials, with their connection state, their runtimes, whether this machine shows their terminals and their load (cores, CPU in use, memory, working executions; loadError when it cannot be read) (JSON)",
     }),
     Spec.make("rm", {
       description:
@@ -398,7 +469,9 @@ export const Commands = Spec.make("vibest", {
     events,
     models,
     harness,
+    agent,
     project,
+    worktree,
     plugins,
     subscriptions,
     integration,

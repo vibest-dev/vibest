@@ -1,5 +1,6 @@
 import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Layout } from "@vibest/schema/layout"
+import type { AgentListing } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Console, Effect, Option } from "effect"
 import { RpcClient } from "effect/rpc"
@@ -11,6 +12,46 @@ import { Commands } from "../commands.ts"
 
 const MARKS = { ok: "✓", problem: "✗", note: "·" } as const
 
+export const plainHarnessProblem = (harness: string, problem: string) => {
+  const failed = `${harness} model discovery failed: `
+  const discovered = problem.startsWith(failed) ? problem.slice(failed.length) : problem
+  const reported = discovered.replace(/^\S+ gave no model list: /, "").replace(/^\S+ did not list its models: /, "")
+
+  return reported === "" ? problem : reported
+}
+
+export const doctorVerdict = (findings: ReadonlyArray<Finding>) => {
+  const problems = findings.filter((f) => f.mark === "problem")
+
+  if (problems.length === 0) return "Ready."
+
+  const word = `${problems.length} problem${problems.length === 1 ? "" : "s"}`
+
+  return problems.some((f) => f.fix) ? `${word}; run the fix lines above.` : `${word}.`
+}
+
+export const agentDefinitionFindings = <E, R>(
+  listed: boolean,
+  list: Effect.Effect<Option.Option<AgentListing>, E, R>,
+): Effect.Effect<ReadonlyArray<Finding>, E, R> =>
+  listed
+    ? Effect.map(list, (definitions) =>
+        Option.match(definitions, {
+          onNone: (): Array<Finding> => [{ mark: "note", text: "vibestd did not list its agent definitions" }],
+          onSome: (listing): Array<Finding> => [
+            { mark: "ok", text: listing.agents.map((agent) => agent.id).join(", ") },
+            ...listing.invalid.map((agent): Finding => ({
+              mark: "problem",
+              text: `${agent.id ?? agent.source}: ${agent.error}`,
+              fix: `fix or remove ${agent.source}`,
+            })),
+          ],
+        }),
+      )
+    : Effect.succeed([
+        { mark: "problem", text: "this vibestd is older and does not list agent definitions", fix: "vibest update" },
+      ])
+
 export default Runtime.handler(Commands.commands.doctor, () =>
   Effect.gen(function* () {
     const layout = yield* Layout
@@ -19,7 +60,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
 
     const installs = yield* extraVibests
 
-    if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
+    if (installs.length > 0) sections.push({ title: "Installs (vibest on PATH)", findings: installs })
 
     const daemon: Array<Finding> = []
     let ping = Option.getOrUndefined(yield* readPing(layout.socket))
@@ -56,7 +97,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         daemon.push({ mark: "note", text: `this vibest is ${VERSION}; to run it instead: vibest daemon restart` })
     }
 
-    sections.push({ title: "vibestd (the background service)", findings: daemon })
+    sections.push({ title: "Background service (vibestd)", findings: daemon })
 
     const harnessNote = (why: string): Finding => ({ mark: "note", text: `not checked: vibestd ${why}` })
     let usable: Array<string> = []
@@ -76,14 +117,18 @@ export default Runtime.handler(Commands.commands.doctor, () =>
 
       const harnesses: Array<Finding> = Option.isNone(listed)
         ? [harnessNote("did not answer")]
-        : listed.value.map((row) =>
-            row.problem
-              ? { mark: "problem" as const, text: `${row.harness.padEnd(width)}  ${row.problem}` }
-              : {
-                  mark: "ok" as const,
-                  text: `${row.harness.padEnd(width)}  ${row.models.length} models, default ${row.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
-                },
-          )
+        : listed.value.map((row) => {
+            if (row.problem === null)
+              return {
+                mark: "ok" as const,
+                text: `${row.harness.padEnd(width)}  ${row.models.length} models, default ${row.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
+              }
+
+            return {
+              mark: "problem" as const,
+              text: `${row.harness.padEnd(width)}  ${plainHarnessProblem(row.harness, row.problem)}`,
+            }
+          })
 
       if (Option.isSome(listed)) usable = listed.value.filter((row) => row.problem === null).map((row) => row.harness)
       sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
@@ -127,6 +172,30 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         sections.push({ title: `Runtime: ${r.name} (where agents run)`, findings })
       }
 
+      const concurrency = yield* ask((c) => c.Concurrency())
+
+      if (Option.isSome(concurrency)) {
+        const { max, problems, unsupported } = concurrency.value
+
+        const findings: Array<Finding> = [
+          ...(max === null
+            ? []
+            : [{ mark: "ok" as const, text: `at most ${max} live harness processes on this machine` }]),
+          ...problems.map((text): Finding => ({ mark: "problem", text, fix: `fix the rule in ${layout.config}` })),
+          ...unsupported.map((text): Finding => ({ mark: "note", text })),
+        ]
+
+        if (findings.length > 0) sections.push({ title: "Concurrency (vibest.json)", findings })
+      }
+
+      sections.push({
+        title: "Agent definitions",
+        findings: yield* agentDefinitionFindings(
+          ping?.capabilities?.agents === true,
+          ask((c) => c["Agents.List"]({})),
+        ),
+      })
+
       const loaded = yield* ask((c) => c.Plugins())
       sections.push({
         title: "Plugins",
@@ -168,11 +237,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
       }
     }
 
-    const problems = sections.flatMap((x) => x.findings).filter((f) => f.mark === "problem").length
-    lines.push(
-      "",
-      problems === 0 ? "Ready." : `${problems} problem${problems === 1 ? "" : "s"}; run the fix lines above.`,
-    )
+    lines.push("", doctorVerdict(sections.flatMap((section) => section.findings)))
     yield* Console.log(lines.join("\n"))
     yield* updateNotice
   }),

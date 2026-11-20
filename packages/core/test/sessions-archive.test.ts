@@ -2,7 +2,9 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { exitedAt, archived } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
+import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
+import { Exits } from "@vibest/core/session/exits"
 import { SessionLive } from "@vibest/core/session/live"
 import { Deferred, Effect, Fiber, FileSystem } from "effect"
 import { SqlClient } from "effect/sql"
@@ -17,6 +19,7 @@ import { lastSentBy, replyOf, settled, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, type TestOptions } from "./lib/session.ts"
 import {
   spawnInput,
+  spawnWorking,
   idleSession,
   sessionWorktree,
   test as plainTest,
@@ -109,7 +112,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     })
 
   const askEntry = (w: { readonly id: string; readonly entryId: string; readonly db: Db.Interface }) =>
-    w.db.inbox.insertSend(w.entryId, "a question", undefined, w.id)
+    w.db.inbox.insertSend(w.entryId, "a question", { type: "agent", session: w.id })
 
   const finishExecution = (
     w: { readonly id: string; readonly sessions: Session.Interface; readonly herdr: FakeRuntime["Service"] },
@@ -153,7 +156,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const rows = yield* sql<{
         kind: string
         status: string
-      }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE m.sender_session_id = ${w.id} ORDER BY m.id`.pipe(
+      }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE (m.sender_session_id = ${w.id} OR m.about_session_id = ${w.id}) ORDER BY m.id`.pipe(
         Effect.orDie,
       )
 
@@ -399,6 +402,55 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const out = (yield* b.sessions.remove(b.id))!
       assert.strictEqual(out.worktree, "removed")
       assert.isFalse(yield* fs.exists(worktree))
+    }),
+  )
+})
+
+describe.concurrent("an exited session", () => {
+  const exitedSession = Effect.gen(function* () {
+    const herdr = yield* FakeRuntime
+    const w = yield* idleSession(yield* makeRepository)
+    yield* herdr.updateAgent(w.id, (a) => ({ ...a, alive: false }))
+    yield* w.sessions.check(w.id)
+    yield* until(w.db.session.getSession(w.id), (row) => (row ? exitedAt(row) : null) !== null)
+    yield* settled
+
+    return { ...w, herdr }
+  })
+
+  plainTest(
+    "archive leaves its pane open, and says so, when another live session now runs at that terminal",
+    Effect.gen(function* () {
+      const w = yield* exitedSession
+      const address = { machine: "local", id: w.row.process!.terminal! }
+      yield* w.db.session.startEntry(
+        w.row.projectId,
+        "claude",
+        false,
+        { runtime: RUNTIME, address },
+        { agent: "general" },
+      )
+      const [other] = yield* w.db.session.processesAt(RUNTIME, address)
+      const out = (yield* w.sessions.remove(w.id))!
+      assert.deepStrictEqual(yield* w.herdr.callsTo("close"), [])
+      assert.include(out.reasons.join("\n"), `left open: session ${other!.sessionId} runs in it`)
+    }),
+  )
+
+  plainTest(
+    "its exit notice shows at most the last 10 lines of its terminal, each cut to 200 characters, 2000 in all",
+    Effect.gen(function* () {
+      const w = yield* spawnWorking(yield* makeRepository)
+      const runtime = yield* (yield* Runtimes.Service).route(RUNTIME)
+      const exits = yield* Exits.make
+      const screen = Array.from({ length: 40 }, (_, i) => `line${i}`.padEnd(65_536, "x")).join("\n")
+      yield* exits.settle({ ...runtime, read: () => Effect.succeed(screen) }, w.id, w.row.process!.id)
+      const [notice] = yield* sqlNotices(w.id)
+      const shown = notice!.slice(notice!.indexOf("Its terminal shows:"))
+      assert.include(shown, "line30")
+      assert.notInclude(shown, "line29")
+      assert.isAtMost(Math.max(...shown.split("\n").map((line) => line.length)), 200)
+      assert.isAtMost(shown.length, 2000 + "Its terminal shows:\n\n".length)
     }),
   )
 })

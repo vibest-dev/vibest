@@ -6,7 +6,8 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
 import { Runtimes } from "@vibest/core/runtimes"
-import { reconnectSchedule, type Runtime } from "@vibest/plugin/effect"
+import { type Runtime } from "@vibest/plugin/effect"
+import { Host } from "@vibest/plugin/host"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -59,10 +60,11 @@ export class MachineTransport extends Context.Service<
 export const machineTransportNode = LayerNode.unbound(MachineTransport)
 
 const ADD_TIMEOUT = Duration.seconds(30)
+const LOAD_TIMEOUT = Duration.seconds(3)
 export const RETRY_FIRST = Duration.millis(500)
 const RETRY_MAX = Duration.seconds(120)
 const RETRY_RESET = Duration.seconds(60)
-const RETRY = reconnectSchedule({ first: RETRY_FIRST, max: RETRY_MAX })
+const RETRY = Host.reconnectSchedule({ first: RETRY_FIRST, max: RETRY_MAX })
 const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 
@@ -160,6 +162,9 @@ interface Link {
   readonly call: <A, E>(
     effect: Effect.Effect<A, E | LineError>,
   ) => Effect.Effect<A, Exclude<E, LineError> | MachineUnavailable | MachineIncompatible>
+  readonly stream: <A, E>(
+    stream: Stream.Stream<A, E | LineError>,
+  ) => Stream.Stream<A, Exclude<E, LineError> | MachineUnavailable | MachineIncompatible>
   readonly exited: Effect.Effect<PipeExit>
   readonly capabilities: Readonly<Record<string, boolean>>
 }
@@ -315,27 +320,39 @@ const make = Effect.gen(function* () {
 
       const unavailable = (message: string) => Effect.fail(new MachineUnavailable({ machine: name, message }))
 
+      const recover =
+        (lost: (reason: string) => string) =>
+        (e: LineError): Effect.Effect<never, MachineUnavailable | MachineIncompatible> =>
+          Match.value(e).pipe(
+            Match.tagsExhaustive({
+              RpcClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              MachineDown: (e) => unavailable(lost(e.message)),
+              ProtocolRejected: (e) =>
+                Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` })),
+              DaemonStopping: (e) => unavailable(`${name}: ${e.message}`),
+              InvalidCaller: (e) => unavailable(`${name}: ${e.message}`),
+            }),
+          )
+
+      const gone = Effect.flatMap(ended, (reason) => Effect.fail(new MachineDown({ message: reason })))
+
       const line =
         (lost: (reason: string) => string) =>
         <A, E>(effect: Effect.Effect<A, E | LineError>) =>
-          Effect.catchIf(
-            Effect.raceFirst(
-              effect,
-              Effect.flatMap(ended, (reason) => Effect.fail(new MachineDown({ message: reason }))),
+          Effect.catchIf(Effect.raceFirst(effect, gone), isLineError, recover(lost))
+
+      const stream = <A, E>(s: Stream.Stream<A, E | LineError>) =>
+        s.pipe(
+          Stream.interruptWhen(gone),
+          Stream.catchIf(isLineError, (e) =>
+            Stream.fromEffect(
+              recover(
+                (reason) =>
+                  `lost the line to ${name} during the call (${reason}); it may have happened there; check, then retry`,
+              )(e),
             ),
-            isLineError,
-            (e): Effect.Effect<never, MachineUnavailable | MachineIncompatible> =>
-              Match.value(e).pipe(
-                Match.tagsExhaustive({
-                  RpcClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
-                  MachineDown: (e) => unavailable(lost(e.message)),
-                  ProtocolRejected: (e) =>
-                    Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` })),
-                  DaemonStopping: (e) => unavailable(`${name}: ${e.message}`),
-                  InvalidCaller: (e) => unavailable(`${name}: ${e.message}`),
-                }),
-              ),
-          )
+          ),
+        )
 
       const call = line(
         (reason) =>
@@ -363,7 +380,7 @@ const make = Effect.gen(function* () {
       return {
         hello,
         version: ping.version,
-        link: { client, call, exited: pipe.exited, capabilities: ping.capabilities ?? {} } satisfies Link,
+        link: { client, call, stream, exited: pipe.exited, capabilities: ping.capabilities ?? {} } satisfies Link,
       }
     })
 
@@ -649,6 +666,37 @@ const make = Effect.gen(function* () {
       for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
 
       return { notes }
+    }),
+
+    reading: Effect.fn("Machines.reading")(function* (name: string) {
+      const row = yield* db.remote.machineNamed(name)
+
+      if (row === undefined)
+        return yield* new UnknownMachine({
+          machine: name,
+          machines: (yield* db.remote.machines).map((known) => known.name),
+        })
+      const entry = entries.get(name)
+      const link = entry?.state === "connected" ? entry.link : undefined
+
+      if (link === undefined) return yield* unavailable(name, entry)
+
+      if (link.capabilities.load !== true)
+        return yield* new MachineIncompatible({
+          machine: name,
+          message: `${name} runs a vibestd that cannot read its load; run vibest update there`,
+        })
+
+      return yield* link.call(RpcClient.withHeaders(link.client["Machine.Load"]({}), peerHeaders(self.id))).pipe(
+        Effect.catchTag("NoSuchSession", (e) =>
+          Effect.fail(new MachineUnavailable({ machine: name, message: e.message })),
+        ),
+        Effect.timeoutOrElse({
+          duration: LOAD_TIMEOUT,
+          orElse: () =>
+            Effect.fail(new MachineUnavailable({ machine: name, message: `${name} did not answer in 3 s` })),
+        }),
+      )
     }),
 
     link: Effect.fn("Machines.link")(function* (name: string) {
