@@ -365,6 +365,13 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         ),
       ),
 
+      pendingRecipients: Effect.fn("Db.inbox.pendingRecipients")(() =>
+        sql<{ id: string }>`SELECT DISTINCT session_id AS id FROM inbox WHERE status = 'pending'`.pipe(
+          Effect.map((rows) => rows.map((row) => row.id)),
+          Effect.orDie,
+        ),
+      ),
+
       pendingInbox: Effect.fn("Db.inbox.pendingInbox")((sessionId: string) =>
         findSend(sessionId, "pending").pipe(Effect.orDie),
       ),

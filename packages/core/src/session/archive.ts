@@ -27,6 +27,7 @@ import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+import { Starts } from "./starts.ts"
 
 export * as Archive from "./archive.ts"
 
@@ -41,6 +42,7 @@ export const make = Effect.gen(function* () {
   const locks = yield* SessionLocks.Service
   const sessionLive = yield* SessionLive.Service
   const { notice, recount } = yield* Placement.Service
+  const starts = yield* Starts.Service
   const { interruptAgent, settleAfterInterrupt } = yield* Executions.Service
   const archives = yield* FiberSet.make()
   const { locked } = locks
@@ -148,6 +150,7 @@ export const make = Effect.gen(function* () {
       const { already } = yield* sessionLive.stop(id)
 
       if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
+      yield* starts.cancel(id)
       const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(release(id))))!
 
       return out
@@ -275,6 +278,7 @@ export const node = LayerNode.make({
     Executions.node,
     Inbox.node,
     Placement.node,
+    Starts.node,
     Processes.node,
     Runtimes.node,
     SessionLive.node,

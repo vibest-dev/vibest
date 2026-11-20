@@ -716,8 +716,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       liveProcesses: Effect.fn("Db.session.liveProcesses")(() =>
-        sql<{ id: string }>`SELECT s.id FROM session s JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-          WHERE s.ended_at IS NULL AND p.ended_at IS NULL AND p.placed_at IS NOT NULL`.pipe(
+        sql<{ id: string }>`SELECT session_id AS id FROM process WHERE ended_at IS NULL AND placed_at IS NOT NULL`.pipe(
           Effect.map((rows) => rows.map((row) => row.id)),
           Effect.orDie,
         ),

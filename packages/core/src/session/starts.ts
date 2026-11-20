@@ -1,5 +1,5 @@
 import { ProcessEnded, SessionEnded } from "@vibest/schema/event"
-import { Context, Deferred, Effect, Layer, Semaphore, Stream } from "effect"
+import { Context, Data, Deferred, Effect, Layer, Semaphore, Stream } from "effect"
 
 import { Bus } from "../bus.ts"
 import { Concurrency } from "../concurrency.ts"
@@ -9,58 +9,54 @@ import * as Reactor from "../reactor.ts"
 
 export * as Starts from "./starts.ts"
 
+export class StartCancelled extends Data.TaggedError("StartCancelled")<{ readonly key: string }> {}
+
 interface Waiting {
   readonly key: string
-  readonly admit: Deferred.Deferred<void>
+  readonly replaces: ReadonlyArray<string>
+  readonly admit: Deferred.Deferred<boolean>
 }
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const concurrency = yield* Concurrency.Service
   const reactor = yield* Reactor.make
-  const scope = yield* Effect.scope
   const lock = yield* Semaphore.make(1)
-  const starting: Array<string> = []
+  const starting = new Set<string>()
   const queue: Array<Waiting> = []
-  let unnamed = 0
 
-  const room = Effect.gen(function* () {
-    const limit = yield* concurrency.limit
+  const room = (replaces: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const limit = yield* concurrency.limit
 
-    if (limit === undefined) return true
+      if (limit === undefined) return true
+      const live = (yield* db.session.liveProcesses()).filter((id) => !replaces.includes(id))
 
-    return new Set([...(yield* db.session.liveProcesses()), ...starting]).size < limit
-  })
+      return new Set([...live, ...starting]).size < limit
+    })
 
   const admitWaiting = lock.withPermits(1)(
     Effect.gen(function* () {
-      while (queue.length > 0 && (yield* room)) {
+      while (queue.length > 0 && (yield* room(queue[0]!.replaces))) {
         const next = queue.shift()!
-        starting.push(next.key)
-        yield* Deferred.succeed(next.admit, undefined)
+        starting.add(next.key)
+        yield* Deferred.succeed(next.admit, true)
       }
     }),
   )
 
-  const release = (key: string) =>
-    Effect.sync(() => {
-      const at = starting.indexOf(key)
+  const release = (key: string) => Effect.sync(() => starting.delete(key)).pipe(Effect.andThen(admitWaiting))
 
-      if (at >= 0) starting.splice(at, 1)
-    }).pipe(Effect.andThen(admitWaiting))
-
-  const enter = (key: string) =>
+  const enter = (key: string, replaces: ReadonlyArray<string>) =>
     lock.withPermits(1)(
       Effect.gen(function* () {
-        if (starting.includes(key)) return "joined" as const
+        if (queue.length === 0 && (yield* room(replaces))) {
+          starting.add(key)
 
-        if (queue.length === 0 && (yield* room)) {
-          starting.push(key)
-
-          return "admitted" as const
+          return undefined
         }
 
-        const waiting = { key, admit: yield* Deferred.make<void>() }
+        const waiting = { key, replaces, admit: yield* Deferred.make<boolean>() }
         queue.push(waiting)
 
         return waiting
@@ -68,41 +64,43 @@ export const make = Effect.gen(function* () {
     )
 
   const leave = (waiting: Waiting) =>
-    Effect.sync(() => {
-      const at = queue.indexOf(waiting)
+    lock
+      .withPermits(1)(
+        Effect.sync(() => {
+          const at = queue.indexOf(waiting)
 
-      if (at >= 0) queue.splice(at, 1)
-    })
-
-  const run = <A, E, R>(
-    key: string | undefined,
-    start: Effect.Effect<A, E, R>,
-    onWait: Effect.Effect<void> = Effect.void,
-  ) =>
-    Effect.suspend(() => {
-      const named = key ?? `start ${++unnamed}`
-
-      return Effect.flatMap(enter(named), (entered) =>
-        entered === "joined" || entered === "admitted"
-          ? start
-          : onWait.pipe(
-              Effect.andThen(Deferred.await(entered.admit)),
-              Effect.onInterrupt(() => leave(entered)),
-              Effect.andThen(start),
-            ),
-      ).pipe(Effect.ensuring(release(named)))
-    })
-
-  const startOrQueue = <E>(key: string, now: Effect.Effect<void, E>, later: Effect.Effect<void>) =>
-    Effect.flatMap(enter(key), (entered) => {
-      if (entered === "joined") return now
-
-      if (entered === "admitted") return now.pipe(Effect.ensuring(release(key)))
-
-      return Effect.asVoid(
-        Effect.forkIn(Deferred.await(entered.admit).pipe(Effect.andThen(later), Effect.ensuring(release(key))), scope),
+          if (at >= 0) queue.splice(at, 1)
+        }),
       )
-    })
+      .pipe(Effect.andThen(release(waiting.key)))
+
+  const gate = <A, E, R>(key: string, replaces: ReadonlyArray<string>, start: Effect.Effect<A, E, R>) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const waiting = yield* enter(key, replaces)
+
+        if (waiting !== undefined) {
+          const admitted = yield* Effect.interruptible(Deferred.await(waiting.admit)).pipe(
+            Effect.onInterrupt(() => leave(waiting)),
+          )
+
+          if (!admitted) return yield* new StartCancelled({ key })
+        }
+
+        return yield* restore(start).pipe(Effect.ensuring(release(key)))
+      }),
+    )
+
+  const cancel = (key: string) =>
+    lock.withPermits(1)(
+      Effect.gen(function* () {
+        const at = queue.findIndex((waiting) => waiting.key === key)
+
+        if (at < 0) return
+        const [waiting] = queue.splice(at, 1)
+        yield* Deferred.succeed(waiting!.admit, false)
+      }),
+    )
 
   yield* reactor.on([ProcessEnded, SessionEnded], () => admitWaiting)
   yield* concurrency.limits.pipe(
@@ -111,9 +109,10 @@ export const make = Effect.gen(function* () {
   )
 
   return {
-    run,
-    startOrQueue,
+    gate,
+    cancel,
     waiting: Effect.sync(() => queue.map((waiting) => waiting.key)),
+    isWaiting: (key: string) => Effect.sync(() => queue.some((waiting) => waiting.key === key)),
   }
 })
 

@@ -392,14 +392,17 @@ How these modules keep the rules:
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
   runs twice. A refused text undoes the execution unless the integration wrote a result anyway; a broken connection is not a refusal (the text may have arrived), so the execution stays.
 - A concurrency limit (`concurrency.ts`, fed by the plugin supervisor's reads of `vibest.json`) caps live harness
-  processes on this machine: placed, not ended processes of live sessions, entry sessions included. Only starting a
-  process waits (`starts.ts`): a `vibest run` launch (the session and its task are recorded, the harness is not
-  launched yet), a relaunch of an exited session for a send, and a new entry session. A start is admitted when the live
-  processes and the starts in flight are below the limit and no earlier start waits; otherwise it waits in an in-memory
-  queue, first come first served, which advances when a process ends (`process.ended`, `session.ended`) or the limit
-  changes. A start holds its place until it returns, so a failed start frees it and a start whose harness never becomes
-  ready holds only its process place. A running session takes messages, pushed or pulled, without any check. The
-  queue is not stored: a `vibest run` still waiting when vibestd stops is reported as never finished starting.
+  processes on this machine. Every harness process start passes one gate (`starts.ts`): `Placement.openTerminal`
+  for a session's own terminal (a `vibest run` launch, a relaunch of an exited session for a send) and the entry
+  session's process start in `entry.ts` (opening, reopening or `--new`). The count is read from the process rows
+  (placed and not ended, whatever the session's state) plus the starts in flight, so a move, an archive whose terminal
+  did not close or a runtime reset cannot drift it; a start that replaces a process (an entry session's next process)
+  does not count the one it replaces. A start that finds no room waits in an in-memory queue, first come first served,
+  holding its session's lock; the queue advances when a process ends (`process.ended`, `session.ended`) or the
+  limit changes. A start holds its place until it returns, so a failed start frees it. Archiving a waiting session
+  takes it out of the queue at once; reconcile skips a session waiting to start. A running session takes messages
+  without any check. The queue is not stored: a `vibest run` still waiting when vibestd stops is reported as never
+  finished starting, and a send still waiting is relaunched by the next vibestd at startup.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the

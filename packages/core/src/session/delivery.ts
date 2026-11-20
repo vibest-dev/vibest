@@ -36,7 +36,6 @@ import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
 import { Sends } from "./sends.ts"
-import { Starts } from "./starts.ts"
 
 export * as Delivery from "./delivery.ts"
 
@@ -54,7 +53,6 @@ export const make = Effect.gen(function* () {
   const exits = yield* Exits.Service
   const { notice, resume, taskInput } = yield* Placement.Service
   const { send, deliverTo, admit } = yield* Sends.Service
-  const starts = yield* Starts.Service
   const reactor = yield* Reactor.make
   const { locked } = locks
   const { undelivered } = inbox
@@ -167,9 +165,6 @@ export const make = Effect.gen(function* () {
         ),
       )
 
-  const redeliver = (id: string): Effect.Effect<void> =>
-    Effect.suspend(() => deliverWoken(id, { rows: new Set(), ended: true }))
-
   const deliver = Effect.fn("Delivery.deliver")(function* (id: string) {
     const session = yield* getRow(id)
 
@@ -201,11 +196,7 @@ export const make = Effect.gen(function* () {
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
         })
 
-      return yield* starts.startOrQueue(
-        id,
-        deliverQueued(h, session, terminal, (text, onHandover) => resume(h, session, { text, onHandover })),
-        redeliver(id),
-      )
+      return yield* deliverQueued(h, session, terminal, (text, onHandover) => resume(h, session, { text, onHandover }))
     }
 
     const fresh = (yield* db.session.getSession(id)) ?? session
@@ -220,6 +211,7 @@ export const make = Effect.gen(function* () {
         Option.exists(
           (e) =>
             Predicate.isTagged(e, "RuntimeUnreachable") ||
+            Predicate.isTagged(e, "StartCancelled") ||
             (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
         ),
       )
@@ -336,6 +328,13 @@ export const make = Effect.gen(function* () {
       `A message to ${label} was not delivered: vibestd stopped while handing it over; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
+  for (const id of yield* db.inbox.pendingRecipients()) {
+    const session = yield* db.session.getSession(id)
+
+    if (session !== undefined && !archived(session) && exitedAt(session) !== null)
+      yield* wakes.wake(id, { rows: new Set(), ended: true })
+  }
+
   return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }
 })
 
@@ -360,6 +359,5 @@ export const node = LayerNode.make({
     SessionLive.node,
     SessionLocks.node,
     Sends.node,
-    Starts.node,
   ],
 })

@@ -46,8 +46,8 @@ machine, across all projects and the entry sessions included; without the key th
 applies without a restart. When the limit is reached, `vibest run` still records the session and its task and returns
 at once, but its harness starts only when a running harness on this machine ends (it exits, is stopped or archived) or
 the limit is raised or removed, first come first served; meanwhile `vibest ls` and `vibest result` show it with
-`"waitingToStart": true`. A send to a session whose harness has exited, and opening a new entry session, wait the
-same way. A running session takes messages as usual whatever the limit. `vibest doctor` shows the limit; a rule with
+`"waitingToStart": true`. A send to a session whose harness has exited, and opening or reopening an entry session,
+wait the same way; archiving a session that waits to start takes it out of the line. A running session takes messages as usual whatever the limit. `vibest doctor` shows the limit; a rule with
 `harness` or `agent` is reported as not supported yet and is not applied, and a rule with an unknown field or a
 `max` that is not a positive integer is reported as a problem and is not applied.
 
