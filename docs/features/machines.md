@@ -57,7 +57,8 @@ refused on A with `run vibest update on <B>`; B starts nothing.
 
 When B has several projects holding A's repositories, `vibest run --machine` is refused listing each with its id and
 folder and saying to pass `--project`. `vibest run --machine <B> --project <id, id prefix or folder name>` runs in
-that project, which must still hold exactly A's repositories at A's commits.
+that project, which must still hold exactly A's repositories at A's commits; another project's URL spelling does not
+affect it. A CLI whose local vibestd predates `--project` refuses it with `run vibest update` and B starts nothing.
 
 ## M14. Cloning a project
 

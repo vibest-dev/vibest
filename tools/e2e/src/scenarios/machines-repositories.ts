@@ -229,6 +229,43 @@ const checks: ReadonlyArray<Check> = [
       }
     },
   },
+  {
+    id: "M15",
+    title:
+      "a new vibest CLI whose local vibestd predates --project refuses run --machine --project with run vibest update, and B starts nothing",
+    run: async (w) => {
+      let s: Setup | undefined
+
+      try {
+        s = await setup(w)
+        await w.stopDaemon()
+        const older = await w.run(w.repository, [await olderBuild(BEFORE_REPOSITORY_LISTS), "daemon"], { env: s.aEnv })
+        expect(older.code === 0, `the older vibestd on A: ${older.stderr}`)
+        await s.okA(["machine", "add", "mb", "b-host"])
+
+        let r = { code: 0, stdout: "", stderr: "" }
+
+        await until(
+          "the older vibestd to see A's entry session running",
+          async () => {
+            r = await w.viaEntry(["run", "--machine", "mb", "--project", "elsewhere", "pi", "--", "say hello"], {
+              env: s!.aEnv,
+              asIs: true,
+            })
+
+            return !r.stderr.includes("is not running")
+          },
+          60_000,
+        )
+
+        expect(r.code !== 0 && r.stderr.includes("vibest update"), `run --project: ${r.code} ${r.stdout}${r.stderr}`)
+        const started = s.bDb<{ n: number }>("SELECT count(*) AS n FROM session")?.n
+        expect(started === 0, `B has ${started} sessions`)
+      } finally {
+        await s?.stop()
+      }
+    },
+  },
 ]
 
 export default checks
