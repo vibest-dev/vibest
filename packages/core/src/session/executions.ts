@@ -310,11 +310,17 @@ export const make = Effect.gen(function* () {
     })
 
     const process = (yield* db.session.getSession(session.id))?.process?.id
+    const seenRunning = yield* Ref.make(false)
+
+    const running = Effect.tap(alive(h, terminal), (up) => (up ? Ref.set(seenRunning, true) : Effect.void))
 
     const gone = Effect.gen(function* () {
-      if ((yield* db.session.getSession(session.id))?.process?.id !== process) return Option.none<Pickup>()
+      const row = yield* db.session.getSession(session.id)
 
-      return (yield* alive(h, terminal)) ? Option.none<Pickup>() : Option.some(Pickup.Exited())
+      if (row?.process?.id !== process || (yield* running)) return Option.none<Pickup>()
+      const started = (yield* Ref.get(seenRunning)) || (row?.process?.readyAt ?? null) !== null
+
+      return started ? Option.some(Pickup.Exited()) : Option.none<Pickup>()
     })
 
     const exitedHere = (event: BusEvent) =>
@@ -335,7 +341,7 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.tap(() => signalExit))
 
     const took = yield* taken.pipe(
-      Effect.tap((done) => (done ? Effect.void : answer)),
+      Effect.tap((done) => (done ? Effect.void : Effect.andThen(answer, running))),
       Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
       Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
       Effect.map((done) => (done ? Pickup.Taken() : undefined)),

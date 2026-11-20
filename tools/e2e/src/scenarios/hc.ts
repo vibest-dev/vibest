@@ -697,17 +697,23 @@ const checks: ReadonlyArray<Check> = [
         ) as { id?: string }
 
         const terminal = await core.get(addressOf(at.id!))
-        const shell = terminal.foreground?.name.replace(/^-/, "").replace(/^.*\//, "") ?? ""
-        expect(
-          terminal.state === "live" && shell === path.basename(Bun.env.SHELL || "/bin/sh"),
-          `the subagent's terminal is not back at a shell: ${JSON.stringify(terminal)}`,
-        )
+        expect(terminal.state === "live", `the subagent's terminal is gone: ${JSON.stringify(terminal)}`)
 
         if (zsh) {
           const screen = (await core.hc("read", terminal.address)).stdout
           const rc = screen.indexOf("vbt-rc-ran")
           expect(rc >= 0 && rc < screen.indexOf("ENOTDIR"), `the harness did not start after the rc:\n${screen}`)
         }
+
+        const typed = await core.hc("send", terminal.address, "echo vbt-shell-$((40+2))")
+        expect(typed.code === 0, `hc send: ${typed.stderr}`)
+        await until(
+          "the subagent's terminal runs a typed command in the user's shell",
+          async () => (await core.hc("read", terminal.address)).stdout.includes("vbt-shell-42"),
+          15_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; screen:\n${(await core.hc("read", terminal.address)).stdout}`)
+        })
       } finally {
         model.stop()
         await w.stopDaemon()

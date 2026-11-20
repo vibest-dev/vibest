@@ -434,18 +434,14 @@ describe.concurrent("Session", () => {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* herdr.endExecution(id)
       yield* writeEnd(id, "pi", { error: "rate_limit" })
-      const starts = yield* Ref.make(0)
-
-      yield* Ref.set(herdr.onStarted, (session) =>
-        Effect.gen(function* () {
-          if ((yield* Ref.getAndUpdate(starts, (n) => n + 1)) !== 0) return
-          const terminal = (yield* herdr.terminalOf(session))!
-          yield* herdr.updateAgent(session, (agent) => ({ ...agent, alive: false }))
-          yield* PubSub.publish(herdr.events, { type: "exited", terminal })
-        }),
-      )
-
-      yield* sessions.check(id)
+      yield* Ref.set(herdr.skipPromptUpdates, 1)
+      const moving = yield* Effect.forkChild(sessions.check(id))
+      yield* until(herdr.callsTo("open"), (calls) => calls.length === 2)
+      const terminal = (yield* herdr.terminalOf(id))!
+      yield* until(herdr.callsTo("process"), (calls) => calls.some((call) => call.terminal === terminal.id))
+      yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
+      yield* PubSub.publish(herdr.events, { type: "exited", terminal })
+      yield* Fiber.join(moving)
       const row = (yield* db.session.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "cursor")
       assert.strictEqual(executionStateOf(row), "open")
