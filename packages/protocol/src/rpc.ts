@@ -52,6 +52,7 @@ import {
   ExecutionState,
 } from "@vibest/schema/session"
 import { Subscription } from "@vibest/schema/subscription"
+import { TeamMember, TeamName } from "@vibest/schema/team"
 import { WorktreeList } from "@vibest/schema/worktree"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
@@ -343,6 +344,7 @@ export class VibestRpcs extends RpcGroup.make(
           machine: Schema.optional(Schema.String),
           project: Schema.optional(Schema.String),
           files: Attachments,
+          team: Schema.optional(TeamName),
         },
         success: Schema.Struct({
           id: Schema.String,
@@ -510,6 +512,13 @@ export class VibestRpcs extends RpcGroup.make(
       payload: { stopped: Schema.optional(Schema.Boolean), all: Schema.optional(Schema.Boolean) },
       success: Schema.Struct({ sessions: Schema.Array(SessionInfo), machines: Schema.Array(ListedMachine) }),
       error: Schema.Union([Forbidden]),
+    }),
+  ),
+  scoped(
+    Rpc.make("Team.List", {
+      payload: { team: Schema.optional(TeamName) },
+      success: Schema.Struct({ team: Schema.String, members: Schema.Array(TeamMember) }),
+      error: Schema.Union([Forbidden, NoCallingSession]),
     }),
   ),
   scoped(
@@ -928,6 +937,7 @@ export const ACCESS = {
   Spawn: "agent",
   Launch: "cli",
   List: ["agent", "peer"],
+  "Team.List": "agent",
   Get: ["agent", "peer"],
   "Inbox.Subscribe": "session",
   "Inbox.Take": "session",

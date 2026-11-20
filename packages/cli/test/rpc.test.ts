@@ -578,6 +578,7 @@ describe("vibest.sock", () => {
         ["Project.Move", c["Project.Move"]({ from: "x" })],
         ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
+        ["Team.List", c["Team.List"]({})],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Inbox.Take", c["Inbox.Take"](undefined)],

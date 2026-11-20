@@ -45,6 +45,7 @@ export const SessionCreated = fact("session.created", "session", {
   directory: Schema.String,
   parent: optional(Text),
   origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
+  team: optional(Text),
 })
 
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })

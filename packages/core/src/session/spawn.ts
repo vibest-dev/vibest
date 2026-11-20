@@ -12,7 +12,20 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Predicate, Ref } from "effect"
+import {
+  Clock,
+  Context,
+  Crypto,
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Predicate,
+  Ref,
+  Schema,
+} from "effect"
 import { Hex } from "effect/encoding"
 
 import { definitionLaunch } from "../agent-launch.ts"
@@ -46,6 +59,8 @@ import { Placement } from "./placement.ts"
 import { Starts } from "./starts.ts"
 
 export * as Spawn from "./spawn.ts"
+
+export class TeamRefused extends Schema.TaggedError<TeamRefused>()("TeamRefused", { message: Schema.String }) {}
 
 export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
@@ -96,6 +111,7 @@ export interface SpawnInput {
   readonly folders?: ReadonlyArray<PinnedFolder> | undefined
   readonly origin?: PeerStart | undefined
   readonly files?: ReadonlyArray<Attachment> | undefined
+  readonly team?: string | undefined
 }
 
 export interface Spawned extends Routing {
@@ -449,12 +465,18 @@ export const make = Effect.gen(function* () {
                   request: input.request,
                   origin: input.origin,
                   archiveOnIdle: input.archive === true,
+                  team: input.team,
                 })
 
                 if (inserted === "parent-ended")
                   return yield* new NoSuchSession({
                     id: input.parentSessionId!,
                     message: `${input.parentSessionId} has ended and can no longer start sessions`,
+                  })
+
+                if (Predicate.isObject(inserted) && "teamOwner" in inserted)
+                  return yield* new TeamRefused({
+                    message: `team ${input.team} is owned by ${inserted.teamOwner}, the session that started its first member; only it adds members`,
                   })
 
                 if (inserted === "waiting") {

@@ -70,6 +70,36 @@ describe("sends from sessions", () => {
   )
 
   it.effect(
+    "members of one team may send to each other; only the session that started the first member adds more",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const { db, project, entryId } = yield* setup
+          const team = { cwd: "/w", task: "t", parentSessionId: entryId, team: "web" }
+          assert.isTrue(yield* db.session.insertSession(session(B), project, team))
+          assert.isTrue(yield* db.session.insertSession(session(X), project, team))
+          assert.deepStrictEqual(
+            yield* db.session.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), project, {
+              ...team,
+              parentSessionId: A,
+            }),
+            { teamOwner: entryId },
+          )
+          assert.isTrue(yield* db.inbox.maySend(B, X))
+          assert.isTrue(yield* db.inbox.maySend(X, B))
+          assert.isFalse(yield* db.inbox.maySend(A, B))
+          assert.deepStrictEqual(
+            (yield* db.session.teamMembers(project, "web")).map((m) => [m.id, m.parent]),
+            [
+              [B, entryId],
+              [X, entryId],
+            ],
+          )
+        }),
+      ),
+  )
+
+  it.effect(
     "a session whose creator has ended still names it as its creator, and its notices go to the nearest creator above that is running",
     () =>
       memory(

@@ -88,7 +88,7 @@ manages it. Items marked planned are not built.
   `context.agent.define`. What a caller may do comes from its definition, not from the database: Spawn needs
   `can.spawn`; Send's recipient must be inside `can.message`; Interrupt, Remove and Peek need the user or an
   ancestor of the target (along `parent_session_id`); Report is a message to the caller's reply target; the
-  guard reads `tools`. Built today: the definition's text and guard; a send is allowed to the creator and to sessions the sender started, and management belongs to the nearest living creator.
+  guard reads `tools`. Built today: the definition's text and guard; a send is allowed to the creator, to sessions the sender started and to the unfinished members of the sender's team, and management belongs to the nearest living creator.
 - **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for entry sessions and subagents alike:
   natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
@@ -96,7 +96,7 @@ manages it. Items marked planned are not built.
   any other harness (Cursor, agy) is typed into, whichever session it runs. When the harness definition gives
   `clearKeys` (Cursor: `ctrl+u`), they are sent right before each typed message, so whatever sits in the input box (a
   user's draft, a cancelled prompt the harness drew back) is cleared first. A row with no session to go to is dropped.
-- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, and sessions it started; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
+- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, sessions it started, and the unfinished members of its team; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its nearest living creator (its parent, else the parent's parent and so on; a creator on another machine through the
   outbox; none left, only the user reads it): its harness exited, its execution ended in an error, it never started, it waits on a permission. An
@@ -104,8 +104,13 @@ manages it. Items marked planned are not built.
   agent went idle.
 
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It is the creator link: a session
-  may send only to its creator and to sessions it started, notices and sends to an ended creator go to the nearest
+  may send only to its creator, to sessions it started and to its teammates, notices and sends to an ended creator go to the nearest
   living one above it, management belongs to the nearest living creator, and a new terminal opens beside the live creator.
+- **Teams are a label.** `session.team` is written once, from `session.created`, and never inherited. A team belongs
+  to one project, and its owner is the creator of its members: the first `vibest run --team <name>` fixes it, and
+  `insertSession` refuses any other creator in the same transaction. Members may send to each other; a send to an
+  archived member is refused rather than forwarded, since the creator fallback is only for a session's own creator.
+  There is no team table and no team command: agents find teammates with `vibest ls --team`.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
   bare `vibest` reopens. It is not identity, and no message falls back to it. "One entry session per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.

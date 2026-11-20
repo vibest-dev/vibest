@@ -1,4 +1,5 @@
 import { LaunchFailed, NoCallingSession } from "@vibest/schema/session"
+import { TEAM_NAME } from "@vibest/schema/team"
 import { Effect, Option } from "effect"
 
 import { caller, callerEnvOf, json } from "../../caller.ts"
@@ -13,6 +14,12 @@ export default Runtime.handler(Commands.commands.run, (o) =>
     const [harness, raw] = o.words.length === 2 ? o.words : [undefined, o.words[0]!]
     const prompt = yield* input(raw, "prompt")
     const files = yield* readAttachments(o.file)
+    const team = Option.getOrUndefined(o.team)
+
+    if (team !== undefined && !TEAM_NAME.test(team))
+      return yield* new EmptyInput({
+        message: `--team ${team}: a team name is lowercase letters, digits and -, starts with a letter, and has at most 32 characters`,
+      })
 
     const spawned = yield* requested((client, request, ping) =>
       Effect.gen(function* () {
@@ -29,6 +36,11 @@ export default Runtime.handler(Commands.commands.run, (o) =>
         if (files.length > 0 && ping.capabilities?.spawnFiles !== true)
           return yield* new LaunchFailed({
             message: "this vibestd does not take --file on vibest run; run vibest update",
+          })
+
+        if (team !== undefined && ping.capabilities?.teams !== true)
+          return yield* new LaunchFailed({
+            message: "this vibestd does not take --team on vibest run; run vibest update",
           })
 
         if (
@@ -57,6 +69,7 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           callerEnv: callerEnvOf(),
           ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
           ...(files.length !== 0 && { files }),
+          ...(team !== undefined && { team }),
         })
       }),
     )

@@ -116,6 +116,11 @@ export const make = Effect.gen(function* () {
         if (!Predicate.isTagged(c, "Session")) return yield* new NoCallingSession()
         const project = yield* projectOf(c, "Spawn")
 
+        if (input.machine !== undefined && input.team !== undefined)
+          return yield* new MachineFailed({
+            message: "--team is not available with --machine yet; nothing was started",
+          })
+
         if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
 
         if (input.project !== undefined)
@@ -123,24 +128,56 @@ export const make = Effect.gen(function* () {
             message: "--project names a project of another machine; give --machine too",
           })
 
-        return yield* sessions.spawn({
-          machine: yield* machineFromCaller(input),
-          root: project.directory,
-          projectId: project.id,
-          name: input.name ?? defaultSessionName(input.prompt),
-          prompt: input.prompt,
-          harness: input.harness,
-          provider: input.provider,
-          model: input.model,
-          env: input.env,
-          agent: input.agent,
-          share: input.share === undefined ? undefined : yield* db.session.resolveSession(input.share),
-          archive: input.archive,
-          runtime: input.runtime,
-          parentSessionId: c.sessionId,
-          request: input.request,
-          files: input.files,
-        })
+        return yield* sessions
+          .spawn({
+            machine: yield* machineFromCaller(input),
+            root: project.directory,
+            projectId: project.id,
+            name: input.name ?? defaultSessionName(input.prompt),
+            prompt: input.prompt,
+            harness: input.harness,
+            provider: input.provider,
+            model: input.model,
+            env: input.env,
+            agent: input.agent,
+            share: input.share === undefined ? undefined : yield* db.session.resolveSession(input.share),
+            archive: input.archive,
+            runtime: input.runtime,
+            parentSessionId: c.sessionId,
+            request: input.request,
+            files: input.files,
+            team: input.team,
+          })
+          .pipe(
+            Effect.catchTag("TeamRefused", (e) => Effect.fail(new Forbidden({ method: "Spawn", message: e.message }))),
+          )
+      }),
+
+    "Team.List": ({ team }) =>
+      Effect.gen(function* () {
+        const c = yield* Caller
+
+        if (!Predicate.isTagged(c, "Session")) return yield* new NoCallingSession()
+        const name = team ?? (yield* db.session.sessionIdentity(c.sessionId))?.team ?? undefined
+
+        if (name === undefined)
+          return yield* new Forbidden({
+            method: "Team.List",
+            message: "you are in no team; name one: vibest ls --team <name>",
+          })
+        const members = yield* db.session.teamMembers(c.projectId, name)
+        const infos = new Map((yield* listed(ListScope.Project({ id: c.projectId }), true)).map((i) => [i.id, i]))
+
+        return {
+          team: name,
+          members: members.flatMap((m) => {
+            const info = infos.get(m.id)
+
+            return info === undefined
+              ? []
+              : [{ id: m.id, agent: info.agent, name: info.name, status: info.status, startedBy: m.parent }]
+          }),
+        }
       }),
 
     Republish: () => sessions.republish,
@@ -329,6 +366,7 @@ export const make = Effect.gen(function* () {
 
 export const layer = group([
   "Spawn",
+  "Team.List",
   "Republish",
   "Send",
   "Interrupt",

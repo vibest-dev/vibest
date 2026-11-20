@@ -146,6 +146,12 @@ const run = Spec.make("run", {
       ),
       Flag.atLeast(0),
     ),
+    team: Flag.String("team").pipe(
+      Flag.withDescription(
+        "Start the session as a member of this team of the project (lowercase letters, digits and -, starting with a letter, at most 32 characters). Members may message each other; vibest ls --team lists them. The session that starts a team's first member owns it: only it adds members",
+      ),
+      Flag.optional,
+    ),
     session: sessionFlag,
   },
 })
@@ -206,6 +212,16 @@ const ls = Spec.make("ls", {
       Flag.withAlias("a"),
       Flag.withDescription("Exited sessions too"),
       Flag.withDefault(false),
+    ),
+    team: Flag.Boolean("team").pipe(
+      Flag.withDescription(
+        "Instead: the unfinished members of a team (default your own) with who started each, as JSON",
+      ),
+      Flag.withDefault(false),
+    ),
+    name: Argument.String("team name").pipe(
+      Argument.withDescription("With --team: the team to list"),
+      Argument.optional,
     ),
   },
 })

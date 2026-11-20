@@ -29,6 +29,7 @@ import restart from "./scenarios/restart.ts"
 import routing from "./scenarios/routing.ts"
 import sessions from "./scenarios/sessions.ts"
 import start from "./scenarios/start.ts"
+import teams from "./scenarios/teams.ts"
 import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
 import {
@@ -61,7 +62,7 @@ const areas = {
   restart: [...restart, ...restartHc],
   hc,
   sessions,
-  delivery,
+  delivery: [...delivery, ...teams],
   routing,
   entry: entrySession,
   machines: [...machines, ...machinesRepositories, ...machinesHerdr],

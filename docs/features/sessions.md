@@ -162,6 +162,21 @@ not a regular file refuses the run. With `--machine`, the files go with the run 
 the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest
 update` there.
 
+## S66. Teams
+
+`vibest run --team <name>` starts the session as a member of team `<name>` in this project. A name is lowercase letters,
+digits and `-`, starts with a letter, and has at most 32 characters; any other is refused before anything starts. A
+session's team is set when it is created and never changes; a session started without `--team` is in no team, even when
+its creator is. The session that starts a team's first member owns the team: afterwards only it may run `--team <name>`
+in this project, and any other session is refused with an error naming the owner, and nothing starts. `--team` with
+`--machine` is refused.
+
+Members of one team may `vibest send` to each other while they are unfinished (S46, S47 still refuse everyone else); a
+send to an archived teammate is refused and goes to no one else. Interrupt, peek and archive stay with the session that
+started each one. `vibest ls --team [<name>]` prints JSON `{team, members}`: each unfinished member's id, agent, title,
+status and `startedBy`; without a name it is the caller's own team, and a session in no team gets an error. A member's
+system prompt names its team and says that `vibest ls --team` lists who is in it now.
+
 ## S58. Listing worktrees
 
 `vibest worktree list` prints JSON, grouped by project, of the worktrees vibest made for this machine's projects:

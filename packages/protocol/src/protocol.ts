@@ -117,4 +117,5 @@ export const CAPABILITIES = {
   load: true,
   agents: true,
   worktrees: true,
+  teams: true,
 } as const

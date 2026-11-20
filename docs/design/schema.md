@@ -120,6 +120,7 @@ CREATE TABLE session (
   origin_peer           TEXT,                         -- started by another vibestd: its id
   origin_project        TEXT,                         -- and its project there
   origin_session        TEXT,                         -- and the session there its notices and sends go to (that project's entry session)
+  team                  TEXT,                         -- vibest run --team; written once, never inherited. Members of one team in a project may send to each other
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
   process_id            INTEGER,                      -- its current process; its latest execution is its highest execution id
@@ -245,7 +246,7 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | project.moved                       | from, to, repositories                                                                                                                                                                                            |
 | project.repositories_changed        | repositories                                                                                                                                                                                                      |
 | project.entry_changed               | session? (none: the project has no entry session)                                                                                                                                                                 |
-| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}                                                                                                                                       |
+| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, team?                                                                                                                                |
 | session.renamed                     | name                                                                                                                                                                                                              |
 | session.directory_changed           | directory                                                                                                                                                                                                         |
 | session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                                                                         |
