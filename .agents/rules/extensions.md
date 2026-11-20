@@ -1,7 +1,7 @@
 # Extensions
 
 An extension is a provider (`transform` of a harness or runtime definition), a decider (a `hook` core calls and waits
-on) or a reaction (`event.subscribe` with `session.list`, `session.get` and `session.send`). See
+on) or a reaction (`event.subscribe` with `session.list`, `session.get`, `session.sentIn` and `session.send`). See
 [architecture §7](../../docs/design/architecture.md#7-plugin-architecture).
 
 1. Only core writes the ledger, through its commands. A plugin's send is recorded with the plugin as its sender, filled

@@ -5,7 +5,7 @@ import {
   OutboxAcked,
   OutboxQueued,
   PeerSeen,
-  type AgentSender,
+  type AgentFrom,
 } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Effect } from "effect"
@@ -39,7 +39,7 @@ export type OutboxRow = {
   readonly sessionId: string
   readonly content: string
   readonly kind: "send" | "notice"
-  readonly from: AgentSender | null
+  readonly from: AgentFrom | null
   readonly createdAt: number
   readonly reportTo: string
 }
@@ -73,7 +73,7 @@ export const statements = Effect.gen(function* () {
       readonly sessionId: string
       readonly content: string
       readonly kind: "send" | "notice"
-      readonly from?: AgentSender | undefined
+      readonly from?: AgentFrom | undefined
       readonly at?: number
       readonly request?: string | undefined
     },
@@ -110,7 +110,7 @@ export const statements = Effect.gen(function* () {
 
   const senderOf = (sessionId: string) =>
     sql<{ agent: string; name: string }>`SELECT agent, name FROM session WHERE id = ${sessionId}`.pipe(
-      Effect.map(([row]): AgentSender | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
+      Effect.map(([row]): AgentFrom | undefined => row && { session: sessionId, agent: row.agent, title: row.name }),
     )
 
   const peerName = (id: string) =>
@@ -184,7 +184,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           readonly recipient: string
           readonly kind: "send" | "notice"
           readonly sender: string
-          readonly from: AgentSender
+          readonly from: AgentFrom
           readonly content: string
         }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
           tx(
@@ -207,7 +207,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 yield* inbox.queueInbox({
                   recipient: item.recipient,
                   kind: item.kind,
-                  sender: item.kind === "send" ? item.from : "vibest",
+                  sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                   content,
                   status: "dropped",
                   peerItem: item.id,
@@ -216,7 +216,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
-                  from: item.from,
                 })
 
                 return "queued" as const
@@ -231,7 +230,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               yield* inbox.queueInbox({
                 recipient: target ?? item.recipient,
                 kind: item.kind,
-                sender: item.kind === "send" ? item.from : "vibest",
+                sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                 content,
                 status: here ? "pending" : "dropped",
                 peerItem: item.id,
@@ -242,11 +241,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           ).pipe(Effect.orDie),
       ),
 
-      remoteProjects: sql<{ id: string; directory: string | null; repositories: number; remote: string }>`SELECT
-            p.id, p.directory, r.remote_url AS remote,
-            (SELECT count(*) FROM project_repository c WHERE c.project_id = p.id) AS repositories
-          FROM project p JOIN project_repository r ON r.project_id = p.id
-          WHERE r.remote_url IS NOT NULL ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
+      projectCheckouts: sql<{ id: string; directory: string | null; path: string }>`SELECT p.id, p.directory, r.path
+          FROM project p JOIN project_repository r ON r.project_id = p.id ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
 
       outboxOf: Effect.fn("Db.remote.outboxOf")((peer: string, after = 0, limit = -1) =>
         reads.outboxOf(peer, after, limit).pipe(Effect.orDie),

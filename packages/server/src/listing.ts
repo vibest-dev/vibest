@@ -4,6 +4,7 @@ import {
   executionStateOf,
   exitedAt,
   harnessIdOf,
+  type ProcessStart,
   runtimeOf,
   type SessionBrief,
   terminalOf,
@@ -11,6 +12,7 @@ import {
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
+import { Starts } from "@vibest/core/session/starts"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import type { RuntimeAddress } from "@vibest/schema/session"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
@@ -24,19 +26,19 @@ const LS_TASK = 500
 const taskForLs = (task: string | null) =>
   task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
 
-export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo => ({
+export const toInfo = (session: SessionView, brief?: SessionBrief, waiting?: ProcessStart): SessionInfo => ({
   id: session.id,
   name: session.name,
   agent: session.agent,
-  harness: harnessIdOf(session),
-  provider: session.process?.provider ?? null,
-  model: session.process?.model ?? null,
+  harness: session.process === null && waiting !== undefined ? waiting.harness : harnessIdOf(session),
+  provider: session.process?.provider ?? waiting?.provider ?? null,
+  model: session.process?.model ?? waiting?.model ?? null,
   status: session.status,
   startedAt: session.process?.placedAt ?? null,
   exitedAt: exitedAt(session),
   executionState: executionStateOf(session),
   projectId: session.projectId,
-  runtime: runtimeOf(session),
+  runtime: session.process === null && waiting !== undefined ? waiting.runtime : runtimeOf(session),
   address: terminalOf(session),
   worktree: session.worktree,
   repositoryRoot: session.repositoryRoot ?? null,
@@ -46,32 +48,42 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   lastActive: session.lastActive,
   task: brief?.task ?? null,
   latest: brief?.latest ?? null,
+  ...(waiting !== undefined && { waitingToStart: true as const }),
 })
 
 export const sessionListing = (deps: {
   readonly db: Db.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
+  readonly starts: Starts.Interface
 }) => {
-  const { db, sessions, runtimes } = deps
+  const { db, sessions, runtimes, starts } = deps
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
-    Effect.map(db.session.sessionBriefs(rows.map((row) => row.id)), (briefs) =>
-      rows.map((row) => {
+    Effect.gen(function* () {
+      const briefs = yield* db.session.sessionBriefs(rows.map((row) => row.id))
+      const waiting = yield* starts.choices
+
+      return rows.map((row) => {
         const brief = briefs.get(row.id)
 
-        return { ...toInfo(row, brief), task: taskForLs(brief?.task ?? null) }
-      }),
-    )
+        return { ...toInfo(row, brief, waiting.get(row.id)), task: taskForLs(brief?.task ?? null) }
+      })
+    })
 
   const listed = (scope: ListScope, stopped: boolean) =>
     Effect.gen(function* () {
       if (Predicate.isTagged(scope, "Nothing")) return []
 
-      if (Predicate.isTagged(scope, "Peer")) return yield* listedRows(yield* sessions.list({ peer: scope, stopped }))
+      const waiting = yield* starts.waiting
+
+      if (Predicate.isTagged(scope, "Peer"))
+        return yield* listedRows(yield* sessions.list({ peer: scope, stopped, waiting }))
       const projectId = Predicate.isTagged(scope, "Project") ? scope.id : undefined
 
-      return yield* listedRows(yield* sessions.list({ ...(projectId !== undefined && { projectId }), stopped }))
+      return yield* listedRows(
+        yield* sessions.list({ ...(projectId !== undefined && { projectId }), stopped, waiting }),
+      )
     })
 
   const seenAt = (runtime: string, address: RuntimeAddress) =>
@@ -212,6 +224,7 @@ export const layer = Layer.effect(
       db: yield* Db.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
+      starts: yield* Starts.Service,
     })
   }),
 )

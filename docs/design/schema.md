@@ -173,9 +173,13 @@ CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NU
 CREATE TABLE inbox (                                  -- id: the seq of its inbox.queued in the recipient session
   session_id        TEXT    NOT NULL,                 -- the recipient
   id                INTEGER NOT NULL,
-  sender            TEXT    NOT NULL,                 -- the inbox.queued sender as JSON
+  sender_type       TEXT    NOT NULL CHECK (sender_type IN ('agent', 'plugin', 'vibest', 'user')),
+  sender_session_id TEXT,                             -- an agent sender: its session, else null
+  sender_agent      TEXT,                             -- an agent sender: its agent, when known
+  sender_title      TEXT,                             -- an agent sender: its title, when known
+  sender_machine    TEXT,                             -- an agent sender received from another vibestd: that machine, else null
+  sender_plugin     TEXT,                             -- a plugin sender: the plugin id, else null
   sender_key        TEXT    NOT NULL,                 -- who sent it, for request dedupe: user, vibest, plugin:<id>, <machine>/<session>
-  sender_session_id TEXT,                             -- the local agent session that sent it, else null
   about_session_id  TEXT,                             -- a notice: the session it is about, else null
   kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
   content           TEXT    NOT NULL,
@@ -209,10 +213,13 @@ session, so a row is named by both.
 | `send`   | a message from the user to any unfinished session of the project, or from a session to its creator or a session it started                        |
 | `notice` | something vibest tells the recipient about a session (`about_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
 
-- `sender` is one of: an agent session `{session, agent?, title?, machine?}` (`machine` set when it was received from
-  another vibestd), a plugin `{plugin}`, `"vibest"` (every notice) or `"user"` (a send or task with no session).
-  `sender_session_id` is the session of a local agent sender and `about_session_id` a notice's `about`; a relay to the
-  nearest living ancestor keeps the sender, so both stay right after the recipient changes.
+- The `inbox.queued` `sender` is one tagged value: `{type: "agent", session, agent?, title?, machine?}` (`machine` set
+  when it was received from another vibestd), `{type: "plugin", plugin}`, `{type: "vibest"}` (every notice) or
+  `{type: "user"}` (a send or task with no session). The row keeps the tag in `sender_type` and each field in its own
+  column; a local agent sender has `sender_session_id` set and `sender_machine` null, and `about_session_id` is a
+  notice's `about`. `sender` is whoever wrote the message: a relay to the nearest living ancestor on this machine passes
+  the message on unchanged and keeps the sender, while one that goes on to another machine writes a new message
+  (prefixed with the incoming address) from the ended recipient's session, which is then its sender there.
 - A `request` repeats nothing: one sender (`sender_key`) queues one row per request, whatever the recipient, so a
   repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The
   unique index `inbox_request` backs it: a second row would fail its transaction.
@@ -247,10 +254,10 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                                                                                                                 |
 | process.pid                         | process, pid: a pid report that is not a ready report                                                                                                                                                             |
 | process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                                         |
-| process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded, stopped; by? (stopped: who stopped it, a sender)                                                                            |
+| process.ended                       | process, reason: exited, restart, move (an entry session moving terminal), archived, launch_failed, superseded, stopped; by? (stopped: who stopped it, a sender)                                                  |
 | execution.started                   | process?, typed? (the text typed into the pane)                                                                                                                                                                   |
 | execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)                                                                                                       |
-| execution.ended                     | execution, outcome, failure? {message, kind?: limit}, conversation?, reply? (the harness's reply, when it reported)                                                                                               |
+| execution.ended                     | execution, outcome, failure? {message, kind?: limit, resetAt? (epoch ms)}, conversation?, reply? (the harness's reply, when it reported)                                                                          |
 | inbox.queued                        | kind: task, send or notice, recipient?, sender, about? (a notice: the session it is about), content, status: pending, delivered or dropped, request?, peerItem?, execution? (a send: the sender's open execution) |
 | inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                                                                                                             |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                                                                                                     |
@@ -301,8 +308,7 @@ type or key changes or removes rows, in the same pull request.
   `inbox.ts` and `remote.ts`. The session row
   callers read (`SessionRow`) is built from the read model plus the memory listed below (`database/ledger-read.ts` holds the
   reads the import's referee shares). It carries `endedAt`, `parentId`, `entry`, the current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
-  session with neither never ran an execution. `attempts` lists the harness and provider of each of its processes that
-  ended `limited`, in process order, once per pair.
+  session with neither never ran an execution.
 - Writes go through intent methods, one per fact: `startProcess` opens a process, except that it reuses a live process
   that has no terminal yet when the harness, provider, model, runtime and routing are identical; `placeProcess` only
   gives the current one its terminal (never a new process id); `startExecution`, `noteConversation`, `rename` and
@@ -317,9 +323,6 @@ type or key changes or removes rows, in the same pull request.
   it is refused. A repeat of a request id returns the row it queued, checked before the archive (it was accepted).
 - An entry session moving to another terminal has no place, but its rows wait for it. Rows for an absent entry session are
   dropped only while it still has no place, so a launch that landed in between keeps them.
-- A usage-limit move resends the open execution's input (its typed text or the rows it consumed); when that is empty, the
-  trailing run of delivered `task` and `send` rows from one sender that no execution consumed, oldest first, joined with a
-  blank line.
 - A task is queued `delivered` with no execution; one with no `execution_id` was never handed over: the only move a
   task gets is its handover, which names the execution. An execution that ended before its handover (vibestd stopped while
   waiting for ready, or one the user typed meanwhile) took nothing, so the task is still handed over: it is the head
@@ -378,7 +381,6 @@ E2E runs it on every world's database at the end of each check.
 - Open execution of a session: `execution_open`. Live process and pid: `session.process_id`, or `process_live`.
 - Session or entry session by terminal: `process_terminal`, joined to `session.process_id` and
   `project.entry_session_id`.
-- Usage-limit attempts: the session's processes that ended `limited`, with their harness and provider.
 - In-place restart after an update: live sessions (`session_live`), their live process, compare the integration.
   Order: restarting mark in memory, SIGTERM, then `execution.ended` (interrupted) and `process.ended` (restart), then the new
   `process.started`. A refused SIGTERM writes nothing.
@@ -409,8 +411,8 @@ E2E runs it on every world's database at the end of each check.
 - `vibest run --archive-on-idle`: the flag is kept only in the memory of the vibestd that started the session (set at
   the spawn, cleared when the session ends), never in a fact or the read model. A session started with it is archived
   the first time it is idle after a completed execution with nothing waiting; once that vibestd stops (a restart,
-  `vibest update`), nothing archives it on its own. The builtin plugin `archive-on-idle` is what archives it;
-  `"-archive-on-idle"` in `vibest.json` removes the plugin and the flag then does nothing.
+  `vibest update`), nothing archives it on its own. The builtin plugin `vibest.archive-on-idle` is what archives it;
+  `"-vibest.archive-on-idle"` in `vibest.json` removes the plugin and the flag then does nothing.
 
 ## Not stored
 

@@ -55,23 +55,7 @@ export const InboxRow = Schema.Struct({
 export type InboxRow = typeof InboxRow.Type
 
 export const Detail = Schema.Struct({
-  sender: Schema.Union([
-    Schema.Struct({
-      agent: Schema.String,
-      title: Schema.String,
-      session: Schema.String,
-      machine: Schema.String,
-    }),
-    Schema.Struct({
-      agent: Schema.String,
-      title: Schema.String,
-      session: Schema.String,
-    }),
-    Schema.Struct({ address: Schema.String }),
-    Schema.Struct({ plugin: Schema.String }),
-    Schema.Literal("vibest"),
-    Schema.Literal("user"),
-  ]),
+  sender: Sender,
   message: Schema.String,
 })
 
@@ -135,12 +119,6 @@ export class SessionBusy extends Schema.TaggedError<SessionBusy>()("SessionBusy"
   message: Schema.String,
 }) {}
 
-export class LimitReached extends Schema.TaggedError<LimitReached>()("LimitReached", { limit: Schema.Number }) {
-  override get message() {
-    return `VIBEST_MAX_SESSIONS=${this.limit} sessions are already open (working or kept); vibest archive one first`
-  }
-}
-
 export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
   id: Schema.String,
   message: Schema.String,
@@ -155,8 +133,10 @@ export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("No
 export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAgent", {
   agent: Schema.String,
   known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
+  invalid: Schema.optional(Schema.String),
 }) {
   override get message() {
+    if (this.invalid !== undefined) return `agent definition ${this.agent} is invalid: ${this.invalid}`
     const known = this.known.map((definition) => `${definition.id} (${definition.description})`).join("; ")
 
     return `no agent definition ${this.agent}; registered: ${known || "none"}`
@@ -211,3 +191,27 @@ export const HarnessChoice = Schema.Struct({
 })
 
 export type HarnessChoice = typeof HarnessChoice.Type
+
+export const AgentListing = Schema.Struct({
+  agents: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      description: Schema.String,
+      plugin: Schema.String,
+      harness: Schema.optional(Schema.String),
+      provider: Schema.optional(Schema.String),
+      model: Schema.optional(Schema.String),
+      system: Schema.String,
+    }),
+  ),
+  invalid: Schema.Array(
+    Schema.Struct({
+      id: Schema.optional(Schema.String),
+      source: Schema.String,
+      error: Schema.String,
+      plugin: Schema.String,
+    }),
+  ),
+})
+
+export type AgentListing = typeof AgentListing.Type

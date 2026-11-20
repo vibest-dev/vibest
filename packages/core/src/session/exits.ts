@@ -13,57 +13,44 @@ import {
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { Inbox } from "../inbox.ts"
-import type { Runtime, Terminal } from "../runtimes.ts"
+import { paneTail, type Runtime } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
-import { Move } from "./move.ts"
 import { Placement } from "./placement.ts"
 
 export * as Exits from "./exits.ts"
 
-export interface LimitedExecution {
-  readonly execution: number
-  readonly process: number | null
-  readonly failure: string
-}
+const TAIL_LINES = 10
+
+const LINE_CHARS = 200
+
+const TAIL_CHARS = 2000
+
+const shownTail = (text: string) =>
+  text
+    .split("\n")
+    .slice(-TAIL_LINES)
+    .map((line) => line.slice(0, LINE_CHARS))
+    .join("\n")
+    .slice(0, TAIL_CHARS)
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const inbox = yield* Inbox.Service
-  const move = yield* Move.Service
   const { undoCutOffStart } = yield* Archive.Service
-  const { notice, handTask, recount } = yield* Placement.Service
+  const { notice, recount } = yield* Placement.Service
 
-  const limitOf = Effect.fn("Exits.limitOf")(function* (session: SessionRow) {
-    if (executionStateOf(session) !== "failed" || (yield* db.session.creatorOf(session.id)) === undefined)
-      return undefined
-
-    return yield* db.session.limitedExecution(session.id)
-  })
-
-  const afterLimit = Effect.fn("Exits.afterLimit")(function* (
-    h: Runtime,
-    session: SessionRow,
-    limited: LimitedExecution,
-    exited: boolean,
-  ) {
-    const rerun = (terminal: Terminal | undefined) =>
-      move.rerun(h, session, terminal, "", false, limited.failure, limited.execution)
-
-    if (exitedAt(session) !== null) return yield* rerun(undefined)
-    const successor = (yield* db.session.currentProcessId(session.id)) !== limited.process
-
-    if (!successor || exited) return yield* rerun(terminalOf(session).id === "" ? undefined : terminalOf(session))
-    const source = yield* db.session.limitSource(session.id, limited.execution)
-    const task = source === undefined ? "" : source.working || source.delivered
-
-    if (task === "") return false
-    yield* handTask(h, session, terminalOf(session), task)
-
-    return true
-  })
-
-  const announceExit = (session: SessionRow, execution: number | undefined) =>
+  const lastScreen = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
+      const tail = shownTail(yield* paneTail(h, terminalOf(session), TAIL_LINES))
+      const output = tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}`
+      const beforeWork = execution !== undefined && !(yield* db.session.executionTaken(session.id))
+
+      return { how: beforeWork ? " before it started working" : "", output }
+    })
+
+  const announceExit = (h: Runtime, session: SessionRow, execution: number | undefined) =>
+    Effect.gen(function* () {
+      const failed = yield* lastScreen(h, session, execution)
       const queued = yield* db.inbox.pendingInbox(session.id)
       const signed = queued.filter((r) => r.kind === "send" && localSessionOf(r.sender) !== undefined)
       const unsigned = queued.filter((r) => !signed.includes(r))
@@ -77,12 +64,12 @@ export const make = Effect.gen(function* () {
       const lost = unsigned.map((r) => r.message).join("\n\n")
 
       const text = (how: string) =>
-        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${how}${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+        `${sessionLabel(session)} (${harnessIdOf(session)}) exited${failed.how}${how}${failed.output}${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
 
       if (
         execution !== undefined &&
         (yield* db.session.closeExecution(session.id, execution, "failed", {
-          failure: "the harness exited",
+          failure: { message: "the harness exited" },
           notice: text(" during an execution"),
         }))
       )
@@ -104,8 +91,10 @@ export const make = Effect.gen(function* () {
 
     if (announce && session.entry) {
       if (execution !== undefined)
-        yield* db.session.closeExecution(session.id, execution, "failed", { failure: "the harness exited" })
-    } else if (announce) yield* announceExit(session, execution)
+        yield* db.session.closeExecution(session.id, execution, "failed", {
+          failure: { message: "the harness exited" },
+        })
+    } else if (announce) yield* announceExit(h, session, execution)
 
     if (
       exitedAt(session) === null &&
@@ -123,13 +112,10 @@ export const make = Effect.gen(function* () {
 
     if (session === undefined || session.process?.id !== process) return
     const execution = executionStateOf(session) === "open" ? yield* db.session.openExecution(session.id) : undefined
-    const limited = yield* limitOf(session)
-
-    if (limited !== undefined && (yield* afterLimit(h, session, limited, true))) return
     yield* recordExit(h, session, execution)
   })
 
-  return { limitOf, afterLimit, recordExit, settle }
+  return { recordExit, settle }
 })
 
 export type Interface = Effect.Success<typeof make>
@@ -141,5 +127,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Archive.node, Db.node, Inbox.node, Move.node, Placement.node],
+  deps: [Archive.node, Db.node, Inbox.node, Placement.node],
 })

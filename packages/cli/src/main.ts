@@ -37,12 +37,20 @@ const Handlers = Runtime.handlers(Commands, {
     list: () => import("./commands/handlers/harness/list.ts"),
     models: () => import("./commands/handlers/harness/models.ts"),
   },
+  agent: {
+    list: () => import("./commands/handlers/agent/list.ts"),
+    show: () => import("./commands/handlers/agent/show.ts"),
+  },
   project: {
     create: () => import("./commands/handlers/project/create.ts"),
+    clone: () => import("./commands/handlers/project/clone.ts"),
     add: () => import("./commands/handlers/project/add.ts"),
     move: () => import("./commands/handlers/project/move.ts"),
     info: () => import("./commands/handlers/project/info.ts"),
     search: () => import("./commands/handlers/project/search.ts"),
+  },
+  worktree: {
+    list: () => import("./commands/handlers/worktree/list.ts"),
   },
   plugins: () => import("./commands/handlers/plugins.ts"),
   subscriptions: () => import("./commands/handlers/subscriptions.ts"),

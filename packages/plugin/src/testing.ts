@@ -253,6 +253,7 @@ export const machineHooks = (
       session: {
         list: () => Effect.succeed([]),
         get: () => Effect.succeed(undefined),
+        sentIn: () => Effect.succeed(0),
         send: () => Effect.void,
         stop: () => Effect.succeed(false),
       },

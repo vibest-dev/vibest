@@ -416,7 +416,7 @@ describe("vibest.sock", () => {
         id: launch.sessionId,
       })
       const fromUser = yield* db.inbox.latestInbox(launch.sessionId, "send")
-      assert.deepInclude(fromUser, { message: "from the user", sender: "user" })
+      assert.deepInclude(fromUser, { message: "from the user", sender: { type: "user" } })
       yield* raw["Session.Ready"](
         { id: launch.sessionId, conversation: { harness: "claude", id: "stale" } },
         {
@@ -607,6 +607,7 @@ describe("vibest.sock", () => {
         ["Integration.Guard", c["Integration.Guard"]({ harness: "pi", input: "{}" })],
         ["Peer.Hello", c["Peer.Hello"]({ id, name: "x", callsMe: "y" })],
         ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
+        ["Machine.Load", c["Machine.Load"]({})],
         ["Machine.List", c["Machine.List"]()],
         ["Machine.Remove", c["Machine.Remove"]({ name: "m" })],
         [
@@ -615,6 +616,7 @@ describe("vibest.sock", () => {
         ],
         ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
         ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
+        ["Project.Clone", Stream.runDrain(c["Project.Clone"]({ url: "git://x/y.git" }))],
       ]
 
       const bare = yield* client
@@ -650,8 +652,10 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* db.session.getSession(id))!.process?.pid, 4242)
 
       yield* bare.Plugins(undefined, { headers: protocolHeaders() })
+      yield* bare.Concurrency(undefined, { headers: protocolHeaders() })
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
+      assert.isArray((yield* bare["Agents.List"]({}, { headers: protocolHeaders() })).agents)
       yield* bare.Republish(undefined, { headers: protocolHeaders() })
       yield* bare.ExecutionEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
       assert.strictEqual(
@@ -667,7 +671,10 @@ describe("vibest.sock", () => {
         ...protectedCalls(bare).map(([method]) => method),
         "Ping",
         "Plugins",
+        "Concurrency",
         "Harnesses.List",
+        "Agents.List",
+        "Worktree.List",
         "Runtimes.Doctor",
         "Subscriptions",
         "Republish",

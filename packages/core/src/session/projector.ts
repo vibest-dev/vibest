@@ -20,7 +20,7 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
-import { localSessionOf, senderKey } from "../database/db-rows.ts"
+import { localSessionOf, senderColumns, senderKey } from "../database/db-rows.ts"
 
 const sessionIdOf = (fact: Fact) => fact.sessionId!
 
@@ -180,10 +180,12 @@ export const layer = Layer.effectDiscard(
       active((fact) => {
         const { data } = fact
 
-        return sql`INSERT INTO inbox (session_id, id, sender, sender_key, sender_session_id, about_session_id, kind, content,
-            request, peer_item, status)
-          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${JSON.stringify(data.sender)}, ${senderKey(data.sender)},
-            ${localSessionOf(data.sender) ?? null}, ${data.about ?? null}, ${data.kind}, ${data.content},
+        const sender = senderColumns(data.sender)
+
+        return sql`INSERT INTO inbox (session_id, id, sender_type, sender_session_id, sender_agent, sender_title,
+            sender_machine, sender_plugin, sender_key, about_session_id, kind, content, request, peer_item, status)
+          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
+            ${sender.machine}, ${sender.plugin}, ${senderKey(data.sender)}, ${data.about ?? null}, ${data.kind}, ${data.content},
             ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`.pipe(
           Effect.andThen(countSent(sql, localSessionOf(data.sender), data.kind, data.execution)),
         )

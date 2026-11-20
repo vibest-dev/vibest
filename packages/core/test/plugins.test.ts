@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Agents } from "@vibest/core/agents"
+import { Concurrency } from "@vibest/core/concurrency"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf } from "@vibest/core/database/db-rows"
 import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugin"
@@ -181,7 +182,7 @@ describe("plugins: spawn hook", () => {
       const plugins = yield* Plugins.Service
       const listed = yield* plugins.list
       const byId = (id: string) => listed.filter((q) => q.id === id)
-      assert.deepInclude(byId("runtime-choice")[0], { status: "active" })
+      assert.deepInclude(byId("vibest.runtime-choice")[0], { status: "active" })
       assert.deepInclude(byId("broken")[0], { id: "broken", status: "failed" })
       assert.include(byId("broken")[0]!.error, "setup boom")
       assert.deepInclude(byId("ok")[0], { id: "ok", status: "active", calls: 0 })
@@ -221,7 +222,7 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(
         s.trace.map((t) => [t.plugin, t.outcome]),
         [
-          ["runtime-choice", "ok"],
+          ["vibest.runtime-choice", "ok"],
           ["current", "ok"],
         ],
       )
@@ -231,16 +232,16 @@ describe("plugins: spawn hook", () => {
         listed.map((p) => [p.id, p.status]),
         [
           ["vibest.agent", "active"],
-          ["runtime-choice", "active"],
+          ["vibest.runtime-choice", "active"],
           ["session", "failed"],
           ["worker", "failed"],
           ["typo", "failed"],
           ["proto", "failed"],
           ["current", "active"],
-          ["archive-on-idle", "active"],
+          ["vibest.archive-on-idle", "active"],
         ],
       )
-      const supported = "agent.start.before, agent.fail"
+      const supported = "agent.start.before"
       assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
       assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
       assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
@@ -395,6 +396,7 @@ const loaded = (dir: string) =>
     Layer.provide(Agents.layer),
     Layer.provide(memoryPluginHost),
     Layer.provide(Hooks.layer),
+    Layer.provide(Concurrency.layer),
     Layer.build,
     Effect.map(Context.get(Plugins.Service)),
   )
@@ -414,7 +416,6 @@ const event = {
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   harnesses: [
     { harness: "pi", available: true },
     { harness: "claude", available: true },
@@ -456,7 +457,7 @@ const LOADING_TIMEOUT = 120_000
 
 describe("plugins: loading", () => {
   it.live(
-    "P1: plugins/ first in path order, then vibest.json in its order (a configured entry must be a folder); -x removes",
+    "P1: plugins/ first in path order, then vibest.json in its order (a file entry loads); -x removes",
     () =>
       Effect.gen(function* () {
         const { dir, plugins, path, config } = yield* loadingFixture
@@ -470,13 +471,14 @@ describe("plugins: loading", () => {
             ["x", "active"],
             ["y", "active"],
             ["vibest-plugin-npm@1.0.0", "failed"],
+            ["f", "active"],
           ],
         )
         const listed = yield* first.list
         assert.include(listed.find((p) => p.id.endsWith("broken.ts"))!.error, "Plugin.define")
         assert.include(listed.find((p) => p.id.startsWith("vibest-plugin-npm"))!.error, "not supported yet")
         assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
-        assert.strictEqual((yield* first.start(event)).model, "from-y")
+        assert.strictEqual((yield* first.start(event)).model, "from-f")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     LOADING_TIMEOUT,
   )

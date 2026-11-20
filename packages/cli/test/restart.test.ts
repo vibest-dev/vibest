@@ -111,7 +111,7 @@ describe("restart in place", () => {
       yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
       const [run] = yield* herdr.callsTo("run")
-      assert.strictEqual(run!.argv[0], "pi")
+      assert.deepStrictEqual([run!.argv[0], run!.argv[4]], ["sh", "pi"])
       assert.include(
         run!.env,
         `VIBEST_PROCESS=${yield* db.session.currentProcessId(id)}`,
@@ -188,8 +188,9 @@ describe("restart in place", () => {
   it("an entry session's continue notice keeps the whole instruction, including a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
 
-    const message = detailOf([{ kind: "notice", sender: "vibest", message: noticeEnvelope(continueText(version)) }])[0]!
-      .message
+    const message = detailOf([
+      { kind: "notice", sender: { type: "vibest" }, message: noticeEnvelope(continueText(version)) },
+    ])[0]!.message
 
     assert.isTrue(message.startsWith(CONTINUE))
 
@@ -290,7 +291,7 @@ describe("restart in place", () => {
         "the continuation is in the argv of the process that continues the execution",
       )
       assert.ok(entryRun.env.includes(`VIBEST_PROCESS=${yield* db.session.currentProcessId(entryId)}`))
-      assert.strictEqual(entryRun.argv[0], "pi")
+      assert.deepStrictEqual([entryRun.argv[0], entryRun.argv[4]], ["sh", "pi"])
 
       const identity = new Set([
         "VIBEST_SESSION_ID",
@@ -301,7 +302,7 @@ describe("restart in place", () => {
         "VIBEST_HARNESS",
         "VIBEST_RUNTIME",
         "VIBEST_HOME",
-        "VIBEST_COMMAND",
+        "VIBEST_CLI",
       ])
 
       for (const pair of entryRun.env) assert.ok(identity.has(pair.slice(0, pair.indexOf("="))), pair)

@@ -148,6 +148,7 @@ const fakeMachine = (options: {
         session: {
           list: () => Effect.succeed([]),
           get: () => Effect.succeed(undefined),
+          sentIn: () => Effect.succeed(0),
           send: () => Effect.void,
           stop: () => Effect.succeed(false),
         },
@@ -526,7 +527,6 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           runtime: undefined,
           parentRuntime: undefined,
           machines: [],
-          attempts: [],
           harnesses: [{ harness: "pi", available: true }],
         })
 

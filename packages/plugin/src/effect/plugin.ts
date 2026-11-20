@@ -36,6 +36,7 @@ export interface MachineDomain {
 export interface SessionDomain {
   readonly list: () => Effect.Effect<ReadonlyArray<PluginSession>>
   readonly get: (id: string) => Effect.Effect<PluginSession | undefined>
+  readonly sentIn: (id: string, execution: number) => Effect.Effect<number>
   readonly send: (input: SessionSend) => Effect.Effect<void, SessionSendFailed>
   readonly stop: (id: string, options?: SessionStop) => Effect.Effect<boolean, SessionStopFailed>
 }

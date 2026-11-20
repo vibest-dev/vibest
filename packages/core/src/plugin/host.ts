@@ -14,7 +14,7 @@ import { Hooks } from "./hooks.ts"
 
 type Short = keyof VibestPlugin.AgentHooks
 
-const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
+const HOOKS: ReadonlyArray<Short> = ["start.before"]
 
 type AgentRegistrations = {
   readonly [S in Short]: (
@@ -60,13 +60,14 @@ const sessionsFor = (
 ): VibestPlugin.SessionDomain => ({
   list: summaries.list,
   get: summaries.get,
+  sentIn: summaries.sentIn,
   send: (input) =>
-    sends.relay(input.to, input.message, { plugin }, input.request).pipe(
+    sends.relay(input.to, input.message, { type: "plugin", plugin }, input.request).pipe(
       Effect.asVoid,
       Effect.mapError((e) => new VibestPlugin.SessionSendFailed({ message: e.message })),
     ),
   stop: (id, options) =>
-    archive.stop(id, { plugin }, options?.idleSince).pipe(
+    archive.stop(id, { type: "plugin", plugin }, options?.idleSince).pipe(
       Effect.map((out) => out.stopped),
       Effect.mapError((e) => new VibestPlugin.SessionStopFailed({ message: e.message })),
     ),
@@ -99,7 +100,6 @@ export const make = Effect.gen(function* () {
 
     const agentRegistrations: AgentRegistrations = {
       "start.before": (callback) => register("agent.start.before", callback),
-      fail: (callback) => register("agent.fail", callback),
     }
 
     const hook: VibestPlugin.AgentDomain["hook"] = (short, callback) => {
@@ -127,7 +127,7 @@ export const make = Effect.gen(function* () {
 
     return {
       options,
-      agent: { hook, transform: agents.transform },
+      agent: { hook, transform: agents.transformFor(plugin) },
       machine: { hook: machine },
       runtime: { transform: runtimes.transform },
       harness: { transform: harnesses.transform },

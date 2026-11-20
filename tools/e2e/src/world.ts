@@ -670,7 +670,11 @@ export class World {
         const db = readDb(file)
 
         try {
-          return db.query("SELECT id FROM session WHERE agent = 'coordinator' AND ended_at IS NULL").get() !== null
+          return (
+            db
+              .query("SELECT s.id FROM project p JOIN session s ON s.id = p.entry_session_id WHERE s.ended_at IS NULL")
+              .get() !== null
+          )
         } catch {
           return false
         } finally {

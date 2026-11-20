@@ -4,26 +4,9 @@ export const PLUGIN = ".agents/plugins/vibest"
 
 export const HOOK = `#!/bin/sh
 # @vibest/agy ${pkg.version}: \`vibest integration guard\` before a tool call, \`prompt\` at a conversation's start and before each model call, \`stop\` at its end.
-# The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
-# cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
+# The vibest vibestd started this agent with (VIBEST_CLI), not the first vibest on PATH, which a login shell may reorder.
 vibest() {
-  case "\${VIBEST_COMMAND:-}" in
-    *'\\'*) ;;
-    '["'*'"]')
-      words=$(printf '%s' "$VIBEST_COMMAND" | sed -e 's/^\\["//' -e 's/"\\]$//' -e 's/","/\\
-/g')
-      ifs=$IFS
-      IFS='
-'
-      set -f
-      set -- $words "$@"
-      IFS=$ifs
-      set +f
-      "$@"
-      return
-      ;;
-  esac
-  command vibest "$@"
+  command "\${VIBEST_CLI:-vibest}" "$@"
 }
 log="\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log"
 # Hooks carry no subagent marker: the first conversation this process reports is its own; agy's subagents are not.

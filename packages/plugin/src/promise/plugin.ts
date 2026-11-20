@@ -40,6 +40,7 @@ export interface Context {
   readonly session: {
     readonly list: () => Promise<ReadonlyArray<PluginSession>>
     readonly get: (id: string) => Promise<PluginSession | undefined>
+    readonly sentIn: (id: string, execution: number) => Promise<number>
     readonly send: (input: SessionSend) => Promise<void>
     readonly stop: (id: string, options?: SessionStop) => Promise<boolean>
   }

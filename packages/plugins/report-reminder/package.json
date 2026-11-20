@@ -8,7 +8,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/plugins/report-reminder"
   },
   "dependencies": {
     "@vibest/plugin": "workspace:*",

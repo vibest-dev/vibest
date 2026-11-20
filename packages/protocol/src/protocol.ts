@@ -100,3 +100,22 @@ export const sessionHeaders = (who: SessionIdentity) => ({
   ]),
   ...(who.repositoryRoot !== undefined && { [REPOSITORY_HEADER]: who.repositoryRoot }),
 })
+
+export const CAPABILITIES = {
+  http: true,
+  handoff: true,
+  requests: true,
+  watch: true,
+  events: true,
+  projects: true,
+  spawnRuntime: true,
+  spawnFiles: true,
+  peerSpawnFiles: true,
+  peerSpawnRepositories: true,
+  peerSpawnProject: true,
+  projectClone: true,
+  load: true,
+  agents: true,
+  worktrees: true,
+  stop: true,
+} as const

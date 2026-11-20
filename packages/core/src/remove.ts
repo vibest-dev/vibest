@@ -86,7 +86,7 @@ export const stopAgent = (
   })
 
 export interface ReleaseInput {
-  readonly h: Runtime
+  readonly h: Runtime | undefined
   readonly session: SessionRow
   readonly terminal: Terminal | undefined
   readonly keepWorktree: boolean | undefined
@@ -129,7 +129,7 @@ export const make = Effect.gen(function* () {
 
       const closeTerminal = () =>
         Effect.gen(function* () {
-          if (input.terminal === undefined || input.terminal.id === "") return "none" as const
+          if (h === undefined || input.terminal === undefined || input.terminal.id === "") return "none" as const
 
           const outcome = yield* h.close(input.terminal).pipe(
             Effect.as("closed" as const),

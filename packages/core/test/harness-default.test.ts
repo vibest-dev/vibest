@@ -19,7 +19,6 @@ const event = (harness: string | undefined, claude: boolean) => ({
   runtime: undefined,
   parentRuntime: undefined,
   machines: [],
-  attempts: [],
   subscriptions: [],
   harnesses: [
     { harness: "pi", available: true },
@@ -28,7 +27,9 @@ const event = (harness: string | undefined, claude: boolean) => ({
 })
 
 const chosen = (harness: string | undefined, claude: boolean) =>
-  makePlugins([{ source: "builtin:harness-default", revision: "1", options: {}, plugin: harnessDefaultPlugin() }]).pipe(
+  makePlugins([
+    { source: "builtin:vibest.harness-default", revision: "1", options: {}, plugin: harnessDefaultPlugin() },
+  ]).pipe(
     Effect.flatMap((plugins) => plugins.start(event(harness, claude))),
     Effect.map((decision) => decision.harness),
     Effect.provide(subscriptionsLayer),
@@ -40,7 +41,7 @@ const chosen = (harness: string | undefined, claude: boolean) =>
     Effect.scoped,
   )
 
-describe("harness-default", () => {
+describe("vibest.harness-default", () => {
   it.effect("chooses claude only when the harness is unset and claude is available", () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* chosen(undefined, true), "claude")

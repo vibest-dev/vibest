@@ -41,10 +41,10 @@ describe("sends from sessions", () => {
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
-        assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { session: A }))
+        assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { type: "agent", session: A }))
         assert.deepStrictEqual(
           (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
-          [["send", { session: A, agent: session(A).agent, title: session(A).name }, entryId]],
+          [["send", { type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
         )
       }),
     ),
@@ -86,10 +86,10 @@ describe("sends from sessions", () => {
             system: "",
             id: B,
             projectDir: "/w",
-            vibest: ["vibest"],
             preferences: "",
             memories: "",
             creator,
+            agents: [],
           })
 
           assert.include(prompt, `send ${A} --`)
@@ -173,7 +173,11 @@ describe("sends from sessions", () => {
         const out = yield* db.remote.outboxOf(peer)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
-        assert.deepStrictEqual(out[0]!.from, item.from, "the relay keeps the original sender, not the ended recipient")
+        assert.deepInclude(
+          out[0]!,
+          { sessionId: ended, from: null },
+          "the relay wrote the new message, so it is the sender",
+        )
       }).pipe(memory),
   )
 })

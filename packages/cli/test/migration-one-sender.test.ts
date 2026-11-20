@@ -69,26 +69,83 @@ const catalog2 = (ledger: string): ReadonlyArray<Fact> => [
     "outbox.queued",
     { id: "66666666-6666-4666-8666-666666666662", peer: PEER, session: S, recipient: "far", content: "S ended" },
   ],
+  [ledger, 4, "outbox.acked", { peer: PEER, ids: ["66666666-6666-4666-8666-666666666661"] }],
+  [
+    ledger,
+    5,
+    "outbox.queued",
+    {
+      id: "66666666-6666-4666-8666-666666666661",
+      peer: PEER,
+      session: S,
+      recipient: "far",
+      kind: "send",
+      content: "hi",
+      from: { session: S },
+    },
+  ],
   [S, 4, "execution.ended", { execution: 3, outcome: "completed" }],
+  [
+    ledger,
+    6,
+    "outbox.queued",
+    {
+      id: "66666666-6666-4666-8666-666666666663",
+      peer: PEER,
+      session: S,
+      recipient: "far",
+      kind: "send",
+      content: "mc/cccccccc: report",
+      from: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", machine: "mc" },
+    },
+  ],
   [E, 3, "inbox.queued", { kind: "notice", sender: S, content: "sub archived", status: "pending" }],
   [E, 4, "inbox.queued", { kind: "send", sender: S, content: "later", status: "pending" }],
   [S, 5, "inbox.queued", { kind: "send", content: "typed by the user", status: "pending" }],
   [R, 2, "inbox.queued", { kind: "task", content: "remote task", status: "pending" }],
+  [
+    E,
+    5,
+    "inbox.queued",
+    {
+      kind: "notice",
+      from: { session: "far", machine: "box" },
+      content: "far ended",
+      status: "pending",
+      peerItem: "item-1",
+    },
+  ],
+  [S, 6, "inbox.queued", { kind: "send", sender: E, content: "q", status: "dropped", request: "q1" }],
+  [R, 3, "inbox.queued", { kind: "send", sender: E, content: "q", status: "pending", request: "q1" }],
 ]
 
 const rewritten = {
-  [`${S} 2`]: { kind: "task", content: "do it", status: "delivered", sender: { session: E } },
+  [`${S} 2`]: { kind: "task", content: "do it", status: "delivered", sender: { type: "agent", session: E } },
   [`${E} 2`]: {
     kind: "send",
     content: "done",
     status: "pending",
-    sender: { session: S, agent: "general", title: "sub" },
+    sender: { type: "agent", session: S, agent: "general", title: "sub" },
     execution: 3,
   },
-  [`${E} 3`]: { kind: "notice", content: "sub archived", status: "pending", sender: "vibest", about: S },
-  [`${E} 4`]: { kind: "send", content: "later", status: "pending", sender: { session: S } },
-  [`${S} 5`]: { kind: "send", content: "typed by the user", status: "pending", sender: "user" },
-  [`${R} 2`]: { kind: "task", content: "remote task", status: "pending", sender: { session: "far", machine: "box" } },
+  [`${E} 3`]: { kind: "notice", content: "sub archived", status: "pending", sender: { type: "vibest" }, about: S },
+  [`${E} 4`]: { kind: "send", content: "later", status: "pending", sender: { type: "agent", session: S } },
+  [`${S} 5`]: { kind: "send", content: "typed by the user", status: "pending", sender: { type: "user" } },
+  [`${R} 2`]: {
+    kind: "task",
+    content: "remote task",
+    status: "pending",
+    sender: { type: "agent", session: "far", machine: "box" },
+  },
+  [`${E} 5`]: {
+    kind: "notice",
+    content: "far ended",
+    status: "pending",
+    peerItem: "item-1",
+    sender: { type: "vibest" },
+  },
+  [`${S} 6`]: { kind: "send", content: "q", status: "dropped", request: "q1", sender: { type: "agent", session: E } },
+  [`${R} 3`]: { kind: "send", content: "q", status: "pending", sender: { type: "agent", session: E } },
 }
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
@@ -119,7 +176,7 @@ const read = <A extends object>(
 
 describe("ledger migration 20261119000000_one_sender", () => {
   it.effect(
-    "rewrites catalog-2 inbox facts to one tagged sender, gives sends their sender's execution by position, and import-check passes on the old file first",
+    "rewrites catalog-2 inbox facts to one tagged sender, gives sends their sender's execution by position, keeps one fact per outbox id and one request key per sender, and import-check passes on the old file first",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -157,8 +214,13 @@ describe("ledger migration 20261119000000_one_sender", () => {
         )
 
         assert.deepStrictEqual(
-          outbox.map((row) => JSON.parse(row.data).execution),
-          [3, undefined],
+          outbox.map((row) => [JSON.parse(row.data).id, JSON.parse(row.data).execution, JSON.parse(row.data).from]),
+          [
+            ["66666666-6666-4666-8666-666666666661", 3, { session: S }],
+            ["66666666-6666-4666-8666-666666666662", undefined, undefined],
+            ["66666666-6666-4666-8666-666666666663", undefined, undefined],
+          ],
+          "a retry of an acknowledged outbox send is one send; a pending relay is from the relaying session, not the author it wrapped",
         )
 
         assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT session_id, id, sent FROM execution`), [

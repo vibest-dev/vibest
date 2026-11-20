@@ -19,6 +19,11 @@ const named = (candidate: Candidate): string => ("error" in candidate.plugin ? c
 const matches = (selector: string, id: string) =>
   selector === "*" || (selector.endsWith(".*") ? id.startsWith(selector.slice(0, -1)) : selector === id)
 
+const revised = (candidate: Candidate) =>
+  candidate.revise === undefined
+    ? Effect.succeed(candidate)
+    : Effect.map(candidate.revise, (fresh) => ({ ...candidate, ...fresh }))
+
 const isBuiltin = (candidate: Candidate) => candidate.source.startsWith("builtin:")
 
 const removeMatching = (candidates: Array<Candidate>, target: string) => {
@@ -31,8 +36,8 @@ const removeMatching = (candidates: Array<Candidate>, target: string) => {
   }
 }
 
-const enabling = (candidate: Candidate, operations: ReadonlyArray<Operation>) =>
-  operations.findLast((op) => op.type === "add" && "id" in candidate.plugin && op.target === candidate.plugin.id)
+const lastNaming = (candidate: Candidate, operations: ReadonlyArray<Operation>) =>
+  operations.findLast((op) => "id" in candidate.plugin && op.target === candidate.plugin.id)
 
 const selects = (builtins: ReadonlyArray<Candidate>, op: Operation) =>
   builtins.some((b) => b.optional && "id" in b.plugin && b.plugin.id === op.target)
@@ -40,12 +45,12 @@ const selects = (builtins: ReadonlyArray<Candidate>, op: Operation) =>
 export const keptBuiltins = (builtins: ReadonlyArray<Candidate>, operations: ReadonlyArray<Operation>) => {
   const kept = builtins.flatMap((candidate) => {
     if (!candidate.optional) return [candidate]
-    const op = enabling(candidate, operations)
+    const op = lastNaming(candidate, operations)
 
     return op?.type === "add" ? [{ ...candidate, options: op.options }] : []
   })
 
-  for (const op of operations) if (op.type === "remove") removeMatching(kept, op.target)
+  for (const op of operations) if (op.type === "remove" && !selects(builtins, op)) removeMatching(kept, op.target)
 
   return kept
 }
@@ -118,7 +123,7 @@ export const supervise = Effect.fnUntraced(function* (
       Effect.gen(function* () {
         if (next !== undefined) users = next
         const { operations } = yield* sources.operations
-        const candidates = [...keptBuiltins(builtins, operations), ...users]
+        const candidates = yield* Effect.forEach([...keptBuiltins(builtins, operations), ...users], revised)
         const revisions = candidates.map((c) => `${c.source}\n${keyOf(c)}`).join("\n")
 
         if (revisions === activated) return

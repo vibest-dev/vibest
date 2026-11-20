@@ -1,6 +1,6 @@
 import { Schema, Struct } from "effect"
 
-import { AgentSender } from "./event.ts"
+import { AgentFrom } from "./event.ts"
 
 export class MachineFailed extends Schema.TaggedError<MachineFailed>()("MachineFailed", { message: Schema.String }) {}
 
@@ -69,6 +69,15 @@ export const RuntimeView = Schema.Struct({
 
 export type RuntimeView = typeof RuntimeView.Type
 
+export const MachineLoad = Schema.Struct({
+  sampledAt: Schema.Number,
+  cpu: Schema.Struct({ count: Schema.Number, utilization: Schema.NullOr(Schema.Number) }),
+  memory: Schema.Struct({ total: Schema.Number, available: Schema.Number }),
+  executions: Schema.Struct({ working: Schema.Number }),
+})
+
+export type MachineLoad = typeof MachineLoad.Type
+
 export const MachineInfo = Schema.Struct({
   name: Schema.String,
   target: Schema.String,
@@ -110,7 +119,7 @@ export const OutboxItem = Schema.Struct({
   recipient: Schema.String,
   kind: Schema.Literals(["send", "notice"]),
   content: Schema.String,
-  from: Schema.optional(AgentSender),
+  from: Schema.optional(AgentFrom),
   cut: Schema.optional(Schema.Boolean),
 })
 

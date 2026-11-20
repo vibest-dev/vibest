@@ -31,7 +31,7 @@ export const make = Effect.gen(function* () {
   const send = Effect.fn("Sends.send")(function* (
     id: string,
     message: string,
-    sender: Sender = "user",
+    sender: Sender = { type: "user" },
     request?: string,
   ) {
     const session = yield* getRow(id)
@@ -58,7 +58,7 @@ export const make = Effect.gen(function* () {
   const deliverTo = Effect.fn("Sends.deliverTo")(function* (
     id: string,
     message: string,
-    sender: Sender = "user",
+    sender: Sender = { type: "user" },
     request?: string,
   ) {
     if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, sender, request)
@@ -97,7 +97,7 @@ export const make = Effect.gen(function* () {
       })
     const session = yield* db.session.getSession(id)
     const stopped = !session || archived(session)
-    const from = { session: sender.sessionId }
+    const from = { type: "agent" as const, session: sender.sessionId }
 
     if (!(stopped && mine === id)) {
       if (stopped && !target.entry) return yield* new NoSuchSession({ id, message: `${id} was archived` })

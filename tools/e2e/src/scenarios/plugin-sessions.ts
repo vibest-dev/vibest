@@ -75,7 +75,7 @@ const probedLines = (file: string) =>
 const pluginRows = (w: World, recipient: string) =>
   rows<{ content: string; status: string }>(
     w,
-    `SELECT content, status FROM inbox WHERE session_id = ? AND sender = '{"plugin":"session-probe"}' ORDER BY id`,
+    `SELECT content, status FROM inbox WHERE session_id = ? AND sender_plugin = 'session-probe' ORDER BY id`,
     recipient,
   )
 
@@ -183,7 +183,7 @@ const REMINDER = "vibest.report-reminder"
 const reminders = (w: World, recipient: string, about: string) =>
   rows<{ content: string; status: string }>(
     w,
-    `SELECT content, status FROM inbox WHERE session_id = ? AND sender = '{"plugin":"vibest.report-reminder"}' AND content LIKE ? ORDER BY id`,
+    `SELECT content, status FROM inbox WHERE session_id = ? AND sender_plugin = 'vibest.report-reminder' AND content LIKE ? ORDER BY id`,
     recipient,
     `%(${about})%`,
   )
@@ -266,7 +266,7 @@ const reminderChecks: ReadonlyArray<Check> = [
             `${reminders(w, entryId, id).length} reminders about ${id}, expected ${count}: ${JSON.stringify(reminders(w, entryId, id))}`,
           )
         expect(
-          inboxRows(w, `sender = '{"plugin":"${REMINDER}"}' AND session_id <> ?`, entryId) === 0,
+          inboxRows(w, `sender_plugin = '${REMINDER}' AND session_id <> ?`, entryId) === 0,
           "a reminder went to a session other than the entry session",
         )
       } finally {
@@ -283,7 +283,7 @@ const IDLE_STOP = "vibest.idle-stop"
 
 const idleStopChecks: ReadonlyArray<Check> = [
   {
-    id: "G19",
+    id: "G20",
     title:
       "the shipped idle-stop plugin, once vibest.idle-stop is added to vibest.json with a short idleMinutes, stops a subagent idle that long, recorded as stopped by the plugin, and sends its creator one message from the plugin saying how to resume or archive it; a subagent with an open execution and the entry session keep running",
     run: async (w) => {
@@ -303,8 +303,9 @@ const idleStopChecks: ReadonlyArray<Check> = [
       const idleMessages = (recipient: string, about: string) =>
         rows<{ content: string; status: string }>(
           w,
-          `SELECT content, status FROM inbox WHERE session_id = ? AND sender = '{"plugin":"${IDLE_STOP}"}' AND content LIKE ?`,
+          "SELECT content, status FROM inbox WHERE session_id = ? AND sender_type = 'plugin' AND sender_plugin = ? AND content LIKE ?",
           recipient,
+          IDLE_STOP,
           `%(${about})%`,
         )
 
@@ -326,7 +327,10 @@ const idleStopChecks: ReadonlyArray<Check> = [
           quiet,
         ).map((r) => (JSON.parse(r.data) as { by?: unknown }).by)[0]
 
-        expect(JSON.stringify(by) === JSON.stringify({ plugin: IDLE_STOP }), `stopped by ${JSON.stringify(by)}`)
+        expect(
+          JSON.stringify(by) === JSON.stringify({ type: "plugin", plugin: IDLE_STOP }),
+          `stopped by ${JSON.stringify(by)}`,
+        )
         await until(
           "the entry session's model saw the idle-stop message",
           () => seen(entryModel).includes(`<plugin>${IDLE_STOP}</plugin>`) && seen(entryModel).includes(quiet),

@@ -73,24 +73,32 @@ export const ProcessReady = fact("process.ready", "session", {
 export const ProcessPid = fact("process.pid", "session", { process: Seq, pid: Pid })
 export const ProcessConversation = fact("process.conversation", "session", { process: Seq, conversation: Text })
 
-export const AgentSender = Schema.Struct({
+export const AgentFrom = Schema.Struct({
   session: Schema.String,
   agent: optional(Schema.String),
   title: optional(Schema.String),
   machine: optional(Schema.String),
 })
 
+export type AgentFrom = typeof AgentFrom.Type
+
+export const AgentSender = Schema.Struct({ type: Schema.Literal("agent"), ...AgentFrom.fields })
+
 export type AgentSender = typeof AgentSender.Type
 
-export const PluginSender = Schema.Struct({ plugin: Text })
+export const PluginSender = Schema.Struct({ type: Schema.Literal("plugin"), plugin: Text })
 
-export const Sender = Schema.Union([AgentSender, PluginSender, Schema.Literal("vibest"), Schema.Literal("user")])
+export const Sender = Schema.Union([
+  AgentSender,
+  PluginSender,
+  Schema.Struct({ type: Schema.Literal("vibest") }),
+  Schema.Struct({ type: Schema.Literal("user") }),
+])
 
 export type Sender = typeof Sender.Type
 
 export const ProcessEndReason = Schema.Literals([
   "exited",
-  "limited",
   "restart",
   "move",
   "archived",
@@ -120,7 +128,9 @@ export type ExecutionOutcome = typeof ExecutionOutcome.Type
 export const ExecutionEnded = fact("execution.ended", "session", {
   execution: Seq,
   outcome: ExecutionOutcome,
-  failure: optional(Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")) })),
+  failure: optional(
+    Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")), resetAt: optional(Schema.Number) }),
+  ),
   conversation: optional(Text),
   reply: optional(Schema.String),
 })
@@ -160,7 +170,7 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
-  from: optional(AgentSender),
+  from: optional(AgentFrom),
   execution: optional(Seq),
 })
 
@@ -200,7 +210,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 4
+export const CATALOG_VERSION = 5
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

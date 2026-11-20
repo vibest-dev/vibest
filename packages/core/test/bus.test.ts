@@ -95,7 +95,7 @@ const story = Effect.gen(function* () {
         data: {
           kind: "task",
           recipient: SUB,
-          sender: { session: MAIN },
+          sender: { type: "agent", session: MAIN },
           content: "fix it",
           status: "delivered",
           request: "r-1",
@@ -136,7 +136,14 @@ const story = Effect.gen(function* () {
       const result = yield* emit(Catalog["inbox.queued"], {
         sessionId: MAIN,
         at: 322,
-        data: { kind: "notice", recipient: MAIN, sender: "vibest", about: SUB, content: "", status: "pending" },
+        data: {
+          kind: "notice",
+          recipient: MAIN,
+          sender: { type: "vibest" },
+          about: SUB,
+          content: "",
+          status: "pending",
+        },
       })
 
       yield* emit(Catalog["inbox.moved"], { sessionId: MAIN, at: 323, data: { inbox: result, to: "delivering" } })
@@ -145,7 +152,7 @@ const story = Effect.gen(function* () {
       yield* emit(Catalog["process.ended"], {
         sessionId: SUB,
         at: 330,
-        data: { process: subProcess, reason: "limited" },
+        data: { process: subProcess, reason: "restart" },
       })
 
       const placeholder = yield* emit(Catalog["process.started"], {
@@ -199,7 +206,7 @@ const story = Effect.gen(function* () {
         data: {
           kind: "notice",
           recipient: MAIN,
-          sender: "vibest",
+          sender: { type: "vibest" },
           content: "remote done",
           status: "pending",
           peerItem: ITEM,
@@ -394,7 +401,7 @@ describe("projectors", () => {
         placedAt: 302,
         readyAt: null,
         endedAt: 330,
-        endReason: "limited",
+        endReason: "restart",
       })
       assert.strictEqual(rows[2]!.endReason, "launch_failed")
       assert.strictEqual(rows[2]!.placedAt, null)
@@ -580,7 +587,7 @@ describe("projectors", () => {
             data: {
               kind: "notice",
               recipient: MAIN,
-              sender: "vibest",
+              sender: { type: "vibest" },
               content: "again",
               status: "pending",
               peerItem: ITEM,
@@ -765,7 +772,7 @@ describe("bus", () => {
           })
           yield* bus.publish(Catalog["inbox.queued"], {
             sessionId: MAIN,
-            data: { kind: "send", sender: { session: MAIN }, content: "hi", status: "pending" },
+            data: { kind: "send", sender: { type: "agent", session: MAIN }, content: "hi", status: "pending" },
           })
           yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
           yield* bus.publish(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })

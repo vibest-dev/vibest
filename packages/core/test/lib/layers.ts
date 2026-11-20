@@ -3,6 +3,7 @@ import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
+import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin/sources"
 import { Processes } from "@vibest/core/processes"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -60,6 +61,15 @@ export const base: LayerNode.Replacements = [
   PlatformNode.childProcessSpawner.replace(platform),
   PlatformNode.sqlClient.replace(checkedSqlite),
   Git.node.replace(fakeGit),
+  pluginLoaderNode.replace(
+    Layer.succeed(PluginLoader, {
+      prepare: Effect.void,
+      parseJsonc: (text) => JSON.parse(text),
+      graph: () => ({ files: [], unresolved: [] }),
+      load: () => Promise.reject(new Error("the test plugin loader loads no module")),
+      watch: () => () => undefined,
+    }),
+  ),
   Processes.node.replace(processes),
 ]
 

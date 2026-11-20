@@ -37,7 +37,7 @@ const entryAsked = Effect.gen(function* () {
   yield* herdr.seedAgent("test/coord")
   const { id } = yield* sessions.spawn(yield* spawnInput(repo))
   yield* until(db.session.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
-  yield* db.inbox.insertSend(entry.sessionId, "a question", { session: id })
+  yield* db.inbox.insertSend(entry.sessionId, "a question", { type: "agent", session: id })
 
   return { db, sessions, inbox: yield* Inbox.Service, entryId: entry.sessionId, sender: id }
 })
@@ -236,7 +236,13 @@ describe.concurrent("an idle session takes its next batch", () => {
       const taken = yield* inbox.take(entry.sessionId, undefined)
       assert.deepStrictEqual(taken?.detail, [
         {
-          sender: { session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", agent: "general", title: "Ask me", machine: "mb" },
+          sender: {
+            type: "agent",
+            session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            agent: "general",
+            title: "Ask me",
+            machine: "mb",
+          },
           message: "report from afar",
         },
       ])

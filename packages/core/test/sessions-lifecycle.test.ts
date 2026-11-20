@@ -82,11 +82,11 @@ describe.concurrent("Session", () => {
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       const seen = (yield* db.session.getSession(id))!.lastActive
       yield* sessions.send(id, "more work")
-      const out = yield* sessions.stop(id, { plugin: "test" }, seen)
+      const out = yield* sessions.stop(id, { type: "plugin", plugin: "test" }, seen)
       assert.isFalse(out.stopped)
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       assert.isNull(exitedAt((yield* db.session.getSession(id))!))
-      assert.isTrue((yield* sessions.stop(id, "user")).stopped)
+      assert.isTrue((yield* sessions.stop(id, { type: "user" })).stopped)
     }),
   )
 
