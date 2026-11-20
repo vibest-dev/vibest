@@ -162,10 +162,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   sessions included. A plugin that keeps state per process (agy's root conversation) needs no special case.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). A process that exits before its execution ends
-  loses the execution, as today. A first start stops waiting for its pickup when its harness is gone: after
-  subscribing to terminal exits it asks the runtime once whether the terminal still runs the session's current process,
-  and asks again on each exit of that terminal, so an exit that came before the wait counts and a stale exit of the
-  harness a restart in place replaced does not. The wait then signals the exit with the process bound, so it is recorded
+  loses the execution, as today. A first start stops waiting for its pickup when its harness is gone:
+  after subscribing to terminal exits it asks the runtime whether the terminal still runs the session's current
+  process, on every poll and on each exit of that terminal. Only the shell counts as gone once the start was
+  confirmed (the harness reported ready or the runtime was seen running it); before that it means a typed command has
+  not started yet. A stale exit of the harness a restart in place replaced does not count either. The wait then signals
+  the exit with the process bound, so it is recorded
   once the start releases the session lock instead of after the ready timeout; a usage-limit move closes that execution
   `not_started` and tries its next harness. When a harness exits with an execution it never started working on, the exit notice to
   its creator says so and carries the last 10 lines of its terminal.
