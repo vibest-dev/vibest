@@ -1,6 +1,6 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
-import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
+import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, PubSub, Ref, Schedule } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
@@ -17,6 +17,7 @@ import {
   stateOf,
   type Terminal,
   type AgentSeen,
+  Runtimes,
 } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 
@@ -26,6 +27,17 @@ export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const STOP_WAIT = Duration.seconds(10)
 const STARTUP_DIALOG_POLL = Schedule.spaced("500 millis")
+
+export type Pickup = Data.TaggedEnum<{
+  Taken: {}
+  Exited: {}
+  NotStarted: { readonly message: string }
+}>
+
+export const Pickup = Data.taggedEnum<Pickup>()
+
+export const notStartedMessage = (pickup: Pickup) =>
+  Predicate.isTagged(pickup, "NotStarted") ? pickup.message : undefined
 
 export const busy = (state: AgentState) => state === "working" || state === "blocked"
 
@@ -43,6 +55,7 @@ export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const harnesses = yield* Harnesses.Service
   const bus = yield* Bus.Service
+  const runtimes = yield* Runtimes.Service
   const { track } = yield* SessionLive.Service
 
   const reportedStatus = (id: string) =>
@@ -297,33 +310,47 @@ export const make = Effect.gen(function* () {
       return yield* db.session.executionAccepted(session.id)
     })
 
+    const current = yield* db.session.getSession(session.id)
+    const process = current?.process?.id
+    const since = current?.openExecution?.startedAt ?? 0
+
+    const exitedHere = (event: BusEvent) =>
+      event.type === "terminal.exited" &&
+      event.runtime === h.id &&
+      sameTerminal(event.terminal, terminal) &&
+      event.processes.some((bound) => bound.sessionId === session.id && bound.process === process)
+
+    const signalExit = Effect.flatMap(db.session.processesAt(h.id, terminal), (processes) =>
+      bus.observe({ type: "terminal.exited", runtime: h.id, terminal, processes }),
+    )
+
     const exited = Effect.flatMap(bus.subscribe(), (subscription) =>
       awaitOn(
         subscription,
-        Effect.succeedNone,
-        (event) =>
-          Effect.succeed(
-            event.type === "terminal.exited" && sameTerminal(event.terminal, terminal)
-              ? Option.some(true)
-              : Option.none(),
-          ),
+        Effect.map(runtimes.exitedSince(h.id, terminal, since), (gone) =>
+          gone ? Option.some(Pickup.Exited()) : Option.none(),
+        ),
+        (event) => Effect.succeed(exitedHere(event) ? Option.some(Pickup.Exited()) : Option.none()),
         READY_TIMEOUT,
         Effect.never,
       ),
-    )
+    ).pipe(Effect.tap(() => signalExit))
 
     const took = yield* taken.pipe(
       Effect.tap((done) => (done ? Effect.void : answer)),
       Effect.repeat({ until: (done) => done, schedule: STARTUP_DIALOG_POLL }),
       Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => Effect.succeed(false) }),
+      Effect.map((done) => (done ? Pickup.Taken() : undefined)),
       Effect.raceFirst(exited),
     )
 
-    if (took) return undefined
+    if (took !== undefined) return took
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* db.session.closeExecution(session.id, execution, "not_started")
 
-    return `${sessionLabel(session)} did not start working on its first message (${adapter.binary} may be signed out: sign in with ${adapter.binary})`
+    return Pickup.NotStarted({
+      message: `${sessionLabel(session)} did not start working on its first message (${adapter.binary} may be signed out: sign in with ${adapter.binary})`,
+    })
   }, Effect.scoped)
 
   const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
@@ -346,5 +373,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
+  deps: [Db.node, Harnesses.node, Bus.node, Runtimes.node, SessionLive.node],
 })

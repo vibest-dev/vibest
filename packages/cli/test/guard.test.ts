@@ -67,6 +67,7 @@ const namedRuntimes = (ids: ReadonlyArray<string>) => {
     online: unused,
     callers: unused(),
     added: Stream.die(new Error("the guard reads only Runtimes.all")),
+    exitedSince: unused,
     transform: unused,
   })
 }

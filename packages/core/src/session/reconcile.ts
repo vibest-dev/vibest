@@ -33,12 +33,10 @@ import { RunCoordinator } from "./run-coordinator.ts"
 export * as Reconcile from "./reconcile.ts"
 
 export const START_TIMEOUT = Duration.seconds(120)
-export const PLACING_GRACE = Duration.seconds(2)
 export const HOOK_GRACE = Duration.seconds(10)
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
-  const bus = yield* Bus.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const inbox = yield* Inbox.Service
@@ -260,17 +258,7 @@ export const make = Effect.gen(function* () {
       : Effect.void,
   )
   yield* reactor.on([TerminalState], (event) => onTerminal(event.processes, event.state === "working"))
-  yield* reactor.on([TerminalExited], (event) =>
-    event.processes.length > 0
-      ? onTerminal(event.processes, false)
-      : reactor.arm(
-          `placing:${event.runtime}:${event.terminal.id}`,
-          PLACING_GRACE,
-          Effect.flatMap(db.session.processesAt(event.runtime, event.terminal), (processes) =>
-            processes.length === 0 ? Effect.void : bus.observe({ ...event, processes }),
-          ),
-        ),
-  )
+  yield* reactor.on([TerminalExited], (event) => onTerminal(event.processes, false))
   yield* reactor.on([ProcessEnded], (event) => forgetIfDone(event.sessionId!))
   yield* reactor.on([RuntimeReset], (event) =>
     republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine }))),

@@ -3,7 +3,7 @@ import { exhaustedText, isLimited, stillLimited } from "@vibest/plugin/effect"
 import type { ProcessEndReason } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import type { Subscription } from "@vibest/schema/subscription"
-import { Cause, Clock, Context, Effect, Exit, Layer } from "effect"
+import { Cause, Clock, Context, Effect, Exit, Layer, Predicate } from "effect"
 
 import { type SessionRow, harnessIdOf, pidOf, runtimeOf, startOf, terminalOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
@@ -391,8 +391,11 @@ export const make = Effect.gen(function* () {
       row = (yield* db.session.getSession(row.id))!
       const prompted = yield* plan.deliver(h, row, terminal).pipe(Effect.exit)
 
-      if (Exit.isFailure(prompted) || prompted.value !== undefined) {
-        skip(next.harness, "not_confirmed")
+      if (Exit.isFailure(prompted) || !Predicate.isTagged(prompted.value, "Taken")) {
+        skip(
+          next.harness,
+          Exit.isSuccess(prompted) && Predicate.isTagged(prompted.value, "Exited") ? "start_failed" : "not_confirmed",
+        )
         continue
       }
 

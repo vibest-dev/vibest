@@ -162,11 +162,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   sessions included. A plugin that keeps state per process (agy's root conversation) needs no special case.
 - Ready for input: the harness definition's `ready` says whose signal counts: `integration`, the plugin's ready report;
   `runtime`, the ready report or the runtime showing the terminal idle (a terminal blocked on a dialog is not ready; the definition's `startup` step answers the dialogs it knows). A process that exits before its execution ends
-  loses the execution, as today. A first start stops waiting for its pickup when its terminal exits, so the exit is
-  recorded at once instead of after the ready timeout; an exit a runtime reports before vibestd has recorded the
-  terminal (a harness that dies within the first second) is looked at again 2 s later (`PLACING_GRACE` in
-  `session/reconcile.ts`). When a harness whose definition has `ready: integration` exits before it reported ready,
-  the exit notice to its creator says so and carries the last 10 lines of its terminal.
+  loses the execution, as today. A first start stops waiting for its pickup when its terminal exits: `Runtimes`
+  remembers each runtime's exited terminals for 10 minutes, so an exit that came before the wait began (even before
+  vibestd recorded the terminal) counts too. The wait then signals the exit again with the process now bound, so the
+  exit is recorded once the start releases the session lock, instead of after the ready timeout, and a usage-limit
+  move tries its next harness. When a harness exits with an execution it never started working on, the exit notice to
+  its creator says so and carries the last 10 lines of its terminal.
 - Empty input box before typing: when a harness definition gives `clearKeys`, vibestd sends them right before it types
   a message (a first task, delivered messages, a retype), whatever the box holds: a draft the user left there is
   cleared, as is a cancelled prompt the harness drew back after an interrupt (Cursor does when the interrupt lands

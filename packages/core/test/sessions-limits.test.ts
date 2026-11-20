@@ -6,7 +6,7 @@ import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
-import { Deferred, Effect, Fiber, FileSystem, HashMap, Ref } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, HashMap, PubSub, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -395,6 +395,36 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude", "cursor", "claude"],
+      )
+    }),
+    { noRun: true, plugins: [chooseNext] },
+  )
+
+  test(
+    "a harness a usage-limit move starts that exits before it takes the task moves on to the next harness",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* herdr.endExecution(id)
+      yield* writeEnd(id, "pi", { error: "rate_limit" })
+      const starts = yield* Ref.make(0)
+
+      yield* Ref.set(herdr.onStarted, (session) =>
+        Effect.gen(function* () {
+          if ((yield* Ref.getAndUpdate(starts, (n) => n + 1)) !== 0) return
+          const terminal = (yield* herdr.terminalOf(session))!
+          yield* herdr.updateAgent(session, (agent) => ({ ...agent, alive: false }))
+          yield* PubSub.publish(herdr.events, { type: "exited", terminal })
+        }),
+      )
+
+      yield* sessions.check(id)
+      const row = (yield* db.session.getSession(id))!
+      assert.strictEqual(harnessIdOf(row), "cursor")
+      assert.strictEqual(executionStateOf(row), "open")
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
+        ["pi", "claude", "cursor"],
       )
     }),
     { noRun: true, plugins: [chooseNext] },

@@ -47,7 +47,7 @@ import { isUsageLimitError } from "../replies.ts"
 import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
 import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
-import { Executions } from "./executions.ts"
+import { Executions, notStartedMessage, Pickup } from "./executions.ts"
 
 export * as Placement from "./placement.ts"
 
@@ -204,7 +204,7 @@ export const make = Effect.gen(function* () {
 
     const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
       Effect.flatMap(Ref.get(execution), (opened) =>
-        opened === undefined ? Effect.succeed(undefined) : launched(h, row, terminal, opened),
+        opened === undefined ? Effect.succeed(Pickup.Taken()) : launched(h, row, terminal, opened),
       )
 
     const abandoned = Effect.flatMap(Ref.get(execution), (opened) =>
@@ -412,7 +412,7 @@ export const make = Effect.gen(function* () {
         execution: (yield* plan.opened) ?? 0,
       })
     yield* show(h, session, terminal.terminal, root)
-    const notStarted = yield* plan.deliver(h, session, terminal.terminal)
+    const notStarted = notStartedMessage(yield* plan.deliver(h, session, terminal.terminal))
 
     if (notStarted) yield* notice(session, notStarted)
 
@@ -517,7 +517,7 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.tap((terminal) => show(h, session, terminal, root))),
       )
 
-      return yield* plan.deliver(h, session, terminal)
+      return notStartedMessage(yield* plan.deliver(h, session, terminal))
     },
     Effect.scoped,
     provided,

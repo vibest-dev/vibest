@@ -575,7 +575,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S59",
     title:
-      "herdr-core runtime: a subagent's harness starts after the user's shell rc; when it exits before it was ready, its terminal is back at the login shell and the creator is told at once with the terminal's last lines",
+      "herdr-core runtime: a subagent's harness starts after the user's shell rc; when it exits before it started working, its terminal is back at the login shell and the creator is told at once with the terminal's last lines",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -637,10 +637,10 @@ const checks: ReadonlyArray<Check> = [
         const started = Date.now()
 
         const told = () =>
-          model.seen.find((m) => m.includes(sub.slice(0, 8)) && m.includes("exited before it was ready"))
+          model.seen.find((m) => m.includes(sub.slice(0, 8)) && m.includes("exited before it started working"))
 
         await until(
-          "the creator told that the subagent exited before it was ready",
+          "the creator told that the subagent exited before it started working",
           () => told() !== undefined,
           30_000,
         ).catch(async (e: Error) => {
@@ -659,7 +659,7 @@ const checks: ReadonlyArray<Check> = [
         const terminal = await core.get(addressOf(at.id!))
         const shell = terminal.foreground?.name.replace(/^-/, "").replace(/^.*\//, "") ?? ""
         expect(
-          terminal.state === "live" && ["sh", "bash", "zsh", "dash", "ksh", "fish"].includes(shell),
+          terminal.state === "live" && shell === path.basename(Bun.env.SHELL || "/bin/sh"),
           `the subagent's terminal is not back at a shell: ${JSON.stringify(terminal)}`,
         )
 

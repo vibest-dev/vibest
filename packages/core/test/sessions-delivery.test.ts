@@ -1,11 +1,11 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
+import { executionStateOf, exitedAt, terminalOf } from "@vibest/core/database/db-rows"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
-import { Clock, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
+import { Clock, Deferred, Effect, Exit, Fiber, PubSub, Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -176,6 +176,32 @@ describe.concurrent("Session", () => {
       const notStarted = (yield* sqlNotices(id)).filter((message) => message.includes("did not start"))
       assert.strictEqual(notStarted.length, 1)
       assert.include(notStarted[0], "(pi may be signed out: sign in with pi)")
+    }),
+    { promptsIgnored: true, hooked: ["pi"] },
+  )
+
+  test(
+    "a harness that exits while its first start is being shown is reported as an exit without waiting for the ready timeout",
+    Effect.gen(function* () {
+      const runtime = yield* FakeRuntime
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      const input = yield* spawnInput(repo)
+      const held = yield* runtime.hold("present")
+      const { id } = yield* sessions.spawn(input)
+      yield* held.reached
+      const terminal = terminalOf((yield* db.session.getSession(id))!).id
+      yield* runtime.updateAgent(id, (agent) => ({ ...agent, alive: false }))
+      yield* PubSub.publish(runtime.events, { type: "exited", terminal: { id: terminal } })
+      yield* held.release()
+
+      const notices = yield* until(sqlNotices(id), (all) =>
+        all.some((message) => message.includes("exited before it started working")),
+      )
+
+      assert.isUndefined(notices.find((message) => message.includes("did not start working")))
+      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
     }),
     { promptsIgnored: true, hooked: ["pi"] },
   )
