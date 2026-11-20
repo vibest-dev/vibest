@@ -112,11 +112,11 @@ describe("Shell denials", () => {
       "vibest run pi 'herdr pane list; vibest integration stop'",
       "git commit -m 'herdr pane list'",
       'rg "vibest integration stop" src',
-      "/usr/bin/bun /src/main.ts report -- 'env -u VIBEST_SESSION_ID vibest rm x'",
+      "/usr/bin/bun /src/main.ts report -- 'env -u VIBEST_SESSION_ID vibest archive x'",
       "vibest run pi - <<'EOF'\nherdr pane list\nvibest integration stop\nEOF",
       "ls # herdr pane list",
       "echo 'claude -p x' && echo \"gh auth token\"",
-      "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "vibest ls",
       "vibest worktree list",
@@ -165,23 +165,23 @@ describe("Shell denials", () => {
 
   it("refuse vibest with its identity variables changed or cleared, however it is wrapped or spelled", () => {
     for (const command of [
-      "env -u VIBEST_SESSION_ID vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "env -u VIBEST_SESSION_ID vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "env -u VIBEST_SESSION_ID vibest machine ls",
       "env -u VIBEST_SESSION_ID vibest daemon restart",
       "env -uVIBEST_SESSION_ID vibest ls",
       "env --unset=VIBEST_SESSION_ID vibest ls",
       "env -i PATH=/bin vibest interrupt abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "env - vibest ls",
-      "VIBEST_SESSION_ID= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "VIBEST_SESSION_ID= vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "VIBEST_SESSION_ID=x /usr/bin/bun /src/main.ts send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "env VIBEST_SESSION_ID= /usr/local/bin/vibest ls",
-      "unset VIBEST_SESSION_ID; vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "unset VIBEST_SESSION_ID; vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "export VIBEST_SESSION_ID=other && vibest ls",
       "VIBEST_SESSION_ID=; vibest ls",
-      "sh -c 'env -u VIBEST_SESSION_ID vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd'",
-      "echo $(VIBEST_SESSION_ID= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd)",
+      "sh -c 'env -u VIBEST_SESSION_ID vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd'",
+      "echo $(VIBEST_SESSION_ID= vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd)",
       "nohup env -i vibest daemon restart",
-      "echo a | VIBEST_SESSION_ID= xargs vibest rm",
+      "echo a | VIBEST_SESSION_ID= xargs vibest archive",
     ])
       assert.match(blocked(command) ?? "", /^vibest runs with the agent's own VIBEST_SESSION_ID/, command)
   })
@@ -562,7 +562,7 @@ layer(
         for (const agent of ["coordinator", "general"]) {
           for (const tool of ["Bash", "Shell"]) {
             for (const command of [
-              "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+              "vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
               "vibest daemon restart",
               "/usr/bin/bun /src/main.ts send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
               "jq . a.json > /tmp/b",
@@ -571,8 +571,8 @@ layer(
               assert.isUndefined(yield* as(agent, tool, command), `${agent} ${tool}: ${command}`)
 
             for (const command of [
-              "env -u VIBEST_SESSION_ID vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
-              "VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+              "env -u VIBEST_SESSION_ID vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
+              "VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
               "vibest integration stop",
               "vibest integration prompt",
               "vibest integration ready",

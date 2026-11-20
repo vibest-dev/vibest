@@ -1086,6 +1086,8 @@ remote there; the start commit must be pushed). An offline machine's Agents show
 
 ## 13. Surfaces and protocol
 
+The commands, who calls them, and the lifecycle verbs are in [cli.md](cli.md). The list below is the older draft.
+
 ```
 vibest project create <directory> --from <repository>…   copy repositories into a new Project directory
 vibest [--new] [--harness <h>]          in a Project directory: open its entry session here (create or resume it)

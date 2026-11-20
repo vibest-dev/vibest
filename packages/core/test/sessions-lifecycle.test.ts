@@ -103,7 +103,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "a Send accepted just before vibest rm does not bring the removed session back; its message fails once",
+    "a Send accepted just before vibest archive does not bring the removed session back; its message fails once",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
