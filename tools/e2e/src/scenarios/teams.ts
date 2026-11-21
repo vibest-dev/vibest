@@ -27,7 +27,7 @@ const inboxFrom = (w: World, sender: string) =>
 const S67: Check = {
   id: "S67",
   title:
-    "vibest run --new-team makes a team whose id the run prints, --team <id> adds two more; the three list each other with vibest ls --team and one sends to another, which arrives from the real sender; another team, a non-member, another creator's new team, a second session adding to the team, an unknown team id, a member's own child, a send to an archived teammate, ls --team from outside the team and adding to a team whose members have all ended are each refused or left out; its creator lists it",
+    "vibest run --team pi (a bare --team before the harness) makes a team whose id the run prints and runs Pi, --team <id> adds two more; the three list each other with vibest ls --team and one sends to another, which arrives from the real sender; another team, a non-member, another creator's new team, a second session adding to the team, an unknown team id, a member's own child, a send to an archived teammate, ls --team from outside the team and adding to a team whose members have all ended are each refused or left out; its creator lists it",
   run: async (w) => {
     needs()
     const entryModel = recordingModel(() => reply("ok"))
@@ -40,7 +40,7 @@ const S67: Check = {
       const dir = await piDir(w, `pi-team-${name}`, model.url)
 
       const out = await w.okViaEntry(
-        ["run", "pi", ...flags, "--session", session, "--env", `PI_CODING_AGENT_DIR=${dir}`, "--", "wait"],
+        ["run", ...flags, "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${dir}`, "--", "wait"],
         { cwd: repo, timeoutMs: 90_000 },
       )
 
@@ -74,17 +74,9 @@ const S67: Check = {
       repo = m.repo
       const entry = entryIdOf(w)
 
-      const both = await w.viaEntry(
-        ["run", "pi", "--new-team", "--team", "t-0000", "--session", session, "--", "wait"],
-        {
-          cwd: repo,
-        },
-      )
-
-      expect(both.code !== 0 && both.stdout.includes("not both"), `--new-team with --team: ${both.stdout}`)
-      const a = await start("a", "--new-team")
+      const a = await start("a", "--team")
       const web = a.team!
-      expect(/^t-[0-9a-f]{4}$/.test(web), `vibest run --new-team printed team ${web}`)
+      expect(/^t-[0-9a-f]{4}$/.test(web), `vibest run --team pi printed team ${web}`)
       const b = await start("b", "--team", web)
       const c = await start("c", "--team", web)
       expect(b.team === web && c.team === web, `--team ${web} printed ${b.team} and ${c.team}`)
@@ -128,17 +120,17 @@ const S67: Check = {
         "a's send to b is not one inbox row from a",
       )
 
-      const other = await start("other", "--new-team")
+      const other = await start("other", "--team")
       const loner = await start("loner")
       const strangerDir = await piDir(w, "pi-team-stranger", loner.model.url)
 
       const stranger = JSON.parse(
-        await tell(loner, `${binary} run pi --new-team --env PI_CODING_AGENT_DIR=${strangerDir} -- wait`),
+        await tell(loner, `${binary} run pi --team --env PI_CODING_AGENT_DIR=${strangerDir} -- wait`),
       ) as { id: string; team: string }
 
       expect(
         other.team !== undefined && new Set([web, other.team, stranger.team]).size === 3,
-        `three --new-team gave teams ${web}, ${other.team}, ${stranger.team}`,
+        `three bare --team gave teams ${web}, ${other.team}, ${stranger.team}`,
       )
       const toStranger = await tell(a, `${binary} send ${stranger.id} -- not-a-teammate`)
       expect(

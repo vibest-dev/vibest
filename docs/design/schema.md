@@ -120,7 +120,7 @@ CREATE TABLE session (
   origin_peer           TEXT,                         -- started by another vibestd: its id
   origin_project        TEXT,                         -- and its project there
   origin_session        TEXT,                         -- and the session there its notices and sends go to (that project's entry session)
-  team                  TEXT,                         -- team id (t-xxxx) from vibest run --new-team; written once, never inherited. Members of one team in a project may send to each other
+  team                  TEXT,                         -- team id (t-xxxx) from a bare vibest run --team; written once, never inherited. Members of one team in a project may send to each other
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
   process_id            INTEGER,                      -- its current process; its latest execution is its highest execution id

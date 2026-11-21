@@ -158,15 +158,17 @@ update` there.
 ## S67. Teams
 
 A team is a running group of sessions, as a session is a run of an agent definition: it has an id, not a name.
-`vibest run --new-team` starts the session as the first member of a new team whose id vibest makes (`t-` and four hex
+`vibest run --team` with no id starts the session as the first member of a new team whose id vibest makes (`t-` and four hex
 digits, unique in the project) and prints it with the session id: `{"id": …, "team": "t-3f2a"}`. `vibest run --team
-<team id>` adds the session to that team and prints the id too; giving both flags is a usage error. Only the session that created the team may add members;
+<team id>` adds the session to that team and prints the id too. The word after `--team` is taken as the id only when it has the
+id's form (`t-` and four lowercase hex digits); anything else (a harness name, `--`, another flag) is left alone, so
+`vibest run --team pi -- <task>` starts a new team and runs Pi. Only the session that created the team may add members;
 any other session is refused with an error naming that session, and an id no team in this project has is refused; in both
 cases nothing starts. A team whose members have all been archived has ended: `--team <id>` is then refused and the id
 never comes back; this is checked in the same transaction as the new member, so a last archive and an addition happen in
-one order. Two `--new-team` always give two teams, whoever runs them. A session's team is set when it is
-created and never changes; a session started without `--team` or `--new-team` is in no team, even when its creator is. `--team` or `--new-team`
-with `--machine` is refused.
+one order. Two bare `--team` always give two teams, whoever runs them. A session's team is set when it is
+created and never changes; a session started without `--team` is in no team, even when its creator is. `--team` with `--machine` is
+refused.
 
 Members of one team may `vibest send` to each other while they are unfinished (S46, S47 still refuse everyone else); a
 send to an archived teammate is refused and goes to no one else. Interrupt, peek and archive stay with the session that

@@ -480,12 +480,12 @@ export const make = Effect.gen(function* () {
 
                 if (Predicate.isObject(inserted) && "teamEnded" in inserted)
                   return yield* new TeamRefused({
-                    message: `team ${inserted.teamEnded} has ended: none of its members is unfinished; start a new one with --new-team`,
+                    message: `team ${inserted.teamEnded} has ended: none of its members is unfinished; start a new one with a bare --team`,
                   })
 
                 if (Predicate.isObject(inserted) && "teamUnknown" in inserted)
                   return yield* new TeamRefused({
-                    message: `no team ${inserted.teamUnknown} in this project; start one with --new-team`,
+                    message: `no team ${inserted.teamUnknown} in this project; start one with a bare --team`,
                   })
 
                 if (inserted === "waiting") {

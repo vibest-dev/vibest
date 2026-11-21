@@ -107,7 +107,7 @@ manages it. Items marked planned are not built.
   may send only to its creator, to sessions it started and to its teammates, notices and sends to an ended creator go to the nearest
   living one above it, management belongs to the nearest living creator, and a new terminal opens beside the live creator.
 - **Teams are a label.** `session.team` holds a team id, written once from `session.created` and never inherited. A
-  team is a runtime instance, not a name: `vibest run --new-team` makes its id (`t-` and four hex digits, unique in the
+  team is a runtime instance, not a name: a bare `vibest run --team` makes its id (`t-` and four hex digits, unique in the
   project) inside `insertSession`'s transaction, and its creator, the creator of all its members, is the only session
   that may add members with `--team <id>`; `insertSession` refuses any other creator, an unknown id and a team with no
   unfinished member (it has ended for good) in the same transaction. `vibest ls --team` answers only the creator and the

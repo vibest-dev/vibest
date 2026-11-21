@@ -7,6 +7,7 @@ import { Effect, FileSystem, Path, Schema } from "effect"
 
 import * as Platform from "#platform"
 
+import { bareTeam } from "../src/commands/commands.ts"
 import { VERSION } from "../src/version.ts"
 
 const TIMEOUT = 30_000
@@ -156,4 +157,15 @@ describe("vibest CLI without vibestd", () => {
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )
+})
+
+describe("vibest run --team", () => {
+  it("takes the next word as the team id only when it has the id's form", () => {
+    assert.deepStrictEqual(bareTeam(["run", "--team", "pi", "--", "task"]), ["run", "--team=", "pi", "--", "task"])
+    assert.deepStrictEqual(bareTeam(["run", "pi", "--team", "--", "task"]), ["run", "pi", "--team=", "--", "task"])
+    assert.deepStrictEqual(bareTeam(["run", "--team", "--env", "A=1", "pi"]), ["run", "--team=", "--env", "A=1", "pi"])
+    assert.deepStrictEqual(bareTeam(["run", "--team", "t-3f2a", "pi"]), ["run", "--team", "t-3f2a", "pi"])
+    assert.deepStrictEqual(bareTeam(["run", "pi", "--", "--team"]), ["run", "pi", "--", "--team"])
+    assert.deepStrictEqual(bareTeam(["ls", "--team", "t-3f2a"]), ["ls", "--team", "t-3f2a"])
+  })
 })

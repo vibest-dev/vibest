@@ -117,11 +117,11 @@ export const make = Effect.gen(function* () {
         const project = yield* projectOf(c, "Spawn")
 
         if (input.newTeam === true && input.team !== undefined)
-          return yield* new Forbidden({ method: "Spawn", message: "give --new-team or --team <team id>, not both" })
+          return yield* new Forbidden({ method: "Spawn", message: "give a new team or a team id, not both" })
 
         if (input.machine !== undefined && (input.team !== undefined || input.newTeam === true))
           return yield* new MachineFailed({
-            message: "--team and --new-team are not available with --machine yet; nothing was started",
+            message: "--team is not available with --machine yet; nothing was started",
           })
 
         if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
