@@ -157,6 +157,12 @@ const run = Spec.make("run", {
       ),
       Flag.atLeast(0),
     ),
+    team: Flag.String("team").pipe(
+      Flag.withDescription(
+        "Bare: start a new team with this session as its first member; its id (such as t-3f2a) is printed with the session id. With a team id: add this session to that team; only the session that created it may. Members may message each other; vibest ls --team lists them",
+      ),
+      Flag.optional,
+    ),
     session: sessionFlag,
   },
 })
@@ -223,6 +229,13 @@ const ls = Spec.make("ls", {
       Flag.withDescription("Include exited sessions"),
       Flag.withDefault(false),
     ),
+    team: Flag.Boolean("team").pipe(
+      Flag.withDescription(
+        "Instead: the unfinished members of a team (default your own) with who started each, as JSON",
+      ),
+      Flag.withDefault(false),
+    ),
+    name: Argument.String("team id").pipe(Argument.withDescription("With --team: the team to list"), Argument.optional),
   },
 })
 
@@ -470,6 +483,15 @@ const machine = Spec.make("machine", {
     }),
   ],
 })
+
+const TEAM_ID = /^t-[0-9a-f]{4}$/
+
+export const bareTeam = (args: ReadonlyArray<string>) => {
+  if (args.find((arg) => !arg.startsWith("-")) !== "run") return args
+  const end = args.includes("--") ? args.indexOf("--") : args.length
+
+  return args.map((arg, i) => (i < end && arg === "--team" && !TEAM_ID.test(args[i + 1] ?? "") ? "--team=" : arg))
+}
 
 export const Commands = Spec.make("vibest", {
   description: "In a project directory, open its entry session in this terminal. --new starts a new conversation",

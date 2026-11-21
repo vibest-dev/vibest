@@ -12,7 +12,20 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Predicate, Ref } from "effect"
+import {
+  Clock,
+  Context,
+  Crypto,
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Predicate,
+  Ref,
+  Schema,
+} from "effect"
 import { Hex } from "effect/encoding"
 
 import { definitionLaunch } from "../agent-launch.ts"
@@ -28,6 +41,7 @@ import {
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import type { PeerStart } from "../database/remote.ts"
+import type { TeamStart } from "../database/session.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
@@ -46,6 +60,8 @@ import { Placement } from "./placement.ts"
 import { Starts } from "./starts.ts"
 
 export * as Spawn from "./spawn.ts"
+
+export class TeamRefused extends Schema.TaggedError<TeamRefused>()("TeamRefused", { message: Schema.String }) {}
 
 export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
@@ -95,6 +111,7 @@ export interface SpawnInput {
   readonly folders?: ReadonlyArray<PinnedFolder> | undefined
   readonly origin?: PeerStart | undefined
   readonly files?: ReadonlyArray<Attachment> | undefined
+  readonly team?: TeamStart | undefined
 }
 
 export interface Spawned extends Routing {
@@ -447,12 +464,28 @@ export const make = Effect.gen(function* () {
                   parentSessionId: input.parentSessionId,
                   request: input.request,
                   origin: input.origin,
+                  team: input.team,
                 })
 
                 if (inserted === "parent-ended")
                   return yield* new NoSuchSession({
                     id: input.parentSessionId!,
                     message: `${input.parentSessionId} has ended and can no longer start sessions`,
+                  })
+
+                if (Predicate.isObject(inserted) && "teamOwner" in inserted)
+                  return yield* new TeamRefused({
+                    message: `team ${inserted.team} is owned by ${inserted.teamOwner}, the session that created it; only it adds members`,
+                  })
+
+                if (Predicate.isObject(inserted) && "teamEnded" in inserted)
+                  return yield* new TeamRefused({
+                    message: `team ${inserted.teamEnded} has ended: none of its members is unfinished; start a new one with a bare --team`,
+                  })
+
+                if (Predicate.isObject(inserted) && "teamUnknown" in inserted)
+                  return yield* new TeamRefused({
+                    message: `no team ${inserted.teamUnknown} in this project; start one with a bare --team`,
                   })
 
                 if (inserted === "waiting") {

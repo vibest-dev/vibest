@@ -20,7 +20,7 @@ import {
   type HarnessId,
 } from "@vibest/schema/session"
 import { Clock, Effect, Predicate } from "effect"
-import { SqlClient } from "effect/sql"
+import { SqlClient, type SqlError } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { type ObservedEnd } from "../replies.ts"
@@ -39,6 +39,13 @@ import {
 import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
 import type * as Session from "./session-statements.ts"
+
+export type TeamStart = "new" | { readonly join: string }
+
+export type TeamRefusal =
+  | { readonly team: string; readonly teamOwner: string }
+  | { readonly teamUnknown: string }
+  | { readonly teamEnded: string }
 
 export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
 
@@ -132,7 +139,42 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         Effect.orDie,
       )
 
+    const teamOwner = (project: string, team: string) =>
+      sql<{ owner: string | null }>`SELECT parent_session_id AS owner FROM session
+        WHERE project_id = ${project} AND team = ${team} LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]?.owner ?? undefined),
+      )
+
+    const unusedTeamId = (project: string): Effect.Effect<string, SqlError.SqlError> =>
+      sql<{ id: string }>`SELECT 't-' || lower(hex(randomblob(2))) AS id`.pipe(
+        Effect.flatMap(([row]) =>
+          teamOwner(project, row!.id).pipe(
+            Effect.flatMap((owner) => (owner === undefined ? Effect.succeed(row!.id) : unusedTeamId(project))),
+          ),
+        ),
+      )
+
+    const teamLive = (project: string, team: string) =>
+      sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+      )
+
     return {
+      mayListTeam: Effect.fn("Db.session.mayListTeam")((project: string, team: string, caller: string) =>
+        sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team}
+          AND (id = ${caller} OR parent_session_id = ${caller}) LIMIT 1`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
+      ),
+
+      teamMembers: Effect.fn("Db.session.teamMembers")((project: string, team: string) =>
+        sql<{ id: string; parent: string | null }>`SELECT id, parent_session_id AS parent FROM session
+          WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL ORDER BY created_at, rowid`.pipe(
+          Effect.orDie,
+        ),
+      ),
+
       sessionParents: Effect.fn("Db.session.sessionParents")((ids: ReadonlyArray<string>) =>
         (ids.length === 0
           ? Effect.succeed<ReadonlyArray<{ id: string; parentSessionId: string | null }>>([])
@@ -228,6 +270,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             request,
             origin,
             max,
+            team,
           }: {
             readonly cwd?: string
             readonly task?: string
@@ -235,8 +278,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly request?: string | undefined
             readonly origin?: Remote.PeerStart | undefined
             readonly max?: number | undefined
+            readonly team?: TeamStart | undefined
           } = {},
-        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended"> =>
+        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended" | TeamRefusal> =>
           tx(
             Effect.gen(function* () {
               if (request !== undefined) {
@@ -250,6 +294,18 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 (yield* sql`SELECT 1 FROM session WHERE id = ${parentSessionId} AND ended_at IS NOT NULL`).length > 0
               )
                 return "parent-ended" as const
+
+              const teamId = team === undefined ? undefined : team === "new" ? yield* unusedTeamId(project) : team.join
+
+              if (team !== undefined && team !== "new") {
+                const owner = yield* teamOwner(project, team.join)
+
+                if (owner === undefined) return { teamUnknown: team.join }
+
+                if (!(yield* teamLive(project, team.join))) return { teamEnded: team.join }
+
+                if (owner !== parentSessionId) return { team: team.join, teamOwner: owner }
+              }
 
               yield* publish(SessionCreated, {
                 sessionId: row.id,
@@ -267,6 +323,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(origin.reportTo !== undefined && { session: origin.reportTo }),
                     },
                   }),
+                  ...(teamId !== undefined && { team: teamId }),
                 },
               })
 
@@ -370,8 +427,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           projectId: string
           agent: string
           harness: string
+          team: string | null
           entry: number
-        }>`SELECT a.id, a.project_id, a.agent,
+        }>`SELECT a.id, a.project_id, a.agent, a.team,
             coalesce(p.harness, '') AS harness,
             q.entry_session_id = a.id AS entry
           FROM session a JOIN project q ON q.id = a.project_id

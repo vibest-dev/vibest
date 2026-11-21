@@ -2,6 +2,7 @@ import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { NoSuchSession } from "@vibest/core/session"
+import { FORWARDED_CALLS, PEER_CALLS } from "@vibest/protocol/access"
 import {
   CALLER_HEADER,
   CWD_HEADER,
@@ -25,9 +26,7 @@ import {
   Caller,
   CallerGate,
   DaemonStopping,
-  FORWARDED_CALLS,
   InvalidCaller,
-  PEER_CALLS,
   ProtocolGate,
   ProtocolRejected,
   type CallerIdentity,

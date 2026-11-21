@@ -17,8 +17,9 @@ import {
 } from "@vibest/platform-bun/test/lib/fakes"
 import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vibest/platform-bun/test/lib/rpc-helpers"
 import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { ACCESS } from "@vibest/protocol/access"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
-import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
+import { VibestRpcs } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, type Schema, Stream } from "effect"
@@ -578,6 +579,7 @@ describe("vibest.sock", () => {
         ["Project.Move", c["Project.Move"]({ from: "x" })],
         ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
+        ["Team.List", c["Team.List"]({})],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Inbox.Take", c["Inbox.Take"](undefined)],
