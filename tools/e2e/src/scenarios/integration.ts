@@ -190,7 +190,7 @@ const checks: ReadonlyArray<Check> = [
           expect(
             (row<{ n: number }>(
               w,
-              "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest'",
+              "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
               id,
             )?.n ?? 0) > 0,
             `${id}'s plain vibest send never reached vibestd`,
@@ -564,7 +564,7 @@ const checks: ReadonlyArray<Check> = [
 
           const delivered = rows<{ content: string; status: string; execution: number }>(
             w,
-            "SELECT content, status, recipient_execution_id AS execution FROM inbox WHERE session_id = ? AND sender_type != 'vibest' ORDER BY id",
+            "SELECT content, status, recipient_execution_id AS execution FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) ORDER BY id",
             id,
           )
 

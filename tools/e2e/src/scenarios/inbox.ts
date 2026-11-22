@@ -577,7 +577,7 @@ const checks: ReadonlyArray<Check> = [
         const toEntry = () =>
           rows<{ status: string }>(
             w,
-            "SELECT status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND sender_session_id IS NOT NULL",
+            "SELECT status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND sender_session_id IS NOT NULL",
             entryId,
           ).map((r) => r.status)
 
@@ -638,7 +638,7 @@ const checks: ReadonlyArray<Check> = [
         const sent = () =>
           rows<{ id: number; status: string }>(
             w,
-            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND sender_type != 'vibest'",
+            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
             sub,
             entryId,
           )

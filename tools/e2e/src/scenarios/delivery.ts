@@ -96,7 +96,7 @@ export const entryIdOf = (w: World) =>
 const sendsFrom = (w: World, sender: string, recipient: string) =>
   rows<{ id: number; status: string; execution: number | null; content: string }>(
     w,
-    "SELECT id, status, recipient_execution_id AS execution, content FROM inbox WHERE sender_session_id = ? AND session_id = ? AND sender_type != 'vibest'",
+    "SELECT id, status, recipient_execution_id AS execution, content FROM inbox WHERE sender_session_id = ? AND session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
     sender,
     recipient,
   )
@@ -439,13 +439,22 @@ const checks: ReadonlyArray<Check> = [
 
         for (const task of ["first", "second"]) await w.ok(["send", sub, "--", ask(task)], { cwd: m.repo })
         expect(
-          inboxRows(w, "session_id = ? AND sender_type != 'vibest' AND status = 'pending'", sub) === 2,
+          inboxRows(
+            w,
+            "session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND status = 'pending'",
+            sub,
+          ) === 2,
           "the two sends are not both pending while the subagent is busy",
         )
         model.release()
         await until(
           "both sends delivered",
-          () => inboxRows(w, "session_id = ? AND sender_type != 'vibest' AND status = 'delivered'", sub) === 2,
+          () =>
+            inboxRows(
+              w,
+              "session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND status = 'delivered'",
+              sub,
+            ) === 2,
           60_000,
         )
         await until(
@@ -466,7 +475,7 @@ const checks: ReadonlyArray<Check> = [
 
         const sends = rows<{ execution: number | null }>(
           w,
-          "SELECT recipient_execution_id AS execution FROM inbox WHERE session_id = ? AND sender_type != 'vibest'",
+          "SELECT recipient_execution_id AS execution FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
           sub,
         )
 
@@ -551,7 +560,12 @@ const checks: ReadonlyArray<Check> = [
         )
         await until(
           "the send after the interrupt delivered",
-          () => inboxRows(w, "session_id = ? AND sender_type != 'vibest' AND status = 'delivered'", sub) === 1,
+          () =>
+            inboxRows(
+              w,
+              "session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND status = 'delivered'",
+              sub,
+            ) === 1,
           10_000,
         )
         expect(

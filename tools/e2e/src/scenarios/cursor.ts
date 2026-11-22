@@ -397,7 +397,7 @@ const noApprovalDialog: Check = {
 
       const sent = row<{ n: number }>(
         w,
-        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND instr(content, 'i12-hello') > 0",
+        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND instr(content, 'i12-hello') > 0",
         id,
       )?.n
 

@@ -80,7 +80,7 @@ export const piProject = async (w: World, name: string) => {
 
   const sendRow = (id: string, message: string) =>
     q<{ id: number; status: string }>(
-      "SELECT id, status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND content = ? ORDER BY id DESC LIMIT 1",
+      "SELECT id, status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND content = ? ORDER BY id DESC LIMIT 1",
       id,
       message,
     )
@@ -376,7 +376,7 @@ const checks: ReadonlyArray<Check> = [
 
         const copies = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND content = ?",
+          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND content = ?",
           sub,
           message,
         )
@@ -638,7 +638,7 @@ const checks: ReadonlyArray<Check> = [
 
         const rows = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest'",
+          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
           sub,
         )?.n
 
