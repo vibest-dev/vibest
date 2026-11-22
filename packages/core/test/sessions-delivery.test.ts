@@ -388,6 +388,21 @@ describe.concurrent("Session", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-123")
+      const integration = yield* Integration.Service
+      const current = (yield* db.session.currentProcessId(id))!
+      yield* db.session.setStatus(id, "idle")
+      yield* integration.prompt(
+        { id, entry: false, harness: "cursor", process: current - 1 },
+        JSON.stringify({ hook_event_name: "afterAgentThought", conversation_id: "c-stale" }),
+      )
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-123")
+      yield* integration.prompt(
+        { id, entry: false, harness: "cursor", process: current },
+        JSON.stringify({ hook_event_name: "afterAgentThought" }),
+      )
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "working")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-123")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
       yield* until(db.session.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
@@ -395,7 +410,6 @@ describe.concurrent("Session", () => {
       yield* sessions.send(id, "next")
       const calls = yield* until(herdr.callsTo("open"), (c) => c.length > starts)
       assert.deepStrictEqual(harnessArgv(calls.at(-1)!.argv).slice(0, 2), ["cursor-agent", "--resume=c-123"])
-      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
       yield* writeEnd(id, "cursor", { conversation_id: "c-other", text: "status: completed" }, 5000)
       yield* herdr.endExecution(id)
       yield* sessions.check(id)

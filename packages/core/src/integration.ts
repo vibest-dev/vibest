@@ -81,6 +81,7 @@ const make = Effect.gen(function* () {
     }
 
     if (prompt.text === "") {
+      if (who.process !== undefined && (yield* db.session.currentProcessId(who.id)) !== who.process) return
       yield* db.session.setStatus(who.id, "working")
 
       return

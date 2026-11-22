@@ -859,14 +859,15 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               end.execution,
             )
 
+            if (end.conversation !== undefined && end.conversation !== current.conversation)
+              yield* session.noteConversation(id, end.conversation, process)
+
             if (recorded === "unaccepted") return "unaccepted" as const
 
             if (recorded === undefined) return undefined
 
             if (!recorded.wrote || !recorded.current) return end.status
 
-            if (end.conversation !== undefined && end.conversation !== current.conversation)
-              yield* session.noteConversation(id, end.conversation, process)
             yield* setStatus(id, "idle")
 
             if (end.status === "failed" && !(yield* isEntry(id)))
