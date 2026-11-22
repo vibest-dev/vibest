@@ -9,7 +9,7 @@ import { SqlClient } from "effect/sql"
 
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { PULLING_CLAUDE } from "./lib/harnesses.ts"
-import { replyOf, eventsOf, until, writeEnd } from "./lib/observe.ts"
+import { replyOf, eventsOf, until, writeEnd, yieldToIo } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnWorking, test } from "./lib/sessions-helpers.ts"
 
@@ -331,6 +331,25 @@ describe("observed execution end", () => {
       assert.include(result.message, "finished its execution before the interrupt took effect")
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.strictEqual(yield* replyOf(id), "finished first")
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "an interrupt whose runtime goes idle before the integration's aborted end arrives waits for and confirms the interrupt",
+    Effect.gen(function* () {
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const execution = (yield* db.session.openExecution(id))!
+      const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
+      yield* yieldToIo
+      assert.isUndefined(interrupting.pollUnsafe())
+      yield* (yield* Integration.Service).executionEnd(
+        { id, entry: false, harness: "pi" },
+        JSON.stringify({ type: "agent_settled", text: "", error: "aborted", aborted: true, execution }),
+      )
+      const result = yield* Fiber.join(interrupting)
+      assert.strictEqual(result.message, `${id} interrupted; its terminal, worktree and session are kept`)
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted")
     }),
     { hooked: ["pi"] },
   )

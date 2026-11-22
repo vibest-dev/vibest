@@ -3,7 +3,7 @@ import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/s
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
-import { Bus } from "../bus.ts"
+import { awaitEvent, Bus } from "../bus.ts"
 import {
   type SessionRow,
   harnessIdOf,
@@ -30,7 +30,7 @@ import {
   stateOf,
   type Terminal,
 } from "../runtimes.ts"
-import { busy, Executions, HANDOFF_UNPROVED, STOP_WAIT } from "./executions.ts"
+import { busy, Executions, HANDOFF_UNPROVED, HOOK_GRACE, STOP_WAIT } from "./executions.ts"
 import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
@@ -45,6 +45,7 @@ export const unreachable = (session: SessionRow) => (e: { readonly message: stri
   Effect.fail(new RuntimeUnreachable({ session: runtimeOf(session), message: e.message }))
 
 export const make = Effect.gen(function* () {
+  const bus = yield* Bus.Service
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
@@ -327,7 +328,26 @@ export const make = Effect.gen(function* () {
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
 
-        if ((yield* db.session.openExecution(id)) === execution)
+        const settled = Effect.map(db.session.openExecution(id), (open) => open !== execution)
+
+        const confirmed =
+          (yield* settled) || harnesses.find(harnessIdOf(session))?.executionEnd === undefined
+            ? yield* settled
+            : yield* awaitEvent(
+                Effect.map(settled, (done) => (done ? Option.some(true) : Option.none())),
+                (event) =>
+                  (event.type === "execution.interrupted" ||
+                    event.type === "execution.succeeded" ||
+                    event.type === "execution.failed" ||
+                    event.type === "execution.unresolved") &&
+                  event.sessionId === id
+                    ? Effect.map(settled, (done) => (done ? Option.some(true) : Option.none()))
+                    : Effect.succeed(Option.none()),
+                HOOK_GRACE,
+                settled,
+              ).pipe(Effect.provideService(Bus.Service, bus))
+
+        if (!confirmed)
           return {
             message: `${id} is idle, but the interrupt was not confirmed; its execution is unchanged`,
           }

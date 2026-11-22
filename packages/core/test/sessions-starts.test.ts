@@ -13,7 +13,7 @@ import { SqlClient } from "effect/sql"
 
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { settled, until, writeEnd } from "./lib/observe.ts"
+import { settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { makeRepository, restartSessions, type TestOptions } from "./lib/session.ts"
 import { entryOfProject, spawnInput, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
@@ -450,6 +450,10 @@ describe("a cap on live harness processes", () => {
       const interrupting = yield* Effect.forkChild(sessions.interrupt(a!))
       yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
       yield* parked.release
+      yield* untilVirtual(
+        Effect.sync(() => interrupting.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
       const answer = yield* Fiber.join(interrupting)
       yield* limitTo([{ max: 3 }])
       yield* until(placed(b!), (yes) => yes)
