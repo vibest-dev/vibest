@@ -98,7 +98,10 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     if (harness === "claude") yield* db.session.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
-    yield* until(db.session.executionAccepted(worker), (accepted) => accepted)
+    yield* until(
+      db.session.getSession(worker),
+      (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+    )
 
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.session.projectOfSession(sessionId))! }
   })
@@ -244,7 +247,8 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
           ),
         )
 
-      const prompted = yield* piExtensionHook("Prompt", { type: "input", text: "work", source: "interactive" })
+      const open = (yield* (yield* Db.Service).session.openExecution(id))!
+      const prompted = yield* piExtensionHook("Prompt", { type: "accepted", execution: open })
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
       assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       assert.isTrue(yield* (yield* Db.Service).session.executionAccepted(id))
@@ -269,7 +273,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* sessions.send(worker, "after reopen")
       assert.isArray(yield* joinAdvancingClock(stopping))
       yield* leave
-      yield* until(db.inbox.inboxWithStatus(worker, "delivered"), (rows) =>
+      yield* until(db.inbox.inboxWithStatus(worker, "delivering"), (rows) =>
         rows.some((r) => r.message === "after reopen"),
       )
       assert.deepStrictEqual(yield* db.inbox.inboxWithStatus(worker, "failed"), [])
@@ -291,7 +295,10 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         prompt: "work",
       })
 
-      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
+      yield* until(
+        db.session.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)

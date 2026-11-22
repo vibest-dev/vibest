@@ -374,6 +374,7 @@ export const make = (deps: {
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
         const argv = yield* argvOf(input.launch)
+        const { VIBEST_EXECUTION: _, ...shellEnv } = input.launch.env
         let attempt = 0
 
         const started = yield* failWith(
@@ -382,7 +383,7 @@ export const make = (deps: {
               argv: [...argv],
               name: terminalName(input, attempt++),
               cwd: input.cwd,
-              env: { ...input.launch.env },
+              env: shellEnv,
               labels: {
                 [LABEL.runtime]: KIND,
                 [LABEL.seen]: "0",

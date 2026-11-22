@@ -13,7 +13,7 @@ const stopper = Effect.gen(function* () {
   const bus = yield* Bus.Service
   const shutdown = yield* Deferred.make<void>()
 
-  return { drain, shutdown, stop: stopOnce({ drain, bus, deliveringInbox: Effect.succeed([]), shutdown }) }
+  return { drain, shutdown, stop: stopOnce({ drain, bus, shutdown }) }
 })
 
 describe("stopOnce: the takeover (the new vibestd of a handoff) starts only once the stop is certain", () => {

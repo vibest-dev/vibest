@@ -82,6 +82,9 @@ export const make = Effect.gen(function* () {
 
     if (toOrigin === true) return { id: input }
     const id = yield* db.session.resolveSession(input)
+
+    if (id === sender.sessionId)
+      return yield* new SendRefused({ message: `${id} is you; a session does not send to itself` })
     const target = yield* db.session.sessionIdentity(id)
 
     if (target?.projectId !== sender.projectId)
@@ -93,7 +96,7 @@ export const make = Effect.gen(function* () {
 
     if (!(yield* db.inbox.maySend(sender.sessionId, id)))
       return yield* new SendRefused({
-        message: `${id} is not the agent that started you, and you did not start it${mine === undefined ? "" : `; you may send to ${mine}`}`,
+        message: `${id} is not the agent that started you, you did not start it, and it is not in your team${mine === undefined ? "" : `; you may send to ${mine}`}`,
       })
     const session = yield* db.session.getSession(id)
     const stopped = !session || archived(session)

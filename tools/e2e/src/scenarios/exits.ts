@@ -80,14 +80,14 @@ export const piProject = async (w: World, name: string) => {
 
   const sendRow = (id: string, message: string) =>
     q<{ id: number; status: string }>(
-      "SELECT id, status FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
+      "SELECT id, status FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content = ? ORDER BY id DESC LIMIT 1",
       id,
       message,
     )
 
   const notices = (id: string, text: string) =>
     q<{ n: number }>(
-      "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice' AND instr(content, ?) > 0",
+      "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest' AND instr(content, ?) > 0",
       id,
       text,
     )?.n ?? 0
@@ -318,7 +318,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S24",
     title:
-      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent and its pane's shell are stopped, so the shell keeps no job control over it, and curl takes for it): the next vibestd ends that execution not_started, fails the row once with one notice, and does not deliver it again",
+      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent and its pane's shell are stopped, so the shell keeps no job control over it, and curl takes for it): the next vibestd ends that execution not_started, leaves the row delivering with one notice, and does not deliver it again",
     run: async (w) => {
       const p = await piProject(w, "s24")
       let shell: number | undefined
@@ -343,11 +343,11 @@ const checks: ReadonlyArray<Check> = [
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, sub)!.p
         const taken = await curl(w, "/inbox/take", { entryId: sub, projectId }, "pi")
         expect(taken.status === 200, `take answered ${taken.status}: ${JSON.stringify(taken.body)}`)
-        expect(p.sendRow(sub, message)?.status === "delivered", "the taken row is not delivered")
+        expect(p.sendRow(sub, message)?.status === "delivering", "the taken row is not delivering")
 
         const open = row<{ id: number; accepted: number | null }>(
           w,
-          "SELECT id, accepted_at AS accepted FROM execution WHERE session_id = ? AND outcome IS NULL",
+          "SELECT id, started_at AS accepted FROM execution WHERE session_id = ? AND outcome IS NULL",
           sub,
         )
 
@@ -366,17 +366,18 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         await until(
-          "the row failed with its notice",
-          () => p.sendRow(sub, message)?.status === "failed" && p.notices(sub, "was not delivered") === 1,
+          "the execution notice arrives",
+          () => p.sendRow(sub, message)?.status === "delivering" && p.notices(sub, "did not start the execution") === 1,
           30_000,
         )
         await Bun.sleep(3_000)
-        expect(p.sendRow(sub, message)?.status === "failed", "the failed row moved again")
-        expect(p.notices(sub, "was not delivered") === 1, "more than one notice")
+        expect(p.sendRow(sub, message)?.status === "delivering", "the unaccepted row moved again")
+        expect(p.notices(sub, "was not delivered") === 0, "unexpected was-not-delivered notice")
+        expect(p.notices(sub, "did not start the execution") === 1, "more than one notice")
 
         const copies = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ?",
+          "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content = ?",
           sub,
           message,
         )
@@ -463,8 +464,11 @@ const checks: ReadonlyArray<Check> = [
         expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
 
         const text =
-          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE about_session_id = ? AND kind = 'notice'", sub)
-            ?.c ?? ""
+          row<{ c: string }>(
+            w,
+            "SELECT content AS c FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'",
+            sub,
+          )?.c ?? ""
 
         const kept = await fs.stat(worktree).then(
           () => true,
@@ -514,8 +518,10 @@ const checks: ReadonlyArray<Check> = [
 
         const input = row<{ n: number }>(
           w,
-          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.inbox'
-            WHERE e.aggregate = ? AND e.type = 'inbox.moved' AND i.kind = 'task' AND e.data ->> '$.execution' IS NOT NULL`,
+          `SELECT count(*) AS n FROM event e
+            JOIN inbox i ON i.recipient_session_id = e.aggregate AND i.id = e.data ->> '$.messageId'
+            JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id
+            WHERE e.aggregate = ? AND e.type = 'inbox.delivered' AND e.data ->> '$.recipientExecutionId' IS NOT NULL`,
           sub,
         )?.n
 
@@ -633,7 +639,7 @@ const checks: ReadonlyArray<Check> = [
 
         const rows = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send'",
+          "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
           sub,
         )?.n
 

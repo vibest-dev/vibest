@@ -96,7 +96,7 @@ export const entryIdOf = (w: World) =>
 const sendsFrom = (w: World, sender: string, recipient: string) =>
   rows<{ id: number; status: string; execution: number | null; content: string }>(
     w,
-    "SELECT id, status, execution_id AS execution, content FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
+    "SELECT id, status, recipient_execution_id AS execution, content FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
     sender,
     recipient,
   )
@@ -132,7 +132,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; recipient: string | null; content: string }>(
             w,
-            "SELECT status, session_id AS recipient, content FROM inbox WHERE about_session_id = ? AND kind = 'notice'",
+            "SELECT status, recipient_session_id AS recipient, content FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'",
             id,
           )
 
@@ -184,10 +184,10 @@ const sendChecks: ReadonlyArray<Check> = [
         const sent = sendsFrom(w, id, entryId)
         expect(sent.length === 1, `${sent.length} sends from ${id} to the entry session: ${JSON.stringify(sent)}`)
         expect(
-          countFacts(w, "aggregate = ? AND type = 'inbox.queued' AND seq = ?", entryId, sent[0]!.id) === 1 &&
+          countFacts(w, "aggregate = ? AND type = 'inbox.enqueued' AND seq = ?", entryId, sent[0]!.id) === 1 &&
             countFacts(
               w,
-              "aggregate = ? AND type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
+              "aggregate = ? AND type = 'inbox.delivered' AND json_extract(data, '$.messageId') = ?",
               entryId,
               sent[0]!.id,
             ) === 1,
@@ -248,9 +248,9 @@ const sendChecks: ReadonlyArray<Check> = [
         expect(
           countFacts(
             w,
-            "type = 'inbox.queued' AND json_extract(data, '$.sender.session') = ? AND json_extract(data, '$.recipient') = ?",
-            id,
+            "aggregate = ? AND type = 'inbox.enqueued' AND json_extract(data, '$.sender.session') = ?",
             siblingId,
+            id,
           ) === 0,
           "inbox.queued was written for the refused send",
         )
@@ -306,11 +306,7 @@ const sendChecks: ReadonlyArray<Check> = [
           `missing a Forbidden refusal: ${written}`,
         )
         expect(
-          countFacts(
-            w,
-            "type = 'inbox.queued' AND json_extract(data, '$.kind') = 'send' AND json_extract(data, '$.sender.session') = ?",
-            id,
-          ) === 0,
+          countFacts(w, "type = 'inbox.enqueued' AND json_extract(data, '$.sender.session') = ?", id) === 0,
           `an inbox.queued names ${id} as sender`,
         )
       } finally {
@@ -360,7 +356,7 @@ const sendChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
-            "SELECT status, about_session_id AS sender FROM inbox WHERE session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
+            "SELECT status, about_session_id AS sender FROM inbox WHERE recipient_session_id = ? AND sender_type = 'vibest' AND instr(content, 'was not delivered') > 0",
             entryId,
           )
 
@@ -409,11 +405,11 @@ const checks: ReadonlyArray<Check> = [
         const seqOf = (type: string) =>
           row<{ seq: number }>(w, "SELECT min(seq) AS seq FROM event WHERE aggregate = ? AND type = ?", sub, type)?.seq
 
-        const started = seqOf("execution.started")
+        const started = seqOf("execution.allocated")
         const placed = seqOf("process.placed")
         expect(
           started !== undefined && placed !== undefined && started < placed,
-          `execution.started at ${started}, process.placed at ${placed}`,
+          `execution.allocated at ${started}, process.placed at ${placed}`,
         )
         expect(executionStarts(w, sub) === 1, `${executionStarts(w, sub)} executions, not one`)
       } finally {
@@ -443,13 +439,22 @@ const checks: ReadonlyArray<Check> = [
 
         for (const task of ["first", "second"]) await w.ok(["send", sub, "--", ask(task)], { cwd: m.repo })
         expect(
-          inboxRows(w, "session_id = ? AND kind = 'send' AND status = 'pending'", sub) === 2,
+          inboxRows(
+            w,
+            "recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND status = 'pending'",
+            sub,
+          ) === 2,
           "the two sends are not both pending while the subagent is busy",
         )
         model.release()
         await until(
           "both sends delivered",
-          () => inboxRows(w, "session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 2,
+          () =>
+            inboxRows(
+              w,
+              "recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND status = 'delivered'",
+              sub,
+            ) === 2,
           60_000,
         )
         await until(
@@ -470,7 +475,7 @@ const checks: ReadonlyArray<Check> = [
 
         const sends = rows<{ execution: number | null }>(
           w,
-          "SELECT execution_id AS execution FROM inbox WHERE session_id = ? AND kind = 'send'",
+          "SELECT recipient_execution_id AS execution FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
           sub,
         )
 
@@ -518,7 +523,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(inboxRows(w, "? IN (sender_session_id, about_session_id)", id) === 0, `rows sent by ${id}`)
         expect(
-          countFacts(w, "type = 'inbox.queued' AND json_extract(data, '$.sender.session') = ?", id) === 0,
+          countFacts(w, "type = 'inbox.enqueued' AND json_extract(data, '$.sender.session') = ?", id) === 0,
           `an inbox.queued names ${id} as sender`,
         )
       } finally {
@@ -555,7 +560,12 @@ const checks: ReadonlyArray<Check> = [
         )
         await until(
           "the send after the interrupt delivered",
-          () => inboxRows(w, "session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 1,
+          () =>
+            inboxRows(
+              w,
+              "recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND status = 'delivered'",
+              sub,
+            ) === 1,
           10_000,
         )
         expect(
@@ -574,12 +584,12 @@ const checks: ReadonlyArray<Check> = [
           `the subagent's executions: ${JSON.stringify(executions)}`,
         )
         expectFacts(w, sub, [
-          "execution.started",
-          "execution.ended",
-          "inbox.queued",
-          "execution.started",
-          "inbox.moved",
-          "execution.ended",
+          "execution.allocated",
+          "execution.interrupted",
+          "inbox.enqueued",
+          "execution.allocated",
+          "inbox.delivered",
+          "execution.succeeded",
         ])
       } finally {
         entryModel.stop()

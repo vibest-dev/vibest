@@ -549,7 +549,7 @@ const checks: ReadonlyArray<Check> = [
         const accepted = () =>
           rows<{ n: number }>(
             w,
-            "SELECT count(*) AS n FROM execution WHERE session_id = ? AND accepted_at IS NOT NULL AND outcome IS NULL",
+            "SELECT count(*) AS n FROM execution WHERE session_id = ? AND started_at IS NOT NULL AND outcome IS NULL",
             id,
           )[0]?.n === 1
 
@@ -756,7 +756,7 @@ const checks: ReadonlyArray<Check> = [
             try {
               return db
                 .query<{ content: string }, [string]>(
-                  `SELECT content FROM inbox WHERE about_session_id = ? AND kind = 'notice' ORDER BY id`,
+                  `SELECT content FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest' ORDER BY id`,
                 )
                 .all(id)
                 .map((r) => r.content)

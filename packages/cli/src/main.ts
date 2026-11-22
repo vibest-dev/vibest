@@ -9,7 +9,7 @@ import * as Platform from "#platform"
 import { userOnly } from "./caller.ts"
 import * as Cli from "./cli.ts"
 import { clients } from "./client.ts"
-import { Commands } from "./commands/commands.ts"
+import { bareTeam, Commands } from "./commands/commands.ts"
 import { Runtime } from "./framework/runtime.ts"
 import { Host } from "./host.ts"
 import { updater } from "./update-check.ts"
@@ -74,6 +74,7 @@ const replacements = [...Platform.replacements, Platform.app({ version: VERSION 
 
 Runtime.run(Commands, Handlers, {
   version: VERSION,
+  args: bareTeam,
   extra: { after: "update", commands: commands(userOnly, clients) },
 }).pipe(
   Cli.printFailure,

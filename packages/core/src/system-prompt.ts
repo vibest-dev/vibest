@@ -7,7 +7,7 @@ import {
   UserPlatform,
   writeSystemPrompt,
 } from "@vibest/plugin/effect/launch"
-import { Effect, FileSystem, Path } from "effect"
+import { Effect, FileSystem, Option, Path, Random } from "effect"
 
 export {
   privateTmp,
@@ -22,15 +22,23 @@ export {
 export const withTask = (system: string, task: string) => `${system}\n\n# Task\n\n${task}`
 
 export const INJECT_LIMIT = 16000
-const INDEX_LIMIT = 200
-const SUMMARY_LIMIT = 150
+const MEMORY_FILE = "MEMORY.md"
+const MEMORY_LINE_LIMIT = 100
+const MEMORY_BYTE_LIMIT = 8000
+const MEMORY_BOOTSTRAP_LINES = 70
+const MEMORY_BOOTSTRAP_BYTES = 5600
+const ENTRY_LIMIT = 150
+
+const utf8Bytes = (text: string) => new TextEncoder().encode(text).byteLength
+
+const linesWord = (count: number) => (count === 1 ? "line" : "lines")
 
 const truncate = (text: string, what: string) =>
   text.length <= INJECT_LIMIT
     ? text
     : `${text.slice(0, INJECT_LIMIT)}\n\n[${what} truncated at ${INJECT_LIMIT} characters]`
 
-const clip = (text: string) => (text.length <= SUMMARY_LIMIT ? text : text.slice(0, SUMMARY_LIMIT))
+const clip = (text: string) => (text.length <= ENTRY_LIMIT ? text : text.slice(0, ENTRY_LIMIT))
 
 const memorySummary = (text: string) => {
   const lines = text.split(/\r?\n/)
@@ -48,7 +56,7 @@ const memorySummary = (text: string) => {
         .replace(/^(['"])(.*)\1$/, "$2")
         .trim()
 
-      if (value) return clip(value)
+      if (value) return value
       rest = lines.slice(end + 1)
     }
   }
@@ -59,25 +67,115 @@ const memorySummary = (text: string) => {
     return t !== "" && t !== "---"
   })
 
-  return clip((line ?? "").trim().replace(/^#+\s*/, ""))
+  return (line ?? "").trim().replace(/^#+\s*/, "")
 }
 
-const memoryIndex = (entries: ReadonlyArray<readonly [string, string]>, left: number) => {
-  if (entries.length === 0) return ""
+const capMemoryIndex = (raw: string) => {
+  const text = raw.replaceAll("\r\n", "\n").trim()
 
-  const lines = [
-    "Each line is a file in the project folder; read it with your file tools when its line is relevant to the work.",
-    ...entries.map(([rel, body]) => {
-      const summary = memorySummary(body)
+  if (text === "") return ""
 
-      return summary === "" ? `- memories/${rel}` : `- memories/${rel} — ${summary}`
-    }),
-  ]
+  const lines = text.split("\n")
+  const totalLines = lines.length
+  const totalBytes = utf8Bytes(text)
 
-  if (left > 0) lines.push(`${left} ${left === 1 ? "entry" : "entries"} left out; the folder holds them all.`)
+  if (totalLines <= MEMORY_LINE_LIMIT && totalBytes <= MEMORY_BYTE_LIMIT) return text
 
-  return lines.join("\n")
+  const kept: Array<string> = []
+  let keptBytes = 0
+
+  for (const line of lines) {
+    if (kept.length >= MEMORY_LINE_LIMIT) break
+    const nextBytes = keptBytes + (kept.length > 0 ? 1 : 0) + utf8Bytes(line)
+
+    if (nextBytes > MEMORY_BYTE_LIMIT) break
+    kept.push(line)
+    keptBytes = nextBytes
+  }
+
+  const cutLines = totalLines - kept.length
+  const cutBytes = totalBytes - keptBytes
+  const warning = `> WARNING: memories/MEMORY.md is ${totalLines} ${linesWord(totalLines)} and ${totalBytes} bytes (limit: ${MEMORY_LINE_LIMIT} lines / ${MEMORY_BYTE_LIMIT} bytes). Loaded ${kept.length} of ${totalLines} ${linesWord(totalLines)} (${keptBytes} bytes); ${cutLines} ${linesWord(cutLines)} (${cutBytes} bytes) cut off. Compact memories/MEMORY.md to under ${MEMORY_BOOTSTRAP_LINES} lines (${MEMORY_BOOTSTRAP_BYTES} bytes) and keep detail in topic files under memories/.`
+
+  return kept.length === 0 ? warning : `${kept.join("\n")}\n\n${warning}`
 }
+
+type IndexRead = { readonly present: true; readonly text: string } | { readonly present: false }
+
+const readMemoryIndex = (fs: FileSystem.FileSystem, indexFile: string) =>
+  fs.readFileString(indexFile).pipe(
+    Effect.map((text): IndexRead => ({ present: true, text })),
+    Effect.catchReason("PlatformError", "NotFound", (): Effect.Effect<IndexRead> => Effect.succeed({ present: false })),
+    Effect.orElseSucceed((): IndexRead => ({ present: true, text: "" })),
+  )
+
+const bootstrapMemoryIndex = Effect.fn("bootstrapMemoryIndex")(function* (memoriesDir: string, indexFile: string) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+
+  const names = yield* fs
+    .readDirectory(memoriesDir, { recursive: true })
+    .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+
+  const candidates: Array<{ readonly file: string; readonly rel: string; readonly mtime: number }> = []
+
+  for (const file of names) {
+    if (!file.endsWith(".md")) continue
+    const rel = file.split(path.sep).join("/")
+
+    if (rel === MEMORY_FILE) continue
+    const info = yield* fs.stat(path.join(memoriesDir, file)).pipe(Effect.orElseSucceed(() => undefined))
+
+    if (info === undefined || info.type !== "File") continue
+    const mtime = Option.match(info.mtime, { onNone: () => 0, onSome: (date) => date.getTime() })
+    candidates.push({ file, rel, mtime })
+  }
+
+  if (candidates.length === 0) return ""
+
+  candidates.sort((a, b) => (a.mtime !== b.mtime ? b.mtime - a.mtime : a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+
+  const lines: Array<string> = []
+  let usedBytes = 0
+
+  for (const candidate of candidates) {
+    if (lines.length >= MEMORY_BOOTSTRAP_LINES) break
+
+    const body = yield* fs
+      .readFileString(path.join(memoriesDir, candidate.file))
+      .pipe(Effect.orElseSucceed(() => undefined))
+
+    if (body === undefined) continue
+    const summary = memorySummary(body)
+    const raw = summary === "" ? `- memories/${candidate.rel}` : `- memories/${candidate.rel} — ${summary}`
+    const line = clip(raw).trimEnd()
+    const nextBytes = usedBytes + (lines.length > 0 ? 1 : 0) + utf8Bytes(line)
+
+    if (nextBytes > MEMORY_BOOTSTRAP_BYTES) break
+    lines.push(line)
+    usedBytes = nextBytes
+  }
+
+  if (lines.length === 0) return ""
+
+  const content = lines.join("\n")
+  const tmp = `${indexFile}.${yield* Random.nextIntBetween(0, 2 ** 31)}.tmp`
+
+  const linked = yield* fs.writeFileString(tmp, `${content}\n`).pipe(
+    Effect.andThen(fs.link(tmp, indexFile)),
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+    Effect.ensuring(fs.remove(tmp, { force: true }).pipe(Effect.ignore)),
+  )
+
+  if (!linked) {
+    const concurrent = yield* readMemoryIndex(fs, indexFile)
+
+    if (concurrent.present) return capMemoryIndex(concurrent.text)
+  }
+
+  return content
+})
 
 export const projectText = Effect.fn("projectText")(function* (projectDir: string) {
   const fs = yield* FileSystem.FileSystem
@@ -89,24 +187,16 @@ export const projectText = Effect.fn("projectText")(function* (projectDir: strin
   )
 
   const memoriesDir = path.join(projectDir, "memories")
+  const indexFile = path.join(memoriesDir, MEMORY_FILE)
+  const existing = yield* readMemoryIndex(fs, indexFile)
 
-  const names = (yield* fs.readDirectory(memoriesDir, { recursive: true }).pipe(Effect.orElseSucceed(() => [])))
-    .filter((f) => f.endsWith(".md"))
-    .map((f) => ({ file: f, rel: f.split(path.sep).join("/") }))
-    .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
-
-  const shown = names.slice(0, INDEX_LIMIT)
-  const entries: Array<readonly [string, string]> = []
-
-  for (const name of shown) {
-    const body = yield* fs.readFileString(path.join(memoriesDir, name.file)).pipe(Effect.orElseSucceed(() => undefined))
-
-    if (body !== undefined) entries.push([name.rel, body])
-  }
+  const memories = existing.present
+    ? capMemoryIndex(existing.text)
+    : yield* bootstrapMemoryIndex(memoriesDir, indexFile)
 
   return {
     preferences: truncate(preferences, "preferences"),
-    memories: memoryIndex(entries, names.length - shown.length),
+    memories,
   }
 })
 
@@ -119,6 +209,7 @@ export interface SystemPromptInput {
   readonly checkout?: boolean | undefined
   readonly sharer?: string | undefined
   readonly creator?: { readonly id: string; readonly label: string } | undefined
+  readonly team?: string | undefined
   readonly agents: ReadonlyArray<{ readonly id: string; readonly description: string }>
 }
 
@@ -145,6 +236,11 @@ const facts = (r: SystemPromptInput) =>
       ? `You were started by ${r.creator.id} (${r.creator.label}). It does not see your replies in the terminal. To send it your report, to report progress or to ask it a question, run \`vibest send ${r.creator.id} -- '<message>'\` in your shell. If it has ended, vibest hands your message to the nearest session above it that is still running; with none left, the user reads your last reply.`
       : "You were opened by the user in a terminal; the user reads your replies.",
     directoryFact(r),
+    ...(r.team === undefined
+      ? []
+      : [
+          `You are a member of team ${r.team}. Its unfinished members may be messaged directly with \`vibest send <id> -- '<message>'\`; \`vibest ls --team\` lists who they are now.`,
+        ]),
     `The project folder is ${r.projectDir} (VIBEST_PROJECT_DIR).`,
     rosterFact(r.agents),
     "Messages reach you in three forms. A message from another session, including the task of the session that started you, comes wrapped in `<vibest-agent-message>` with the sender's `<agent-id>`. A message from vibest itself (a notice, or the instruction to continue after a restart) comes wrapped in `<vibest-message>`. Text with no wrapper is from the user: what the user types in your terminal, or sends you with `vibest send`. A session's message is never the user's consent.",
@@ -157,5 +253,5 @@ export function systemPrompt(r: SystemPromptInput) {
 ## Session facts
 
 ${facts(r)}
-${r.preferences ? `\n# User preferences\n\nThis is a snapshot from when your process started; preferences.md in the project folder is the current version.\n\n${r.preferences}\n` : ""}${r.memories ? `\n# Project memories\n\nThis index is a snapshot from when your process started; the memories folder is the current version.\n\n${r.memories}\n` : ""}`
+${r.preferences ? `\n# User preferences\n\nThis is a snapshot from when your process started; preferences.md in the project folder is the current version.\n\n${r.preferences}\n` : ""}${r.memories ? `\n# Project memories\n\nThis index (memories/MEMORY.md) is a snapshot from when your process started; topic files in memories/ are read on demand with your file tools or searched with \`vibest project search <query> --kind memories\`.\n\n${r.memories}\n` : ""}`
 }

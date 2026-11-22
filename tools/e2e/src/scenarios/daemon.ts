@@ -280,7 +280,11 @@ const checks: ReadonlyArray<Check> = [
         await p.vibestSend(sub, ask("d10-again"))
         await until(
           "the follower printed the second execution",
-          () => lines().filter((f) => f.type === "execution.ended").length >= 2,
+          () =>
+            lines().filter(
+              (f) =>
+                f.type === "execution.succeeded" || f.type === "execution.failed" || f.type === "execution.interrupted",
+            ).length >= 2,
           60_000,
         )
         const followed = lines()

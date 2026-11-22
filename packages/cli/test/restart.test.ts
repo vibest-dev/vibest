@@ -188,9 +188,8 @@ describe("restart in place", () => {
   it("an entry session's continue notice keeps the whole instruction, including a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
 
-    const message = detailOf([
-      { kind: "notice", sender: { type: "vibest" }, message: noticeEnvelope(continueText(version)) },
-    ])[0]!.message
+    const message = detailOf([{ sender: { type: "vibest" }, message: noticeEnvelope(continueText(version)) }])[0]!
+      .message
 
     assert.isTrue(message.startsWith(CONTINUE))
 
@@ -296,6 +295,7 @@ describe("restart in place", () => {
       const identity = new Set([
         "VIBEST_SESSION_ID",
         "VIBEST_PROCESS",
+        "VIBEST_EXECUTION",
         "VIBEST_PROJECT_ID",
         "VIBEST_PROJECT_DIR",
         "VIBEST_AGENT",
@@ -384,7 +384,7 @@ describe("restart in place", () => {
       const [restarted] = (yield* eventsOf(id, "process.started")).slice(-1)
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: old harness" })
       assert.isAbove(restarted!.id, 0)
-      assert.lengthOf(yield* eventsOf(id, "execution.ended"), 0)
+      assert.lengthOf(yield* eventsOf(id, "execution.succeeded"), 0)
       yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* held.release()
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (rows) => rows !== undefined))!
@@ -393,8 +393,30 @@ describe("restart in place", () => {
       yield* sessions.check(id)
       const freshSessions = yield* restartSessions
       yield* freshSessions.check(id)
-      assert.strictEqual((yield* eventsOf(id, "execution.ended")).length, 0)
+      assert.strictEqual((yield* eventsOf(id, "execution.succeeded")).length, 0)
       assert.isUndefined(yield* db.session.latestReply(id))
+    }),
+  )
+
+  test(
+    "an idle in-place restart after Turn 1 omits VIBEST_EXECUTION from run env",
+    Effect.gen(function* () {
+      const { db, sessions, id } = yield* busyPiSubagent
+      const herdr = yield* FakeRuntime
+      yield* db.session.noteConversation(id, "conv-idle-restart")
+      yield* writeEnd(id, "pi", { text: "turn 1 done" })
+      yield* herdr.endExecution(id)
+      yield* sessions.check(id)
+      assert.isUndefined(yield* db.session.openExecution(id))
+      const ran = yield* herdr.hold("run")
+      const restarting = yield* Effect.forkChild(sessions.restart([id]))
+      yield* ran.reached
+      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* ran.release()
+      const [outcome] = yield* Fiber.join(restarting)
+      assert.deepInclude(outcome, { id, ok: true })
+      const [run] = yield* herdr.callsTo("run")
+      assert.isFalse(run!.env.some((pair) => pair.startsWith("VIBEST_EXECUTION=")))
     }),
   )
 })

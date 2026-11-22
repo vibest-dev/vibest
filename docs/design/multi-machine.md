@@ -119,9 +119,7 @@ started it is the `origin` of its `session.created` fact (peer, project, reportT
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to that creator as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
-inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
-B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
+Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to that creator as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. A forward writes no local inbox row: the outbox item is the receipt, and it is not an inbox delivery. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
 `Peer.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
 same request id finds it and queues nothing. Archiving a peer session (`session.ended`) deletes its unacknowledged
@@ -213,10 +211,11 @@ a machine that is not connected fails at once; nothing is queued. The 1 MiB prom
 and passes `PromptTooLarge` through.
 
 After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
-recipient's project (none: logged and acknowledged); an inbox row whose `peer_item` is the outbox id (found: only
-acknowledged); otherwise an `inbox.queued` with `peerItem` set, from the remote agent session with its machine (a `notice` is from
-`"vibest"`), routed to the recipient while it
-has not ended, else to the project's entry session, `pending` when that one is present, else `dropped`. A `notice` has content
+recipient's project (none: logged and acknowledged); an inbox row whose `transfer_id` is the outbox id, or an outbox
+row already carrying that id (found: only acknowledged); otherwise an `inbox.enqueued` with `transferId` set to that
+id, from the remote agent session with its machine (a `notice` is from `"vibest"`), routed to the recipient while it
+has not ended, else to the project's entry session, pending when that one is present, else dropped without being
+handed to an agent. A forward to another machine reuses the same id on the outbox and writes no local delivery. A `notice` has content
 `<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Peer.Ack`. A pipe that drops
 between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
 copy was routed. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going

@@ -25,7 +25,7 @@ const log = (line) => fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(l
 export default Plugin.define({
   id: "session-probe",
   effect: (ctx) =>
-    ctx.event.subscribe({ types: ["execution.ended", "session.ended"] }).pipe(
+    ctx.event.subscribe({ types: ["execution.succeeded", "session.ended"] }).pipe(
       Stream.runForEach((fact) =>
         Effect.gen(function* () {
           const id = fact.sessionId
@@ -35,13 +35,13 @@ export default Plugin.define({
           }
           const got = yield* ctx.session.get(id)
           const listed = (yield* ctx.session.list()).some((s) => s.id === id)
-          log({ id, execution: fact.data.execution, got, listed })
+          log({ id, execution: fact.data.executionId, got, listed })
           if (got === undefined || got.parentId === null) return
           for (const _ of [1, 2])
             yield* ctx.session.send({
               to: got.parentId,
-              message: \`probe-\${id}-\${fact.data.execution}\`,
-              request: \`probe:\${id}:\${fact.data.execution}\`,
+              message: \`probe-\${id}-\${fact.data.executionId}\`,
+              request: \`probe:\${id}:\${fact.data.executionId}\`,
             })
         }).pipe(Effect.catch((e) => Effect.sync(() => log({ failed: String(e) })))),
       ),
@@ -75,7 +75,7 @@ const probedLines = (file: string) =>
 const pluginRows = (w: World, recipient: string) =>
   rows<{ content: string; status: string }>(
     w,
-    `SELECT content, status FROM inbox WHERE session_id = ? AND sender_plugin = 'session-probe' ORDER BY id`,
+    `SELECT content, status FROM inbox WHERE recipient_session_id = ? AND sender_plugin = 'session-probe' ORDER BY id`,
     recipient,
   )
 
@@ -165,7 +165,7 @@ const pluginSessionChecks: ReadonlyArray<Check> = [
           60_000,
         )
         expect(
-          inboxRows(w, "session_id = ? AND content LIKE '%after-archive%'", quiet) === 0,
+          inboxRows(w, "recipient_session_id = ? AND content LIKE '%after-archive%'", quiet) === 0,
           "the message was queued for the archived subagent",
         )
       } finally {
@@ -183,7 +183,7 @@ const REMINDER = "vibest.report-reminder"
 const reminders = (w: World, recipient: string, about: string) =>
   rows<{ content: string; status: string }>(
     w,
-    `SELECT content, status FROM inbox WHERE session_id = ? AND sender_plugin = 'vibest.report-reminder' AND content LIKE ? ORDER BY id`,
+    `SELECT content, status FROM inbox WHERE recipient_session_id = ? AND sender_plugin = 'vibest.report-reminder' AND content LIKE ? ORDER BY id`,
     recipient,
     `%(${about})%`,
   )
@@ -266,7 +266,7 @@ const reminderChecks: ReadonlyArray<Check> = [
             `${reminders(w, entryId, id).length} reminders about ${id}, expected ${count}: ${JSON.stringify(reminders(w, entryId, id))}`,
           )
         expect(
-          inboxRows(w, `sender_plugin = '${REMINDER}' AND session_id <> ?`, entryId) === 0,
+          inboxRows(w, `sender_plugin = '${REMINDER}' AND recipient_session_id <> ?`, entryId) === 0,
           "a reminder went to a session other than the entry session",
         )
       } finally {
@@ -303,7 +303,7 @@ const idleStopChecks: ReadonlyArray<Check> = [
       const idleMessages = (recipient: string, about: string) =>
         rows<{ content: string; status: string }>(
           w,
-          "SELECT content, status FROM inbox WHERE session_id = ? AND sender_type = 'plugin' AND sender_plugin = ? AND content LIKE ?",
+          "SELECT content, status FROM inbox WHERE recipient_session_id = ? AND sender_type = 'plugin' AND sender_plugin = ? AND content LIKE ?",
           recipient,
           IDLE_STOP,
           `%(${about})%`,

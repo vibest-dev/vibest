@@ -58,9 +58,25 @@ export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks
 
 export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject, offsetMs = 1000) =>
   Effect.gen(function* () {
+    const db = yield* Db.Service
     const adapter = yield* (yield* Harnesses.Service).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* Db.Service).session.endObserved(id, executionEndFrom(adapter, payload, at))
+    const named = payload.execution
+
+    const bound = Predicate.isNumber(named) || harness !== "pi" ? named : yield* db.session.openExecution(id)
+
+    const withHook =
+      harness === "cursor" && payload.hook_event_name === undefined
+        ? { hook_event_name: "afterAgentResponse", ...payload }
+        : (harness === "pi" || harness.endsWith("-pi")) && payload.type === undefined
+          ? { type: "agent_settled", ...payload }
+          : payload
+
+    const body = Predicate.isNumber(bound) ? { ...withHook, execution: bound } : withHook
+    const observed = adapter.executionEnd?.(body)
+
+    if (observed === undefined) return
+    yield* db.session.endObserved(id, executionEndFrom(adapter, observed, at))
   })
 
 const decodeEventData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))
@@ -91,18 +107,16 @@ export const lastSentBy = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
 
-    const [row] = yield* sql<{ id: number; kind: string; status: string; content: string }>`SELECT id, kind, status,
-        content FROM inbox WHERE sender_session_id = ${id} OR about_session_id = ${id} ORDER BY id DESC LIMIT 1`.pipe(
-      Effect.orDie,
-    )
+    const [row] = yield* sql<{ id: number; status: string; content: string }>`SELECT id, status, content FROM inbox
+        WHERE sender_session_id = ${id} OR about_session_id = ${id} ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
 
     return row
   })
 
 export const EXECUTIONS = `(SELECT t.id, t.session_id, t.started_at, t.ended_at,
-    (SELECT max(i.id) FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id) AS inbox_id,
+    (SELECT max(i.id) FROM inbox i WHERE i.recipient_session_id = t.session_id AND i.recipient_execution_id = t.id) AS inbox_id,
     coalesce(t.typed, (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
-      FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id ORDER BY i.id)), '') AS input,
+      FROM inbox i WHERE i.recipient_session_id = t.session_id AND i.recipient_execution_id = t.id ORDER BY i.id)), '') AS input,
     coalesce(t.outcome, 'working') AS status,
     t.reply AS output
   FROM execution t)`

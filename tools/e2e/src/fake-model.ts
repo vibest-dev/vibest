@@ -331,6 +331,7 @@ export const usageLimitedModel = (limited: (path: string) => boolean) => {
 export const fakeOpenAI = (
   step: (who: string, dir: string, done: number, last: string | undefined, creator?: string) => Step,
   dirs: Record<string, string>,
+  systems?: Record<string, string>,
 ) => {
   let calls = 0
   const answer = (s: Step) => (Predicate.isString(s) ? reply(s) : toolCall(`call${++calls}`, s.tool, s.input))
@@ -348,6 +349,8 @@ export const fakeOpenAI = (
       const main = creatorIn(system) === undefined ? folder : undefined
       const sub = creatorIn(system) === undefined ? undefined : folder
       const who = main ? "main" : sub ? "pi" : undefined
+
+      if (who !== undefined && systems !== undefined) systems[who] = system
       const tools = messages.filter((m) => m.role === "tool" && !isEntryRunResult(m))
       const last = messages.at(-1)
 

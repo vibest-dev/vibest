@@ -142,7 +142,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("reopening projection 17 replays a known harness session id and a null one", () =>
+  it.effect("reopening projection 22 replays a known harness session id and a null one", () =>
     Effect.gen(function* () {
       const file = yield* fileAt(yield* tempDirectory("vibest-projection-harness-session-"), "vibest.db")
       const quietPlace = { ...place, address: { ...place.address, id: "test/p2" } }
@@ -165,7 +165,7 @@ describe("Db", () => {
       const before = yield* ledger
       yield* writeSql(file, [
         "ALTER TABLE process RENAME COLUMN harness_session_id TO conversation",
-        "UPDATE meta SET value = '17' WHERE key = 'projection'",
+        "UPDATE meta SET value = '22' WHERE key = 'projection'",
       ])
       yield* Effect.void.pipe(Effect.provide(database(file)))
 

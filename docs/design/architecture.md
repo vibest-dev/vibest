@@ -88,7 +88,7 @@ manages it. Items marked planned are not built.
   `context.agent.define`. What a caller may do comes from its definition, not from the database: Spawn needs
   `can.spawn`; Send's recipient must be inside `can.message`; Interrupt, Remove and Peek need the user or an
   ancestor of the target (along `parent_session_id`); Report is a message to the caller's reply target; the
-  guard reads `tools`. Built today: the definition's text and guard; a send is allowed to the creator and to sessions the sender started, and management belongs to the nearest living creator.
+  guard reads `tools`. Built today: the definition's text and guard; a send is allowed to the creator, to sessions the sender started and to the unfinished members of the sender's team, and management belongs to the nearest living creator.
 - **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for entry sessions and subagents alike:
   natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
@@ -96,7 +96,7 @@ manages it. Items marked planned are not built.
   any other harness (Cursor, agy) is typed into, whichever session it runs. When the harness definition gives
   `clearKeys` (Cursor: `ctrl+u`), they are sent right before each typed message, so whatever sits in the input box (a
   user's draft, a cancelled prompt the harness drew back) is cleared first. A row with no session to go to is dropped.
-- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, and sessions it started; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
+- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, sessions it started, and the unfinished members of its team; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes `execution.succeeded` (or `execution.failed` / `execution.interrupted`), and the succeeded event carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its nearest living creator (its parent, else the parent's parent and so on; a creator on another machine through the
   outbox; none left, only the user reads it): its harness exited, its execution ended in an error, it never started, it waits on a permission. An
@@ -104,8 +104,16 @@ manages it. Items marked planned are not built.
   agent went idle.
 
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It is the creator link: a session
-  may send only to its creator and to sessions it started, notices and sends to an ended creator go to the nearest
+  may send only to its creator, to sessions it started and to its teammates, notices and sends to an ended creator go to the nearest
   living one above it, management belongs to the nearest living creator, and a new terminal opens beside the live creator.
+- **Teams are a label.** `session.team` holds a team id, written once from `session.created` and never inherited. A
+  team is a runtime instance, not a name: a bare `vibest run --team` makes its id (`t-` and four hex digits, unique in the
+  project) inside `insertSession`'s transaction, and its creator, the creator of all its members, is the only session
+  that may add members with `--team <id>`; `insertSession` refuses any other creator, an unknown id and a team with no
+  unfinished member (it has ended for good) in the same transaction. `vibest ls --team` answers only the creator and the
+  members. Members may send to each other; a send to an
+  archived member is refused rather than forwarded, since the creator fallback is only for a session's own creator.
+  There is no team table and no team command: agents find teammates with `vibest ls --team`.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
   bare `vibest` reopens. It is not identity, and no message falls back to it. "One entry session per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
@@ -251,8 +259,8 @@ AgentDefinition    Harness    Subscription    Machine
   every conversation and every subagent sees the same preferences and memory index.
 - **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/`): `preferences.md` (how the user likes work done), `docs/`,
   `memories/` and `artifacts/`, read and written by every Agent of the Project with its own file tools; the guard
-  keeps each Agent to its own project's folder. `preferences.md` is added to every agent's rules (16,000 characters).
-  Memories are an index of at most 200 lines, not the file text. A subagent's `## Remember` section is a proposal the entry session may write to memories.
+  keeps each Agent to its own project's folder. `preferences.md` is added to every agent's system prompt (16,000 characters).
+  `memories/MEMORY.md` is the curated memory index loaded into every session's system prompt (capped at 100 lines and 8,000 bytes on a line boundary, with a truncation warning to compact under 70 lines; when `MEMORY.md` is missing and `memories/` holds `.md` topic files, vibest bootstraps `MEMORY.md` once newest-first up to 70 lines and 5,600 bytes). Topic files `memories/<name>.md` are not enumerated into the prompt; they are read on demand or searched with `vibest project search <query> --kind memories`. A subagent's `## Remember` section is a proposal: saving or updating a memory maintains both `memories/<name>.md` and its one-line entry in `memories/MEMORY.md`, updating or removing stale entries instead of only appending.
 - **Labels** are free key/value pairs for references outside vibest; grouping uses `runID`.
 - **Conventions (borrowed):** branded IDs with a type prefix and a sortable body (`prj_`, `wsp_`, `run_`,
   `agt_`, `msg_`, `evt_`), each exposing `ID.create()`; one `time` struct per entity; archiving is a
@@ -305,7 +313,7 @@ by `vibest interrupt`. Text the user types into a subagent's pane is recorded as
 opens no such Message; when that execution ends, the user's text and the subagent's reply go to the entry session as one
 `notice` (information, delivered with its next input, never a task it must act on).
 
-**Answers** come through the best channel (D11): the integration sends its execution-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) in the execution's `execution.ended`; the projection keeps it as `execution.reply`, read with `vibest result` and shown as the summary in `vibest ls`. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
+**Answers** come through the best channel (D11): the integration sends its execution-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) in `execution.succeeded`; the projection keeps it as `execution.reply`, read with `vibest result` and shown as the summary in `vibest ls`. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
 
 The subagent's rules ask for a message whose first line is one sentence the recipient can relay, then the details, and an
 optional `## Remember`. The recipient gets it as:
@@ -454,7 +462,7 @@ How these modules keep the rules:
 How an execution ends:
 
 - An execution end the harness reports (`db.session.endObserved`) is written as it arrives, without the session lock, in one
-  transaction: the `execution.ended` with the reply and the conversation, the session idle, and the error notice for a
+  transaction: the `execution.succeeded` with the reply, and a `process.conversation` when the conversation changed, the session idle, and the error notice for a
   failed end (for a usage limit, the limit and its reset time). It is ignored for the entry session, for a harness the session no longer
   runs, before the current process's ready report when its harness reports ready, and when it is interrupted with no
   execution open. A completed or failed end with no execution open is an execution of its own (an execution typed in the terminal whose
@@ -1038,7 +1046,7 @@ window with a reset time, its `resetAt` (the earliest one); the creator gets one
 reset time, and the harness process stays as it is, so the next send resumes the same session on the same harness. A
 limit at launch (the harness dies in its terminal on a usage-limit error) is a launch failure with the same failure
 kind. Whatever follows a limit is the creator agent's decision; a user who wants it automatic writes a plugin that
-reacts to `execution.ended` with failure kind `limit` (for example, waits for `resetAt` and sends the session a
+reacts to `execution.failed` with failure kind `limit` (for example, waits for `resetAt` and sends the session a
 message to continue).
 
 ## 10. Ports

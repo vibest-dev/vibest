@@ -5,8 +5,9 @@ import { PROTOCOL } from "@vibest/schema/version"
 import { Schema } from "effect"
 import { RpcSchema } from "effect/rpc"
 
+import { ACCESS } from "../src/access.ts"
 import { CAPABILITIES } from "../src/protocol.ts"
-import { ACCESS, VibestRpcs } from "../src/rpc.ts"
+import { VibestRpcs } from "../src/rpc.ts"
 
 const CONTRACT_DIR = path.join(import.meta.dirname, "..", "contract")
 export const RPC_JSON = path.join(CONTRACT_DIR, "rpc.json")

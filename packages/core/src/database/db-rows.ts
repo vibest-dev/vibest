@@ -55,15 +55,15 @@ export const SessionProcess = Schema.Struct({
 export const OpenExecution = Schema.Struct({
   id: Schema.Number,
   process: Schema.NullOr(Schema.Number),
-  startedAt: Schema.Number,
-  acceptedAt: Schema.NullOr(Schema.Number),
+  bookedAt: Schema.Number,
+  startedAt: Schema.NullOr(Schema.Number),
 })
 
 export const LastExecution = Schema.Struct({
   id: Schema.Number,
   process: Schema.NullOr(Schema.Number),
   outcome: ExecutionOutcome,
-  startedAt: Schema.Number,
+  startedAt: Schema.NullOr(Schema.Number),
   endedAt: Schema.NullOr(Schema.Number),
   reply: Schema.NullOr(Schema.String),
   failure: Schema.NullOr(Schema.Struct({ message: Schema.String, kind: Schema.optional(Schema.Literal("limit")) })),
@@ -141,7 +141,7 @@ export const executionStateOf = (row: Pick<SessionRow, "openExecution" | "lastEx
   row.openExecution !== null ? "open" : (row.lastExecution?.outcome ?? "none")
 
 export const executionStartedAt = (row: Pick<SessionRow, "openExecution" | "lastExecution">) =>
-  row.openExecution?.startedAt ?? row.lastExecution?.startedAt ?? 0
+  row.openExecution?.bookedAt ?? 0
 
 export type NewInboxRow = {
   readonly sessionId: string
@@ -228,7 +228,6 @@ export const fromOf = (row: FromSql): AgentFrom | null =>
 export type InboxSql = SenderSql & {
   readonly id: number
   readonly sessionId: string
-  readonly kind: string
   readonly content: string
   readonly status: string
 }
@@ -271,7 +270,6 @@ export const toInbox = (row: InboxSql) => {
     id: row.id,
     sender: senderOfRow(row),
     recipient: row.sessionId,
-    kind: row.kind,
     message: row.content,
     status: row.status,
   }

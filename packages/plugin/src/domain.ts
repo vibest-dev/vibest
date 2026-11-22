@@ -139,7 +139,6 @@ export interface InvalidAgent {
 export interface AgentEditor {
   add(definition: AgentDefinition): void
   invalid(agent: InvalidAgent): void
-  get(id: string): AgentDefinition | undefined
 }
 
 export interface MachineHooks {

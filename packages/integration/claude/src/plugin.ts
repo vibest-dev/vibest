@@ -62,6 +62,7 @@ type Env =
   | "VIBEST_RUNTIME"
   | "VIBEST_HOME"
   | "VIBEST_PROCESS"
+  | "VIBEST_EXECUTION"
   | "HOME"
 
 function nativeHost($: EngineInterface) {
@@ -80,6 +81,8 @@ function nativeHost($: EngineInterface) {
           return $.env.get("VIBEST_HOME")
         case "VIBEST_PROCESS":
           return $.env.get("VIBEST_PROCESS")
+        case "VIBEST_EXECUTION":
+          return $.env.get("VIBEST_EXECUTION")
         case "HOME":
           return $.env.get("HOME")
       }
@@ -143,9 +146,16 @@ const errorOf = (body: Json | undefined) => {
   return Predicate.isString(error) ? error : undefined
 }
 
+const parseExecution = (raw: string | undefined) => {
+  if (raw === undefined || !/^[1-9]\d*$/.test(raw)) return undefined
+  const parsed = Number(raw)
+
+  return Number.isSafeInteger(parsed) ? parsed : undefined
+}
+
 export function register(on: On) {
   const queue: Array<Taken> = []
-  const full = new Map<string, Array<{ readonly content: string; readonly execution: number }>>()
+  const full = new Map<string, Array<Taken>>()
   let idle = false
   let polling = false
   let draining = false
@@ -153,6 +163,20 @@ export function register(on: On) {
   let mismatched = false
   let timer: { cancel: () => void } | undefined
   let processId: string | undefined
+  let bound: number | undefined
+  let initialPending: number | undefined
+  let initialBoundRead = false
+
+  const ensureInitialBound = async (host: Host) => {
+    if (initialBoundRead) return
+    initialBoundRead = true
+    const initial = parseExecution(await host.env("VIBEST_EXECUTION").catch(() => undefined))
+
+    if (bound === undefined && initial !== undefined) {
+      bound = initial
+      initialPending = initial
+    }
+  }
 
   const identity = async (host: Host) => {
     const sessionId = await host.env("VIBEST_SESSION_ID")
@@ -245,7 +269,7 @@ export function register(on: On) {
     }
   }
 
-  const keep = (line: string, taken: { readonly content: string; readonly execution: number }) => {
+  const keep = (line: string, taken: Taken) => {
     const list = full.get(line)
 
     if (list) list.push(taken)
@@ -265,6 +289,7 @@ export function register(on: On) {
 
   on("session.start", async ($, e, next) => {
     const host = nativeHost($)
+    await ensureInitialBound(host)
 
     if (await identity(host).catch(() => undefined)) {
       const pid = await host.claudeCodePid().catch(() => undefined)
@@ -273,13 +298,21 @@ export function register(on: On) {
 
         if (Predicate.isNumber(current)) processId = String(current)
       })
+
+      if (bound !== undefined)
+        void report(host, hookRoute("claude", "prompt"), {
+          hook_event_name: "PromptSubmit",
+          origin: "vibest",
+          execution: bound,
+        })
     }
 
-    idle = true
+    idle = bound === undefined
 
     if (timer === undefined && (await identity(host))) {
       timer = host.every(POLL_MS, () => void tick(host))
-      void tick(host)
+
+      if (idle) void tick(host)
     }
 
     return next(e)
@@ -327,6 +360,11 @@ export function register(on: On) {
       const host = nativeHost($)
       const who = await identity(host).catch(() => undefined)
       idle = true
+      await ensureInitialBound(host)
+
+      const execution = bound
+      bound = undefined
+      initialPending = undefined
 
       if (who)
         void report(host, hookRoute("claude", "execution-end"), {
@@ -334,6 +372,7 @@ export function register(on: On) {
           session_id: await host.conversation().catch(() => ""),
           reason: event.reason,
           last_assistant_message: event.answer,
+          ...(execution !== undefined && { execution }),
           ...(event.reason === "refusal" && { refusal: event.refusal }),
         })
     }
@@ -352,15 +391,32 @@ export function register(on: On) {
       if (list?.length === 0) full.delete(event.text)
 
       if (taken === undefined) return next(event)
+      initialBoundRead = true
+      initialPending = undefined
+      bound = taken.execution
       await report(host, hookRoute("claude", "prompt"), {
         hook_event_name: "PromptSubmit",
         origin: "vibest",
         execution: taken.execution,
+        ids: taken.ids,
       })
 
       if (event.text.trimEnd().endsWith(taken.content.trim())) return next(event)
 
       return next({ ...event, context: [...(event.context ?? []), taken.content] })
+    }
+
+    await ensureInitialBound(host)
+
+    if (event.origin.kind === "composer" && initialPending !== undefined) {
+      initialPending = undefined
+
+      return next(event)
+    }
+
+    if (event.origin.kind === "composer" || event.origin.kind === "bridge") {
+      initialPending = undefined
+      bound = undefined
     }
 
     const who = await identity(host).catch(() => undefined)

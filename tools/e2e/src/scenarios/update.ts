@@ -6,6 +6,7 @@ import type { Check } from "../check.ts"
 import { ask, holdsSlowMessageModel, piDir } from "../fake-model.ts"
 import {
   alive,
+  binary,
   buildVersion,
   checkout,
   compiled,
@@ -105,6 +106,21 @@ const out = (r: { stdout: string; stderr: string }) => `${r.stdout}${r.stderr}`.
 
 const buildProtocol = async () =>
   Number(/PROTOCOL = (\d+)/.exec(await fs.readFile(path.join(harnesses, "pi", "extension.mjs"), "utf8"))![1])
+
+const pathWithoutExtraVibests = async (w: World) => {
+  const own = await fs.realpath(binary)
+  const dirs = (w.env().PATH ?? "").split(":").filter(Boolean)
+
+  const kept = await Promise.all(
+    dirs.map(async (dir) => {
+      const real = await fs.realpath(path.join(dir, "vibest")).catch(() => undefined)
+
+      return real === undefined || real === own ? [dir] : []
+    }),
+  )
+
+  return kept.flat().join(":")
+}
 
 const olderAgents = async (
   w: World,
@@ -213,17 +229,22 @@ const checks: ReadonlyArray<Check> = [
       "update reads the latest version where vibest was installed from (npm's registry or the GitHub release) and installs nothing when it is this version; a build installs nothing; --stable reads the newest stable release, --beta the newest of either channel, and without either the channel of this version",
     run: async (w) => {
       await w.stopDaemon()
-      const r = await w.vibest(["update"], { timeoutMs: 60_000 })
+      const cleanPath = await pathWithoutExtraVibests(w)
+      const r = await w.vibest(["update"], { env: { PATH: cleanPath }, timeoutMs: 60_000 })
       const said = `exit ${r.code}: ${r.stdout}${r.stderr}`
 
       if (method === "build")
-        expect(r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout), said)
+        expect(
+          r.code === 0 &&
+            /^this vibest \(.+\) was not installed by npm or install\.sh; nothing to install\.\n$/.test(r.stdout),
+          said,
+        )
       else
         expect(
           r.code === 0 && r.stdout === `Checking for a newer vibest…\nvibest ${buildVersion} is up to date\n`,
           said,
         )
-      const version = await w.ok(["--version"])
+      const version = await w.ok(["--version"], { env: { PATH: cleanPath } })
       expect(version.trim() === `vibest v${buildVersion}`, `vibest --version after update: ${version}`)
 
       if (method === "build") return
@@ -252,6 +273,7 @@ const checks: ReadonlyArray<Check> = [
 
       try {
         const env = {
+          PATH: cleanPath,
           npm_config_registry: `http://127.0.0.1:${server.port}`,
           VIBEST_DOWNLOAD_URL: undefined,
           VIBEST_RELEASES_URL: `http://127.0.0.1:${server.port}/releases`,

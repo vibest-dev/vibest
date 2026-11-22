@@ -7,13 +7,22 @@ import reminder from "../src/index.ts"
 const S = "33333333-3333-4333-8333-333333333333"
 const E = "22222222-2222-4222-8222-222222222222"
 
-const ended = (execution: number, outcome: "completed" | "failed") => ({
+const succeeded = (execution: number) => ({
   aggregate: S,
   seq: execution + 1,
   at: 0,
   sessionId: S,
-  type: "execution.ended",
-  data: { execution, outcome },
+  type: "execution.succeeded" as const,
+  data: { executionId: execution },
+})
+
+const failed = (execution: number) => ({
+  aggregate: S,
+  seq: execution + 1,
+  at: 0,
+  sessionId: S,
+  type: "execution.failed" as const,
+  data: { executionId: execution, failure: { message: "failed" } },
 })
 
 describe("vibest.report-reminder", () => {
@@ -39,8 +48,7 @@ describe("vibest.report-reminder", () => {
           harness: { transform: () => Effect.succeed(registration) },
           subscription: { report: () => Effect.void },
           event: {
-            subscribe: () =>
-              Stream.fromIterable([ended(4, "completed"), ended(6, "completed"), ended(8, "failed")]) as never,
+            subscribe: () => Stream.fromIterable([succeeded(4), succeeded(6), failed(8)]) as never,
           },
           session: {
             list: () => Effect.succeed([]),

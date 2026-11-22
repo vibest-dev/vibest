@@ -41,7 +41,7 @@ describe.concurrent("Session", () => {
 
       const sent = yield* sql<{
         id: number
-      }>`SELECT id FROM inbox WHERE session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
+      }>`SELECT id FROM inbox WHERE recipient_session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
 
       assert.strictEqual(execution!.input, "one\n\ntwo")
       assert.strictEqual(execution!.inbox, sent[1]!.id)
@@ -168,14 +168,24 @@ describe.concurrent("Session", () => {
       yield* untilVirtual(
         sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
-        (rows) => rows[0]?.status === "delivered",
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+          Effect.orDie,
+        ),
+        (rows) => rows[0]?.status === "delivering",
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.include(yield* replyOf(id), "landed")
       const notStarted = (yield* sqlNotices(id)).filter((message) => message.includes("did not start"))
       assert.strictEqual(notStarted.length, 1)
       assert.include(notStarted[0], "(pi may be signed out: sign in with pi)")
+      assert.deepStrictEqual(
+        yield* sql<{
+          status: string
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+          Effect.orDie,
+        ),
+        [{ status: "delivering" }],
+      )
     }),
     { promptsIgnored: true, hooked: ["pi"] },
   )
@@ -225,7 +235,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "a reply after a start report before a refused prompt is delivered, and the batch stays delivered",
+    "a start report while a write is still in flight does not deliver that batch",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -247,8 +257,10 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
-        [{ status: "delivered" }],
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+          Effect.orDie,
+        ),
+        [{ status: "delivering" }],
       )
       assert.include(yield* replyOf(id), "landed")
       assert.isUndefined(
@@ -274,7 +286,9 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+          Effect.orDie,
+        ),
         [{ status: "failed" }],
       )
     }),
@@ -295,7 +309,7 @@ describe.concurrent("Session", () => {
         sql<{
           id: number
           status: string
-        }>`SELECT id, status AS status FROM inbox WHERE session_id = ${receiverId} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE session_id = ${receiverId} AND kind IN ('task', 'send')) ORDER BY id`.pipe(
+        }>`SELECT id, status AS status FROM inbox WHERE recipient_session_id = ${receiverId} AND sender_type != 'vibest' AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${receiverId} AND sender_type != 'vibest') ORDER BY id`.pipe(
           Effect.orDie,
         )
 
@@ -313,12 +327,12 @@ describe.concurrent("Session", () => {
       assert.match(notices.at(-1)!, /^A message to .* was not delivered: .*send: failed/)
       assert.match(notices.at(-1)!, /\n\nfirst$/)
       assert.notMatch(notices.at(-1)!, /second/)
-      const rows = yield* until(all(id), (list) => list[1]?.status === "delivered")
+      const rows = yield* until(all(id), (list) => list[1]?.status === "delivering")
       assert.deepStrictEqual(
         rows.map((row) => [row.id, row.status]),
         [
           [first, "failed"],
-          [second, "delivered"],
+          [second, "delivering"],
         ],
       )
       assert.deepStrictEqual(
@@ -345,11 +359,7 @@ describe.concurrent("Session", () => {
       yield* held.reached
       yield* sessions.send(id, "second")
       yield* held.release("unreachable")
-      yield* until(notices, (rows) => rows.length === 1)
-      assert.match(
-        (yield* notices)[0]!,
-        /^A message to .* was not delivered: the connection to herdr broke after the message was handed over.*it may have reached the session\n\nfirst$/s,
-      )
+      yield* sessions.check(id)
       yield* sessions.check(id)
       assert.deepStrictEqual(pick(yield* db.session.getSession(id)), { status: "idle", executionState: "open" })
       assert.deepStrictEqual(
@@ -367,7 +377,11 @@ describe.concurrent("Session", () => {
         ["first", "second"],
       )
       assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
-      const later = (yield* notices).slice(1)
+      assert.deepStrictEqual(
+        (yield* db.inbox.inboxWithStatus(id, "delivering")).map((r) => r.message),
+        ["first", "second"],
+      )
+      const later = yield* notices
       assert.strictEqual(later.length, 1)
       assert.include(later[0], "did not start the execution it was sent; it is idle and takes queued messages again")
     }),
@@ -388,6 +402,21 @@ describe.concurrent("Session", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-123")
+      const integration = yield* Integration.Service
+      const current = (yield* db.session.currentProcessId(id))!
+      yield* db.session.setStatus(id, "idle")
+      yield* integration.prompt(
+        { id, entry: false, harness: "cursor", process: current - 1 },
+        JSON.stringify({ hook_event_name: "afterAgentThought", conversation_id: "c-stale" }),
+      )
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-123")
+      yield* integration.prompt(
+        { id, entry: false, harness: "cursor", process: current },
+        JSON.stringify({ hook_event_name: "afterAgentThought" }),
+      )
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "working")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-123")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
       yield* until(db.session.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
@@ -395,14 +424,28 @@ describe.concurrent("Session", () => {
       yield* sessions.send(id, "next")
       const calls = yield* until(herdr.callsTo("open"), (c) => c.length > starts)
       assert.deepStrictEqual(harnessArgv(calls.at(-1)!.argv).slice(0, 2), ["cursor-agent", "--resume=c-123"])
-      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
-      yield* writeEnd(id, "cursor", { conversation_id: "c-other", text: "status: completed" }, 5000)
+      yield* writeEnd(
+        id,
+        "cursor",
+        { hook_event_name: "afterAgentResponse", conversation_id: "c-other", text: "status: completed" },
+        5000,
+      )
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-other")
       yield* herdr.updateAgent(id, (a) => ({ ...a, session: "h-9" }))
       yield* sessions.check(id)
       assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "h-9")
+      const resumed = (yield* db.session.currentProcessId(id))!
+      yield* integration.executionEnd(
+        { id, entry: false, harness: "cursor", process: resumed },
+        JSON.stringify({
+          hook_event_name: "afterAgentResponse",
+          conversation_id: "c-123",
+          text: "status: completed",
+        }),
+      )
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-123")
     }),
   )
 
@@ -498,6 +541,7 @@ describe.concurrent("Session", () => {
         [["completed", true]],
       )
       const [open] = yield* herdr.callsTo("open")
+      assert.strictEqual(open!.env.VIBEST_EXECUTION, "1")
       assert.include(open!.argv.slice(-2).join(" "), "--first")
       assert.include(open!.argv.at(-1)!, "do it")
       assert.isFalse((yield* herdr.callsTo("send")).some((call) => call.text !== undefined))
@@ -539,7 +583,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "Cursor on a runtime with no status for it: the task is in its launch argv; its first activity report accepts it and shows it working, with no resend; its execution end shows it idle, and an interrupt goes by its open execution",
+    "Cursor on a runtime with no status for it: the task is in its launch argv; activity marks the session working without starting or delivering an execution, and an unkeyed end finishes the sole owned execution without faking started_at",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -557,51 +601,39 @@ describe.concurrent("Session", () => {
       const integration = yield* Integration.Service
       const who = { id, entry: false, harness: CURSOR.id }
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
+      const sql = yield* SqlClient.SqlClient
+
+      const before = yield* sql<{
+        started: number | null
+        delivered: number
+      }>`SELECT
+          (SELECT count(*) FROM execution WHERE session_id = ${id} AND started_at IS NOT NULL) AS started,
+          (SELECT count(*) FROM inbox WHERE recipient_session_id = ${id} AND status = 'delivered') AS delivered`
+
       yield* integration.prompt(who, thought)
       assert.strictEqual((yield* db.session.getSession(id))!.status, "working")
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
-      yield* TestClock.adjust("40 seconds")
-      yield* settled
-      assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
+      assert.isFalse(yield* db.session.executionAccepted(id))
+
+      const after = yield* sql<{
+        started: number | null
+        delivered: number
+      }>`SELECT
+          (SELECT count(*) FROM execution WHERE session_id = ${id} AND started_at IS NOT NULL) AS started,
+          (SELECT count(*) FROM inbox WHERE recipient_session_id = ${id} AND status = 'delivered') AS delivered`
+
+      assert.deepStrictEqual(after, before)
       yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
-      yield* untilVirtual(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
-      const typedTasks = (yield* herdr.callsTo("send")).filter((c) => c.text !== undefined).length
-      yield* integration.prompt(who, thought)
-      const byUser = (yield* db.session.getSession(id))!
-      assert.strictEqual(byUser.status, "working")
-      assert.strictEqual(executionStateOf(byUser), "open")
-      const userExecution = (yield* db.session.openExecution(id))!
-      yield* sessions.send(id, "queued while the user's prompt runs")
-      yield* settled
-      assert.strictEqual((yield* herdr.callsTo("send")).filter((c) => c.text !== undefined).length, typedTasks)
-      yield* integration.prompt(who, JSON.stringify({ hook_event_name: "postToolUse" }))
-      yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "user done" }))
-      yield* until(herdr.callsTo("send"), (calls) =>
-        calls.some((c) => c.text?.includes("queued while the user's prompt runs") === true),
-      )
-      const userEnd = (yield* db.session.latestReply(id))!
-      assert.strictEqual(userEnd.execution, userExecution)
-      assert.strictEqual(userEnd.text, "user done")
-      assert.notStrictEqual(yield* db.session.openExecution(id), userExecution)
-      yield* integration.prompt(who, thought)
-      yield* integration.executionEnd(
-        who,
-        JSON.stringify({ hook_event_name: "afterAgentResponse", text: "queued done" }),
-      )
-      yield* untilVirtual(db.session.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "completed")
-      yield* sessions.send(id, "next")
-      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
-      yield* integration.prompt(who, thought)
-      yield* untilVirtual(
-        db.session.getSession(id),
-        (w) => w !== undefined && executionStateOf(w) === "open" && w.status === "working",
-      )
-      const stopped = yield* sessions.interrupt(id)
-      assert.include(stopped.message, "interrupted")
-      assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("ctrl+c")))
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(row.status, "idle")
-      assert.strictEqual(executionStateOf(row), "interrupted")
+      const finished = (yield* db.session.getSession(id))!
+      assert.strictEqual(executionStateOf(finished), "completed")
+      assert.strictEqual(finished.status, "idle")
+      assert.isFalse(yield* db.session.executionAccepted(id))
+
+      const afterEnd = yield* sql<{
+        started: number | null
+      }>`SELECT count(*) AS started FROM execution WHERE session_id = ${id} AND started_at IS NOT NULL`
+
+      assert.deepStrictEqual(afterEnd, [{ started: 0 }])
+      assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
     }),
   )
 
@@ -657,7 +689,9 @@ describe.concurrent("Session", () => {
 
         const [row] = yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'hello'`.pipe(Effect.orDie)
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'hello'`.pipe(
+          Effect.orDie,
+        )
 
         const sent = (yield* herdr.callsTo("send")).filter((call) => call.text?.includes("hello")).length
         assert.deepStrictEqual({ status: row?.status, sent }, { status: "failed", sent: 0 })
@@ -668,13 +702,13 @@ describe.concurrent("Session", () => {
           ...db,
           inbox: {
             ...db.inbox,
-            setInboxStatus: (sessionId, ids, status, from, into) =>
+            setInboxStatus: (sessionId, ids, status, from, into, reason) =>
               status === "failed" && from === undefined
                 ? Deferred.succeed(failing, undefined).pipe(
                     Effect.andThen(Deferred.await(go)),
-                    Effect.andThen(db.inbox.setInboxStatus(sessionId, ids, status, from, into)),
+                    Effect.andThen(db.inbox.setInboxStatus(sessionId, ids, status, from, into, reason)),
                   )
-                : db.inbox.setInboxStatus(sessionId, ids, status, from, into),
+                : db.inbox.setInboxStatus(sessionId, ids, status, from, into, reason),
           },
         }),
       },
@@ -725,7 +759,7 @@ describe.concurrent("Session", () => {
       const prompts = (yield* herdr.callsTo("send")).length
 
       const notices = entryPending(db, (yield* db.session.getSession(id))!.projectId).pipe(
-        Effect.map((rows) => rows.filter((r) => r.kind === "notice")),
+        Effect.map((rows) => rows.filter((r) => r.sender.type === "vibest")),
       )
 
       const held = yield* herdr.hold("state", id)
@@ -777,7 +811,7 @@ describe.concurrent("Session", () => {
     { hooked: ["pi"] },
   )
   test(
-    "a prompt typed while a delivery awaits the runtime, then the harness dies: the typed execution ends failed with the queued message",
+    "a prompt typed while a delivery awaits the runtime, then the harness dies: the unstarted execution is released, not failed, and the queued message is not left pending",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* idleSession(yield* makeRepository)
@@ -792,9 +826,74 @@ describe.concurrent("Session", () => {
       yield* until(db.session.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
       yield* settled
       assert.isUndefined(yield* db.session.openExecution(id))
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "failed")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "not_started")
       assert.deepStrictEqual((yield* db.inbox.pendingInbox(id)).length, 0)
     }),
     { hooked: ["pi"] },
+  )
+
+  test(
+    "a refusal before the text is written fails that batch even if another input was accepted",
+    Effect.gen(function* () {
+      const rt = yield* FakeRuntime
+      const integration = yield* Integration.Service
+      const sql = yield* SqlClient.SqlClient
+      const repo = yield* makeRepository
+      const { id, sessions, db, entryId } = yield* spawnWorking(repo, "cursor")
+      yield* writeEnd(id, "cursor", { text: "status: completed" })
+      yield* rt.endExecution(id)
+      yield* sessions.check(id)
+      yield* settled
+      const text = "PREHANDOFF-REFUSED"
+      const held = yield* rt.hold("send", id)
+      yield* sessions.send(id, text, { type: "agent", session: entryId }, "refusal")
+      yield* held.reached
+      const terminal = (yield* rt.terminalOf(id))!
+      const direct = "DIRECT unrelated concurrent input"
+      yield* rt.runtime.send(terminal, { text: direct })
+      yield* integration.prompt(
+        { id, entry: false, harness: "cursor", process: yield* db.session.currentProcessId(id) },
+        JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: direct }),
+      )
+      yield* held.release("failed")
+      yield* untilVirtual(sessions.inMemory, (memory) => memory.locks === 0)
+
+      const [row] = yield* sql<{ status: string }>`SELECT status FROM inbox
+        WHERE recipient_session_id = ${id} AND request_id = ${"refusal"}`.pipe(Effect.orDie)
+
+      const notices = yield* sql<{ recipient: string }>`SELECT recipient_session_id AS recipient FROM inbox
+        WHERE sender_type = 'vibest' AND instr(content, ${text}) > 0`.pipe(Effect.orDie)
+
+      const writes = yield* rt.callsTo("send")
+      assert.equal(writes.filter((call) => call.text?.includes(text)).length, 0)
+      assert.equal(row?.status, "failed")
+      assert.equal(notices.filter((notice) => notice.recipient === entryId).length, 1)
+    }),
+    { hooked: ["cursor"] },
+  )
+
+  test(
+    "a typed attempt that nothing picks up does not block the next send or type itself again",
+    Effect.gen(function* () {
+      const rt = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const { id, sessions } = yield* spawnWorking(repo, "cursor")
+      yield* writeEnd(id, "cursor", { text: "status: completed" })
+      yield* rt.endExecution(id)
+      yield* sessions.check(id)
+      yield* settled
+      yield* Ref.set(rt.skipPromptUpdates, 1)
+      yield* sessions.send(id, "FIRST AMBIGUOUS")
+      yield* until(rt.callsTo("send"), (calls) => calls.some((call) => call.text === "FIRST AMBIGUOUS"))
+      yield* sessions.send(id, "SECOND NEXT")
+      yield* TestClock.adjust("9 seconds")
+      yield* yieldToIo
+      yield* until(rt.callsTo("send"), (calls) => calls.some((call) => call.text === "SECOND NEXT"))
+      const writes = yield* rt.callsTo("send")
+      assert.equal(writes.filter((call) => call.text === "FIRST AMBIGUOUS").length, 1)
+      assert.equal(writes.filter((call) => call.keys?.includes("enter")).length, 0)
+      assert.equal(writes.filter((call) => call.text === "SECOND NEXT").length, 1)
+    }),
+    { hooked: ["cursor"] },
   )
 })

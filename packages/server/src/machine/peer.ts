@@ -241,7 +241,10 @@ const make = Effect.gen(function* () {
           origin: { peer, project, reportTo },
           files: input.files,
         })
-        .pipe(Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })))
+        .pipe(
+          Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })),
+          Effect.catchTag("TeamRefused", Effect.die),
+        )
 
       return {
         session: spawned.id,

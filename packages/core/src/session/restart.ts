@@ -22,7 +22,7 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import { entryCommand, withProcess, type Launch } from "../launch.ts"
+import { entryCommand, withExecution, withProcess, type Launch } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import { Processes } from "../processes.ts"
@@ -132,7 +132,9 @@ export const make = Effect.gen(function* () {
         message: continuing(interrupted),
       })
 
-      return (process: number | undefined) => withProcess(command, process)
+      const execution = interrupted ? yield* db.session.openExecution(entry.id) : undefined
+
+      return (process: number | undefined) => withExecution(withProcess(command, process), execution)
     }).pipe(
       Effect.provideService(Agents.Service, agents),
       Effect.provideService(Harness.Service, harness),
@@ -249,18 +251,19 @@ export const make = Effect.gen(function* () {
     )
   }
 
-  const againArgv = (session: SessionRow, interrupted: boolean) => {
-    const message = continuing(interrupted)
+  const againArgv = (session: SessionRow, interrupted: boolean) =>
+    Effect.gen(function* () {
+      const message = continuing(interrupted)
+      const execution = interrupted ? yield* db.session.openExecution(session.id) : undefined
 
-    return Effect.map(
-      launching(
+      const plan = yield* launching(
         session,
         (session.process?.harnessSessionId ?? null) !== null,
         message === undefined ? undefined : { text: message, onHandover: Effect.void },
-      ),
-      (plan) => plan.launch,
-    )
-  }
+      )
+
+      return (process: number | undefined) => withExecution(plan.launch(process), execution)
+    })
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {

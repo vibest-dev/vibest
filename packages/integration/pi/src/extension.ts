@@ -36,7 +36,16 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const decodeRefusal = Schema.decodeUnknownOption(Schema.String)
 
-const decodeVibestDetails = Schema.decodeUnknownOption(Schema.Struct({ execution: Schema.Number }))
+const decodeVibestDetails = Schema.decodeUnknownOption(
+  Schema.Struct({ execution: Schema.Number, ids: Schema.optional(Schema.Array(Schema.Number)) }),
+)
+
+const parseExecution = (raw: string | undefined) => {
+  if (raw === undefined || !/^[1-9]\d*$/.test(raw)) return undefined
+  const parsed = Number(raw)
+
+  return Number.isSafeInteger(parsed) ? parsed : undefined
+}
 
 const guarded = (sessionId: string) =>
   Effect.gen(function* () {
@@ -86,13 +95,19 @@ const piHeaders = (sessionId: string, ctx: ExtensionContext, current?: string) =
 
 type Role = Layer.Layer<never, Config.ConfigError, Pi | ClientServices | FileSystem.FileSystem>
 
-const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Role =>
+const session = (
+  sessionId: string,
+  processId: Ref.Ref<string | undefined>,
+  initialExecution: number | undefined,
+): Role =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const pi = yield* Pi
       const layout = yield* Layout
       const root = yield* Ref.make(false)
       const reply = yield* Ref.make({ text: "", error: "" })
+      const initialPending = yield* Ref.make<number | undefined>(initialExecution)
+      const bound = yield* Ref.make<number | undefined>(initialExecution)
       yield* pi.handle("session_start", (_e, ctx) => Ref.set(root, ctx.mode === "tui"))
       yield* pi.handle("agent_end", (e) => Ref.set(reply, lastReply(e.messages)))
       yield* pi.handle("message_start", (e, ctx) =>
@@ -103,15 +118,33 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
           const details = decodeVibestDetails(message.details)
 
           if (Option.isNone(details)) return
+          yield* Ref.set(initialPending, undefined)
+          yield* Ref.set(bound, details.value.execution)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
-          const event = encodeJson({ type: "accepted", execution: details.value.execution })
+
+          const event = encodeJson({
+            type: "accepted",
+            execution: details.value.execution,
+            ...(details.value.ids !== undefined && { ids: details.value.ids }),
+          })
+
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
         }),
       )
       yield* pi.handle("input", (e, ctx) =>
         Effect.gen(function* () {
           if (e.source === "extension" || e.text.trim() === "") return
+          const initial = yield* Ref.getAndSet(initialPending, undefined)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
+
+          if (initial !== undefined) {
+            const event = encodeJson({ type: "accepted", execution: initial })
+            yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
+
+            return
+          }
+
+          yield* Ref.set(bound, undefined)
           const event = encodeJson({ type: "input", text: e.text, source: e.source })
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
         }),
@@ -120,8 +153,18 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
           const { text, error } = yield* Ref.get(reply)
+          yield* Ref.set(initialPending, undefined)
+          const execution = yield* Ref.getAndSet(bound, undefined)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
-          const event = encodeJson({ type: "agent_settled", text, error, aborted: e.aborted })
+
+          const event = encodeJson({
+            type: "agent_settled",
+            text,
+            error,
+            aborted: e.aborted,
+            ...(execution !== undefined && { execution }),
+          })
+
           yield* hookCall(layout.socket, headers, (client) => client.ExecutionEnd({ sessionId, harness: "pi", event }))
         }),
       )
@@ -212,7 +255,7 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
               customType: "vibest",
               content: taken.content,
               display: true,
-              details: { execution: taken.execution, detail: taken.detail },
+              details: { execution: taken.execution, ids: taken.ids, detail: taken.detail },
             },
             { triggerTurn: true },
           )
@@ -299,11 +342,18 @@ export const extension = Layer.unwrap(
 
     if (!sessionId) return Layer.empty
     const processId = yield* Ref.make(Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROCESS"))))
+
+    const initialExecution = parseExecution(
+      Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_EXECUTION"))),
+    )
+
     const guard: Role = Layer.merge(Layer.effectDiscard(guarded(sessionId)), ready(sessionId, processId))
 
     return terminal(sessionId).pipe(
       Layer.provideMerge(
-        Layer.mergeAll(session(sessionId, processId), inbox(sessionId, processId)).pipe(Layer.provideMerge(guard)),
+        Layer.mergeAll(session(sessionId, processId, initialExecution), inbox(sessionId, processId)).pipe(
+          Layer.provideMerge(guard),
+        ),
       ),
     )
   }),

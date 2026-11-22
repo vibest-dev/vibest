@@ -151,6 +151,7 @@ export const setup = async (
     readonly aWithoutCursor?: boolean
     readonly aProject?: string
     readonly bBinary?: string
+    readonly aDaemonBinary?: string
   } = {},
 ) => {
   for (const bin of ["pi", "hc", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
@@ -226,7 +227,7 @@ export const setup = async (
   for (const dir of ["a-r", "a-s", "a-c"]) await fs.mkdir(path.join(w.root, dir), { recursive: true })
   const hcA = await hcCore(w, "a", aEnv)
   await w.stopDaemon()
-  const daemonA = await w.run(w.repository, [binary, "daemon"], { env: aEnv })
+  const daemonA = await w.run(w.repository, [options.aDaemonBinary ?? binary, "daemon"], { env: aEnv })
   expect(daemonA.code === 0, `A: vibest daemon: ${daemonA.stderr}`)
   await w.startEntry({
     harness: "pi",
@@ -264,7 +265,7 @@ export const setup = async (
   const notices = (address: string, marker: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE kind = 'send' AND content LIKE ? AND content LIKE ?",
+      "SELECT count(*) AS n FROM inbox WHERE sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content LIKE ? AND content LIKE ?",
       `%<agent-id>${address}</agent-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
@@ -421,7 +422,7 @@ const checks: ReadonlyArray<Check> = [
 
         expect(
           started?.peer === a.id &&
-            /session\.created .*process\.started .*execution\.started .*execution\.ended .*session\.ended/.test(
+            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.ended/.test(
               started.facts,
             ),
           `B's session started for A: ${JSON.stringify(started)}`,
