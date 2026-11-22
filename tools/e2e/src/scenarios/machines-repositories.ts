@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
 import { binary, expect, until, type World } from "../world.ts"
@@ -33,6 +34,50 @@ const twoRepositories = async (w: World) => {
 }
 
 const BEFORE_REPOSITORY_LISTS = "55868c318d60222aa0c6a8c3e417bf8ce2b8dd54"
+const BEFORE_REPOSITORY_LISTS_PROTOCOL = 13
+
+const withCurrentProtocol = (bytes: Buffer, label: string) => {
+  const found = [
+    ...bytes.toString("latin1").matchAll(new RegExp(`PROTOCOL\\d* = ${BEFORE_REPOSITORY_LISTS_PROTOCOL}\\b`, "g")),
+  ]
+
+  expect(
+    found.length === 1,
+    `${label}: expected one PROTOCOL = ${BEFORE_REPOSITORY_LISTS_PROTOCOL}, found ${found.length}`,
+  )
+  const from = found[0]![0]
+  const to = from.replace(/\d+$/, String(PROTOCOL).padStart(String(BEFORE_REPOSITORY_LISTS_PROTOCOL).length))
+  const at = bytes.indexOf(from)
+  expect(
+    at >= 0 && bytes.indexOf(from, at + 1) < 0 && from.length === to.length,
+    `${label}: cannot swap ${from} for ${to}`,
+  )
+  bytes.write(to, at)
+}
+
+const beforeRepositoryLists = async (w: World) => {
+  const built = await olderBuild(BEFORE_REPOSITORY_LISTS)
+  const dir = path.join(w.root, "before-repository-lists")
+  const bin = path.join(dir, "bin", "vibest")
+  await fs.mkdir(path.dirname(bin), { recursive: true })
+  const bytes = Buffer.from(await fs.readFile(built))
+  withCurrentProtocol(bytes, built)
+  await fs.writeFile(bin, bytes, { mode: 0o755 })
+
+  if (process.platform === "darwin") {
+    const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
+    expect(signed.code === 0, `codesign: ${signed.stderr}${signed.stdout}`)
+  }
+
+  const builtHarnesses = path.join(path.dirname(path.dirname(built)), "harnesses")
+  await fs.cp(builtHarnesses, path.join(dir, "harnesses"), { recursive: true })
+  const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
+  const source = Buffer.from(await fs.readFile(extension))
+  withCurrentProtocol(source, extension)
+  await fs.writeFile(extension, source)
+
+  return bin
+}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -100,13 +145,13 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M12",
     title:
-      "a project of two repositories and a B running an unmodified vibest built from before repository lists: run --machine is refused on A with run vibest update on B, and B starts nothing",
+      "a project of two repositories and a B running a vibest built from before repository lists: run --machine is refused on A with run vibest update on B, and B starts nothing",
     run: async (w) => {
       let s: Setup | undefined
 
       try {
         const a = await twoRepositories(w)
-        s = await setup(w, { aProject: a.combo, bBinary: await olderBuild(BEFORE_REPOSITORY_LISTS) })
+        s = await setup(w, { aProject: a.combo, bBinary: await beforeRepositoryLists(w) })
         await s.okA(["machine", "add", "mb", "b-host"])
         await s.refusedOnA("mold", "run vibest update on mb")
         const started = s.bDb<{ n: number }>("SELECT count(*) AS n FROM session")?.n
@@ -237,28 +282,18 @@ const checks: ReadonlyArray<Check> = [
       let s: Setup | undefined
 
       try {
-        s = await setup(w)
-        await w.stopDaemon()
-        const older = await w.run(w.repository, [await olderBuild(BEFORE_REPOSITORY_LISTS), "daemon"], { env: s.aEnv })
-        expect(older.code === 0, `the older vibestd on A: ${older.stderr}`)
+        s = await setup(w, { aDaemonBinary: await beforeRepositoryLists(w) })
         await s.okA(["machine", "add", "mb", "b-host"])
 
-        let r = { code: 0, stdout: "", stderr: "" }
+        const r = await w.viaEntry(["run", "--machine", "mb", "--project", "elsewhere", "pi", "--", "say hello"], {
+          env: s.aEnv,
+          asIs: true,
+        })
 
-        await until(
-          "the older vibestd to see A's entry session running",
-          async () => {
-            r = await w.viaEntry(["run", "--machine", "mb", "--project", "elsewhere", "pi", "--", "say hello"], {
-              env: s!.aEnv,
-              asIs: true,
-            })
-
-            return !r.stderr.includes("is not running")
-          },
-          60_000,
+        expect(
+          r.code !== 0 && r.stderr.includes("does not take --project") && r.stderr.includes("vibest update"),
+          `run --project: ${r.code} ${r.stdout}${r.stderr}`,
         )
-
-        expect(r.code !== 0 && r.stderr.includes("vibest update"), `run --project: ${r.code} ${r.stdout}${r.stderr}`)
         const started = s.bDb<{ n: number }>("SELECT count(*) AS n FROM session")?.n
         expect(started === 0, `B has ${started} sessions`)
       } finally {
