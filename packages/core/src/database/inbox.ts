@@ -418,6 +418,13 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
       untakenTask: Effect.fn("Db.inbox.untakenTask")((id: string) => reads.untakenTask(id).pipe(Effect.orDie)),
 
+      taskId: Effect.fn("Db.inbox.taskId")((sessionId: string) =>
+        sql<{ id: number | null }>`SELECT message_id AS id FROM session WHERE id = ${sessionId}`.pipe(
+          Effect.map((rows) => rows[0]?.id ?? undefined),
+          Effect.orDie,
+        ),
+      ),
+
       waitingOn: Effect.fn("Db.inbox.waitingOn")((id: string) => waitingOn(id).pipe(Effect.orDie)),
 
       hasQueued: Effect.fn("Db.inbox.hasQueued")((id: string) =>

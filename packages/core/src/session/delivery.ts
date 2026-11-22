@@ -80,12 +80,26 @@ export const make = Effect.gen(function* () {
     if (task !== undefined) {
       const first = yield* taskInput(session, task)
 
-      const notStarted = yield* into(first.text, first.onHandover).pipe(
-        Effect.catchTag("HandoffRejected", (e) =>
-          db.inbox.inboxWithStatus(session.id, "delivering").pipe(
-            Effect.flatMap((rows) => undelivered(session, rows, e.message)),
-            Effect.as(undefined),
+      const attempted: Array<number> = []
+
+      const notStarted = yield* into(
+        first.text,
+        first.onHandover.pipe(
+          Effect.andThen(
+            db.inbox.taskId(session.id).pipe(
+              Effect.tap((id) =>
+                Effect.sync(() => {
+                  if (id !== undefined) attempted.push(id)
+                }),
+              ),
+            ),
           ),
+        ),
+      ).pipe(
+        Effect.catchTag("HandoffRejected", (e) =>
+          attempted.length === 0
+            ? Effect.fail(e)
+            : undelivered(session, [{ id: attempted[0]!, message: task }], e.message).pipe(Effect.as(undefined)),
         ),
       )
 
