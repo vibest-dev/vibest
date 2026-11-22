@@ -33,6 +33,7 @@ export class HandoffRejected extends Schema.TaggedError<HandoffRejected>()("Hand
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const STOP_WAIT = Duration.seconds(10)
+export const HOOK_GRACE = Duration.seconds(10)
 const STARTUP_DIALOG_POLL = Schedule.spaced("500 millis")
 
 export type Pickup = Data.TaggedEnum<{

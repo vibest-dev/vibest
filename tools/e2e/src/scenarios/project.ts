@@ -334,7 +334,7 @@ const checks: ReadonlyArray<Check> = [
       expect((await fs.readFile(log, "utf8").catch(() => "")) === "", "ls ran git")
       const repo = path.join(w.root, "no-project")
       await fs.mkdir(repo)
-      const init = await w.run(repo, ["git", "init", "-q"])
+      const init = await w.run(repo, ["git", "init", "-q", "-b", "main"])
       expect(init.code === 0, init.stderr)
       const none = (JSON.parse(await w.ok(["ls"], { cwd: repo, env })) as { sessions: Array<unknown> }).sessions
       expect(none.length === 0, `ls in a repository that is no project: ${JSON.stringify(none)}`)

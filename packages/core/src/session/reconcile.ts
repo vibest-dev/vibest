@@ -23,7 +23,7 @@ import * as Reactor from "../reactor.ts"
 import { agentState, alive, paneTail, reportedWhenUnknown, Runtimes, stateOf } from "../runtimes.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
-import { CONFIRM_TIMEOUT } from "./executions.ts"
+import { CONFIRM_TIMEOUT, HOOK_GRACE } from "./executions.ts"
 import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
@@ -33,8 +33,9 @@ import { Starts } from "./starts.ts"
 
 export * as Reconcile from "./reconcile.ts"
 
+export { HOOK_GRACE }
+
 export const START_TIMEOUT = Duration.seconds(120)
-export const HOOK_GRACE = Duration.seconds(10)
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service

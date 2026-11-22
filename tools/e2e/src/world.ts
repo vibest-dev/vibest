@@ -173,7 +173,7 @@ export class World {
     await fsPromises.mkdir(w.config.pi, { mode: 0o700 })
     await cursorShadow(w.config.cursor, profile)
     await zshKeepingHistoryInTheWorld(w.shellDir)
-    await w.sh(root, ["git", "init", "-q", "--bare", w.origin])
+    await w.sh(root, ["git", "init", "-q", "-b", "main", "--bare", w.origin])
     await w.sh(root, ["git", "init", "-q", "-b", "main", w.repository])
     await fsPromises.writeFile(path.join(w.repository, "README.md"), "# shop\n")
     await w.sh(w.repository, ["git", "add", "."])
@@ -406,16 +406,21 @@ export class World {
     const db = readDb(file)
 
     try {
-      const rows = db.query(`SELECT id, runtime FROM ${SESSIONS} s`).all() as Array<{
+      const rows = db
+        .query(
+          `SELECT s.id, p.runtime, p.terminal
+           FROM session s
+           LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT max(id) FROM process WHERE session_id = s.id)`,
+        )
+        .all() as Array<{
         id: string
         runtime: string | null
+        terminal: string | null
       }>
 
       return rows.flatMap((r) => {
-        const runtime = JSON.parse(r.runtime ?? "{}") as { kind?: string; id?: string }
-
-        if (runtime.kind !== undefined && this.ownRuntimes.has(runtime.kind)) return []
-        const terminal = runtime.id ?? ""
+        if (r.runtime === null || this.ownRuntimes.has(r.runtime)) return []
+        const terminal = r.terminal ?? ""
         const session = terminal.split("/")[0] ?? ""
 
         return session === "" || session === this.herdrSession || session.startsWith(`${this.herdrSession}-`)
