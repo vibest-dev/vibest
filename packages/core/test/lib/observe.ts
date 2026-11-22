@@ -66,7 +66,10 @@ export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject
     const bound = Predicate.isNumber(named) || harness !== "pi" ? named : yield* db.session.openExecution(id)
 
     const body = Predicate.isNumber(bound) ? { ...payload, execution: bound } : payload
-    yield* db.session.endObserved(id, executionEndFrom(adapter, body, at))
+    const observed = adapter.executionEnd?.(body)
+
+    if (observed === undefined) return
+    yield* db.session.endObserved(id, executionEndFrom(adapter, observed, at))
   })
 
 const decodeEventData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))

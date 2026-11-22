@@ -45,7 +45,6 @@ export const cursor: Harness.HarnessDefinition = {
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
-  replyField: "text",
   ready: "runtime",
   promptArgs: ["--"],
   clearKeys: ["ctrl+u"],
@@ -71,12 +70,22 @@ export const cursor: Harness.HarnessDefinition = {
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (Predicate.isString(event.conversation_id) ? event.conversation_id : undefined),
   userPrompt: (event) => {
-    if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
+    if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse")
+      return { activity: true }
 
     if (event.hook_event_name !== "beforeSubmitPrompt" || !Predicate.isString(event.prompt) || !event.prompt.trim())
       return undefined
 
     return { text: event.prompt }
   },
-  executionEnd: (event) => (event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined),
+  executionEnd: (event) => {
+    if (event.hook_event_name !== "afterAgentResponse") return undefined
+    const conversation = Predicate.isString(event.conversation_id) ? event.conversation_id : undefined
+
+    return {
+      reply: Predicate.isString(event.text) ? event.text : "",
+      ...(conversation !== undefined && { conversation }),
+      ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
+    }
+  },
 }

@@ -65,7 +65,6 @@ export const pi: Harness.HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  replyField: "text",
   delivery: "pull",
   promptArgs: ["--"],
   ready: "integration",
@@ -100,13 +99,12 @@ export const pi: Harness.HarnessDefinition = {
     const aborted = event.aborted === true
     const error = Predicate.isString(event.error) ? event.error : ""
 
+    const reply = Predicate.isString(event.text) ? event.text : ""
+
     return {
-      end: {
-        text: Predicate.isString(event.text) ? event.text : "",
-        error: error || (aborted ? "aborted" : ""),
-        aborted,
-        ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
-      },
+      reply,
+      ...(aborted ? { interrupted: true } : error !== "" ? { failure: error } : {}),
+      ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
     }
   },
 }
