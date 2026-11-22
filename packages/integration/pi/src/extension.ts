@@ -106,6 +106,7 @@ const session = (
       const layout = yield* Layout
       const root = yield* Ref.make(false)
       const reply = yield* Ref.make({ text: "", error: "" })
+      const initialPending = yield* Ref.make<number | undefined>(initialExecution)
       const bound = yield* Ref.make<number | undefined>(initialExecution)
       yield* pi.handle("session_start", (_e, ctx) => Ref.set(root, ctx.mode === "tui"))
       yield* pi.handle("agent_end", (e) => Ref.set(reply, lastReply(e.messages)))
@@ -117,6 +118,7 @@ const session = (
           const details = decodeVibestDetails(message.details)
 
           if (Option.isNone(details)) return
+          yield* Ref.set(initialPending, undefined)
           yield* Ref.set(bound, details.value.execution)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
 
@@ -132,7 +134,17 @@ const session = (
       yield* pi.handle("input", (e, ctx) =>
         Effect.gen(function* () {
           if (e.source === "extension" || e.text.trim() === "") return
+          const initial = yield* Ref.getAndSet(initialPending, undefined)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
+
+          if (initial !== undefined) {
+            const event = encodeJson({ type: "accepted", execution: initial })
+            yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
+
+            return
+          }
+
+          yield* Ref.set(bound, undefined)
           const event = encodeJson({ type: "input", text: e.text, source: e.source })
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
         }),
@@ -141,6 +153,7 @@ const session = (
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
           const { text, error } = yield* Ref.get(reply)
+          yield* Ref.set(initialPending, undefined)
           const execution = yield* Ref.getAndSet(bound, undefined)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
 

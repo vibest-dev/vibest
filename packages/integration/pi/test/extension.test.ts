@@ -610,6 +610,17 @@ describe("pi-vibest", () => {
       })
 
       yield* s.emit("session_start", { reason: "startup" }, tuiStart)
+      yield* s.emit("input", { type: "input", text: "initial cli argv prompt", source: "interactive" }, tuiStart)
+      yield* until(
+        sql<{ started: number | null; typed: string | null }>`SELECT started_at AS started, typed FROM execution
+          WHERE session_id = ${id} AND id = ${first}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.started !== null,
+      )
+      assert.isNull(
+        (yield* sql<{
+          typed: string | null
+        }>`SELECT typed FROM execution WHERE session_id = ${id} AND id = ${first}`)[0]?.typed,
+      )
       yield* s.emit(
         "agent_end",
         { messages: [{ role: "assistant", content: [{ type: "text", text: "first turn" }] }] },
@@ -620,6 +631,25 @@ describe("pi-vibest", () => {
         sql<{ outcome: string | null; reply: string | null }>`SELECT outcome, reply FROM execution
           WHERE session_id = ${id} AND id = ${first}`.pipe(Effect.orDie),
         (rows) => rows[0]?.outcome === "completed",
+      )
+
+      yield* s.emit("input", { type: "input", text: "human follow-up", source: "interactive" }, tuiStart)
+      yield* until(
+        sql<{ typed: string | null }>`SELECT typed FROM execution WHERE session_id = ${id} AND id > ${first}`.pipe(
+          Effect.orDie,
+        ),
+        (rows) => rows[0]?.typed === "human follow-up",
+      )
+      yield* s.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "follow-up reply" }] }] },
+        tuiStart,
+      )
+      yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* until(
+        sql<{ outcome: string | null; reply: string | null }>`SELECT outcome, reply FROM execution
+          WHERE session_id = ${id} AND id > ${first}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.outcome === "completed" && rows[0]?.reply === "follow-up reply",
       )
 
       const lost = (yield* db.session.startExecution(id, 2)).execution

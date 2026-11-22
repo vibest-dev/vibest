@@ -1,12 +1,14 @@
 import { assert, describe } from "@effect/vitest"
-import { executionStateOf } from "@vibest/core/database/db-rows"
+import { exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
 import { Harnesses } from "@vibest/core/harnesses"
+import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
 import { Clock, Effect, Fiber, type Schema } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { PULLING_CLAUDE } from "./lib/harnesses.ts"
 import { replyOf, eventsOf, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnWorking, test } from "./lib/sessions-helpers.ts"
@@ -43,18 +45,14 @@ describe("observed execution end", () => {
       const { id, db } = yield* idleSession(yield* makeRepository)
       const before = yield* ends(id)
       const { execution } = yield* db.session.startExecution(id, yield* Clock.currentTimeMillis)
-      assert.strictEqual(
+      assert.isUndefined(
         yield* db.session.endObserved(id, yield* observedEnd("pi", { type: "agent_settled", text: "background" })),
-        "completed",
       )
-      assert.deepStrictEqual((yield* ends(id)).at(-1), { executionId: execution, reply: "background" })
-      assert.strictEqual((yield* ends(id)).length, before.length + 1)
-      assert.isUndefined(yield* db.session.openExecution(id))
-      assert.strictEqual(
-        yield* db.session.endObserved(id, yield* observedEnd("pi", { type: "agent_settled", text: "background" })),
-        "completed",
-      )
-      assert.strictEqual((yield* ends(id)).length, before.length + 1)
+      assert.deepStrictEqual(yield* ends(id), before)
+      assert.strictEqual(yield* db.session.openExecution(id), execution)
+      yield* db.session.acceptExecution(id, execution)
+      yield* writeEnd(id, "pi", { type: "agent_settled", text: "mine" })
+      assert.deepStrictEqual((yield* ends(id)).at(-1), { executionId: execution, reply: "mine" })
     }),
     { hooked: ["pi"] },
   )
@@ -91,10 +89,72 @@ describe("observed execution end", () => {
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
       )
       const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(executionStateOf(row), "interrupted")
-      assert.notStrictEqual(executionStateOf(row), "failed")
+      assert.strictEqual(executionStateOf(row), "failed")
+      assert.isNotNull(exitedAt(row))
+      assert.deepStrictEqual(
+        (yield* db.inbox.inboxWithStatus(id, "failed")).map((r) => r.message),
+        ["queued"],
+      )
     }),
     { hooked: ["claude"] },
+  )
+
+  test(
+    "an unkeyed end between inbox take and PromptSubmit does not settle the unaccepted pulled execution",
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const inbox = yield* Inbox.Service
+      const integration = yield* Integration.Service
+      const { id, db, row } = yield* spawnWorking(yield* makeRepository, "pulling-claude")
+      const who = { id, entry: false, harness: "pulling-claude" as const, process: row.process?.id }
+      const first = (yield* db.session.openExecution(id))!
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: "Turn 1 answer",
+          execution: first,
+        }),
+      )
+      yield* db.inbox.insertSend(id, "Turn 2 question")
+      const taken = (yield* inbox.take(id, row.process?.id))!
+      assert.strictEqual(taken.execution, first + 1)
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: "Late unkeyed background note",
+        }),
+      )
+      assert.strictEqual(yield* db.session.openExecution(id), taken.execution)
+      yield* integration.prompt(
+        who,
+        JSON.stringify({
+          hook_event_name: "PromptSubmit",
+          origin: "vibest",
+          execution: taken.execution,
+          ids: taken.ids,
+        }),
+      )
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: "Real Turn 2 answer",
+          execution: taken.execution,
+        }),
+      )
+      assert.strictEqual(yield* replyOf(id), "Real Turn 2 answer")
+
+      const [delivered] = yield* sql<{ status: string }>`SELECT status FROM inbox
+        WHERE recipient_session_id = ${id} AND content = 'Turn 2 question'`
+
+      assert.strictEqual(delivered?.status, "delivered")
+    }),
+    { hooked: ["pi", "pulling-claude"], harnesses: [PULLING_CLAUDE] },
   )
 
   test(
@@ -123,7 +183,7 @@ describe("observed execution end", () => {
       const facts = (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id}`)[0]?.n
       yield* integration.executionEnd(who, report(a, "reply A"))
       yield* integration.executionEnd(
-        who,
+        { ...who, process: who.process! - 1 },
         JSON.stringify({
           hook_event_name: "ExecutionComplete",
           reason: "answer",
@@ -167,7 +227,7 @@ describe("observed execution end", () => {
   )
 
   test(
-    "a typed message stays bound to the execution it was handed to, even when that execution ended before the send finished",
+    "a message is delivered into the execution it was handed to, even when that execution ended before the delivery was recorded",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -178,14 +238,14 @@ describe("observed execution end", () => {
       const handed = yield* db.session.openExecution(id)
       yield* writeEnd(id, "pi", { type: "agent_settled", text: "done fast" })
       yield* held.release()
-      yield* until(sessions.inMemory, (m) => m.locks === 0)
 
-      const [row] = yield* sql<{ status: string; execution: number | null }>`SELECT
-          status, recipient_execution_id AS execution FROM inbox
-        WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(Effect.orDie)
+      const [row] = yield* until(
+        sql<{ status: string; execution: number | null }>`SELECT status, recipient_execution_id AS execution FROM inbox
+          WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+        (rows) => rows[0]?.status === "delivered",
+      )
 
       assert.isDefined(handed)
-      assert.strictEqual(row!.status, "delivering")
       assert.strictEqual(row!.execution, handed)
     }),
     { hooked: ["pi"] },

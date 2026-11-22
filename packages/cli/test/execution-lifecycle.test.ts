@@ -376,6 +376,40 @@ describe("execution lifecycle", () => {
           started: null,
           owner: 0,
         })
+
+        const second = (yield* db.session.startExecution(S, 12)).execution
+        yield* db.session.setStatus(S, "working")
+        assert.strictEqual(
+          yield* db.session.endObserved(S, { ...harnessEnd("completed", 13, "sole reply"), conversation: "conv-2" }),
+          "completed",
+        )
+        const settledSecond = (yield* db.session.getSession(S))!
+        assert.strictEqual(settledSecond.status, "idle")
+        assert.strictEqual(settledSecond.process?.conversation, "conv-2")
+
+        const [secondRow] = yield* sql<{
+          id: number
+          outcome: string | null
+          reply: string | null
+          owner: number
+        }>`SELECT id, outcome, reply, owner FROM execution WHERE session_id = ${S} AND id = ${second}`
+
+        assert.deepStrictEqual(secondRow, {
+          id: second,
+          outcome: "completed",
+          reply: "sole reply",
+          owner: 0,
+        })
+
+        const eventsBeforeReplay = (yield* sql<{
+          n: number
+        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S}`)[0]?.n
+
+        assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 14, "sole reply")), "completed")
+        assert.strictEqual(
+          (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S}`)[0]?.n,
+          eventsBeforeReplay,
+        )
       }).pipe(Effect.provide(memoryDb())),
   )
 

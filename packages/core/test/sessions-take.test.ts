@@ -2,7 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Session } from "@vibest/core/session"
-import { Effect } from "effect"
+import { Effect, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -267,6 +267,27 @@ describe.concurrent("an idle session takes its next batch", () => {
       ])
       assert.isTrue(taken?.content.includes("<vibest-agent-message>") === true)
       assert.isTrue(taken?.content.includes("report from afar") === true)
+    }),
+  )
+
+  test(
+    "a working launch-argv execution on a pulling harness is not closed as not_started when a follow-up message arrives",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      yield* Ref.set(herdr.onStarted, (session) => db.session.patchLive(session, { ready: 1, pid: 60_000 }))
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo, "pulling-pi"))
+      yield* until(db.session.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
+      const first = yield* db.session.openExecution(id)
+      assert.isDefined(first)
+      assert.isFalse(yield* db.session.executionAccepted(id))
+      yield* sessions.send(id, "follow-up while Turn 1 works")
+      yield* TestClock.adjust("9 seconds")
+      yield* sessions.check(id)
+      assert.strictEqual(yield* db.session.openExecution(id), first)
+      assert.strictEqual((yield* db.session.getSession(id))?.status, "working")
     }),
   )
 })

@@ -185,7 +185,6 @@ describe.concurrent("Session", () => {
         yield* held.release()
         yield* Fiber.join(removing)
         const after = yield* spawnWorking(repo, harness)
-        yield* after.db.session.acceptExecution(after.id, (yield* after.db.session.openExecution(after.id))!)
         yield* after.sessions.remove(after.id)
         yield* writeEnd(after.id, harness, aborted, 60_000)
         yield* TestClock.adjust("2 minutes")

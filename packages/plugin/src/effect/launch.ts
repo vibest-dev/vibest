@@ -118,12 +118,16 @@ const IDENTITY_ENV = [
   "VIBEST_CLI",
 ] as const
 
-const identityPairs = (env: Readonly<Record<string, string>>) =>
-  IDENTITY_ENV.flatMap((key) => {
+const UNSET_WHEN_OMITTED = ["VIBEST_EXECUTION"] as const
+
+const identityArgs = (env: Readonly<Record<string, string>>) => [
+  ...UNSET_WHEN_OMITTED.flatMap((key) => (env[key] === undefined ? ["-u", key] : [])),
+  ...IDENTITY_ENV.flatMap((key) => {
     const value = env[key]
 
     return value === undefined ? [] : [`${key}=${value}`]
-  })
+  }),
+]
 
 const MESSAGE_FROM_FILE = 'm=$(cat -- "$0") || exit 1; exec "$@" "$m"'
 
@@ -140,7 +144,7 @@ export const launchLine = Effect.fn("launchLine")(function* (launch: Launch) {
       ? [...launch.argv]
       : messageFromFile(launch.argv.slice(0, -1), yield* writeFirstInput(id, launch.prompt))
 
-  const prefix = identityPairs(launch.env)
+  const prefix = identityArgs(launch.env)
 
   return prefix.length === 0 ? argv : ["env", ...prefix, ...argv]
 })

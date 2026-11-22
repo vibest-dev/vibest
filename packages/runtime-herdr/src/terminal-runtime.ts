@@ -394,6 +394,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 .workspace.workspace_id)
 
         const split = input.split === true && nearPane !== undefined
+        const { VIBEST_EXECUTION: _, ...shellEnv } = input.launch.env
 
         const paneId = split
           ? (yield* failWith(
@@ -401,7 +402,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 target_pane_id: nearPane!.pane_id,
                 direction: "right",
                 cwd: input.cwd,
-                env: { ...input.launch.env },
+                env: shellEnv,
                 focus: input.focus === true,
               }),
             )).pane.pane_id
@@ -409,7 +410,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
               h.call("tab.create", {
                 workspace_id: workspaceId,
                 cwd: input.cwd,
-                env: { ...input.launch.env },
+                env: shellEnv,
                 focus: input.focus === true,
                 label: input.label,
               }),

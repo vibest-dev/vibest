@@ -266,3 +266,25 @@ test(
   }),
   { hooked: ["pi"] },
 )
+
+test(
+  "archiving a completed subagent does not drop its initial delegation or notify its creator",
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const { id, entryId, sessions } = yield* idleSession(yield* makeRepository)
+    assert.deepStrictEqual(yield* inboxStatus(id), [{ status: "delivered" }])
+    yield* sessions.remove(id)
+
+    const dropped = yield* sql<{ type: string }>`SELECT type FROM event
+      WHERE aggregate = ${id} AND type = 'inbox.dropped'`
+
+    assert.deepStrictEqual(dropped, [])
+
+    const notices = yield* sql<{ content: string }>`SELECT content FROM inbox
+      WHERE recipient_session_id = ${entryId} AND sender_type = 'vibest'
+        AND instr(content, 'was not delivered: it was archived') > 0`
+
+    assert.deepStrictEqual(notices, [])
+  }),
+  { hooked: ["pi"] },
+)

@@ -432,6 +432,8 @@ export const statements = Effect.gen(function* () {
     at: number | undefined,
     currentProcess: number,
     executionId?: number,
+    needsReady = false,
+    pulls = false,
   ) =>
     Effect.gen(function* () {
       if (executionId !== undefined) {
@@ -462,22 +464,49 @@ export const statements = Effect.gen(function* () {
         outcome: string | null
         owner: number
         reply: string | null
-      }>`SELECT id, outcome, owner, reply FROM execution
+        started: number | null
+        typed: string | null
+      }>`SELECT id, outcome, owner, reply, started_at AS started, typed FROM execution
         WHERE session_id = ${id} AND process_id = ${currentProcess} ORDER BY id`
 
       const active = rows.find((row) => row.owner === 1)
       const reply = end.reply ?? null
 
-      const duplicate =
-        reply !== null && reply !== ""
-          ? rows.findLast((row) => confirmedOutcome(row.outcome) && row.outcome === end.outcome && row.reply === reply)
-          : undefined
+      if (active === undefined) {
+        const last = rows.at(-1)
 
-      if (duplicate !== undefined) return { kind: "duplicate" as const, id: duplicate.id, active: active !== undefined }
+        if (
+          last !== undefined &&
+          confirmedOutcome(last.outcome) &&
+          last.outcome === end.outcome &&
+          reply !== null &&
+          reply !== "" &&
+          last.reply === reply
+        )
+          return { kind: "duplicate" as const, id: last.id, active: false }
 
-      const unresolvedEarlier = rows.some((row) => row.id !== active?.id && !confirmedOutcome(row.outcome))
+        return { kind: "unmatched" as const }
+      }
 
-      if (active === undefined || unresolvedEarlier) return { kind: "unmatched" as const }
+      const unresolvedEarlier = rows.some((row) => row.id !== active.id && !confirmedOutcome(row.outcome))
+
+      if (unresolvedEarlier) return { kind: "unmatched" as const }
+
+      if (active.started === null) {
+        if (needsReady && active.typed === null) return { kind: "unaccepted" as const }
+
+        if (pulls) {
+          const unacceptedPulled =
+            (yield* sql<{ ok: number }>`SELECT 1 AS ok FROM inbox m
+              WHERE m.recipient_session_id = ${id} AND m.status = 'delivering'
+                AND m.recipient_execution_id = ${active.id}
+                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)
+              LIMIT 1`).length > 0
+
+          if (unacceptedPulled) return { kind: "unaccepted" as const }
+        }
+      }
+
       const wrote = yield* finishExecution(id, active.id, end, at)
 
       return { kind: "settled" as const, id: active.id, current: true, wrote }

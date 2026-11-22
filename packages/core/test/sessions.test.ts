@@ -63,7 +63,6 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db, entryId } = yield* spawnWorking(yield* makeRepository)
-      yield* db.session.acceptExecution(id, (yield* db.session.openExecution(id))!)
       yield* settleEntry(sessions, entryId)
       const entryStatuses = (yield* (yield* SessionLive.Service).size).statuses - 1
       assert.deepInclude(yield* sessions.inMemory, { tracked: 2, locks: 0 })
@@ -275,7 +274,6 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* db.session.acceptExecution(id, (yield* db.session.openExecution(id))!)
       const opens = () => Effect.map(herdr.callsTo("open"), (calls) => calls.length)
       const before = yield* opens()
       const stateHeld = yield* herdr.hold("state", id)

@@ -131,7 +131,14 @@ export const make = Effect.gen(function* () {
     const ended = idle && worked
     const now = yield* Clock.currentTimeMillis
     const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - executionStartedAt(session))
-    const unstarted = !worked && (idle || inbox.pulls(harnessIdOf(session)))
+
+    const pulledUnaccepted =
+      !worked &&
+      execution !== undefined &&
+      inbox.pulls(harnessIdOf(session)) &&
+      (yield* db.inbox.hasUnacceptedPulledBatch(id, execution))
+
+    const unstarted = !worked && (idle || pulledUnaccepted)
 
     if (unstarted && unconfirmed <= 0) {
       const closed =

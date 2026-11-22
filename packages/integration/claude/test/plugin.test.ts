@@ -213,11 +213,27 @@ describe("Claude plugin requests", () => {
     assert.lengthOf(h.requests, 2, "taken: no more tries")
   })
 
-  it("VIBEST_EXECUTION binds the first turn once and is cleared after settle or replaced by inbox take", async () => {
+  it("VIBEST_EXECUTION starts busy, accepts Turn 1, blocks mid-turn take, clears on settle or composer input, and lets inbox take bind Turn 2", async () => {
     const h = host({ ...WORKER, VIBEST_EXECUTION: "7" })
+    const takes = [batch(12, [{ sender: { type: "vibest" }, message: "pulled" }], "pulled")]
+    h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
     await h.start()
+    await h.tick()
+    assert.deepStrictEqual(
+      h.requests.filter((r) => r.url.endsWith("/take")),
+      [],
+      "never polls /inbox/take while Turn 1 is running",
+    )
+    assert.deepStrictEqual(
+      h.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt")).map((r) => r.body),
+      [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 7 }],
+    )
     await h.executionComplete({ reason: "answer", answer: "first" })
     await h.executionComplete({ reason: "answer", answer: "second" })
+    await h.tick()
+    await h.draw()
+    await h.prompt("Message from Vibest\npulled", ownSubmit)
+    await h.executionComplete({ reason: "answer", answer: "from pull" })
     await settle()
     const ends = h.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body)
     assert.deepStrictEqual(ends, [
@@ -234,19 +250,6 @@ describe("Claude plugin requests", () => {
         reason: "answer",
         last_assistant_message: "second",
       },
-    ])
-
-    const replaced = host({ ...WORKER, VIBEST_EXECUTION: "7" })
-    const takes = [batch(12, [{ sender: { type: "vibest" }, message: "pulled" }], "pulled")]
-    replaced.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
-    await replaced.start()
-    await replaced.draw()
-    await replaced.prompt("Message from Vibest\npulled", ownSubmit)
-    await replaced.executionComplete({ reason: "answer", answer: "from pull" })
-    await replaced.executionComplete({ reason: "answer", answer: "later" })
-    await settle()
-    const replacedEnds = replaced.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body)
-    assert.deepStrictEqual(replacedEnds, [
       {
         hook_event_name: "ExecutionComplete",
         session_id: "c1",
@@ -254,11 +257,20 @@ describe("Claude plugin requests", () => {
         last_assistant_message: "from pull",
         execution: 12,
       },
+    ])
+
+    const userPrompted = host({ ...WORKER, VIBEST_EXECUTION: "9" })
+    await userPrompted.start()
+    await userPrompted.prompt("typed by user", { kind: "composer" })
+    await userPrompted.executionComplete({ reason: "answer", answer: "user reply" })
+    await settle()
+    const userEnds = userPrompted.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body)
+    assert.deepStrictEqual(userEnds, [
       {
         hook_event_name: "ExecutionComplete",
         session_id: "c1",
         reason: "answer",
-        last_assistant_message: "later",
+        last_assistant_message: "user reply",
       },
     ])
   })

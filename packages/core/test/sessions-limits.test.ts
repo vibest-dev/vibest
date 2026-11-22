@@ -94,7 +94,6 @@ describe.concurrent("Session", () => {
       const aborted = yield* spawnWorking(repo)
       const missing = yield* spawnWorking(repo)
       const lost = yield* spawnWorking(repo)
-      yield* lost.db.session.acceptExecution(lost.id, (yield* lost.db.session.openExecution(lost.id))!)
       yield* (yield* Subscriptions.Service).report({ harness: "pi", limits: [limited] })
 
       const fail = (

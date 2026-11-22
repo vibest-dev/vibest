@@ -758,7 +758,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       acceptExecution: Effect.fn("Db.session.acceptExecution")((id: string, execution: number) =>
         tx(
           Effect.gen(function* () {
-            return yield* accept(id, execution)
+            const accepted = yield* accept(id, execution)
+
+            if (accepted) yield* inbox.confirmTask(id, execution)
+
+            return accepted
           }),
         ).pipe(Effect.orDie),
       ),
@@ -836,6 +840,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (!closed) return false
 
+              if (status === "completed") yield* inbox.confirm(id, execution)
+
               if (options.notice !== undefined && !(yield* isEntry(id)))
                 yield* insertInboxRow({ sessionId: id, message: options.notice })
 
@@ -898,6 +904,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               end.at,
               current.id,
               end.execution,
+              end.needsReady,
+              end.pulls ?? false,
             )
 
             const updateConversation =
@@ -905,7 +913,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 ? session.noteConversation(id, end.conversation, process)
                 : Effect.void
 
-            if (recorded === undefined) {
+            if (recorded === undefined || recorded.kind === "unaccepted") {
               yield* updateConversation
 
               return undefined
@@ -924,6 +932,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               return undefined
             }
+
+            if (recorded.wrote)
+              yield* end.status === "completed" && !(yield* sessionLive.isPrompting(id))
+                ? inbox.confirm(id, recorded.id)
+                : inbox.confirmTask(id, recorded.id)
 
             if (!recorded.wrote || !recorded.current) return end.status
 
@@ -952,7 +965,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             Effect.gen(function* () {
               const stamp = at === undefined ? yield* now : Math.max(at, yield* now)
               const execution = (yield* openExecution(id)) ?? (yield* allocateExecution(id, stamp))
-              yield* finishExecution(id, execution, end, stamp)
+              const wrote = yield* finishExecution(id, execution, end, stamp)
+
+              if (wrote && end.outcome === "completed") yield* inbox.confirm(id, execution)
 
               if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice }, stamp)
             }),

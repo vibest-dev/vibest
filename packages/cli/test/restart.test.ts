@@ -140,7 +140,6 @@ describe("restart in place", () => {
     Effect.gen(function* () {
       const { db, sessions, id } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
-      yield* db.session.acceptExecution(id, (yield* db.session.openExecution(id))!)
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       const ran = yield* herdr.hold("run")
@@ -396,6 +395,28 @@ describe("restart in place", () => {
       yield* freshSessions.check(id)
       assert.strictEqual((yield* eventsOf(id, "execution.succeeded")).length, 0)
       assert.isUndefined(yield* db.session.latestReply(id))
+    }),
+  )
+
+  test(
+    "an idle in-place restart after Turn 1 omits VIBEST_EXECUTION from run env",
+    Effect.gen(function* () {
+      const { db, sessions, id } = yield* busyPiSubagent
+      const herdr = yield* FakeRuntime
+      yield* db.session.noteConversation(id, "conv-idle-restart")
+      yield* writeEnd(id, "pi", { text: "turn 1 done" })
+      yield* herdr.endExecution(id)
+      yield* sessions.check(id)
+      assert.isUndefined(yield* db.session.openExecution(id))
+      const ran = yield* herdr.hold("run")
+      const restarting = yield* Effect.forkChild(sessions.restart([id]))
+      yield* ran.reached
+      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* ran.release()
+      const [outcome] = yield* Fiber.join(restarting)
+      assert.deepInclude(outcome, { id, ok: true })
+      const [run] = yield* herdr.callsTo("run")
+      assert.isFalse(run!.env.some((pair) => pair.startsWith("VIBEST_EXECUTION=")))
     }),
   )
 })

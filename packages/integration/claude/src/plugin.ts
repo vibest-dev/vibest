@@ -294,13 +294,21 @@ export function register(on: On) {
 
         if (Predicate.isNumber(current)) processId = String(current)
       })
+
+      if (bound !== undefined)
+        void report(host, hookRoute("claude", "prompt"), {
+          hook_event_name: "PromptSubmit",
+          origin: "vibest",
+          execution: bound,
+        })
     }
 
-    idle = true
+    idle = bound === undefined
 
     if (timer === undefined && (await identity(host))) {
       timer = host.every(POLL_MS, () => void tick(host))
-      void tick(host)
+
+      if (idle) void tick(host)
     }
 
     return next(e)
@@ -390,6 +398,11 @@ export function register(on: On) {
       if (event.text.trimEnd().endsWith(taken.content.trim())) return next(event)
 
       return next({ ...event, context: [...(event.context ?? []), taken.content] })
+    }
+
+    if (event.origin.kind === "composer" || event.origin.kind === "bridge") {
+      initialBoundRead = true
+      bound = undefined
     }
 
     const who = await identity(host).catch(() => undefined)

@@ -117,8 +117,11 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((notStarted) => {
         const rows = batch.filter((r) => claimed.includes(r.id))
 
-        if (notStarted === HANDOFF_UNPROVED || notStarted || rows.length === 0 || handedInto === undefined)
-          return Effect.void
+        if (rows.length === 0 || handedInto === undefined) return Effect.void
+
+        if (notStarted === HANDOFF_UNPROVED) return db.inbox.confirm(session.id, handedInto)
+
+        if (notStarted) return Effect.void
 
         return db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
       }),

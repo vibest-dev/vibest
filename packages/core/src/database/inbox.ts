@@ -268,7 +268,10 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
     const confirm = (sessionId: string, execution: number) =>
       moveInbox(
-        sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}`,
+        sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+          AND (id = (SELECT message_id FROM session WHERE id = ${sessionId})
+            OR EXISTS (SELECT 1 FROM execution e WHERE e.session_id = ${sessionId} AND e.id = ${execution}
+              AND e.outcome = 'completed' AND e.typed IS NULL))`,
         "delivered",
         { execution },
       )
@@ -504,6 +507,17 @@ export const make = (session: Session.Statements, inbox: Statements) =>
             )
           }),
         ).pipe(Effect.orDie),
+      ),
+
+      hasUnacceptedPulledBatch: Effect.fn("Db.inbox.hasUnacceptedPulledBatch")((sessionId: string, execution: number) =>
+        sql<{ ok: number }>`SELECT 1 AS ok FROM inbox m
+            WHERE m.recipient_session_id = ${sessionId} AND m.status = 'delivering'
+              AND m.recipient_execution_id = ${execution}
+              AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)
+            LIMIT 1`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
       ),
 
       deliveredIn: Effect.fn("Db.inbox.deliveredIn")((sessionId: string, execution: number) =>

@@ -92,6 +92,7 @@ export type ObservedEnd = {
   readonly windows?: ReadonlyArray<string> | undefined
   readonly conversation: string | undefined
   readonly needsReady: boolean
+  readonly pulls?: boolean | undefined
   readonly execution?: number | undefined
 }
 
@@ -127,6 +128,7 @@ export const executionEndFrom = (
     limited: isUsageLimitError(failure),
     conversation: conversation !== undefined && PLAIN_ID_NOT_A_FLAG.test(conversation) ? conversation : undefined,
     needsReady: adapter.ready === "integration",
+    pulls: adapter.delivery === "pull",
     ...(observed.execution !== undefined && { execution: observed.execution }),
   }
 }
