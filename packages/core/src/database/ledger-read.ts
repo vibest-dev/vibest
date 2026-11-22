@@ -196,10 +196,10 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     )
 
   const untakenTask = (id: string) =>
-    sql<{ content: string }>`SELECT i.content FROM inbox i
+    sql<{ id: number; content: string }>`SELECT i.id, i.content FROM inbox i
       JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id
       WHERE i.recipient_session_id = ${id} AND i.status = 'pending' AND i.recipient_execution_id IS NULL
-      LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.content))
+      LIMIT 1`.pipe(Effect.map((rows) => rows[0]))
 
   const spawnedBy = (project: string, request: string) =>
     sql<{

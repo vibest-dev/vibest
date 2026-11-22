@@ -341,7 +341,12 @@ describe("Db", () => {
           yield* db.session.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
           "task not handed over yet",
         )
-        assert.strictEqual(yield* db.inbox.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "do it")
+        assert.deepStrictEqual(yield* db.inbox.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
+          id: (yield* sql<{
+            id: number
+          }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0]!.id,
+          content: "do it",
+        })
         yield* db.inbox.linkTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         assert.isUndefined(yield* db.inbox.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         assert.isFalse(
