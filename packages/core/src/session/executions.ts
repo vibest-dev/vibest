@@ -270,11 +270,6 @@ export const make = Effect.gen(function* () {
     if (yield* confirm) return already ? HANDOFF_UNPROVED : undefined
 
     if (yield* settledElsewhere) return undefined
-    yield* send.pipe(Effect.ignore)
-
-    if (yield* confirm) return already ? HANDOFF_UNPROVED : undefined
-
-    if (yield* settledElsewhere) return undefined
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed
 

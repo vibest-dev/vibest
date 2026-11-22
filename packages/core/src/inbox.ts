@@ -148,11 +148,18 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const pending = yield* db.inbox.pendingInbox(session.id)
         const task = yield* db.inbox.unsentDelegation(session.id)
-        const rows = task.length === 0 ? pending : [...pending, ...task]
 
-        if (rows.length === 0) return
+        if (pending.length > 0) yield* undelivered(session, pending, reason)
 
-        yield* undelivered(session, rows, reason)
+        if (task.length === 0) return
+        yield* db.inbox.dropUnsent(session.id, reason)
+
+        const message = `A message to ${sessionLabel(session)} was not delivered: ${reason}\n\n${task.map((row) => row.message).join("\n\n")}`
+        const sender = task[0]?.sender
+        const local = sender === undefined ? undefined : localSessionOf(sender)
+
+        if (local === undefined) yield* db.inbox.insertInbox({ sessionId: session.id, message })
+        else yield* db.inbox.insertNoticeTo(local, message)
       }),
     )
 

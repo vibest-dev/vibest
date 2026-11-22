@@ -462,8 +462,12 @@ const checks: ReadonlyArray<Check> = [
         stopped = [shell!, harness!]
 
         for (const pid of stopped) process.kill(pid, "SIGSTOP")
+
         const who = { entryId: c.entryId, projectId: c.projectId }
-        const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
+
+        const status = (id: number) =>
+          row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE session_id = ? AND id = ?", c!.entryId, id)?.s
+
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
 
         let taken: Taken = {
@@ -487,7 +491,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(taken.content.includes("done-cmcurl"), `the taken text: ${taken.content}`)
         const id = taken.ids[0]!
-        expect(status(id) === "delivered", `after the take the row is ${status(id)}`)
+        expect(status(id) === "delivering", `after the take the row is ${status(id)}`)
         const again = await curl(w, "/inbox/take", who)
         expect(again.status === 204, `a second take answered ${again.status}: ${JSON.stringify(again.body)}`)
         const other = await curl(w, "/inbox/take", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
@@ -501,11 +505,7 @@ const checks: ReadonlyArray<Check> = [
         for (const pid of stopped.reverse()) process.kill(pid, "SIGCONT")
         stopped = []
 
-        await until(
-          "the batch nobody accepted ends not_started and its row fails",
-          () => status(id) === "failed",
-          60_000,
-        )
+        await until("the batch nobody accepted stays reserved", () => status(id) === "delivering", 60_000)
         const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: c.repo, timeoutMs: 60_000 })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         const after = c.delivered(b)

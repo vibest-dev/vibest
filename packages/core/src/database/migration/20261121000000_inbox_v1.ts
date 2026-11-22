@@ -82,16 +82,22 @@ export const migration = {
   up: (tx: SqlClient.SqlClient) =>
     Effect.gen(function* () {
       const rows = yield* tx<Row>`SELECT position, aggregate, seq, type, data FROM event
-        WHERE type IN ('session.created', 'inbox.queued', 'inbox.moved')
+        WHERE type IN ('session.created', 'inbox.queued', 'inbox.moved', 'process.ended', 'session.ended')
         ORDER BY position`
 
       const created = new Map<string, { position: number; seq: number }>()
       const delegation = new Map<string, number>()
+      const closed = new Set<string>()
 
       const replace = (row: Row, type: string, data: Written) =>
         tx`UPDATE event SET type = ${type}, data = ${JSON.stringify(data)} WHERE position = ${row.position}`
 
       for (const row of rows) {
+        if (row.type === "process.ended" || row.type === "session.ended") {
+          if (!delegation.has(row.aggregate)) closed.add(row.aggregate)
+          continue
+        }
+
         if (row.type === "session.created") {
           created.set(row.aggregate, { position: row.position, seq: row.seq })
           continue
@@ -105,7 +111,7 @@ export const migration = {
             !delegation.has(row.aggregate) &&
             data.kind === "task" &&
             birth !== undefined &&
-            row.seq === birth.seq + 1
+            !closed.has(row.aggregate)
           )
             delegation.set(row.aggregate, row.seq)
           const body = bodyOf(data)

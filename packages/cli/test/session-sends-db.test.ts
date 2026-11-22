@@ -37,6 +37,41 @@ const setup = Effect.gen(function* () {
 })
 
 describe("sends from sessions", () => {
+  it.effect("an acked outbound id does not swallow a later forward of the same transfer", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, entryId } = yield* setup
+        const peer = "11111111-1111-4111-8111-111111111111"
+        const remote = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const middle = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        const ended = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+        const id = "22222222-2222-4222-8222-222222222222"
+        yield* db.remote.notePeer({ id: peer, name: "peer-b" })
+        yield* db.session.insertSession(session(B), project, { cwd: "/w", task: "child", parentSessionId: entryId })
+        yield* db.remote.sendToPeer(B, peer, remote, "orig", id)
+        yield* db.remote.ackOutbox(peer, [id])
+        yield* db.session.insertSession(session(middle), project, { origin: { peer, project: "p", reportTo: remote } })
+        yield* db.session.insertSession(session(ended), project, { parentSessionId: middle })
+        yield* db.session.archive(middle)
+        yield* db.session.archive(ended)
+
+        const back = {
+          id,
+          recipient: ended,
+          kind: "send" as const,
+          sender: "peer-b/dddddddd",
+          from: { session: remote, machine: "peer-b" },
+          content: "came back",
+        }
+
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "queued")
+        assert.lengthOf(yield* db.remote.outboxOf(peer), 1)
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "duplicate")
+        assert.lengthOf(yield* db.remote.outboxOf(peer), 1)
+      }),
+    ),
+  )
+
   it.effect("an outbound transfer id is not proof that the same id was received", () =>
     memory(
       Effect.gen(function* () {

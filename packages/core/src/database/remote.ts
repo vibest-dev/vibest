@@ -211,12 +211,35 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   : noticeEnvelope(`${item.sender}: ${item.content}`)
 
               if (heir !== undefined && "peer" in heir) {
-                yield* queueForPeer(heir.peer, heir.session, {
-                  id: item.id,
+                const [leg] = yield* sql<{
+                  session: string
+                }>`SELECT session_id AS session FROM outbox WHERE id = ${item.id}`
+
+                if (leg !== undefined && leg.session === item.recipient) return "duplicate" as const
+
+                const id = leg === undefined ? item.id : randomId()
+
+                const queued = yield* queueForPeer(heir.peer, heir.session, {
+                  id,
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
                 })
+
+                if (!queued) return "unknown" as const
+
+                if (id !== item.id) {
+                  const receipt = yield* inbox.queueInbox({
+                    recipient: item.recipient,
+                    sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
+                    content,
+                    transfer: item.id,
+                  })
+
+                  yield* inbox.moveInbox(sql`session_id = ${item.recipient} AND id = ${receipt}`, "dropped", {
+                    reason: "forwarded",
+                  })
+                }
 
                 return "queued" as const
               }

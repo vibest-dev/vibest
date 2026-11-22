@@ -5,7 +5,7 @@ import { checkLedger, open } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
-import { database } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { database, session } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { Effect, Exit, FileSystem, Layer, Path } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -17,6 +17,7 @@ const B = "33333333-3333-4333-8333-333333333333"
 const R = "44444444-4444-4444-8444-444444444444"
 const E = "55555555-5555-4555-8555-555555555555"
 const C = "66666666-6666-4666-8666-666666666666"
+const L = "77777777-7777-4777-8777-777777777777"
 const MIGRATION = "20261121000000_inbox_v1"
 
 const agent = { type: "agent" as const, session: A }
@@ -57,6 +58,7 @@ const facts = [
   [R, 5, "inbox.moved", { inbox: 3, to: "pending" }],
   [E, 1, "session.created", { project: P, agent: "general", name: "entry", directory: "/p" }],
   [E, 2, "execution.ended", { execution: 1, outcome: "completed" }],
+  [E, 3, "process.ended", { process: 1, reason: "exited" }],
   [E, 5, "inbox.queued", { kind: "task", sender: { type: "user" }, content: "later bootstrap", status: "delivered" }],
   [E, 6, "execution.started", {}],
   [E, 7, "inbox.moved", { inbox: 5, to: "delivered", execution: 6 }],
@@ -70,6 +72,17 @@ const facts = [
   [C, 3, "execution.started", {}],
   [C, 4, "inbox.moved", { inbox: 2, to: "delivered", execution: 3 }],
   [C, 5, "execution.ended", { execution: 3, outcome: "interrupted" }],
+  [L, 1, "session.created", { project: P, agent: "general", name: "limit", directory: "/p", parent: A }],
+  [L, 2, "process.started", { harness: "pi", runtime: "herdr", terminal: "t" }],
+  [
+    L,
+    3,
+    "inbox.queued",
+    { kind: "task", sender: agent, content: "rejected open", status: "delivered", request: "r2-launch" },
+  ],
+  [L, 4, "execution.started", {}],
+  [L, 5, "inbox.moved", { inbox: 3, to: "delivered", execution: 4 }],
+  [L, 6, "execution.ended", { execution: 4, outcome: "failed" }],
 ] as const
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
@@ -256,6 +269,36 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
       assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${C}`), [
         { messageId: 2 },
       ])
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${L}`), [
+        { messageId: 3 },
+      ])
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT status FROM inbox WHERE session_id = ${L}`), [
+        { status: "unresolved" },
+      ])
+
+      const retry = yield* Effect.gen(function* () {
+        const db = yield* Db.Service
+
+        return yield* db.session.insertSession(session("88888888-8888-4888-8888-888888888888"), P, {
+          cwd: "/p",
+          task: "again",
+          request: "r2-launch",
+          parentSessionId: A,
+        })
+      }).pipe(
+        Effect.provide(
+          Db.layer.pipe(
+            Layer.provide(Projectors.layer),
+            Layer.provide(Bus.layer),
+            Layer.provide(SessionLive.layer),
+            Layer.provideMerge(Platform.sqlite(file)),
+          ),
+        ),
+      )
+
+      if (retry === true || retry === "waiting" || retry === "parent-ended") return yield* Effect.die(retry)
+
+      assert.strictEqual(retry.id, L)
       assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, sent FROM execution WHERE session_id = ${A}`), [
         { id: 2, sent: 1 },
       ])

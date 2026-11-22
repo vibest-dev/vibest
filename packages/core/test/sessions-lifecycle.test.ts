@@ -195,7 +195,8 @@ describe.concurrent("Session", () => {
           yield* sessions.check(id)
           assert.deepStrictEqual(yield* executionAndSentCounts(id), { executions: 1, sent: 0 }, id)
           assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted", id)
-          assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
+          const pending = yield* entryPending(db, row.projectId)
+          assert.ok(pending.every((item) => item.message.includes("was not delivered")))
         }
       }),
       harness === "pi" ? { hooked: ["pi"] } : undefined,

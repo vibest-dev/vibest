@@ -10,10 +10,14 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { until } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
+
+const here = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } }
 
 const inboxStatus = (sessionId: string, content?: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
@@ -131,7 +135,7 @@ test(
     const task = yield* sql<{ status: string }>`SELECT i.status AS status FROM inbox i
       JOIN session s ON s.id = i.session_id AND s.message_id = i.id WHERE s.id = ${second.id}`
 
-    assert.deepStrictEqual(task, [{ status: "failed" }])
+    assert.deepStrictEqual(task, [{ status: "dropped" }])
     assert.isFalse(
       (yield* sql<{ id: number }>`SELECT id FROM inbox
           WHERE session_id = ${second.id} AND status IN ('pending', 'delivering')`).length > 0,
@@ -157,4 +161,68 @@ test(
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivered" }])
   }),
   { hooked: ["pi", "pulling-pi"] },
+)
+
+test(
+  "an unrelated prompt does not deliver a taken batch, and the batch report does",
+  Effect.gen(function* () {
+    const db = yield* Db.Service
+    const inbox = yield* Inbox.Service
+    const sessions = yield* Session.Service
+    const integration = yield* Integration.Service
+    const { entryId } = yield* idleSession(yield* makeRepository)
+    yield* db.inbox.insertSend(entryId, "one", { type: "user" })
+    yield* db.inbox.insertSend(entryId, "two", { type: "user" })
+    const taken = yield* inbox.take(entryId, undefined)
+    yield* sessions.userPrompt(entryId, "an unrelated typed question")
+    assert.deepStrictEqual(yield* inboxStatus(entryId, "one"), [{ status: "delivering" }])
+    assert.deepStrictEqual(yield* inboxStatus(entryId, "two"), [{ status: "delivering" }])
+    yield* integration.prompt(
+      { id: entryId, entry: true, harness: "pulling-pi" },
+      JSON.stringify({ type: "accepted", execution: taken!.execution, ids: taken!.ids }),
+    )
+    assert.deepStrictEqual(yield* inboxStatus(entryId, "one"), [{ status: "delivered" }])
+    assert.deepStrictEqual(yield* inboxStatus(entryId, "two"), [{ status: "delivered" }])
+  }),
+  { hooked: ["pi", "pulling-pi"] },
+)
+
+test(
+  "a terminal that is already working is not given the launch input",
+  Effect.gen(function* () {
+    const runtime = yield* FakeRuntime
+    const db = yield* Db.Service
+    const sessions = yield* Session.Service
+    const repo = yield* makeRepository
+    yield* runtime.seedAgent("test/coord")
+    yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, status: "working" }))
+
+    const started = yield* db.session.startEntry(yield* projectOf(repo), "pi", false, here, {
+      agent: "general",
+      firstInput: "bootstrap",
+    })
+
+    yield* sessions.check(started.sessionId)
+    assert.deepStrictEqual(yield* runtime.callsTo("open"), [])
+    assert.deepStrictEqual(yield* runtime.callsTo("send"), [])
+    assert.notStrictEqual((yield* inboxStatus(started.sessionId))[0]?.status, "delivered")
+  }),
+  { hooked: ["pi"] },
+)
+
+test(
+  "a text write with no pickup is not typed again",
+  Effect.gen(function* () {
+    const runtime = yield* FakeRuntime
+    const { id, sessions } = yield* idleSession(yield* makeRepository)
+    yield* runtime.updateAgent(id, (agent) => ({ ...agent, registerPrompt: false }))
+    yield* sessions.send(id, "possible handoff")
+    yield* until(runtime.callsTo("send"), (calls) => calls.some((call) => call.text === "possible handoff"))
+
+    for (let i = 0; i < 4; i++) yield* TestClock.adjust("9 seconds")
+    const texts = (yield* runtime.callsTo("send")).filter((call) => call.text === "possible handoff")
+    assert.lengthOf(texts, 1)
+    assert.deepStrictEqual(yield* inboxStatus(id, "possible handoff"), [{ status: "delivering" }])
+  }),
+  { hooked: ["pi"] },
 )
