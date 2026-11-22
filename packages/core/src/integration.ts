@@ -80,6 +80,12 @@ const make = Effect.gen(function* () {
       return
     }
 
+    if (prompt.text === "") {
+      yield* db.session.setStatus(who.id, "working")
+
+      return
+    }
+
     yield* sessions.userPrompt(who.id, prompt.text, yield* Clock.currentTimeMillis, who.process)
   })
 

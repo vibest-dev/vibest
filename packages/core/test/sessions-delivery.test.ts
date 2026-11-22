@@ -539,7 +539,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "Cursor on a runtime with no status for it: the task is in its launch argv; an activity report and an unkeyed end do not start or finish it, and nothing is resent",
+    "Cursor on a runtime with no status for it: the task is in its launch argv; activity marks the session working without starting or delivering an execution, and an unkeyed end does not finish it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -557,9 +557,27 @@ describe.concurrent("Session", () => {
       const integration = yield* Integration.Service
       const who = { id, entry: false, harness: CURSOR.id }
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
+      const sql = yield* SqlClient.SqlClient
+
+      const before = yield* sql<{
+        started: number | null
+        delivered: number
+      }>`SELECT
+          (SELECT count(*) FROM execution WHERE session_id = ${id} AND started_at IS NOT NULL) AS started,
+          (SELECT count(*) FROM inbox WHERE session_id = ${id} AND status = 'delivered') AS delivered`
+
       yield* integration.prompt(who, thought)
-      assert.strictEqual((yield* db.session.getSession(id))!.status, "unknown")
+      assert.strictEqual((yield* db.session.getSession(id))!.status, "working")
       assert.isFalse(yield* db.session.executionAccepted(id))
+
+      const after = yield* sql<{
+        started: number | null
+        delivered: number
+      }>`SELECT
+          (SELECT count(*) FROM execution WHERE session_id = ${id} AND started_at IS NOT NULL) AS started,
+          (SELECT count(*) FROM inbox WHERE session_id = ${id} AND status = 'delivered') AS delivered`
+
+      assert.deepStrictEqual(after, before)
       yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
       assert.isFalse(yield* db.session.executionAccepted(id))
       assert.notStrictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
