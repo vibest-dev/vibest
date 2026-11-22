@@ -537,7 +537,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       at,
                     })
 
-                    yield* inbox.moveInbox(sql`session_id = ${entryId} AND id = ${queued}`, "delivering", {
+                    yield* inbox.moveInbox(sql`recipient_session_id = ${entryId} AND id = ${queued}`, "delivering", {
                       execution,
                     })
                   }

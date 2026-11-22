@@ -825,7 +825,7 @@ export const expectReplied = async (w: World, sub: string) => {
 
   const task = row<{ status: string; execution: number | null }>(
     w,
-    "SELECT i.status, i.recipient_execution_id AS execution FROM inbox i JOIN session s ON s.id = i.session_id AND s.message_id = i.id WHERE i.session_id = ?",
+    "SELECT i.status, i.recipient_execution_id AS execution FROM inbox i JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id WHERE i.recipient_session_id = ?",
     sub,
   )
 

@@ -318,7 +318,7 @@ const reports = (runtime: Runtime): Check => ({
 
       const handed = rows<{ content: string }>(
         w,
-        "SELECT content FROM inbox WHERE session_id = ? AND recipient_execution_id = ?",
+        "SELECT content FROM inbox WHERE recipient_session_id = ? AND recipient_execution_id = ?",
         id,
         fresh.id,
       ).map((r) => r.content)
@@ -397,7 +397,7 @@ const noApprovalDialog: Check = {
 
       const sent = row<{ n: number }>(
         w,
-        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND instr(content, 'i12-hello') > 0",
+        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND instr(content, 'i12-hello') > 0",
         id,
       )?.n
 
@@ -539,7 +539,7 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
 
       const handed = rows<{ content: string }>(
         w,
-        "SELECT content FROM inbox WHERE session_id = ? AND recipient_execution_id = ?",
+        "SELECT content FROM inbox WHERE recipient_session_id = ? AND recipient_execution_id = ?",
         entry,
         two.id,
       ).map((r) => r.content)

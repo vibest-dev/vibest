@@ -41,7 +41,7 @@ describe.concurrent("Session", () => {
 
       const sent = yield* sql<{
         id: number
-      }>`SELECT id FROM inbox WHERE session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
+      }>`SELECT id FROM inbox WHERE recipient_session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
 
       assert.strictEqual(execution!.input, "one\n\ntwo")
       assert.strictEqual(execution!.inbox, sent[1]!.id)
@@ -168,7 +168,9 @@ describe.concurrent("Session", () => {
       yield* untilVirtual(
         sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+          Effect.orDie,
+        ),
         (rows) => rows[0]?.status === "delivered",
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
@@ -247,7 +249,9 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+          Effect.orDie,
+        ),
         [{ status: "delivering" }],
       )
       assert.include(yield* replyOf(id), "landed")
@@ -274,7 +278,9 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+          Effect.orDie,
+        ),
         [{ status: "failed" }],
       )
     }),
@@ -295,7 +301,7 @@ describe.concurrent("Session", () => {
         sql<{
           id: number
           status: string
-        }>`SELECT id, status AS status FROM inbox WHERE session_id = ${receiverId} AND sender_type != 'vibest' AND id > (SELECT min(id) FROM inbox WHERE session_id = ${receiverId} AND sender_type != 'vibest') ORDER BY id`.pipe(
+        }>`SELECT id, status AS status FROM inbox WHERE recipient_session_id = ${receiverId} AND sender_type != 'vibest' AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${receiverId} AND sender_type != 'vibest') ORDER BY id`.pipe(
           Effect.orDie,
         )
 
@@ -657,7 +663,9 @@ describe.concurrent("Session", () => {
 
         const [row] = yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'hello'`.pipe(Effect.orDie)
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'hello'`.pipe(
+          Effect.orDie,
+        )
 
         const sent = (yield* herdr.callsTo("send")).filter((call) => call.text?.includes("hello")).length
         assert.deepStrictEqual({ status: row?.status, sent }, { status: "failed", sent: 0 })

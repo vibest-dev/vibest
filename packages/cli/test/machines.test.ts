@@ -602,7 +602,7 @@ describe("another machine's vibestd runs agents here", () => {
             SqlClient.SqlClient,
             (sql) =>
               sql<{ content: string }>`SELECT content FROM inbox i WHERE i.sender_type != 'vibest'
-                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = i.session_id AND s.message_id = i.id)
+                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = i.recipient_session_id AND s.message_id = i.id)
                 ORDER BY i.id`,
           ),
         )

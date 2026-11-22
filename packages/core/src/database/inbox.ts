@@ -29,15 +29,15 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const inbox = reads.inboxWhere
 
     const inboxIn = (recipient: string, ids: ReadonlyArray<number>) =>
-      inbox(sql`m.session_id = ${recipient} AND ${sql.in("m.id", ids)}`)
+      inbox(sql`m.recipient_session_id = ${recipient} AND ${sql.in("m.id", ids)}`)
 
     const keysIn = (keys: ReadonlyArray<InboxKey>) =>
-      sql.or(keys.map((k) => sql`(session_id = ${k.session} AND id = ${k.id})`))
+      sql.or(keys.map((k) => sql`(recipient_session_id = ${k.session} AND id = ${k.id})`))
 
-    const notDelegation = sql`NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.session_id AND s.message_id = m.id)`
+    const notDelegation = sql`NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`
 
     const findSend = (sessionId: string, status: InboxStatus) =>
-      inbox(sql`m.session_id = ${sessionId} AND m.status = ${status} AND ${notDelegation}`)
+      inbox(sql`m.recipient_session_id = ${sessionId} AND m.status = ${status} AND ${notDelegation}`)
 
     const moveInbox = (
       where: Statement.Fragment,
@@ -50,7 +50,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
             id: number
             status: string
             session: string
-          }>`SELECT id, status, session_id AS session FROM inbox WHERE ${where} ORDER BY session_id, id`
+          }>`SELECT id, status, recipient_session_id AS session FROM inbox WHERE ${where} ORDER BY recipient_session_id, id`
 
           const moved = rows.filter((r) => r.status !== to)
           const at = yield* now
@@ -119,8 +119,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const linkTask = (sessionId: string, execution: number, at: number) =>
       Effect.gen(function* () {
         const [task] = yield* sql<{ id: number }>`SELECT i.id FROM inbox i
-          JOIN session s ON s.id = i.session_id AND s.message_id = i.id
-          WHERE i.session_id = ${sessionId} AND i.status = 'pending' AND i.recipient_execution_id IS NULL`
+          JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id
+          WHERE i.recipient_session_id = ${sessionId} AND i.status = 'pending' AND i.recipient_execution_id IS NULL`
 
         if (task !== undefined)
           yield* publish(InboxDeliveryStarted, {
@@ -158,8 +158,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const queuedFrom = (sender: Sender, request: string) =>
       recorded(sender).pipe(
         Effect.flatMap(
-          (as) => sql<{ session: string; id: number }>`SELECT session_id AS session, id FROM inbox
-            WHERE sender_key = ${senderKey(as)} AND request = ${request}`,
+          (as) => sql<{ session: string; id: number }>`SELECT recipient_session_id AS session, id FROM inbox
+            WHERE sender_key = ${senderKey(as)} AND request_id = ${request}`,
         ),
         Effect.map((rows) => rows[0]),
       )
@@ -227,7 +227,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         })
 
         if (!present)
-          yield* moveInbox(sql`session_id = ${heir.local} AND id = ${id}`, "dropped", {
+          yield* moveInbox(sql`recipient_session_id = ${heir.local} AND id = ${id}`, "dropped", {
             reason: "the entry session is not running",
           })
 
@@ -250,10 +250,10 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           sender: string
           recipient: string
           content: string
-        }>`SELECT sender_session_id AS sender, session_id AS recipient, content FROM inbox
+        }>`SELECT sender_session_id AS sender, recipient_session_id AS recipient, content FROM inbox
           WHERE (${keysIn(keys)}) AND sender_type = 'agent' AND sender_session_id IS NOT NULL AND sender_machine IS NULL
-            AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)
-          ORDER BY session_id, id`
+            AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)
+          ORDER BY recipient_session_id, id`
 
         const groups = Map.groupBy(sends, (s) => `${s.sender}\n${s.recipient}`)
 
@@ -268,7 +268,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
     const confirm = (sessionId: string, execution: number) =>
       moveInbox(
-        sql`session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}`,
+        sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}`,
         "delivered",
         { execution },
       )
@@ -277,7 +277,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       ids.length === 0
         ? Effect.void
         : moveInbox(
-            sql`session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+            sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
               AND ${sql.in("id", ids)}`,
             "delivered",
             { execution },
@@ -285,7 +285,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
     const confirmTask = (sessionId: string, execution: number) =>
       moveInbox(
-        sql`session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+        sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
           AND id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
         "delivered",
         { execution },
@@ -293,7 +293,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
     const dropUnsent = (sessionId: string, reason: string) =>
       moveInbox(
-        sql`session_id = ${sessionId} AND status IN ('pending', 'delivering')
+        sql`recipient_session_id = ${sessionId} AND status IN ('pending', 'delivering')
           AND id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
         "dropped",
         { reason },
@@ -301,7 +301,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
     const dropWaiting = (entry: string) =>
       Effect.gen(function* () {
-        const dropped = yield* moveInbox(sql`status = 'pending' AND session_id = ${entry}`, "dropped", {
+        const dropped = yield* moveInbox(sql`status = 'pending' AND recipient_session_id = ${entry}`, "dropped", {
           reason: "the entry session is not running",
         })
 
@@ -310,7 +310,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
     const waitingOn = (id: string) =>
       sql<{ id: number }>`SELECT id FROM inbox
-        WHERE (session_id = ${id} OR sender_session_id = ${id} OR about_session_id = ${id})
+        WHERE (recipient_session_id = ${id} OR sender_session_id = ${id} OR about_session_id = ${id})
           AND status IN ('pending', 'delivering')
         LIMIT 1`.pipe(Effect.map((rows) => rows.length > 0))
 
@@ -421,14 +421,16 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       waitingOn: Effect.fn("Db.inbox.waitingOn")((id: string) => waitingOn(id).pipe(Effect.orDie)),
 
       hasQueued: Effect.fn("Db.inbox.hasQueued")((id: string) =>
-        sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${id} AND status = 'pending' LIMIT 1`.pipe(
+        sql<{
+          id: number
+        }>`SELECT id FROM inbox WHERE recipient_session_id = ${id} AND status = 'pending' LIMIT 1`.pipe(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
       ),
 
       pendingRecipients: Effect.fn("Db.inbox.pendingRecipients")(() =>
-        sql<{ id: string }>`SELECT DISTINCT session_id AS id FROM inbox WHERE status = 'pending'`.pipe(
+        sql<{ id: string }>`SELECT DISTINCT recipient_session_id AS id FROM inbox WHERE status = 'pending'`.pipe(
           Effect.map((rows) => rows.map((row) => row.id)),
           Effect.orDie,
         ),
@@ -452,7 +454,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
           if (ids.length === 0) return []
 
           const claimed = yield* moveInbox(
-            sql`session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
+            sql`recipient_session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
             "delivering",
             execution === undefined ? undefined : { execution },
           )
@@ -480,7 +482,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
       unsentDelegation: Effect.fn("Db.inbox.unsentDelegation")((sessionId: string) =>
         inboxWhere(
-          sql`m.session_id = ${sessionId} AND m.status IN ('pending', 'delivering')
+          sql`m.recipient_session_id = ${sessionId} AND m.status IN ('pending', 'delivering')
             AND m.id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
         ).pipe(Effect.orDie),
       ),
@@ -492,7 +494,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
               return undefined
 
             return yield* inboxWhere(
-              sql`m.session_id = ${sessionId} AND m.status = 'delivering' AND m.recipient_execution_id = ${execution}`,
+              sql`m.recipient_session_id = ${sessionId} AND m.status = 'delivering' AND m.recipient_execution_id = ${execution}`,
             )
           }),
         ).pipe(Effect.orDie),
@@ -500,8 +502,8 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
       deliveredIn: Effect.fn("Db.inbox.deliveredIn")((sessionId: string, execution: number) =>
         inboxWhere(
-          sql`m.session_id = ${sessionId} AND m.status = 'delivered' AND m.recipient_execution_id = ${execution}
-            AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.session_id AND s.message_id = m.id)`,
+          sql`m.recipient_session_id = ${sessionId} AND m.status = 'delivered' AND m.recipient_execution_id = ${execution}
+            AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`,
         ).pipe(Effect.orDie),
       ),
 
@@ -517,7 +519,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
             const batch = nextBatch(pending)
             const execution = yield* startExecution(sessionId, yield* now)
             yield* moveInbox(
-              sql`session_id = ${sessionId} AND ${sql.in(
+              sql`recipient_session_id = ${sessionId} AND ${sql.in(
                 "id",
                 batch.map((r) => r.id),
               )}`,
@@ -543,7 +545,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
             if (ids.length === 0) return []
 
             const moved = yield* moveInbox(
-              sql`session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,
+              sql`recipient_session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,
               status,
               { ...(into !== undefined && { execution: into }), ...(reason !== undefined && { reason }) },
             )
@@ -560,7 +562,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       latestInbox: Effect.fn("Db.inbox.latestInbox")((sessionId: string, which: "send" | "notice") =>
         (which === "send"
           ? inboxWhere(
-              sql`m.session_id = ${sessionId} AND m.sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.session_id AND s.message_id = m.id)`,
+              sql`m.recipient_session_id = ${sessionId} AND m.sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`,
               sql`m.id DESC LIMIT 1`,
             )
           : inboxWhere(sql`m.sender_type = 'vibest' AND m.about_session_id = ${sessionId}`, sql`m.id DESC LIMIT 1`)

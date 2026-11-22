@@ -236,7 +236,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     transfer: item.id,
                   })
 
-                  yield* inbox.moveInbox(sql`session_id = ${item.recipient} AND id = ${receipt}`, "dropped", {
+                  yield* inbox.moveInbox(sql`recipient_session_id = ${item.recipient} AND id = ${receipt}`, "dropped", {
                     reason: "forwarded",
                   })
                 }
@@ -258,7 +258,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   transfer: item.id,
                 })
 
-                yield* inbox.moveInbox(sql`session_id = ${item.recipient} AND id = ${queued}`, "dropped", {
+                yield* inbox.moveInbox(sql`recipient_session_id = ${item.recipient} AND id = ${queued}`, "dropped", {
                   reason: "the entry session is not running",
                 })
 

@@ -96,7 +96,7 @@ export const entryIdOf = (w: World) =>
 const sendsFrom = (w: World, sender: string, recipient: string) =>
   rows<{ id: number; status: string; execution: number | null; content: string }>(
     w,
-    "SELECT id, status, recipient_execution_id AS execution, content FROM inbox WHERE sender_session_id = ? AND session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
+    "SELECT id, status, recipient_execution_id AS execution, content FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
     sender,
     recipient,
   )
@@ -132,7 +132,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; recipient: string | null; content: string }>(
             w,
-            "SELECT status, session_id AS recipient, content FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'",
+            "SELECT status, recipient_session_id AS recipient, content FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'",
             id,
           )
 
@@ -356,7 +356,7 @@ const sendChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
-            "SELECT status, about_session_id AS sender FROM inbox WHERE session_id = ? AND sender_type = 'vibest' AND instr(content, 'was not delivered') > 0",
+            "SELECT status, about_session_id AS sender FROM inbox WHERE recipient_session_id = ? AND sender_type = 'vibest' AND instr(content, 'was not delivered') > 0",
             entryId,
           )
 
@@ -441,7 +441,7 @@ const checks: ReadonlyArray<Check> = [
         expect(
           inboxRows(
             w,
-            "session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND status = 'pending'",
+            "recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND status = 'pending'",
             sub,
           ) === 2,
           "the two sends are not both pending while the subagent is busy",
@@ -452,7 +452,7 @@ const checks: ReadonlyArray<Check> = [
           () =>
             inboxRows(
               w,
-              "session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND status = 'delivered'",
+              "recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND status = 'delivered'",
               sub,
             ) === 2,
           60_000,
@@ -475,7 +475,7 @@ const checks: ReadonlyArray<Check> = [
 
         const sends = rows<{ execution: number | null }>(
           w,
-          "SELECT recipient_execution_id AS execution FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
+          "SELECT recipient_execution_id AS execution FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
           sub,
         )
 
@@ -563,7 +563,7 @@ const checks: ReadonlyArray<Check> = [
           () =>
             inboxRows(
               w,
-              "session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND status = 'delivered'",
+              "recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND status = 'delivered'",
               sub,
             ) === 1,
           10_000,

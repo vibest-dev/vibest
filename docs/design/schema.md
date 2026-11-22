@@ -171,7 +171,7 @@ CREATE TABLE execution (                              -- id: the seq of its exec
 CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL;
 
 CREATE TABLE inbox (                                  -- id: the seq of its inbox.enqueued, or of a historical route record, in the recipient session
-  session_id             TEXT    NOT NULL,            -- the recipient
+  recipient_session_id    TEXT    NOT NULL,            -- the recipient
   id                     INTEGER NOT NULL,
   sender_type            TEXT    NOT NULL CHECK (sender_type IN ('agent', 'plugin', 'vibest', 'user')),
   sender_session_id      TEXT,
@@ -182,18 +182,18 @@ CREATE TABLE inbox (                                  -- id: the seq of its inbo
   sender_key             TEXT    NOT NULL,
   about_session_id       TEXT,                        -- a notice: the session it is about, else null
   content                TEXT    NOT NULL,
-  request                TEXT,
+  request_id             TEXT,
   transfer_id            TEXT,                        -- a cross-machine transfer: the sender's existing item id, else null
   status                 TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped', 'unresolved')),
   sender_execution_id    INTEGER,                     -- a local agent send: the sender's open execution, else null
   recipient_execution_id INTEGER,                     -- delivered: the recipient execution that took it
-  PRIMARY KEY (session_id, id)
+  PRIMARY KEY (recipient_session_id, id)
 ) STRICT;
-CREATE INDEX inbox_status    ON inbox (status, session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'
+CREATE INDEX inbox_status    ON inbox (status, recipient_session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'
 CREATE INDEX inbox_sender    ON inbox (sender_session_id) WHERE sender_session_id IS NOT NULL;
 CREATE INDEX inbox_about     ON inbox (about_session_id) WHERE about_session_id IS NOT NULL;
-CREATE INDEX inbox_recipient_execution ON inbox (session_id, recipient_execution_id) WHERE recipient_execution_id IS NOT NULL;
-CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request) WHERE request IS NOT NULL;
+CREATE INDEX inbox_recipient_execution ON inbox (recipient_session_id, recipient_execution_id) WHERE recipient_execution_id IS NOT NULL;
+CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request_id) WHERE request_id IS NOT NULL;
 CREATE UNIQUE INDEX inbox_transfer ON inbox (transfer_id) WHERE transfer_id IS NOT NULL;
 ```
 
@@ -203,7 +203,7 @@ unique indexes, so a fact that would break them fails its transaction.
 
 ## Inbox
 
-An inbox row is text for one recipient session (`session_id`); its id is the `seq` of its `inbox.enqueued` (or of a
+An inbox row is text for one recipient session (`recipient_session_id`); its id is the `seq` of its `inbox.enqueued` (or of a
 historical route record) in that session, so a row is named by both. A session's original delegation is the message
 named by `session.message_id`, written in the same transaction as `session.created`; `result` and `vibest ls` follow
 that, not the earliest row. A notice is from `vibest` and may name `about_session_id`. Anything else is an ordinary
@@ -216,7 +216,7 @@ message.
   notice's `about`. `sender` is whoever wrote the message: a relay to the nearest living ancestor on this machine passes
   the message on unchanged and keeps the sender, while one that goes on to another machine writes a new message
   (prefixed with the incoming address) from the ended recipient's session, which is then its sender there.
-- A `request` repeats nothing: one sender (`sender_key`) queues one row per request, whatever the recipient, so a
+- A `request_id` repeats nothing: one sender (`sender_key`) queues one row per request, whatever the recipient, so a
   repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The
   unique index `inbox_request` backs it: a second row would fail its transaction.
 - A send from a local agent session names the execution it had open (`senderExecutionId` on `inbox.enqueued`,

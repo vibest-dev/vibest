@@ -195,8 +195,8 @@ export const layer = Layer.effectDiscard(
       const sender = senderColumns(row.sender)
 
       return Effect.gen(function* () {
-        yield* sql`INSERT INTO inbox (session_id, id, sender_type, sender_session_id, sender_agent, sender_title,
-          sender_machine, sender_plugin, sender_key, about_session_id, content, request, transfer_id, status,
+        yield* sql`INSERT INTO inbox (recipient_session_id, id, sender_type, sender_session_id, sender_agent, sender_title,
+          sender_machine, sender_plugin, sender_key, about_session_id, content, request_id, transfer_id, status,
           sender_execution_id)
         VALUES (${session}, ${id}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
           ${sender.machine}, ${sender.plugin}, ${senderKey(row.sender)}, ${row.aboutSessionId ?? null}, ${row.content},
@@ -215,7 +215,7 @@ export const layer = Layer.effectDiscard(
         (fact) =>
           sql`UPDATE inbox SET status = 'delivering',
               recipient_execution_id = coalesce(${fact.data.execution ?? null}, recipient_execution_id)
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
       ),
     )
     yield* bus.project(
@@ -223,7 +223,7 @@ export const layer = Layer.effectDiscard(
       active(
         (fact) =>
           sql`UPDATE inbox SET status = 'delivered', recipient_execution_id = ${fact.data.recipientExecutionId}
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
       ),
     )
     yield* bus.project(
@@ -231,7 +231,7 @@ export const layer = Layer.effectDiscard(
       active(
         (fact) =>
           sql`UPDATE inbox SET status = 'failed'
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
       ),
     )
     yield* bus.project(
@@ -239,7 +239,7 @@ export const layer = Layer.effectDiscard(
       active(
         (fact) =>
           sql`UPDATE inbox SET status = 'dropped'
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
       ),
     )
     yield* bus.project(
@@ -251,11 +251,11 @@ export const layer = Layer.effectDiscard(
 
         if (data.history === "released" && data.messageId !== undefined)
           return sql`UPDATE inbox SET status = 'pending', recipient_execution_id = NULL
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${data.messageId}`
+            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${data.messageId}`
 
         if (data.messageId !== undefined || sender === undefined || content === undefined)
           return sql`UPDATE inbox SET status = 'unresolved'
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${data.messageId ?? fact.seq}`
+            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${data.messageId ?? fact.seq}`
 
         return inboxRow(sessionIdOf(fact), fact.seq, {
           sender,

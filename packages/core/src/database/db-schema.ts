@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 18
+export const PROJECTION_VERSION = 19
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -193,7 +193,7 @@ export const PROJECTION_SCHEMA = [
   ) STRICT`,
   `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL`,
   `CREATE TABLE inbox (
-    session_id        TEXT    NOT NULL,
+    recipient_session_id        TEXT    NOT NULL,
     id                INTEGER NOT NULL,
     sender_type       TEXT    NOT NULL CHECK (sender_type IN ('agent', 'plugin', 'vibest', 'user')),
     sender_session_id TEXT,
@@ -204,18 +204,18 @@ export const PROJECTION_SCHEMA = [
     sender_key           TEXT    NOT NULL,
     about_session_id     TEXT,
     content              TEXT    NOT NULL,
-    request              TEXT,
+    request_id           TEXT,
     transfer_id          TEXT,
     status               TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped', 'unresolved')),
     sender_execution_id  INTEGER,
     recipient_execution_id INTEGER,
-    PRIMARY KEY (session_id, id)
+    PRIMARY KEY (recipient_session_id, id)
   ) STRICT`,
-  `CREATE INDEX inbox_status ON inbox (status, session_id)`,
+  `CREATE INDEX inbox_status ON inbox (status, recipient_session_id)`,
   `CREATE INDEX inbox_sender ON inbox (sender_session_id) WHERE sender_session_id IS NOT NULL`,
   `CREATE INDEX inbox_about ON inbox (about_session_id) WHERE about_session_id IS NOT NULL`,
-  `CREATE INDEX inbox_recipient_execution ON inbox (session_id, recipient_execution_id) WHERE recipient_execution_id IS NOT NULL`,
-  `CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request) WHERE request IS NOT NULL`,
+  `CREATE INDEX inbox_recipient_execution ON inbox (recipient_session_id, recipient_execution_id) WHERE recipient_execution_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request_id) WHERE request_id IS NOT NULL`,
   `CREATE UNIQUE INDEX inbox_transfer ON inbox (transfer_id) WHERE transfer_id IS NOT NULL`,
   `CREATE TABLE machine (
     name         TEXT PRIMARY KEY,
@@ -254,7 +254,7 @@ export const PROJECTION_TABLES = {
   session: "id",
   process: "session_id, id",
   execution: "session_id, id",
-  inbox: "session_id, id",
+  inbox: "recipient_session_id, id",
   machine: "name",
   peer: "id",
   outbox: "id",

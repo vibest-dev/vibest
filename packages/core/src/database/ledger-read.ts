@@ -152,7 +152,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_type, m.sender_session_id, m.sender_agent, m.sender_title,
+    sql<InboxColumns>`SELECT m.id, m.recipient_session_id AS session_id, m.sender_type, m.sender_session_id, m.sender_agent, m.sender_title,
         m.sender_machine, m.sender_plugin, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
@@ -168,7 +168,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         endedAt: number | null
         reply: string | null
       }>`SELECT s.id,
-          (SELECT i.content FROM inbox i WHERE i.session_id = s.id AND i.id = s.message_id) AS task,
+          (SELECT i.content FROM inbox i WHERE i.recipient_session_id = s.id AND i.id = s.message_id) AS task,
           t.id AS execution_id, t.outcome, t.ended_at, t.reply
         FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
         WHERE ${sql.in("s.id", ids)}`
@@ -197,8 +197,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
   const untakenTask = (id: string) =>
     sql<{ content: string }>`SELECT i.content FROM inbox i
-      JOIN session s ON s.id = i.session_id AND s.message_id = i.id
-      WHERE i.session_id = ${id} AND i.status = 'pending' AND i.recipient_execution_id IS NULL
+      JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id
+      WHERE i.recipient_session_id = ${id} AND i.status = 'pending' AND i.recipient_execution_id IS NULL
       LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.content))
 
   const spawnedBy = (project: string, request: string) =>
@@ -210,9 +210,9 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       runtime: string | null
       routing: string | null
     }>`SELECT s.id, p.harness, p.provider, p.model, p.runtime, p.routing FROM session s
-        JOIN inbox i ON i.session_id = s.id AND i.id = s.message_id
+        JOIN inbox i ON i.recipient_session_id = s.id AND i.id = s.message_id
         LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT min(id) FROM process WHERE session_id = s.id)
-      WHERE i.request = ${request} AND s.project_id = ${project}
+      WHERE i.request_id = ${request} AND s.project_id = ${project}
       ORDER BY s.created_at, s.id LIMIT 1`.pipe(
       Effect.map((rows): SpawnedBefore | undefined => {
         const found = rows[0]

@@ -257,9 +257,9 @@ const decodeSender = Schema.decodeUnknownSync(Sender)
 
 export const sendersTo = (recipient: string, which: "task" | "send" | "notice" = "send") =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => {
-    const task = sql`EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)`
+    const task = sql`EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)`
     const notice = sql`sender_type = 'vibest'`
-    const send = sql`sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)`
+    const send = sql`sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)`
     let where = send
 
     if (which === "task") where = task
@@ -267,7 +267,7 @@ export const sendersTo = (recipient: string, which: "task" | "send" | "notice" =
     if (which === "notice") where = notice
 
     return sql<SenderSql>`SELECT sender_type, sender_session_id, sender_agent, sender_title, sender_machine,
-        sender_plugin FROM inbox WHERE session_id = ${recipient} AND ${where} ORDER BY id`
+        sender_plugin FROM inbox WHERE recipient_session_id = ${recipient} AND ${where} ORDER BY id`
   }).pipe(Effect.map((rows) => rows.map((row) => decodeSender(senderOfRow(row)))))
 
 export const inboxOf = (recipient: string) =>
@@ -277,7 +277,7 @@ export const inboxOf = (recipient: string) =>
       sql<{
         content: string
         senderType: string
-      }>`SELECT content, sender_type FROM inbox WHERE session_id = ${recipient} ORDER BY id`,
+      }>`SELECT content, sender_type FROM inbox WHERE recipient_session_id = ${recipient} ORDER BY id`,
   )
 
 export const outboxRows = Effect.flatMap(

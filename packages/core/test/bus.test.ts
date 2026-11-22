@@ -521,8 +521,8 @@ describe("projectors", () => {
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
-          `SELECT id, session_id, sender_session_id, about_session_id, content, request, transfer_id,
-            status, recipient_execution_id FROM inbox ORDER BY session_id = '${SUB}' DESC, id`,
+          `SELECT id, recipient_session_id AS session_id, sender_session_id, about_session_id, content, request_id AS request, transfer_id,
+            status, recipient_execution_id FROM inbox ORDER BY recipient_session_id = '${SUB}' DESC, id`,
         ),
         [
           {

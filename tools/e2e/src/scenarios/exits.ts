@@ -80,7 +80,7 @@ export const piProject = async (w: World, name: string) => {
 
   const sendRow = (id: string, message: string) =>
     q<{ id: number; status: string }>(
-      "SELECT id, status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND content = ? ORDER BY id DESC LIMIT 1",
+      "SELECT id, status FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content = ? ORDER BY id DESC LIMIT 1",
       id,
       message,
     )
@@ -376,7 +376,7 @@ const checks: ReadonlyArray<Check> = [
 
         const copies = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND content = ?",
+          "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content = ?",
           sub,
           message,
         )
@@ -518,8 +518,8 @@ const checks: ReadonlyArray<Check> = [
         const input = row<{ n: number }>(
           w,
           `SELECT count(*) AS n FROM event e
-            JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.messageId'
-            JOIN session s ON s.id = i.session_id AND s.message_id = i.id
+            JOIN inbox i ON i.recipient_session_id = e.aggregate AND i.id = e.data ->> '$.messageId'
+            JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id
             WHERE e.aggregate = ? AND e.type = 'inbox.delivered' AND e.data ->> '$.recipientExecutionId' IS NOT NULL`,
           sub,
         )?.n
@@ -638,7 +638,7 @@ const checks: ReadonlyArray<Check> = [
 
         const rows = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
+          "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
           sub,
         )?.n
 

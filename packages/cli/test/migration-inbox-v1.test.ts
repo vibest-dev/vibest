@@ -162,8 +162,8 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
         yield* read(
           file,
           (sql) =>
-            sql`SELECT id, status, request, transfer_id, sender_execution_id, recipient_execution_id
-                FROM inbox WHERE session_id = ${B} ORDER BY id`,
+            sql`SELECT id, status, request_id AS request, transfer_id, sender_execution_id, recipient_execution_id
+                FROM inbox WHERE recipient_session_id = ${B} ORDER BY id`,
         ),
         [
           {
@@ -231,9 +231,10 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
         yield* read(file, (sql) => sql`SELECT seq, type FROM event WHERE aggregate = ${R} AND seq = 5`),
         [{ seq: 5, type: "inbox.unresolved" }],
       )
-      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, status FROM inbox WHERE session_id = ${R}`), [
-        { id: 3, status: "pending" },
-      ])
+      assert.deepStrictEqual(
+        yield* read(file, (sql) => sql`SELECT id, status FROM inbox WHERE recipient_session_id = ${R}`),
+        [{ id: 3, status: "pending" }],
+      )
       assert.deepStrictEqual(
         yield* read(file, (sql) => sql`SELECT max(seq) AS seq FROM event WHERE aggregate = ${R}`),
         [{ seq: 5 }],
@@ -259,11 +260,17 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
         { messageId: null },
       ])
       assert.deepStrictEqual(
-        yield* read(file, (sql) => sql`SELECT id, status, recipient_execution_id FROM inbox WHERE session_id = ${E}`),
+        yield* read(
+          file,
+          (sql) => sql`SELECT id, status, recipient_execution_id FROM inbox WHERE recipient_session_id = ${E}`,
+        ),
         [{ id: 5, status: "unresolved", recipientExecutionId: null }],
       )
       assert.deepStrictEqual(
-        yield* read(file, (sql) => sql`SELECT status, recipient_execution_id FROM inbox WHERE session_id = ${C}`),
+        yield* read(
+          file,
+          (sql) => sql`SELECT status, recipient_execution_id FROM inbox WHERE recipient_session_id = ${C}`,
+        ),
         [{ status: "unresolved", recipientExecutionId: null }],
       )
       assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${C}`), [
@@ -272,9 +279,10 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
       assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${L}`), [
         { messageId: 3 },
       ])
-      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT status FROM inbox WHERE session_id = ${L}`), [
-        { status: "unresolved" },
-      ])
+      assert.deepStrictEqual(
+        yield* read(file, (sql) => sql`SELECT status FROM inbox WHERE recipient_session_id = ${L}`),
+        [{ status: "unresolved" }],
+      )
 
       const retry = yield* Effect.gen(function* () {
         const db = yield* Db.Service

@@ -22,8 +22,10 @@ const here = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" }
 const inboxStatus = (sessionId: string, content?: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     content === undefined
-      ? sql<{ status: string }>`SELECT status FROM inbox WHERE session_id = ${sessionId} ORDER BY id`
-      : sql<{ status: string }>`SELECT status FROM inbox WHERE session_id = ${sessionId} AND content = ${content}`,
+      ? sql<{ status: string }>`SELECT status FROM inbox WHERE recipient_session_id = ${sessionId} ORDER BY id`
+      : sql<{
+          status: string
+        }>`SELECT status FROM inbox WHERE recipient_session_id = ${sessionId} AND content = ${content}`,
   )
 
 test(
@@ -102,7 +104,7 @@ test(
     const item = yield* db.inbox.insertSend(entryId, "from child", { type: "agent", session: id })
     yield* inbox.undelivered((yield* db.session.getSession(entryId))!, [item!], "definite refusal")
     assert.deepStrictEqual(
-      yield* sql<{ sessionId: string }>`SELECT session_id AS sessionId FROM inbox
+      yield* sql<{ sessionId: string }>`SELECT recipient_session_id AS sessionId FROM inbox
         WHERE sender_type = 'vibest' AND instr(content, 'definite refusal') > 0`,
       [{ sessionId: id }],
     )
@@ -127,18 +129,18 @@ test(
 
     assert.deepStrictEqual(
       yield* sql<{ status: string; processes: number }>`SELECT i.status AS status,
-        (SELECT count(*) FROM process p WHERE p.session_id = i.session_id) AS processes
-        FROM inbox i WHERE i.session_id = ${first.id}`,
+        (SELECT count(*) FROM process p WHERE p.session_id = i.recipient_session_id) AS processes
+        FROM inbox i WHERE i.recipient_session_id = ${first.id}`,
       [{ status: "dropped", processes: 0 }],
     )
 
     const task = yield* sql<{ status: string }>`SELECT i.status AS status FROM inbox i
-      JOIN session s ON s.id = i.session_id AND s.message_id = i.id WHERE s.id = ${second.id}`
+      JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id WHERE s.id = ${second.id}`
 
     assert.deepStrictEqual(task, [{ status: "dropped" }])
     assert.isFalse(
       (yield* sql<{ id: number }>`SELECT id FROM inbox
-          WHERE session_id = ${second.id} AND status IN ('pending', 'delivering')`).length > 0,
+          WHERE recipient_session_id = ${second.id} AND status IN ('pending', 'delivering')`).length > 0,
     )
   }),
   { hooked: ["pi"] },

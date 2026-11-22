@@ -130,7 +130,7 @@ describe("Db", () => {
 
           const [task] = yield* sql<{
             id: number
-          }>`SELECT id FROM inbox WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
+          }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
 
           const [opened] = yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.strictEqual(opened!.inboxId, task!.id)
@@ -208,7 +208,7 @@ describe("Db", () => {
             yield* sql<{
               session: string
               senderKey: string
-            }>`SELECT session_id AS session, sender_key FROM inbox ORDER BY session_id, id`,
+            }>`SELECT recipient_session_id AS session, sender_key FROM inbox ORDER BY recipient_session_id, id`,
             [
               { session: x, senderKey: "plugin:p" },
               { session: y, senderKey: "plugin:other" },
@@ -326,7 +326,7 @@ describe("Db", () => {
           task: "do it",
         })
         assert.deepStrictEqual(
-          yield* sql`SELECT content, status FROM inbox WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
+          yield* sql`SELECT content, status FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
           [{ content: "do it", status: "pending" }],
         )
         assert.deepStrictEqual(yield* db.inbox.pendingInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), [])
@@ -409,7 +409,7 @@ describe("Db", () => {
           Effect.map(
             sql<{
               recipient: string
-            }>`SELECT session_id AS recipient FROM inbox WHERE sender_type = 'vibest' AND instr(content, ${summary}) > 0`,
+            }>`SELECT recipient_session_id AS recipient FROM inbox WHERE sender_type = 'vibest' AND instr(content, ${summary}) > 0`,
             (rows) => rows.map((row) => row.recipient),
           )
 
@@ -456,7 +456,7 @@ describe("Db", () => {
           sql<{
             recipient: string
             status: string
-          }>`SELECT session_id AS recipient, status FROM inbox WHERE sender_type = 'vibest'`
+          }>`SELECT recipient_session_id AS recipient, status FROM inbox WHERE sender_type = 'vibest'`
 
         assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
         assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "duplicate")
@@ -661,9 +661,10 @@ describe("Db", () => {
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         yield* db.session.insertSession(session(id), yield* projectOf("r"), { cwd: "/w", task: "do it" })
         yield* db.session.endUnstarted(id, "not_started", "did not start")
-        assert.deepStrictEqual(yield* sql<{ status: string }>`SELECT status FROM inbox WHERE session_id = ${id}`, [
-          { status: "dropped" },
-        ])
+        assert.deepStrictEqual(
+          yield* sql<{ status: string }>`SELECT status FROM inbox WHERE recipient_session_id = ${id}`,
+          [{ status: "dropped" }],
+        )
         assert.deepStrictEqual(
           yield* sql<{
             n: number

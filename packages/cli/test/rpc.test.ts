@@ -155,7 +155,7 @@ describe("vibest.sock", () => {
           AND json_extract(data, '$.requestId') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
 
       const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox i WHERE i.sender_type != 'vibest'
-          AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = i.session_id AND s.message_id = i.id)`.pipe(
+          AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = i.recipient_session_id AND s.message_id = i.id)`.pipe(
         Effect.map((rows) => rows[0]!.n),
       )
 

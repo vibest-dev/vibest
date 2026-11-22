@@ -144,7 +144,7 @@ export const claudeEntry = async (
   const delivered = (from: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE session_id = ?1 AND ?2 IN (sender_session_id, about_session_id) AND status = 'delivered'",
+      "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ?1 AND ?2 IN (sender_session_id, about_session_id) AND status = 'delivered'",
       entryId,
       from,
     )?.n ?? 0
@@ -427,7 +427,7 @@ const checks: ReadonlyArray<Check> = [
         const results = () =>
           row<{ n: number }>(
             w,
-            "SELECT count(*) AS n FROM inbox WHERE session_id = ?1 AND ?2 IN (sender_session_id, about_session_id)",
+            "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ?1 AND ?2 IN (sender_session_id, about_session_id)",
             c!.entryId,
             a,
           )?.n ?? 0
@@ -466,7 +466,12 @@ const checks: ReadonlyArray<Check> = [
         const who = { entryId: c.entryId, projectId: c.projectId }
 
         const status = (id: number) =>
-          row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE session_id = ? AND id = ?", c!.entryId, id)?.s
+          row<{ s: string }>(
+            w,
+            "SELECT status AS s FROM inbox WHERE recipient_session_id = ? AND id = ?",
+            c!.entryId,
+            id,
+          )?.s
 
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
 
@@ -577,7 +582,7 @@ const checks: ReadonlyArray<Check> = [
         const toEntry = () =>
           rows<{ status: string }>(
             w,
-            "SELECT status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id) AND sender_session_id IS NOT NULL",
+            "SELECT status FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND sender_session_id IS NOT NULL",
             entryId,
           ).map((r) => r.status)
 
@@ -638,7 +643,7 @@ const checks: ReadonlyArray<Check> = [
         const sent = () =>
           rows<{ id: number; status: string }>(
             w,
-            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.session_id AND s.message_id = inbox.id)",
+            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
             sub,
             entryId,
           )

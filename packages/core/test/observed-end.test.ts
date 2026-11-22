@@ -116,7 +116,7 @@ describe("observed execution end", () => {
 
       const [row] = yield* until(
         sql<{ status: string; execution: number | null }>`SELECT status, recipient_execution_id AS execution FROM inbox
-          WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+          WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )
 

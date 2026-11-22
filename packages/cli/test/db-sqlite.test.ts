@@ -177,7 +177,7 @@ describe("a vibestd restart", () => {
 
         const [row] = yield* (yield* SqlClient.SqlClient)<{
           id: number
-        }>`SELECT id FROM inbox WHERE session_id = ${sessionId}`
+        }>`SELECT id FROM inbox WHERE recipient_session_id = ${sessionId}`
 
         assert.deepStrictEqual(yield* db.inbox.claim(sessionId, [row!.id]), [row!.id])
 

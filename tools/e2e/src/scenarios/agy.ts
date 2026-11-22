@@ -307,7 +307,7 @@ const checks: ReadonlyArray<Check> = [
         const settled = () =>
           (row<{ n: number }>(
             w,
-            "SELECT (SELECT count(*) FROM inbox WHERE session_id = ?1 AND status IN ('pending', 'delivering')) + (SELECT count(*) FROM execution WHERE session_id = ?1 AND outcome IS NULL) AS n",
+            "SELECT (SELECT count(*) FROM inbox WHERE recipient_session_id = ?1 AND status IN ('pending', 'delivering')) + (SELECT count(*) FROM execution WHERE session_id = ?1 AND outcome IS NULL) AS n",
             entry,
           )?.n ?? 1) === 0
 
@@ -331,7 +331,7 @@ const checks: ReadonlyArray<Check> = [
 
         const handed = rows<{ content: string }>(
           w,
-          "SELECT content FROM inbox WHERE session_id = ? AND recipient_execution_id = ?",
+          "SELECT content FROM inbox WHERE recipient_session_id = ? AND recipient_execution_id = ?",
           entry,
           a.executions(entry).at(-1)!.id,
         )

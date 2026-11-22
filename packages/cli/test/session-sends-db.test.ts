@@ -234,7 +234,7 @@ describe("sends from sessions", () => {
 
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "queued")
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "duplicate")
-        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE session_id = ${ended}`, [])
+        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE recipient_session_id = ${ended}`, [])
         const out = yield* db.remote.outboxOf(peer)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })

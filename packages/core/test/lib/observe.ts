@@ -98,9 +98,9 @@ export const lastSentBy = (id: string) =>
   })
 
 export const EXECUTIONS = `(SELECT t.id, t.session_id, t.started_at, t.ended_at,
-    (SELECT max(i.id) FROM inbox i WHERE i.session_id = t.session_id AND i.recipient_execution_id = t.id) AS inbox_id,
+    (SELECT max(i.id) FROM inbox i WHERE i.recipient_session_id = t.session_id AND i.recipient_execution_id = t.id) AS inbox_id,
     coalesce(t.typed, (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
-      FROM inbox i WHERE i.session_id = t.session_id AND i.recipient_execution_id = t.id ORDER BY i.id)), '') AS input,
+      FROM inbox i WHERE i.recipient_session_id = t.session_id AND i.recipient_execution_id = t.id ORDER BY i.id)), '') AS input,
     coalesce(t.outcome, 'working') AS status,
     t.reply AS output
   FROM execution t)`
