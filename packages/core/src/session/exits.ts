@@ -75,6 +75,8 @@ export const make = Effect.gen(function* () {
         }))
       )
         return
+
+      if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "not_started")
       const last = yield* db.session.latestReply(session.id)
       yield* notice(
         session,
@@ -95,6 +97,7 @@ export const make = Effect.gen(function* () {
         yield* db.session.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
         })
+      else if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "not_started")
     } else if (announce) yield* announceExit(h, session, execution)
 
     if (

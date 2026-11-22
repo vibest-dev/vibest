@@ -58,9 +58,15 @@ export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks
 
 export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject, offsetMs = 1000) =>
   Effect.gen(function* () {
+    const db = yield* Db.Service
     const adapter = yield* (yield* Harnesses.Service).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* Db.Service).session.endObserved(id, executionEndFrom(adapter, payload, at))
+    const named = payload.execution
+
+    const bound = Predicate.isNumber(named) || harness !== "pi" ? named : yield* db.session.openExecution(id)
+
+    const body = Predicate.isNumber(bound) ? { ...payload, execution: bound } : payload
+    yield* db.session.endObserved(id, executionEndFrom(adapter, body, at))
   })
 
 const decodeEventData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))

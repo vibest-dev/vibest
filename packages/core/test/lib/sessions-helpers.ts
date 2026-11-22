@@ -95,7 +95,8 @@ export const idleSession = (repo: string) =>
     const herdr = yield* FakeRuntime
     const w = yield* spawnWorking(repo, "pi")
     yield* herdr.endExecution(w.id)
-    yield* writeEnd(w.id, "pi", { text: "status: completed" })
+    const open = yield* w.db.session.openExecution(w.id)
+    yield* writeEnd(w.id, "pi", { text: "status: completed", ...(open !== undefined && { execution: open }) })
     yield* w.sessions.check(w.id)
     yield* settled
 

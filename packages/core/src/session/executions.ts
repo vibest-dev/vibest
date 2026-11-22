@@ -109,7 +109,10 @@ export const make = Effect.gen(function* () {
       if (yield* db.session.executionAccepted(session.id)) return true
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
 
-      return state === "working" || state === "blocked"
+      if (state !== "working" && state !== "blocked") return false
+      yield* db.session.setStatus(session.id, state)
+
+      return true
     })
 
   const confirmed = (
