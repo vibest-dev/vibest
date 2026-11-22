@@ -1,4 +1,5 @@
-import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
+import { ACCESS } from "@vibest/protocol/access"
+import { VibestRpcs } from "@vibest/protocol/rpc"
 
 type Tag = keyof typeof ACCESS
 

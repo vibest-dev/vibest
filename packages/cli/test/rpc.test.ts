@@ -17,8 +17,9 @@ import {
 } from "@vibest/platform-bun/test/lib/fakes"
 import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vibest/platform-bun/test/lib/rpc-helpers"
 import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { ACCESS } from "@vibest/protocol/access"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
-import { ACCESS, VibestRpcs } from "@vibest/protocol/rpc"
+import { VibestRpcs } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, type Schema, Stream } from "effect"
@@ -578,6 +579,7 @@ describe("vibest.sock", () => {
         ["Project.Move", c["Project.Move"]({ from: "x" })],
         ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
+        ["Team.List", c["Team.List"]({})],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Inbox.Take", c["Inbox.Take"](undefined)],
@@ -860,6 +862,19 @@ describe("vibest.sock", () => {
         }).pipe(Effect.provideService(Layout, having.layout)),
         "ok",
       )
+    }),
+  )
+
+  test(
+    "Team.List from a CLI caller without a session fails Forbidden naming vibest ls --team, not vibest run",
+    Effect.gen(function* () {
+      const cli = asCli(yield* client, yield* makeRepository)
+
+      for (const payload of [{}, { team: "t-1234" }]) {
+        const refused = yield* Effect.flip(cli["Team.List"](payload))
+        assert.strictEqual(refused._tag, "Forbidden")
+        assert.strictEqual(refused.message, "vibest ls --team is run by an agent in a session")
+      }
     }),
   )
 })

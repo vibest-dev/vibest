@@ -52,10 +52,10 @@ export const layer = Layer.effectDiscard(
       const origin = data.origin
 
       return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_peer,
-          origin_project, origin_session, created_at, active_at)
+          origin_project, origin_session, team, created_at, active_at)
         VALUES (${sessionIdOf(fact)}, ${data.project}, ${data.parent ?? null}, ${data.agent}, ${data.name},
-          ${data.directory}, ${origin?.peer ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null}, ${fact.at},
-          ${origin === undefined ? null : fact.at})`
+          ${data.directory}, ${origin?.peer ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null},
+          ${data.team ?? null}, ${fact.at}, ${origin === undefined ? null : fact.at})`
     })
     yield* bus.project(
       SessionRenamed,

@@ -45,6 +45,7 @@ export const SessionCreated = fact("session.created", "session", {
   directory: Schema.String,
   parent: optional(Text),
   origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
+  team: optional(Text),
 })
 
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
@@ -210,7 +211,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 5
+export const CATALOG_VERSION = 6
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {
