@@ -318,7 +318,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S24",
     title:
-      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent and its pane's shell are stopped, so the shell keeps no job control over it, and curl takes for it): the next vibestd ends that execution not_started, fails the row once with one notice, and does not deliver it again",
+      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent and its pane's shell are stopped, so the shell keeps no job control over it, and curl takes for it): the next vibestd ends that execution not_started, leaves the row delivering with one notice, and does not deliver it again",
     run: async (w) => {
       const p = await piProject(w, "s24")
       let shell: number | undefined
@@ -343,7 +343,7 @@ const checks: ReadonlyArray<Check> = [
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, sub)!.p
         const taken = await curl(w, "/inbox/take", { entryId: sub, projectId }, "pi")
         expect(taken.status === 200, `take answered ${taken.status}: ${JSON.stringify(taken.body)}`)
-        expect(p.sendRow(sub, message)?.status === "delivered", "the taken row is not delivered")
+        expect(p.sendRow(sub, message)?.status === "delivering", "the taken row is not delivering")
 
         const open = row<{ id: number; accepted: number | null }>(
           w,
@@ -366,13 +366,14 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         await until(
-          "the row failed with its notice",
-          () => p.sendRow(sub, message)?.status === "failed" && p.notices(sub, "was not delivered") === 1,
+          "the execution notice arrives",
+          () => p.sendRow(sub, message)?.status === "delivering" && p.notices(sub, "did not start the execution") === 1,
           30_000,
         )
         await Bun.sleep(3_000)
-        expect(p.sendRow(sub, message)?.status === "failed", "the failed row moved again")
-        expect(p.notices(sub, "was not delivered") === 1, "more than one notice")
+        expect(p.sendRow(sub, message)?.status === "delivering", "the unaccepted row moved again")
+        expect(p.notices(sub, "was not delivered") === 0, "unexpected was-not-delivered notice")
+        expect(p.notices(sub, "did not start the execution") === 1, "more than one notice")
 
         const copies = row<{ n: number }>(
           w,

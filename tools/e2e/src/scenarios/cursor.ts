@@ -338,7 +338,7 @@ const reports = (runtime: Runtime): Check => ({
 
       const timing = row<{ placed: number | null; started: number }>(
         w,
-        `SELECT p.placed_at AS placed, (SELECT min(started_at) FROM execution x WHERE x.session_id = p.session_id) AS started
+        `SELECT p.placed_at AS placed, (SELECT min(booked_at) FROM execution x WHERE x.session_id = p.session_id) AS started
           FROM process p WHERE p.session_id = ? ORDER BY p.id LIMIT 1`,
         id,
       )
@@ -458,7 +458,7 @@ const conversationAtStart: Check = {
         `the conversation was not recorded at the session start: ready ${JSON.stringify(ready)}, conversation ${JSON.stringify(noted)}`,
       )
       const conversation = (JSON.parse(noted[0]!.data) as { conversation: string }).conversation
-      await until("the first task taken", () => fact(id, "execution.started").length > 0, 60_000)
+      await until("the first task taken", () => fact(id, "execution.input").length > 0, 60_000)
       await closePane(id)
       expect(
         !c.executions(id).some((x) => x.outcome === "completed"),
