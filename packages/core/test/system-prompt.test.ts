@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { projectText, systemPrompt } from "@vibest/core/system-prompt"
-import { Effect, FileSystem, Path } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Path } from "effect"
 
 import { tempDirectory } from "./lib/directory.ts"
 import * as Platform from "./platform/bun.ts"
@@ -287,5 +287,156 @@ describe("projectText: preferences.md and the curated memories/MEMORY.md index i
         const missing = yield* projectText(path.join(dir, "no-such-project"))
         assert.deepStrictEqual(missing, { preferences: "", memories: "" })
       }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("cuts cleanly before line 1 with 0 lines loaded when a single line exceeds 8000 bytes", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* tempDirectory("vibest-prompt-single-huge-")
+      const memories = path.join(dir, "memories")
+      yield* fs.makeDirectory(memories, { recursive: true })
+      yield* fs.writeFileString(path.join(memories, "MEMORY.md"), `${"x".repeat(8500)}\n`)
+
+      const text = yield* projectText(dir)
+      assert.isTrue(
+        text.memories.startsWith(
+          "> WARNING: memories/MEMORY.md is 1 line and 8500 bytes (limit: 100 lines / 8000 bytes). Loaded 0 of 1 line (0 bytes); 1 line (8500 bytes) cut off.",
+        ),
+      )
+      assert.notInclude(text.memories, "xxxx")
+      assert.include(text.memories, "70 lines")
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "concurrent bootstrap does not clobber a curated MEMORY.md written mid-scan, and returns the curated index",
+    () =>
+      Effect.gen(function* () {
+        const realFs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* tempDirectory("vibest-prompt-race-")
+        const memoriesDir = path.join(dir, "memories")
+        yield* realFs.makeDirectory(memoriesDir, { recursive: true })
+        yield* realFs.writeFileString(path.join(memoriesDir, "old-topic.md"), "legacy lesson from topic file\n")
+
+        const scanStarted = yield* Deferred.make<void>()
+        const curatedWritten = yield* Deferred.make<void>()
+
+        const hookedFs: FileSystem.FileSystem = {
+          ...realFs,
+          readDirectory: (target, options) =>
+            options?.recursive === true
+              ? realFs.readDirectory(target, options).pipe(
+                  Effect.tap(() => Deferred.succeed(scanStarted, undefined)),
+                  Effect.tap(() => Deferred.await(curatedWritten)),
+                )
+              : realFs.readDirectory(target, options),
+        }
+
+        const fiber = yield* Effect.forkChild(
+          projectText(dir).pipe(Effect.provideService(FileSystem.FileSystem, hookedFs)),
+        )
+
+        yield* Deferred.await(scanStarted)
+        const curatedLine = "- memories/curated.md — carefully curated index entry"
+        yield* realFs.writeFileString(path.join(memoriesDir, "MEMORY.md"), `${curatedLine}\n`)
+        yield* Deferred.succeed(curatedWritten, undefined)
+
+        const result = yield* Fiber.join(fiber)
+        const diskAfter = yield* realFs.readFileString(path.join(memoriesDir, "MEMORY.md"))
+        const remaining = yield* realFs.readDirectory(memoriesDir)
+
+        assert.strictEqual(diskAfter, `${curatedLine}\n`)
+        assert.strictEqual(result.memories, curatedLine)
+        assert.deepStrictEqual(
+          remaining.filter((name) => name.endsWith(".tmp")),
+          [],
+        )
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("interrupted bootstrap cleans up temporary files and leaves zero .tmp files in memories/", () =>
+    Effect.gen(function* () {
+      const realFs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* tempDirectory("vibest-prompt-interrupt-")
+      const memoriesDir = path.join(dir, "memories")
+      yield* realFs.makeDirectory(memoriesDir, { recursive: true })
+      yield* realFs.writeFileString(path.join(memoriesDir, "topic.md"), "lesson body\n")
+
+      const tmpReady = yield* Deferred.make<void>()
+      const neverFinish = yield* Deferred.make<void>()
+
+      const pausePublish = <A, E>(op: Effect.Effect<A, E>) =>
+        Deferred.succeed(tmpReady, undefined).pipe(Effect.andThen(Deferred.await(neverFinish)), Effect.andThen(op))
+
+      const interruptFs: FileSystem.FileSystem = {
+        ...realFs,
+        rename: (from, to) => pausePublish(realFs.rename(from, to)),
+        link: (from, to) => pausePublish(realFs.link(from, to)),
+      }
+
+      const fiber = yield* Effect.forkChild(
+        projectText(dir).pipe(Effect.provideService(FileSystem.FileSystem, interruptFs)),
+      )
+
+      yield* Deferred.await(tmpReady)
+      yield* Fiber.interrupt(fiber)
+
+      const remaining = yield* realFs.readDirectory(memoriesDir)
+      assert.deepStrictEqual(
+        remaining.filter((name) => name.endsWith(".tmp")),
+        [],
+      )
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "clips bootstrap lines by Unicode code points at 150 without splitting surrogate pairs, preserving idempotency",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* tempDirectory("vibest-prompt-surrogate-")
+        const memoriesDir = path.join(dir, "memories")
+        yield* fs.makeDirectory(memoriesDir, { recursive: true })
+        yield* fs.writeFileString(path.join(memoriesDir, "note.md"), `${"a".repeat(128)}🚀 tail\n`)
+
+        const first = yield* projectText(dir)
+        const second = yield* projectText(dir)
+        const disk = yield* fs.readFileString(path.join(memoriesDir, "MEMORY.md"))
+
+        assert.strictEqual(Array.from(first.memories).length, 150)
+        assert.isTrue(first.memories.endsWith("🚀"))
+        assert.notInclude(disk, "\uFFFD")
+        assert.strictEqual(first.memories, second.memories)
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("a lowercase memories/memory.md topic file does not shadow missing MEMORY.md or suppress bootstrap", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* tempDirectory("vibest-prompt-lowercase-")
+      const memoriesDir = path.join(dir, "memories")
+      yield* fs.makeDirectory(memoriesDir, { recursive: true })
+
+      const base = Date.UTC(2026, 10, 20, 0, 0, 0)
+      const lower = path.join(memoriesDir, "memory.md")
+      const other = path.join(memoriesDir, "other.md")
+      yield* fs.writeFileString(lower, "legacy lowercase lesson\nbody stays in memory.md\n")
+      yield* fs.utimes(lower, new Date(base + 1_000), new Date(base + 1_000))
+      yield* fs.writeFileString(other, "other topic lesson\n")
+      yield* fs.utimes(other, new Date(base + 2_000), new Date(base + 2_000))
+
+      const result = yield* projectText(dir)
+      assert.strictEqual(
+        result.memories,
+        "- memories/other.md — other topic lesson\n- memories/memory.md — legacy lowercase lesson",
+      )
+      assert.notInclude(result.memories, "body stays in memory.md")
+      assert.strictEqual(yield* fs.readFileString(lower), "legacy lowercase lesson\nbody stays in memory.md\n")
+    }).pipe(Effect.provide(Platform.services)),
   )
 })

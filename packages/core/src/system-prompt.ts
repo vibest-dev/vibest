@@ -38,7 +38,11 @@ const truncate = (text: string, what: string) =>
     ? text
     : `${text.slice(0, INJECT_LIMIT)}\n\n[${what} truncated at ${INJECT_LIMIT} characters]`
 
-const clip = (text: string) => (text.length <= ENTRY_LIMIT ? text : text.slice(0, ENTRY_LIMIT))
+const clip = (text: string) => {
+  const points = Array.from(text)
+
+  return points.length <= ENTRY_LIMIT ? text : points.slice(0, ENTRY_LIMIT).join("")
+}
 
 const memorySummary = (text: string) => {
   const lines = text.split(/\r?\n/)
@@ -102,6 +106,24 @@ const capMemoryIndex = (raw: string) => {
 
 type IndexRead = { readonly present: true; readonly text: string } | { readonly present: false }
 
+const hasExactEntry = (fs: FileSystem.FileSystem, dir: string, name: string) =>
+  fs.readDirectory(dir).pipe(
+    Effect.map((entries) => entries.includes(name)),
+    Effect.orElseSucceed(() => false),
+  )
+
+const readExactMemoryIndex = Effect.fn("readExactMemoryIndex")(function* (memoriesDir: string, indexFile: string) {
+  const fs = yield* FileSystem.FileSystem
+
+  if (!(yield* hasExactEntry(fs, memoriesDir, MEMORY_FILE))) return { present: false } satisfies IndexRead
+
+  return yield* fs.readFileString(indexFile).pipe(
+    Effect.map((text): IndexRead => ({ present: true, text })),
+    Effect.catchReason("PlatformError", "NotFound", (): Effect.Effect<IndexRead> => Effect.succeed({ present: false })),
+    Effect.orElseSucceed((): IndexRead => ({ present: true, text: "" })),
+  )
+})
+
 const bootstrapMemoryIndex = Effect.fn("bootstrapMemoryIndex")(function* (memoriesDir: string, indexFile: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -154,11 +176,18 @@ const bootstrapMemoryIndex = Effect.fn("bootstrapMemoryIndex")(function* (memori
   const content = lines.join("\n")
   const tmp = `${indexFile}.${yield* Random.nextIntBetween(0, 2 ** 31)}.tmp`
 
-  yield* fs.writeFileString(tmp, `${content}\n`).pipe(
-    Effect.andThen(fs.rename(tmp, indexFile)),
-    Effect.catch(() => fs.remove(tmp, { force: true })),
-    Effect.ignore,
+  const linked = yield* fs.writeFileString(tmp, `${content}\n`).pipe(
+    Effect.andThen(fs.link(tmp, indexFile)),
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+    Effect.ensuring(fs.remove(tmp, { force: true }).pipe(Effect.ignore)),
   )
+
+  if (!linked) {
+    const concurrent = yield* readExactMemoryIndex(memoriesDir, indexFile)
+
+    if (concurrent.present) return capMemoryIndex(concurrent.text)
+  }
 
   return content
 })
@@ -174,12 +203,7 @@ export const projectText = Effect.fn("projectText")(function* (projectDir: strin
 
   const memoriesDir = path.join(projectDir, "memories")
   const indexFile = path.join(memoriesDir, MEMORY_FILE)
-
-  const existing = yield* fs.readFileString(indexFile).pipe(
-    Effect.map((text): IndexRead => ({ present: true, text })),
-    Effect.catchReason("PlatformError", "NotFound", (): Effect.Effect<IndexRead> => Effect.succeed({ present: false })),
-    Effect.orElseSucceed((): IndexRead => ({ present: true, text: "" })),
-  )
+  const existing = yield* readExactMemoryIndex(memoriesDir, indexFile)
 
   const memories = existing.present
     ? capMemoryIndex(existing.text)
