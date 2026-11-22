@@ -26,17 +26,18 @@ made while an execution runs waits until it ends and then opens the next executi
 
 ## S54. A first task is delivered once
 
-A session's original message, the one recorded with the session when it is created, is delivered once, as one execution
-that completes with its reply; no other message is delivered into that execution. A message that arrives while that
-one is still waiting stays out of it.
+A session's original message is the one recorded with the session when it is created. It belongs to one execution, and
+no other message is delivered into that execution. It is marked delivered only when a handoff report names its id. Launch
+arguments alone never do. A message that arrives while that execution is still open stays out of it.
 
 ## Unconfirmed hand-over
 
-Taking a batch, claiming it, or putting it in the launch arguments starts a hand-over; it is not delivery. Delivery is
-the recipient execution accepting that hand-over. A message vibestd has started handing over, and then cannot confirm,
-stays in that unconfirmed hand-over. It is not delivered again and it is not a failure. A session that never launches
-did not receive its first message. A hand-over that failed for a recorded reason is a failure, and the two are
-different. `vibest result` and the task line follow the message recorded with the session, not `sent` and not the
+A row is delivered only when a handoff report names its id. A take, a claim, launch arguments, a start report, a working
+terminal, or another input on the same execution do not. What those leave behind stays `delivering`: not delivered again,
+and not a failure. Withdrawal before launch drops that original message. A handoff that failed for a recorded reason is a
+failure, and the two are different. An inbound transfer id is one receipt. An earlier outbound row with the same id is a
+different leg, so a forward that still has to be sent is its own unacked outbox row; a repeat of that inbound id does not
+enqueue another. `vibest result` and the task line follow the message recorded with the session, not `sent` and not the
 earliest inbox row.
 
 ## S11. Claude entry session inbox
