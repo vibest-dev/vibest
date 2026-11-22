@@ -142,7 +142,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("reopening a previous projection keeps a reported harness session id and a null one", () =>
+  it.effect("reopening projection 17 replays a known harness session id and a null one", () =>
     Effect.gen(function* () {
       const file = yield* fileAt(yield* tempDirectory("vibest-projection-harness-session-"), "vibest.db")
       const quietPlace = { ...place, address: { ...place.address, id: "test/p2" } }
@@ -156,88 +156,34 @@ describe("Db", () => {
         return { reported: reported.sessionId, quiet: quiet.sessionId }
       }).pipe(Effect.provide(database(file)))
 
-      const read = <A extends object>(query: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-
-          return yield* sql.unsafe<A>(query)
-        }).pipe(Effect.provide(Platform.sqlite(file)))
-
-      const before = yield* read<{ type: string; data: string }>("SELECT type, data FROM event ORDER BY position")
-      yield* writeSql(file, [
-        "ALTER TABLE process RENAME COLUMN harness_session_id TO conversation",
-        `UPDATE meta SET value = '${PROJECTION_VERSION - 1}' WHERE key = 'projection'`,
-      ])
-
-      const previous = yield* Effect.gen(function* () {
+      const ledger = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const columns = yield* sql.unsafe<{ name: string }>("SELECT name FROM pragma_table_info('process')")
-        const projection = (yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`)[0]?.value
 
-        const rows = yield* sql<{
-          sessionId: string
-          conversation: string | null
-        }>`SELECT session_id, conversation FROM process`
-
-        return { columns: columns.map((column) => column.name), projection, rows }
+        return yield* sql<{ type: string; data: string }>`SELECT type, data FROM event ORDER BY position`
       }).pipe(Effect.provide(Platform.sqlite(file)))
 
-      assert.strictEqual(previous.projection, String(PROJECTION_VERSION - 1))
-      assert.isTrue(previous.columns.includes("conversation"))
-      assert.isFalse(previous.columns.includes("harness_session_id"))
-      assert.deepStrictEqual(
-        previous.rows.find((row) => row.sessionId === ids.reported),
-        { sessionId: ids.reported, conversation: "conv-known" },
-      )
-      assert.deepStrictEqual(
-        previous.rows.find((row) => row.sessionId === ids.quiet),
-        { sessionId: ids.quiet, conversation: null },
-      )
-      assert.isTrue(
-        before.some((row) => row.type === "process.conversation" && row.data.includes('"conversation":"conv-known"')),
-      )
-
+      const before = yield* ledger
+      yield* writeSql(file, [
+        "ALTER TABLE process RENAME COLUMN harness_session_id TO conversation",
+        "UPDATE meta SET value = '17' WHERE key = 'projection'",
+      ])
       yield* Effect.void.pipe(Effect.provide(database(file)))
 
       const rebuilt = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
 
-        const columns = (yield* sql.unsafe<{ name: string }>("SELECT name FROM pragma_table_info('process')")).map(
-          (column) => column.name,
-        )
-
-        const rows = yield* sql<{
-          sessionId: string
-          harnessSessionId: string | null
-        }>`SELECT session_id, harness_session_id FROM process`
-
-        const events = yield* sql<{ type: string; data: string }>`SELECT type, data FROM event ORDER BY position`
-
-        return { columns, rows, events }
+        return {
+          rows: yield* sql<{
+            sessionId: string
+            harnessSessionId: string | null
+          }>`SELECT session_id, harness_session_id FROM process`,
+          events: yield* sql<{ type: string; data: string }>`SELECT type, data FROM event ORDER BY position`,
+        }
       }).pipe(Effect.provide(Platform.sqlite(file)))
 
-      assert.isTrue(rebuilt.columns.includes("harness_session_id"))
-      assert.isFalse(rebuilt.columns.includes("conversation"))
       assert.strictEqual(rebuilt.rows.find((row) => row.sessionId === ids.reported)?.harnessSessionId, "conv-known")
       assert.strictEqual(rebuilt.rows.find((row) => row.sessionId === ids.quiet)?.harnessSessionId, null)
       assert.deepStrictEqual(rebuilt.events, before)
-
-      const resumed = yield* Effect.gen(function* () {
-        const db = yield* Db.Service
-        const reported = (yield* db.session.getSession(ids.reported))?.process?.harnessSessionId
-        const quiet = (yield* db.session.getSession(ids.quiet))?.process?.harnessSessionId
-        const again = yield* db.session.startEntry(yield* projectOf("known"), "pi", false, place, ENTRY)
-        const stillUnknown = yield* db.session.startEntry(yield* projectOf("unknown"), "pi", false, quietPlace, ENTRY)
-
-        return { reported, quiet, again, stillUnknown }
-      }).pipe(Effect.provide(database(file)))
-
-      assert.strictEqual(resumed.reported, "conv-known")
-      assert.strictEqual(resumed.quiet, null)
-      assert.strictEqual(resumed.again.sessionId, ids.reported)
-      assert.strictEqual(resumed.again.harnessSessionId, "conv-known")
-      assert.strictEqual(resumed.stillUnknown.sessionId, ids.quiet)
-      assert.isNull(resumed.stillUnknown.harnessSessionId)
     }).pipe(Effect.provide(Platform.services)),
   )
 

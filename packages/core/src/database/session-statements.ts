@@ -27,7 +27,7 @@ export type Current = {
   readonly start: ProcessStart
   readonly ended: number | null
   readonly terminal: string | null
-  readonly conversation: string | null
+  readonly harnessSessionId: string | null
   readonly integration: Integration | undefined
   readonly readyAt: number | null
 }
@@ -70,7 +70,7 @@ const currentOf = (row: ProcessColumns): Current => ({
   },
   ended: row.endedAt,
   terminal: row.terminal,
-  conversation: row.harnessSessionId,
+  harnessSessionId: row.harnessSessionId,
   integration:
     row.integrationVersion === null || row.integrationProtocol === null
       ? undefined
@@ -242,7 +242,7 @@ export const statements = Effect.gen(function* () {
       if (live !== undefined && live.terminal === null && start.terminal !== "" && sameChoice(live, start)) {
         yield* placeProcess(id, start.terminal, start.pid, at)
 
-        if (start.resume && start.resume !== live.conversation)
+        if (start.resume && start.resume !== live.harnessSessionId)
           yield* publish(ProcessConversation, {
             sessionId: id,
             ...stamp,
@@ -280,7 +280,7 @@ export const statements = Effect.gen(function* () {
       const live = yield* liveProcess(id)
 
       if (live !== undefined && live.terminal === null && sameChoice(live, start)) {
-        if (start.resume && start.resume !== live.conversation)
+        if (start.resume && start.resume !== live.harnessSessionId)
           yield* publish(ProcessConversation, { sessionId: id, data: { process: live.id, conversation: start.resume } })
 
         return live.id
@@ -319,7 +319,7 @@ export const statements = Effect.gen(function* () {
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
 
-      if (current === undefined || current.conversation === conversation) return false
+      if (current === undefined || current.harnessSessionId === conversation) return false
 
       if (process !== undefined && process !== current.id) return false
       yield* publish(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
@@ -381,14 +381,6 @@ export const statements = Effect.gen(function* () {
     )
 
   const unusedId = newId(sessionPrefixTaken)
-
-  const conversationOf = (id: string) =>
-    currentProcess(id).pipe(
-      Effect.map((current) => ({
-        current,
-        conversation: current === undefined ? null : current.conversation,
-      })),
-    )
 
   const creatorOf = (id: string): Effect.Effect<Creator> =>
     sql<{ parent: string | null; peer: string | null; session: string | null }>`SELECT
@@ -455,7 +447,6 @@ export const statements = Effect.gen(function* () {
     processesAt,
     lastSessionAt,
     unusedId,
-    conversationOf,
     creatorOf,
     nearestAlive,
   }
