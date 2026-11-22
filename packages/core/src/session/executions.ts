@@ -116,11 +116,18 @@ export const make = Effect.gen(function* () {
 
   const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
     Effect.gen(function* () {
+      if ((yield* db.session.openExecution(session.id)) !== execution) return "stop" as const
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
 
-      if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
+      if (state === "working" || state === "blocked") {
+        yield* pickedUp(session, execution, state)
 
-      return yield* db.session.executionAccepted(session.id)
+        return "handoff" as const
+      }
+
+      if (yield* db.session.executionAccepted(session.id)) return "stop" as const
+
+      return "wait" as const
     })
 
   const confirmed = (
@@ -133,18 +140,20 @@ export const make = Effect.gen(function* () {
     awaitOn(
       subscription,
       pickupNow(h, session, terminal, execution).pipe(
-        Effect.map((picked) => (picked ? Option.some(true) : Option.none())),
+        Effect.map((picked) => (picked === "wait" ? Option.none() : Option.some(picked))),
       ),
       (event) =>
         event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
-          ? Effect.succeed(Option.some(true))
+          ? Effect.succeed(Option.some("stop" as const))
           : event.type === "terminal.state" &&
               sameTerminal(event.terminal, terminal) &&
               (event.state === "working" || event.state === "blocked")
-            ? Effect.map(pickedUp(session, execution, event.state), Option.some)
+            ? pickupNow(h, session, terminal, execution).pipe(
+                Effect.map((picked) => (picked === "handoff" ? Option.some(picked) : Option.none())),
+              )
             : Effect.succeed(Option.none()),
       CONFIRM_TIMEOUT,
-      pickupNow(h, session, terminal, execution),
+      Effect.succeed("stop" as const),
     )
 
   const settleAfterInterrupt = Effect.fn("Executions.settleAfterInterrupt")((
@@ -262,14 +271,19 @@ export const make = Effect.gen(function* () {
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
     const confirm = confirmed(h, session, terminal, execution, subscription)
 
-    if (yield* confirm) return already ? HANDOFF_UNPROVED : undefined
+    const watched = yield* confirm
 
-    if (yield* settledElsewhere) return undefined
+    if (watched === "handoff") return already ? HANDOFF_UNPROVED : undefined
+
+    if ((yield* settledElsewhere) || (yield* db.session.executionWasAccepted(session.id, execution)))
+      return HANDOFF_UNPROVED
     yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
+    const watchedAgain = yield* confirm
 
-    if (yield* confirm) return already ? HANDOFF_UNPROVED : undefined
+    if (watchedAgain === "handoff") return already ? HANDOFF_UNPROVED : undefined
 
-    if (yield* settledElsewhere) return undefined
+    if ((yield* settledElsewhere) || (yield* db.session.executionWasAccepted(session.id, execution)))
+      return HANDOFF_UNPROVED
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed
 

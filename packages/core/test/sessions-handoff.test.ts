@@ -228,3 +228,40 @@ test(
   }),
   { hooked: ["pi"] },
 )
+
+test(
+  "an unrelated prompt while a typed write is held does not deliver that batch",
+  Effect.gen(function* () {
+    const runtime = yield* FakeRuntime
+    const { id, sessions } = yield* idleSession(yield* makeRepository)
+    yield* runtime.updateAgent(id, (agent) => ({ ...agent, registerPrompt: false }))
+    const held = yield* runtime.hold("send", id)
+    yield* sessions.send(id, "bound batch")
+    yield* held.reached
+    yield* sessions.userPrompt(id, "an unrelated typed question")
+    yield* held.release()
+
+    for (let i = 0; i < 4; i++) yield* TestClock.adjust("9 seconds")
+    assert.deepStrictEqual(yield* inboxStatus(id, "bound batch"), [{ status: "delivering" }])
+  }),
+  { hooked: ["pi"] },
+)
+
+test(
+  "a successful write after the execution was interrupted is not a handoff",
+  Effect.gen(function* () {
+    const runtime = yield* FakeRuntime
+    const { db, id, sessions } = yield* idleSession(yield* makeRepository)
+    yield* runtime.updateAgent(id, (agent) => ({ ...agent, registerPrompt: false }))
+    const held = yield* runtime.hold("send", id)
+    yield* sessions.send(id, "bound batch")
+    yield* held.reached
+    const execution = yield* db.session.openExecution(id)
+    yield* db.session.closeExecution(id, execution!, "interrupted")
+    yield* held.release()
+
+    for (let i = 0; i < 2; i++) yield* TestClock.adjust("9 seconds")
+    assert.deepStrictEqual(yield* inboxStatus(id, "bound batch"), [{ status: "delivering" }])
+  }),
+  { hooked: ["pi"] },
+)

@@ -74,7 +74,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       const statusOf = SqlClient.SqlClient.pipe(
         Effect.flatMap(
           (sql) => sql<{ status: string }>`SELECT status FROM inbox
-            WHERE session_id = ${entryId} AND instr(content, 'a question') > 0`,
+            WHERE recipient_session_id = ${entryId} AND instr(content, 'a question') > 0`,
         ),
         Effect.map((rows) => rows.map((row) => row.status)),
       )

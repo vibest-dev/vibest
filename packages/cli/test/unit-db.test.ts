@@ -653,6 +653,24 @@ describe("Db", () => {
       ),
   )
 
+  it.effect("a reserved launch input on a finished execution is not work still waiting", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db.Service
+        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const project = yield* projectOf("r")
+        yield* db.session.insertSession(session(id), project, { cwd: "/w", task: "do it" })
+        yield* db.session.startExecution(id, 1)
+        yield* db.inbox.linkTask(id)
+        const execution = yield* db.session.openExecution(id)
+        yield* db.session.closeExecution(id, execution!, "completed", {})
+        assert.isFalse(yield* db.inbox.waitingOn(id))
+        yield* db.inbox.insertSend(id, "queued", { type: "user" })
+        assert.isTrue(yield* db.inbox.waitingOn(id))
+      }),
+    ),
+  )
+
   it.effect("a session cancelled before it launches did not receive its first message", () =>
     memory(
       Effect.gen(function* () {
