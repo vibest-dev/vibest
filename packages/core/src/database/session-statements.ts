@@ -1,6 +1,7 @@
 import {
   ExecutionAllocated,
   ExecutionFailed,
+  ExecutionInput,
   ExecutionInterrupted,
   ExecutionStarted,
   ExecutionSucceeded,
@@ -411,6 +412,12 @@ export const statements = Effect.gen(function* () {
       return true
     })
 
+  const noteInput = (sessionId: string, execution: number, typed: string) =>
+    publish(ExecutionInput, { sessionId, data: { executionId: execution, typed } })
+
+  const confirmedOutcome = (outcome: string | null) =>
+    outcome === "completed" || outcome === "failed" || outcome === "interrupted"
+
   const recordObservedEnd = (id: string, end: ExecutionEnd, at: number | undefined, process: number | undefined) =>
     Effect.gen(function* () {
       const rows = yield* sql<{
@@ -419,48 +426,51 @@ export const statements = Effect.gen(function* () {
         outcome: string | null
         process: number | null
         owner: number
-      }>`SELECT id, started_at AS started, outcome, process_id AS process, owner FROM execution
+        reply: string | null
+      }>`SELECT id, started_at AS started, outcome, process_id AS process, owner, reply FROM execution
         WHERE session_id = ${id} ORDER BY id`
 
-      const sameProcess = (row: { readonly process: number | null }) => process === undefined || row.process === process
-      const started = rows.filter((row) => row.started !== null && sameProcess(row))
-      const unsettled = started.filter((row) => row.outcome === null)
+      const inScope = process === undefined ? rows : rows.filter((row) => row.process === process)
+      const candidates = inScope.filter((row) => row.started !== null && !confirmedOutcome(row.outcome))
       const owner = rows.find((row) => row.owner === 1)
       const apply = (execution: number) => finishExecution(id, execution, end, at)
+      const recorded = (execution: number) => ({ id: execution, current: owner?.id === execution })
 
-      if (unsettled.length > 1) return undefined
+      if (candidates.length > 1) return undefined
 
-      if (unsettled.length === 1) {
-        const candidate = unsettled[0]!
+      if (candidates.length === 1) {
+        const candidate = candidates[0]!
 
-        if (owner !== undefined && owner.started === null && candidate.id !== owner.id) {
-          if (!(yield* apply(candidate.id))) return candidate.id
+        if (!(yield* apply(candidate.id))) return recorded(candidate.id)
 
-          return candidate.id
-        }
-
-        if (owner !== undefined && owner.started === null) return "unaccepted" as const
-
-        if (owner !== undefined && owner.id !== candidate.id) return undefined
-
-        if (!(yield* apply(candidate.id))) return candidate.id
-
-        return candidate.id
+        return recorded(candidate.id)
       }
 
-      if (owner !== undefined && owner.started === null) return "unaccepted" as const
+      const reserved = inScope.filter((row) => row.started === null && row.outcome === null)
 
-      if (started.length > 0) return started[started.length - 1]!.id
+      if (
+        reserved.length === 1 &&
+        (end.outcome === "completed" || end.outcome === "failed" || end.outcome === "interrupted")
+      ) {
+        const candidate = reserved[0]!
+        yield* apply(candidate.id)
+
+        return recorded(candidate.id)
+      }
+
+      if (reserved.length > 0) return "unaccepted" as const
 
       if (end.outcome === "interrupted" || end.outcome === "lost" || end.outcome === "not_started") return undefined
 
-      if (rows.some((row) => row.started === null && row.outcome !== null && sameProcess(row)))
-        return rows.filter((row) => sameProcess(row)).at(-1)?.id
+      const prior = [...inScope].reverse().find((row) => confirmedOutcome(row.outcome))
 
+      if (prior !== undefined && prior.reply === (end.reply ?? null)) return { id: prior.id, current: false }
+
+      if (owner !== undefined || (process !== undefined && inScope.length === 0 && rows.length > 0)) return undefined
       const execution = yield* allocateExecution(id, at ?? (yield* now))
       yield* apply(execution)
 
-      return execution
+      return { id: execution, current: true }
     })
 
   const setStatus = (id: string, status: AgentStatus) =>
@@ -553,6 +563,7 @@ export const statements = Effect.gen(function* () {
     openExecution,
     workingExecutions,
     allocateExecution,
+    noteInput,
     startedAt,
     releaseExecution,
     finishExecution,

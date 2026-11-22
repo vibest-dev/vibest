@@ -166,6 +166,11 @@ export const ExecutionUnresolved = fact("execution.unresolved", "session", {
   reply: optional(Schema.String),
 })
 
+export const ExecutionInput = fact("execution.input", "session", {
+  executionId: Seq,
+  typed: Text,
+})
+
 export const InboxKind = Schema.Literals(["task", "send", "notice"])
 
 export type InboxKind = typeof InboxKind.Type
@@ -228,6 +233,7 @@ export const Catalog = {
   [ExecutionFailed.type]: ExecutionFailed,
   [ExecutionInterrupted.type]: ExecutionInterrupted,
   [ExecutionUnresolved.type]: ExecutionUnresolved,
+  [ExecutionInput.type]: ExecutionInput,
   [InboxQueued.type]: InboxQueued,
   [InboxMoved.type]: InboxMoved,
   [MachineAdded.type]: MachineAdded,
@@ -244,7 +250,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 6
+export const CATALOG_VERSION = 7
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

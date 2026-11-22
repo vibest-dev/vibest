@@ -103,7 +103,7 @@ const lastExecutionOf = (row: SessionColumns) =>
         id: row.lId,
         process: row.lProcess,
         outcome: row.lOutcome ?? "",
-        startedAt: row.lAt ?? 0,
+        startedAt: row.lAt,
         endedAt: row.lEnded,
         reply: row.lReply,
         failure:

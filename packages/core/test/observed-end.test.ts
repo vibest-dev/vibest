@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
+import { executionStateOf } from "@vibest/core/database/db-rows"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
@@ -41,13 +41,16 @@ describe("observed execution end", () => {
       const { execution } = yield* db.session.startExecution(id, yield* Clock.currentTimeMillis)
       assert.strictEqual(
         yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "background" })),
-        "unaccepted",
+        "completed",
       )
-      assert.deepStrictEqual(yield* ends(id), before)
-      assert.strictEqual(yield* db.session.openExecution(id), execution)
-      yield* db.session.acceptExecution(id, execution)
-      yield* writeEnd(id, "pi", { text: "mine" })
-      assert.deepStrictEqual((yield* ends(id)).at(-1), { executionId: execution, reply: "mine" })
+      assert.deepStrictEqual((yield* ends(id)).at(-1), { executionId: execution, reply: "background" })
+      assert.strictEqual((yield* ends(id)).length, before.length + 1)
+      assert.isUndefined(yield* db.session.openExecution(id))
+      assert.strictEqual(
+        yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "background" })),
+        "completed",
+      )
+      assert.strictEqual((yield* ends(id)).length, before.length + 1)
     }),
     { hooked: ["pi"] },
   )
@@ -82,12 +85,8 @@ describe("observed execution end", () => {
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
       )
       const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(executionStateOf(row), "failed")
-      assert.isNotNull(exitedAt(row))
-      assert.deepStrictEqual(
-        (yield* db.inbox.inboxWithStatus(id, "failed")).map((r) => r.message),
-        ["queued"],
-      )
+      assert.strictEqual(executionStateOf(row), "interrupted")
+      assert.notStrictEqual(executionStateOf(row), "failed")
     }),
     { hooked: ["claude"] },
   )

@@ -286,7 +286,7 @@ export const make = Effect.gen(function* () {
 
     if (yield* starts.remove(id)) {
       if (known.process === null) {
-        yield* db.session.endUnstarted(id, "interrupted")
+        yield* db.session.endUnstarted(id, "not_started")
 
         return { message: `${id} was waiting for a free slot; it will not start` }
       }
@@ -317,17 +317,19 @@ export const make = Effect.gen(function* () {
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
-        const closed = yield* db.session.closeExecution(id, execution, "interrupted")
 
-        if (closed) yield* db.session.setStatus(id, "idle")
-        const last = closed ? undefined : yield* db.session.latestReply(id)
-
-        if (!closed && !(last?.execution === execution && last.status === "interrupted"))
+        if ((yield* db.session.openExecution(id)) === execution)
           return {
-            message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
+            message: `${id} is idle, but the interrupt was not confirmed; its execution is unchanged`,
           }
+        const last = yield* db.session.latestReply(id)
 
-        return { message: `${id} interrupted; its terminal, worktree and session are kept` }
+        if (last?.execution === execution && last.status === "interrupted")
+          return { message: `${id} interrupted; its terminal, worktree and session are kept` }
+
+        return {
+          message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
+        }
       }),
     ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) }))
   })

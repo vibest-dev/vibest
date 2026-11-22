@@ -68,6 +68,7 @@ export const make = Effect.gen(function* () {
 
       if (
         execution !== undefined &&
+        (yield* db.session.executionAccepted(session.id)) &&
         (yield* db.session.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
           notice: text(" during an execution"),
@@ -90,7 +91,7 @@ export const make = Effect.gen(function* () {
     const announce = !cutOff && (executionStateOf(session) === "open" || exitedAt(session) === null)
 
     if (announce && session.entry) {
-      if (execution !== undefined)
+      if (execution !== undefined && (yield* db.session.executionAccepted(session.id)))
         yield* db.session.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
         })

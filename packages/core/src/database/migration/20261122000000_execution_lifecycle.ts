@@ -14,7 +14,7 @@ const Started = Schema.Struct({
   typed: optional(Schema.String),
 })
 
-const Accepted = Schema.Struct({ execution: Schema.Number })
+const HasReply = Schema.Struct({ reply: Schema.String })
 
 const Ended = Schema.Struct({
   execution: Schema.Number,
@@ -24,7 +24,6 @@ const Ended = Schema.Struct({
   reply: optional(Schema.String),
 })
 
-const ProcessStarted = Schema.Struct({ resume: optional(Schema.String) })
 const ProcessConversation = Schema.Struct({ process: Schema.Number, conversation: Schema.String })
 
 type Row = {
@@ -48,12 +47,10 @@ export const migration = {
   up: (tx: SqlClient.SqlClient) =>
     Effect.gen(function* () {
       const rows = yield* tx<Row>`SELECT position, aggregate, seq, at, type, data FROM event
-        WHERE type IN ('execution.started', 'execution.accepted', 'execution.ended', 'process.started',
-          'process.conversation')
+        WHERE type IN ('execution.started', 'execution.accepted', 'execution.ended', 'process.conversation')
         ORDER BY position`
 
       const booked = new Map<string, Booking>()
-      const resumes = new Map<string, { readonly position: number; readonly resume: string | undefined }>()
       const conversations = new Map<string, Array<{ readonly position: number }>>()
 
       const carried: Array<{
@@ -84,12 +81,6 @@ export const migration = {
       const remembered = (aggregate: string, process: number) => conversations.get(key(aggregate, process)) ?? []
 
       for (const row of rows) {
-        if (row.type === "process.started") {
-          const data = yield* decode(ProcessStarted, row)
-          resumes.set(key(row.aggregate, row.seq), { position: row.position, resume: data.resume })
-          continue
-        }
-
         if (row.type === "process.conversation") {
           const data = yield* decode(ProcessConversation, row)
           const id = key(row.aggregate, data.process)
@@ -109,9 +100,7 @@ export const migration = {
         }
 
         if (row.type === "execution.accepted") {
-          const data = yield* decode(Accepted, row)
-          const booking = booked.get(key(row.aggregate, data.execution))
-          yield* replace(row, "execution.started", { executionId: data.execution, processId: booking?.process })
+          yield* tx`DELETE FROM event WHERE position = ${row.position}`
           continue
         }
 
@@ -119,29 +108,36 @@ export const migration = {
         const executionId = data.execution
         const reply = data.reply === "" ? undefined : data.reply
         const booking = booked.get(key(row.aggregate, executionId))
+        const harnessReport = Schema.is(HasReply)(JSON.parse(row.data))
+        const exitBeforeWork = data.failure?.message === "the harness exited"
 
-        if (data.outcome === "completed") yield* replace(row, "execution.succeeded", { executionId, reply })
-        else if (data.outcome === "failed")
-          yield* replace(row, "execution.failed", {
+        if (!harnessReport || exitBeforeWork) {
+          const observation = data.outcome === "lost" ? "lost" : "not_started"
+          yield* replace(row, "execution.unresolved", {
             executionId,
-            failure: data.failure?.message ? data.failure : { message: "failed" },
-            reply,
+            observation,
+            failure: data.failure?.message ? data.failure : undefined,
           })
+        } else if (data.outcome === "completed") yield* replace(row, "execution.succeeded", { executionId, reply })
+        else if (data.outcome === "failed" && data.failure?.message)
+          yield* replace(row, "execution.failed", { executionId, failure: data.failure, reply })
         else if (data.outcome === "interrupted")
-          yield* replace(row, "execution.interrupted", {
-            executionId,
-            reason: data.failure?.message,
-            reply,
-          })
+          yield* replace(row, "execution.interrupted", { executionId, reason: data.failure?.message, reply })
         else
           yield* replace(row, "execution.unresolved", {
             executionId,
-            observation: data.outcome,
+            observation: data.outcome === "lost" ? "lost" : "not_started",
             failure: data.failure?.message ? data.failure : undefined,
             reply,
           })
 
-        if (data.conversation !== undefined && data.conversation !== "" && booking?.process !== undefined)
+        if (
+          harnessReport &&
+          !exitBeforeWork &&
+          data.conversation !== undefined &&
+          data.conversation !== "" &&
+          booking?.process !== undefined
+        )
           carried.push({
             aggregate: row.aggregate,
             process: booking.process,
@@ -155,22 +151,6 @@ export const migration = {
         const known = remembered(change.aggregate, change.process)
 
         if (known.some((fact) => fact.position > change.position)) continue
-        const prior = [...known].reverse().find((fact) => fact.position < change.position)
-
-        if (prior !== undefined) {
-          yield* tx`UPDATE event SET data = json_set(data, '$.conversation', ${change.conversation})
-            WHERE position = ${prior.position}`
-          continue
-        }
-
-        const started = resumes.get(key(change.aggregate, change.process))
-
-        if (started !== undefined && (started.resume === undefined || started.resume === change.conversation)) {
-          yield* tx`UPDATE event SET data = json_set(data, '$.resume', ${change.conversation})
-            WHERE position = ${started.position}`
-          continue
-        }
-
         yield* tx`INSERT INTO event (aggregate, seq, at, type, data)
           SELECT ${change.aggregate}, coalesce(max(seq), 0) + 1, ${change.at}, 'process.conversation',
             ${JSON.stringify({ process: change.process, conversation: change.conversation })}

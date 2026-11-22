@@ -162,8 +162,10 @@ describe.concurrent("an idle session takes its next batch", () => {
       yield* sessions.typeTaken(entryId, execution)
       assert.isFalse(yield* db.session.executionAccepted(entryId))
       yield* sessions.userPrompt(entryId, "a question")
-      assert.isTrue(yield* db.session.executionAccepted(entryId))
+      assert.isFalse(yield* db.session.executionAccepted(entryId))
       assert.deepStrictEqual(yield* db.session.openExecution(entryId), execution)
+      yield* db.session.acceptExecution(entryId, execution)
+      assert.isTrue(yield* db.session.executionAccepted(entryId))
     }),
   )
 

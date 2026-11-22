@@ -1,6 +1,7 @@
 import {
   ExecutionAllocated,
   ExecutionFailed,
+  ExecutionInput,
   ExecutionInterrupted,
   ExecutionStarted,
   ExecutionSucceeded,
@@ -177,7 +178,8 @@ export const layer = Layer.effectDiscard(
       ExecutionSucceeded,
       active(
         (fact) =>
-          sql`UPDATE execution SET outcome = 'completed', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at}, owner = 0
+          sql`UPDATE execution SET outcome = 'completed', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at}, owner = 0,
+              failure = null, failure_kind = null
             WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
       ),
     )
@@ -196,7 +198,7 @@ export const layer = Layer.effectDiscard(
       active(
         (fact) =>
           sql`UPDATE execution SET outcome = 'interrupted', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at},
-              owner = 0
+              owner = 0, failure = null, failure_kind = null
             WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
       ),
     )
@@ -204,13 +206,22 @@ export const layer = Layer.effectDiscard(
       ExecutionUnresolved,
       active(
         (fact) =>
-          sql`UPDATE execution SET outcome = ${fact.data.observation}, ended_at = ${fact.at}, owner = 0,
+          sql`UPDATE execution SET outcome = ${fact.data.observation}, owner = 0,
               reply = ${fact.data.reply ?? null},
               failure = ${fact.data.failure?.message ?? null}, failure_kind = ${fact.data.failure?.kind ?? null}
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.executionId} AND outcome IS NULL`,
       ),
     )
 
+    yield* bus.project(
+      ExecutionInput,
+      active(
+        (fact) =>
+          sql`UPDATE execution SET typed = CASE WHEN typed IS NULL THEN ${fact.data.typed}
+              ELSE typed || char(10) || ${fact.data.typed} END
+            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.executionId}`,
+      ),
+    )
     yield* bus.project(
       InboxQueued,
       active((fact) => {

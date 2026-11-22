@@ -93,9 +93,6 @@ export const make = Effect.gen(function* () {
 
     if (state !== undefined && session.status !== state) yield* db.session.setStatus(session.id, state)
 
-    if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(harnessIdOf(session)))
-      yield* db.session.acceptExecution(id, execution)
-
     const exited =
       state === undefined &&
       (yield* Effect.gen(function* () {
@@ -198,19 +195,11 @@ export const make = Effect.gen(function* () {
     merge: (pending, next) => (pending === undefined || next === undefined ? undefined : Math.max(pending, next)),
   })
 
-  const onTerminal = (processes: ReadonlyArray<BoundProcess>, working: boolean) =>
+  const onTerminal = (processes: ReadonlyArray<BoundProcess>, _working: boolean) =>
     Effect.forEach(
       processes,
       ({ sessionId, process }) =>
         Effect.gen(function* () {
-          const session = working ? yield* db.session.getSession(sessionId) : undefined
-
-          const execution =
-            session && session.process?.id === process && !inbox.pulls(harnessIdOf(session))
-              ? yield* db.session.openExecution(sessionId)
-              : undefined
-
-          if (execution !== undefined) yield* db.session.acceptExecution(sessionId, execution)
           yield* wakes.wake(sessionId, process)
         }),
       { discard: true },

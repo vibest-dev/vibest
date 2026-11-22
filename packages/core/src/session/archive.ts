@@ -104,14 +104,16 @@ export const make = Effect.gen(function* () {
 
         if (working && h !== undefined && owned !== undefined) {
           stopped = yield* interruptAgent(h, session, owned)
+          const still = execution !== undefined && (yield* db.session.openExecution(id)) === execution
           reasons.push(
-            stopped
-              ? "it was working: interrupted, then its terminal closed"
-              : `it did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
+            !stopped
+              ? `it did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`
+              : still
+                ? `it did not confirm the interrupt within ${Duration.format(STOP_WAIT)}; its terminal closed anyway`
+                : "it was working: interrupted, then its terminal closed",
           )
         }
 
-        if (execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
         session = yield* getRow(id)
       }
 

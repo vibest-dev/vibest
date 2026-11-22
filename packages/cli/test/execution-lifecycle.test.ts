@@ -117,7 +117,7 @@ describe("execution lifecycle", () => {
         FROM execution WHERE session_id = ${S}`
 
       assert.strictEqual(typed?.typed, "typed line")
-      assert.isNotNull(typed?.started)
+      assert.isNull(typed?.started)
       assert.strictEqual(
         (yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE content = 'typed line'`)[0]?.n,
         0,
@@ -232,7 +232,7 @@ describe("execution lifecycle", () => {
       const execution = (yield* db.session.startExecution(S, 5)).execution
       yield* db.session.acceptExecution(S, execution)
       assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 6, "once")), "completed")
-      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 7, "twice")), "completed")
+      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 7, "once")), "completed")
       assert.strictEqual(
         (yield* sql<{
           n: number
@@ -278,6 +278,41 @@ describe("execution lifecycle", () => {
     }).pipe(Effect.provide(memoryDb())),
   )
 
+  it.effect("a lost execution's delayed answer does not complete the successor or allocate another", () =>
+    Effect.gen(function* () {
+      const db = yield* withSession
+      const sql = yield* SqlClient.SqlClient
+      const first = (yield* db.session.startExecution(S, 1)).execution
+      yield* db.session.acceptExecution(S, first)
+      yield* db.session.closeExecution(S, first, "lost", { failure: { message: "no end hook" } })
+      const second = (yield* db.session.startExecution(S, 2)).execution
+      yield* db.session.acceptExecution(S, second)
+      assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 3, "reply A")))
+      assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 4, "reply A")))
+      assert.deepStrictEqual(
+        yield* sql<{ id: number; outcome: string | null; reply: string | null }>`SELECT id, outcome, reply
+          FROM execution WHERE session_id = ${S} ORDER BY id`,
+        [
+          { id: first, outcome: "lost", reply: null },
+          { id: second, outcome: null, reply: null },
+        ],
+      )
+      yield* db.session.startObserved(S, "second typed", 5)
+      assert.strictEqual(
+        (yield* sql<{
+          n: number
+        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND data LIKE ${"%second typed%"}`)[0]?.n,
+        1,
+      )
+      assert.notStrictEqual(
+        (yield* sql<{
+          started: number | null
+        }>`SELECT started_at AS started FROM execution WHERE session_id = ${S} AND id = ${second}`)[0]?.started,
+        null,
+      )
+    }).pipe(Effect.provide(memoryDb())),
+  )
+
   it.effect(
     "an old log keeps execution ids, does not turn lost or not_started into failures, and keeps send counts",
     () =>
@@ -311,7 +346,7 @@ describe("execution lifecycle", () => {
               "' ORDER BY id",
           ),
           [
-            { id: 3, outcome: "completed", typed: "typed line", started: 4 },
+            { id: 3, outcome: "completed", typed: "typed line", started: null },
             { id: 6, outcome: "lost", typed: null, started: null },
             { id: 8, outcome: "not_started", typed: null, started: null },
           ],
@@ -331,7 +366,6 @@ describe("execution lifecycle", () => {
           names.map((row) => row.type),
           [
             "execution.allocated",
-            "execution.started",
             "execution.succeeded",
             "execution.allocated",
             "execution.unresolved",

@@ -68,6 +68,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       openExecution,
       workingExecutions,
       allocateExecution,
+      noteInput,
       startedAt,
       accept,
       observable,
@@ -814,17 +815,21 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       startObserved: Effect.fn("Db.session.startObserved")(
-        (id: string, typed: string | undefined, at: number, process?: number, anonymous = false) =>
+        (id: string, typed: string | undefined, at: number, process?: number, _anonymous = false) =>
           tx(
             Effect.gen(function* () {
               if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return
 
-              const open =
-                (yield* openExecution(id)) ?? (typed || anonymous ? yield* allocateExecution(id, at, typed) : undefined)
+              if (typed === undefined || typed === "") return
+              const open = yield* openExecution(id)
 
-              if (open === undefined) return
-              yield* accept(id, open)
-              yield* setStatus(id, "working")
+              if (open === undefined) {
+                yield* allocateExecution(id, at, typed)
+
+                return
+              }
+
+              yield* noteInput(id, open, typed)
             }),
           ).pipe(Effect.orDie),
       ),
@@ -832,16 +837,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       endObserved: Effect.fn("Db.session.endObserved")((id: string, end: ObservedEnd, process?: number) =>
         tx(
           Effect.gen(function* () {
-            if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return undefined
+            if (!(yield* observable(id))) return undefined
             const current = yield* currentProcess(id)
 
             if (current === undefined || current.start.harness !== end.harness) return undefined
 
-            if (end.needsReady && current.readyAt === null && process !== current.id) return undefined
+            if (end.needsReady && current.readyAt === null && process !== undefined && process !== current.id)
+              return undefined
             const failure = end.limited ? limitFailure(end.failure ?? "", end.resetAt) : failureOf(end.failure)
-
-            if (end.conversation !== undefined && end.conversation !== current.conversation)
-              yield* session.noteConversation(id, end.conversation, process)
 
             const recorded = yield* recordObservedEnd(
               id,
@@ -851,12 +854,17 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 reply: end.reply,
               },
               end.at,
-              process ?? current.id,
+              process,
             )
 
             if (recorded === "unaccepted") return "unaccepted" as const
 
             if (recorded === undefined) return undefined
+
+            if (!recorded.current) return end.status
+
+            if (end.conversation !== undefined && end.conversation !== current.conversation)
+              yield* session.noteConversation(id, end.conversation, process)
             yield* setStatus(id, "idle")
 
             if (end.status === "failed" && !(yield* isEntry(id)))

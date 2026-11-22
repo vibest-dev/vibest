@@ -1,8 +1,7 @@
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { Clock, Context, Effect, FileSystem, Layer, Option, Path } from "effect"
+import { Clock, Context, Effect, FileSystem, Layer, Path } from "effect"
 
 import { Agents } from "./agents.ts"
-import { runtimeOf, terminalOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -10,7 +9,7 @@ import * as Guard from "./guard.ts"
 import { Harnesses } from "./harnesses.ts"
 import type { HarnessDefinition } from "./plugin/domains.ts"
 import { jsonObject, promptOf, executionEndOf, type ObservedEnd } from "./replies.ts"
-import { alive, Runtimes } from "./runtimes.ts"
+import { Runtimes } from "./runtimes.ts"
 import { Session } from "./session.ts"
 import { limitSeen, Subscriptions } from "./subscriptions/service.ts"
 
@@ -44,21 +43,6 @@ const make = Effect.gen(function* () {
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
 
-  const terminalClosed = (who: HookCaller) =>
-    Effect.gen(function* () {
-      const session = yield* db.session.getSession(who.id)
-
-      if (
-        session === undefined ||
-        terminalOf(session).id === "" ||
-        (who.process !== undefined && who.process !== session.process?.id)
-      )
-        return false
-      const runtime = yield* runtimes.route(runtimeOf(session)).pipe(Effect.option)
-
-      return Option.isSome(runtime) && !(yield* alive(runtime.value, terminalOf(session)))
-    })
-
   const withReset = (who: HookCaller, end: ObservedEnd) =>
     Effect.gen(function* () {
       const provider = (yield* db.session.getSession(who.id))?.process?.provider ?? ""
@@ -74,12 +58,6 @@ const make = Effect.gen(function* () {
     const end = executionEndOf(definition, raw, yield* Clock.currentTimeMillis)
 
     if (!end) return yield* noteConversation(definition, who, raw)
-
-    if (end.status === "interrupted" && (yield* terminalClosed(who))) {
-      yield* Effect.log(`execution end ${who.id} (${end.harness}, interrupted as its terminal closed: an exit)`)
-
-      return yield* sessions.check(who.id, who.process)
-    }
 
     const written = yield* db.session.endObserved(who.id, end.limited ? yield* withReset(who, end) : end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)

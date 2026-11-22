@@ -112,13 +112,12 @@ export const make = Effect.gen(function* () {
       return true
     })
 
-  const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
+  const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, _execution: number) =>
     Effect.gen(function* () {
+      if (yield* db.session.executionAccepted(session.id)) return true
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
 
-      if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
-
-      return yield* db.session.executionAccepted(session.id)
+      return state === "working" || state === "blocked"
     })
 
   const confirmed = (
@@ -139,7 +138,7 @@ export const make = Effect.gen(function* () {
           : event.type === "terminal.state" &&
               sameTerminal(event.terminal, terminal) &&
               (event.state === "working" || event.state === "blocked")
-            ? Effect.map(pickedUp(session, execution, event.state), Option.some)
+            ? Effect.succeed(Option.some(true))
             : Effect.succeed(Option.none()),
       CONFIRM_TIMEOUT,
       pickupNow(h, session, terminal, execution),
@@ -172,8 +171,7 @@ export const make = Effect.gen(function* () {
             event.state !== "blocked") ||
             ((event.type === "execution.succeeded" ||
               event.type === "execution.failed" ||
-              event.type === "execution.interrupted" ||
-              event.type === "execution.unresolved") &&
+              event.type === "execution.interrupted") &&
               event.sessionId === session.id)
             ? Option.some(true)
             : Option.none(),
@@ -259,6 +257,8 @@ export const make = Effect.gen(function* () {
 
     if (delivered) return undefined
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
+
+    if (yield* settledElsewhere) return undefined
     const confirm = confirmed(h, session, terminal, execution, subscription)
 
     if (yield* confirm) return undefined
