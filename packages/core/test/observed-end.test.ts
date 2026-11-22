@@ -131,9 +131,9 @@ describe("observed execution end", () => {
         facts,
       )
       assert.deepStrictEqual(yield* db.session.openExecution(id), b)
-      yield* integration.executionEnd(who, report(b, "reply B"))
+      yield* integration.executionEnd(who, report(b, "reply A"))
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
-      assert.strictEqual(yield* replyOf(id), "reply B")
+      assert.strictEqual(yield* replyOf(id), "reply A")
     }),
     { hooked: ["claude"] },
   )

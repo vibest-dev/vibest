@@ -1,4 +1,5 @@
 import {
+  ExecutionAccepted,
   ExecutionAllocated,
   ExecutionFailed,
   ExecutionInput,
@@ -148,6 +149,7 @@ export const layer = Layer.effectDiscard(
         }),
       ),
     )
+    yield* bus.project(ExecutionAccepted, () => Effect.void)
     yield* bus.project(
       ExecutionStarted,
       active((fact) =>

@@ -231,7 +231,7 @@ describe("Db", () => {
           yield* sql<{
             input: string
           }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
-          [{ input: "kept" }],
+          [{ input: "kept\ndropped" }],
         )
       }),
     ),
@@ -246,6 +246,7 @@ describe("Db", () => {
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
           yield* db.session.insertSession(session(id), yield* projectOf("r"))
           yield* db.session.startObserved(id, "typed", 1)
+          const execution = yield* db.session.openExecution(id)
 
           const end = {
             harness: "pi",
@@ -259,7 +260,10 @@ describe("Db", () => {
 
           assert.isUndefined(yield* db.session.endObserved(id, { ...end, needsReady: true }))
           const current = (yield* db.session.getSession(id))!.process!.id
-          assert.strictEqual(yield* db.session.endObserved(id, { ...end, needsReady: true }, current), "completed")
+          assert.strictEqual(
+            yield* db.session.endObserved(id, { ...end, execution, needsReady: true }, current),
+            "completed",
+          )
         }),
       ),
   )

@@ -137,6 +137,8 @@ export const ExecutionAllocated = fact("execution.allocated", "session", {
   typed: optional(Text),
 })
 
+export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
+
 export const ExecutionStarted = fact("execution.started", "session", {
   executionId: Seq,
   processId: optional(Seq),
@@ -228,6 +230,7 @@ export const Catalog = {
   [ProcessConversation.type]: ProcessConversation,
   [ProcessEnded.type]: ProcessEnded,
   [ExecutionAllocated.type]: ExecutionAllocated,
+  [ExecutionAccepted.type]: ExecutionAccepted,
   [ExecutionStarted.type]: ExecutionStarted,
   [ExecutionSucceeded.type]: ExecutionSucceeded,
   [ExecutionFailed.type]: ExecutionFailed,
@@ -250,7 +253,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 7
+export const CATALOG_VERSION = 8
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

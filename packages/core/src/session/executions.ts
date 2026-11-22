@@ -104,14 +104,6 @@ export const make = Effect.gen(function* () {
       }),
   )
 
-  const pickedUp = (session: SessionRow, execution: number, state: "working" | "blocked") =>
-    Effect.gen(function* () {
-      yield* db.session.acceptExecution(session.id, execution)
-      yield* db.session.setStatus(session.id, state)
-
-      return true
-    })
-
   const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, _execution: number) =>
     Effect.gen(function* () {
       if (yield* db.session.executionAccepted(session.id)) return true
@@ -306,11 +298,11 @@ export const make = Effect.gen(function* () {
 
     const taken = Effect.gen(function* () {
       if ((yield* db.session.openExecution(session.id)) !== execution) return true
+
+      if (yield* db.session.executionAccepted(session.id)) return true
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
 
-      if (state === "working") return yield* pickedUp(session, execution, state)
-
-      return yield* db.session.executionAccepted(session.id)
+      return state === "working" || state === "blocked"
     })
 
     const process = (yield* db.session.getSession(session.id))?.process?.id

@@ -99,10 +99,7 @@ export const migration = {
           continue
         }
 
-        if (row.type === "execution.accepted") {
-          yield* tx`DELETE FROM event WHERE position = ${row.position}`
-          continue
-        }
+        if (row.type === "execution.accepted") continue
 
         const data = yield* decode(Ended, row)
         const executionId = data.execution

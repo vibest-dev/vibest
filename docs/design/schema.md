@@ -231,7 +231,7 @@ session, so a row is named by both.
 
 ## Facts
 
-`packages/schema/src/event.ts` defines 24 types, each with its aggregate kind (`session`, `project` or `ledger`) and a
+`packages/schema/src/event.ts` defines 25 types, each with its aggregate kind (`session`, `project` or `ledger`) and a
 Schema for its data. `Bus.publish` takes the aggregate from the kind: a session fact needs a session id and no project
 id, a project fact a project id and no session id, a ledger fact neither. A key marked optional is absent, never null, and a string key that is present is never empty. Encoding and
 decoding refuse keys a definition does not have, and encoding fails when its JSON does not decode back. `Routing` and
@@ -282,13 +282,13 @@ not an execution field. An execution vibestd gives up (`execution.unresolved`: `
 confirmed result: it frees the one live slot, and a later report that names that execution still lands on it.
 There is no stored send count. `sentIn` counts the `inbox` and `outbox` send rows for that execution, so ending the
 session does not change it. A machine-addressed send is forwarded and records no execution, so it adds nothing. One
-row has `owner = 1`. A successor's `execution.started` clears the previous owner and does not invent its outcome. An
-end report that names an execution settles that execution only. A report with no execution id, the same reply as an execution this process already finished, and no new
-conversation id changes nothing, so that retry cannot close the successor. A different reply, or a different
-conversation id, still settles the one open execution. Cursor and agy cannot name the execution, so a retry whose
-reply and conversation are unchanged is all they can exclude.
+row has `owner = 1`. A successor's `execution.started` clears the previous owner and does not invent its outcome. An end report settles an execution only when it names that execution. The reply text is not an identity: a later
+execution finishes from its own report even when the reply matches an earlier one, and a retry that names the earlier
+execution changes nothing. A report that names no execution is not applied. Claude and Pi send the execution id they
+already knew; Cursor and agy cannot, so their end report does not choose an execution. A historical `execution.accepted`
+stays at its original sequence and is not a start.
 
-A report that names an execution is written on that execution and leaves a successor and the session unchanged. A report that does not name one is written only for the session's current process: the harness's integration sends the
+A report that names an execution is written on that execution and leaves a successor and the session unchanged. The harness's integration sends the
 process id vibestd started it as (`VIBEST_PROCESS`, or the one the ready report's answer gave after an in-place
 restart), and a report naming another process is dropped. A reported end is also written only for the harness the
 current process runs, and, for a harness whose integration reports ready, only after that process's ready report

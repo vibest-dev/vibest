@@ -30,7 +30,7 @@ const withSession = Effect.gen(function* () {
   return db
 })
 
-const harnessEnd = (status: "completed" | "failed" | "interrupted", at: number, reply = "") => ({
+const harnessEnd = (status: "completed" | "failed" | "interrupted", at: number, reply = "", execution?: number) => ({
   harness: "pi" as const,
   at,
   status,
@@ -39,6 +39,7 @@ const harnessEnd = (status: "completed" | "failed" | "interrupted", at: number, 
   limited: false,
   conversation: undefined,
   needsReady: false,
+  ...(execution !== undefined && { execution }),
 })
 
 const P = "11111111-1111-4111-8111-111111111111"
@@ -171,17 +172,15 @@ describe("execution lifecycle", () => {
       Effect.gen(function* () {
         const db = yield* withSession
         const sql = yield* SqlClient.SqlClient
-        assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 20, "solo")), "completed")
-
-        const [solo] = yield* sql<{ started: number | null; outcome: string; reply: string | null }>`SELECT
-          started_at AS started, outcome, reply FROM execution WHERE session_id = ${S}`
-
-        assert.strictEqual(solo?.outcome, "completed")
-        assert.isNull(solo?.started)
-        assert.strictEqual(solo?.reply, "solo")
+        assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 20, "solo")))
+        assert.strictEqual(
+          (yield* sql<{ n: number }>`SELECT count(*) AS n FROM execution WHERE session_id = ${S}`)[0]?.n,
+          0,
+        )
 
         const first = (yield* db.session.startExecution(S, 30)).execution
         yield* db.session.acceptExecution(S, first)
+        assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 31, "same", first)), "completed")
         const successor = first + 1
         const bus = yield* Bus.Service
         yield* bus.transaction(
@@ -210,17 +209,23 @@ describe("execution lifecycle", () => {
           WHERE session_id = ${S} AND id IN (${first}, ${successor}) ORDER BY id`
 
         assert.deepStrictEqual(rows, [
-          { id: first, outcome: null, reply: null, started: rows[0]?.started ?? null, owner: 0 },
+          { id: first, outcome: "completed", reply: "same", started: rows[0]?.started ?? null, owner: 0 },
           { id: successor, outcome: null, reply: null, started: rows[1]?.started ?? null, owner: 1 },
         ])
-        assert.notStrictEqual(rows[0]?.started, null)
-        assert.notStrictEqual(rows[1]?.started, null)
-        assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 60, "again")), undefined)
+        assert.strictEqual(
+          yield* db.session.endObserved(S, harnessEnd("completed", 60, "same", successor)),
+          "completed",
+        )
+        assert.strictEqual(
+          (yield* sql<{ reply: string }>`SELECT reply FROM execution WHERE session_id = ${S} AND id = ${first}`)[0]
+            ?.reply,
+          "same",
+        )
         assert.strictEqual(
           (yield* sql<{
             n: number
           }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
-          1,
+          2,
         )
       }).pipe(Effect.provide(memoryDb())),
   )
@@ -231,8 +236,8 @@ describe("execution lifecycle", () => {
       const sql = yield* SqlClient.SqlClient
       const execution = (yield* db.session.startExecution(S, 5)).execution
       yield* db.session.acceptExecution(S, execution)
-      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 6, "once")), "completed")
-      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 7, "once")), "completed")
+      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 6, "once", execution)), "completed")
+      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 7, "once", execution)), "completed")
       assert.strictEqual(
         (yield* sql<{
           n: number
@@ -312,6 +317,56 @@ describe("execution lifecycle", () => {
     }).pipe(Effect.provide(memoryDb())),
   )
 
+  it.effect("a trailing accepted fact keeps its sequence through migration and the next append", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      const file = path.join(yield* tempDirectory("vibest-execution-accepted-"), "vibest.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+      const accepted = 5
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
+        yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
+
+        const facts = [
+          [P, 1, "project.created", { directory: "/p", repositories: [] }],
+          [S, 1, "session.created", { project: P, agent: "general", name: "s", directory: "/p/s" }],
+          [S, 2, "process.started", { harness: "pi", runtime: "herdr" }],
+          [S, 3, "execution.started", { process: 2 }],
+          [S, accepted, "execution.accepted", { execution: 3 }],
+        ] as const
+
+        for (const [aggregate, seq, type, data] of facts)
+          yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
+            VALUES (${aggregate}, ${seq}, ${seq}, ${type}, ${JSON.stringify(data)})`
+      }).pipe(Effect.provide(Platform.sqlite(file)))
+
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const bus = yield* Bus.Service
+
+        const [row] = yield* sql<{ seq: number; data: string }>`SELECT seq, data FROM event
+          WHERE aggregate = ${S} AND type = 'execution.accepted'`
+
+        assert.deepStrictEqual(row, { seq: accepted, data: JSON.stringify({ execution: 3 }) })
+        yield* bus.transaction(
+          bus.publish(Catalog["session.renamed"], { sessionId: S, at: 9, data: { name: "later" } }),
+        )
+        const [next] = yield* sql<{ seq: number }>`SELECT max(seq) AS seq FROM event WHERE aggregate = ${S}`
+        assert.strictEqual(next?.seq, accepted + 1)
+      }).pipe(
+        Effect.provide(
+          Db.layer.pipe(
+            Layer.provide(Projectors.layer),
+            Layer.provideMerge(Bus.layer),
+            Layer.provide(SessionLive.layer),
+            Layer.provideMerge(Platform.sqlite(file)),
+          ),
+        ),
+      )
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
   it.effect(
     "an old log keeps execution ids, does not turn lost or not_started into failures, and keeps send counts",
     () =>
@@ -365,6 +420,7 @@ describe("execution lifecycle", () => {
           names.map((row) => row.type),
           [
             "execution.allocated",
+            "execution.accepted",
             "execution.succeeded",
             "execution.allocated",
             "execution.unresolved",
