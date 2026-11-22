@@ -142,6 +142,51 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("reopening projection 22 replays a known harness session id and a null one", () =>
+    Effect.gen(function* () {
+      const file = yield* fileAt(yield* tempDirectory("vibest-projection-harness-session-"), "vibest.db")
+      const quietPlace = { ...place, address: { ...place.address, id: "test/p2" } }
+
+      const ids = yield* Effect.gen(function* () {
+        const db = yield* Db.Service
+        const reported = yield* db.session.startEntry(yield* projectOf("known"), "pi", false, place, ENTRY)
+        yield* db.session.noteConversation(reported.sessionId, "conv-known")
+        const quiet = yield* db.session.startEntry(yield* projectOf("unknown"), "pi", false, quietPlace, ENTRY)
+
+        return { reported: reported.sessionId, quiet: quiet.sessionId }
+      }).pipe(Effect.provide(database(file)))
+
+      const ledger = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+
+        return yield* sql<{ type: string; data: string }>`SELECT type, data FROM event ORDER BY position`
+      }).pipe(Effect.provide(Platform.sqlite(file)))
+
+      const before = yield* ledger
+      yield* writeSql(file, [
+        "ALTER TABLE process RENAME COLUMN harness_session_id TO conversation",
+        "UPDATE meta SET value = '22' WHERE key = 'projection'",
+      ])
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+
+      const rebuilt = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+
+        return {
+          rows: yield* sql<{
+            sessionId: string
+            harnessSessionId: string | null
+          }>`SELECT session_id, harness_session_id FROM process`,
+          events: yield* sql<{ type: string; data: string }>`SELECT type, data FROM event ORDER BY position`,
+        }
+      }).pipe(Effect.provide(Platform.sqlite(file)))
+
+      assert.strictEqual(rebuilt.rows.find((row) => row.sessionId === ids.reported)?.harnessSessionId, "conv-known")
+      assert.strictEqual(rebuilt.rows.find((row) => row.sessionId === ids.quiet)?.harnessSessionId, null)
+      assert.deepStrictEqual(rebuilt.events, before)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
 
   const ledgerOf = (file: string) =>

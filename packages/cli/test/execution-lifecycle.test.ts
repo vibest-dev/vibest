@@ -300,7 +300,7 @@ describe("execution lifecycle", () => {
       assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 4, "reply A")))
       const afterAmbiguous = (yield* db.session.getSession(S))!
       assert.strictEqual(afterAmbiguous.status, "idle")
-      assert.strictEqual(afterAmbiguous.process?.conversation, "conv-ambig")
+      assert.strictEqual(afterAmbiguous.process?.harnessSessionId, "conv-ambig")
       assert.strictEqual(
         (yield* sql<{
           n: number
@@ -343,7 +343,7 @@ describe("execution lifecycle", () => {
         )
         const unowned = (yield* db.session.getSession(S))!
         assert.strictEqual(unowned.status, "idle")
-        assert.strictEqual(unowned.process?.conversation, "conv-unowned")
+        assert.strictEqual(unowned.process?.harnessSessionId, "conv-unowned")
         assert.strictEqual(
           (yield* sql<{
             n: number
@@ -359,7 +359,7 @@ describe("execution lifecycle", () => {
         )
         const settled = (yield* db.session.getSession(S))!
         assert.strictEqual(settled.status, "idle")
-        assert.strictEqual(settled.process?.conversation, "conv-sole")
+        assert.strictEqual(settled.process?.harnessSessionId, "conv-sole")
 
         const [row] = yield* sql<{
           id: number
@@ -385,7 +385,7 @@ describe("execution lifecycle", () => {
         )
         const settledSecond = (yield* db.session.getSession(S))!
         assert.strictEqual(settledSecond.status, "idle")
-        assert.strictEqual(settledSecond.process?.conversation, "conv-2")
+        assert.strictEqual(settledSecond.process?.harnessSessionId, "conv-2")
 
         const [secondRow] = yield* sql<{
           id: number
@@ -531,11 +531,11 @@ describe("execution lifecycle", () => {
 
         assert.deepStrictEqual(catalog, [{ catalog: String(CATALOG_VERSION), applied: 1 }])
 
-        const conversation = yield* read<{ conversation: string | null }>(
-          `SELECT conversation FROM process WHERE session_id = '${S}' AND id = 2`,
+        const conversation = yield* read<{ harnessSessionId: string | null }>(
+          `SELECT harness_session_id FROM process WHERE session_id = '${S}' AND id = 2`,
         )
 
-        assert.strictEqual(conversation[0]?.conversation, "conv-1")
+        assert.strictEqual(conversation[0]?.harnessSessionId, "conv-1")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

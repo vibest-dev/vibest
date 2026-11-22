@@ -85,7 +85,7 @@ const move = (harness: "claude" | "pi"): Check => ({
           terminal: string
         }>(
           w,
-          `SELECT p.session_id AS session, p.pid, p.ready_at AS ready, p.conversation, p.terminal FROM process p
+          `SELECT p.session_id AS session, p.pid, p.ready_at AS ready, p.harness_session_id AS conversation, p.terminal FROM process p
             JOIN project q ON q.entry_session_id = p.session_id
             WHERE p.ended_at IS NULL ORDER BY p.id DESC LIMIT 1`,
         )

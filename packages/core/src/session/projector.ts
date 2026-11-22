@@ -77,7 +77,7 @@ export const layer = Layer.effectDiscard(
         const { data } = fact
 
         return Effect.andThen(
-          sql`INSERT INTO process (id, session_id, harness, provider, model, routing, conversation, runtime, terminal,
+          sql`INSERT INTO process (id, session_id, harness, provider, model, routing, harness_session_id, runtime, terminal,
               pid, started_at, placed_at)
             VALUES (${fact.seq}, ${sessionIdOf(fact)}, ${data.harness}, ${data.provider ?? null}, ${data.model ?? null},
               ${data.routing === undefined ? null : JSON.stringify(data.routing)}, ${data.resume ?? null}, ${data.runtime},
@@ -117,7 +117,7 @@ export const layer = Layer.effectDiscard(
       ProcessConversation,
       active(
         (fact) =>
-          sql`UPDATE process SET conversation = ${fact.data.conversation}
+          sql`UPDATE process SET harness_session_id = ${fact.data.conversation}
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
       ),
     )

@@ -765,7 +765,7 @@ export class World {
 export const SESSIONS = `(SELECT s.id, s.project_id, s.agent AS agent_type, s.directory, s.created_at, s.ended_at,
     p.harness, p.provider,
     CASE WHEN p.id IS NULL THEN NULL ELSE json_object('kind', p.runtime, 'id', coalesce(p.terminal, '')) END AS runtime,
-    p.conversation AS harness_session_id, p.pid, p.integration_version AS version,
+    p.harness_session_id, p.pid, p.integration_version AS version,
     p.ended_at AS exited_at
   FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT max(id) FROM process WHERE session_id = s.id))`
 

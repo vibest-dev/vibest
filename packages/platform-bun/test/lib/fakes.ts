@@ -85,7 +85,7 @@ export const savedSession = (sessionId: string) =>
     if (projectId === undefined) return null
     const entry = yield* db.session.entryOf(projectId)
 
-    return entry?.id === sessionId ? (entry.process?.conversation ?? null) : null
+    return entry?.id === sessionId ? (entry.process?.harnessSessionId ?? null) : null
   })
 
 const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'

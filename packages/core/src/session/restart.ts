@@ -113,7 +113,7 @@ export const make = Effect.gen(function* () {
       const root =
         (yield* db.project.projectDirectory(entry.projectId)) || (yield* db.session.sessionDirectory(entry.id)) || ""
 
-      const savedId = entry.process?.conversation ?? null
+      const savedId = entry.process?.harnessSessionId ?? null
       const place = placedTerminal(entry)
 
       const command = yield* entryCommand({
@@ -258,7 +258,7 @@ export const make = Effect.gen(function* () {
 
       const plan = yield* launching(
         session,
-        (session.process?.conversation ?? null) !== null,
+        (session.process?.harnessSessionId ?? null) !== null,
         message === undefined ? undefined : { text: message, onHandover: Effect.void },
       )
 
@@ -281,7 +281,7 @@ export const make = Effect.gen(function* () {
         h: yield* routed(runtimeOf(session)),
         terminal: terminalOf(session),
         pid: pidOf(session),
-        harnessSessionId: session.process?.conversation ?? null,
+        harnessSessionId: session.process?.harnessSessionId ?? null,
         argv: againArgv(session, interrupted),
         liveNow: db.session.getSession(id).pipe(Effect.map(reportedOf)),
         hint: `; ${peekHint(id)}`,
@@ -314,7 +314,7 @@ export const make = Effect.gen(function* () {
         h,
         terminal: place.address,
         pid: pidOf(entry),
-        harnessSessionId: entry.process?.conversation ?? null,
+        harnessSessionId: entry.process?.harnessSessionId ?? null,
         argv: entryArgv(entry, interrupted),
         liveNow: Effect.gen(function* () {
           const row = yield* db.session.entryOf(projectId)
@@ -359,7 +359,7 @@ export const make = Effect.gen(function* () {
         integration: row.process?.integration ?? undefined,
         runtime: runtimeOf(row),
         pid: pidOf(row),
-        harnessSessionId: row.process?.conversation ?? null,
+        harnessSessionId: row.process?.harnessSessionId ?? null,
         working: Effect.succeed<boolean | undefined>(executionStateOf(row) === "open"),
       }))
 
@@ -372,7 +372,7 @@ export const make = Effect.gen(function* () {
         integration: entry.process?.integration ?? undefined,
         runtime: placedTerminal(entry)?.runtime,
         pid: pidOf(entry),
-        harnessSessionId: entry.process?.conversation ?? null,
+        harnessSessionId: entry.process?.harnessSessionId ?? null,
         working: entryRunning(entry).pipe(
           Effect.map((seen) => (seen === undefined ? undefined : stateOf(seen) === "working")),
         ),

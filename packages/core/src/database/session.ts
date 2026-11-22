@@ -90,7 +90,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       setStatus,
       entrySessionsAt,
       unusedId,
-      conversationOf,
       creatorOf,
       fromCurrentHarness,
       canResumeConversation,
@@ -494,17 +493,19 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     })
                 }
 
-                const { current, conversation } = yield* conversationOf(entryId)
+                const current = yield* currentProcess(entryId)
 
                 if (current !== undefined && current.ended === null)
                   yield* endProcess(entryId, movingHere ? "move" : "exited", at)
 
+                const harnessSessionId = current?.harnessSessionId ?? null
+
                 const resume =
                   !fresh &&
                   current?.start.harness === harness &&
-                  conversation !== null &&
-                  (yield* canResumeConversation(entryId, conversation))
-                    ? conversation
+                  harnessSessionId !== null &&
+                  (yield* canResumeConversation(entryId, harnessSessionId))
+                    ? harnessSessionId
                     : undefined
 
                 const process = yield* startProcess(
@@ -654,13 +655,16 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       restartProcess: Effect.fn("Db.session.restartProcess")((id: string) =>
         tx(
           Effect.gen(function* () {
-            const { current, conversation } = yield* conversationOf(id)
+            const current = yield* currentProcess(id)
 
             if (current === undefined) return undefined
             yield* endProcess(id, "restart")
             const { resume: _, pid: __, ...start } = current.start
 
-            return yield* startProcess(id, { ...start, ...(conversation && { resume: conversation }) })
+            return yield* startProcess(id, {
+              ...start,
+              ...(current.harnessSessionId && { resume: current.harnessSessionId }),
+            })
           }),
         ).pipe(Effect.orDie),
       ),
@@ -907,7 +911,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             )
 
             const updateConversation =
-              end.conversation !== undefined && end.conversation !== current.conversation
+              end.conversation !== undefined && end.conversation !== current.harnessSessionId
                 ? session.noteConversation(id, end.conversation, process)
                 : Effect.void
 

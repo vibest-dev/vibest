@@ -33,7 +33,7 @@ export type Current = {
   readonly start: ProcessStart
   readonly ended: number | null
   readonly terminal: string | null
-  readonly conversation: string | null
+  readonly harnessSessionId: string | null
   readonly integration: Integration | undefined
   readonly readyAt: number | null
 }
@@ -49,7 +49,7 @@ type ProcessColumns = {
   readonly runtime: string
   readonly terminal: string | null
   readonly pid: number | null
-  readonly conversation: string | null
+  readonly harnessSessionId: string | null
   readonly integrationVersion: string | null
   readonly integrationProtocol: number | null
   readonly readyAt: number | null
@@ -76,7 +76,7 @@ const currentOf = (row: ProcessColumns): Current => ({
   },
   ended: row.endedAt,
   terminal: row.terminal,
-  conversation: row.conversation,
+  harnessSessionId: row.harnessSessionId,
   integration:
     row.integrationVersion === null || row.integrationProtocol === null
       ? undefined
@@ -84,7 +84,7 @@ const currentOf = (row: ProcessColumns): Current => ({
   readyAt: row.readyAt,
 })
 
-const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, conversation,
+const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, harness_session_id,
   integration_version, integration_protocol, ready_at, ended_at`
 
 export const statements = Effect.gen(function* () {
@@ -287,7 +287,7 @@ export const statements = Effect.gen(function* () {
       if (live !== undefined && live.terminal === null && start.terminal !== "" && sameChoice(live, start)) {
         yield* placeProcess(id, start.terminal, start.pid, at)
 
-        if (start.resume && start.resume !== live.conversation)
+        if (start.resume && start.resume !== live.harnessSessionId)
           yield* publish(ProcessConversation, {
             sessionId: id,
             ...stamp,
@@ -325,7 +325,7 @@ export const statements = Effect.gen(function* () {
       const live = yield* liveProcess(id)
 
       if (live !== undefined && live.terminal === null && sameChoice(live, start)) {
-        if (start.resume && start.resume !== live.conversation)
+        if (start.resume && start.resume !== live.harnessSessionId)
           yield* publish(ProcessConversation, { sessionId: id, data: { process: live.id, conversation: start.resume } })
 
         return live.id
@@ -364,7 +364,7 @@ export const statements = Effect.gen(function* () {
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
 
-      if (current === undefined || current.conversation === conversation) return false
+      if (current === undefined || current.harnessSessionId === conversation) return false
 
       if (process !== undefined && process !== current.id) return false
       yield* publish(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
@@ -548,14 +548,6 @@ export const statements = Effect.gen(function* () {
 
   const unusedId = newId(sessionPrefixTaken)
 
-  const conversationOf = (id: string) =>
-    currentProcess(id).pipe(
-      Effect.map((current) => ({
-        current,
-        conversation: current === undefined ? null : current.conversation,
-      })),
-    )
-
   const creatorOf = (id: string): Effect.Effect<Creator> =>
     sql<{ parent: string | null; peer: string | null; session: string | null }>`SELECT
         parent_session_id AS parent, origin_peer AS peer, origin_session AS session
@@ -639,11 +631,11 @@ export const statements = Effect.gen(function* () {
       EXISTS (
         SELECT 1 FROM execution t JOIN process p ON p.session_id = t.session_id AND p.id = t.process_id
         WHERE t.session_id = ${sessionId} AND (t.started_at IS NOT NULL OR t.outcome IS NOT NULL)
-          AND p.conversation = ${harnessSessionId}
+          AND p.harness_session_id = ${harnessSessionId}
       )
       OR (
         EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
-        AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND conversation = ${harnessSessionId})
+        AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND harness_session_id = ${harnessSessionId})
       )
     ) AS ok`.pipe(
       Effect.map((rows) => rows[0]?.ok === 1),
@@ -700,7 +692,6 @@ export const statements = Effect.gen(function* () {
     processesAt,
     lastSessionAt,
     unusedId,
-    conversationOf,
     creatorOf,
     nearestAlive,
     teamOwner,

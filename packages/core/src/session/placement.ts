@@ -139,7 +139,7 @@ export const make = Effect.gen(function* () {
     const system = yield* systemPromptOf(session)
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const pluginDir = yield* harness.plugin(adapter.id)
-    const id = session.process?.conversation ?? null
+    const id = session.process?.harnessSessionId ?? null
     const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
     const env = { ...vibestEnv(session), ...(yield* cliEnv(vibest, adapter.id)) }
 

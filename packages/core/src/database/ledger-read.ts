@@ -37,7 +37,7 @@ export type SessionColumns = {
   readonly pid: number | null
   readonly integrationVersion: string | null
   readonly integrationProtocol: number | null
-  readonly conversation: string | null
+  readonly harnessSessionId: string | null
   readonly placedAt: number | null
   readonly readyAt: number | null
   readonly pEnded: number | null
@@ -85,7 +85,7 @@ const processOf = (row: SessionColumns, integration: Integration | undefined) =>
         machine: LOCAL_MACHINE,
         terminal: row.terminal,
         pid: row.pid,
-        conversation: row.conversation,
+        harnessSessionId: row.harnessSessionId,
         placedAt: row.placedAt,
         readyAt: row.readyAt,
         endedAt: row.pEnded,
@@ -139,7 +139,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         s.created_at, s.ended_at, s.active_at, s.parent_session_id AS parent,
         EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id) AS entry,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
-        p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
+        p.integration_version, p.integration_protocol, p.harness_session_id, p.placed_at, p.ready_at,
         p.ended_at AS p_ended, p.end_reason AS p_end_reason,
         o.id AS o_id, o.process_id AS o_process, o.booked_at AS o_booked, o.started_at AS o_at,
         l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,

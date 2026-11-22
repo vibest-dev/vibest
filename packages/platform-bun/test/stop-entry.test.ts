@@ -241,7 +241,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
       const row = (yield* s.db.session.entryOf(s.projectId))!
       assert.strictEqual(terminalOf(row)?.id, s.paneId)
-      assert.strictEqual(row.process?.conversation ?? null, "conversation-1")
+      assert.strictEqual(row.process?.harnessSessionId ?? null, "conversation-1")
       assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))

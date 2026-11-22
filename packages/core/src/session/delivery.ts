@@ -232,7 +232,7 @@ export const make = Effect.gen(function* () {
 
       if ((yield* db.inbox.pendingInbox(id)).length === 0) return
 
-      if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && !(session.process?.conversation ?? null))
+      if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && !(session.process?.harnessSessionId ?? null))
         return yield* new NoSuchSession({
           id,
           message: `${id} exited before the runtime reported its session id; spawn a new session`,
