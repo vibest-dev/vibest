@@ -294,7 +294,8 @@ end, for example): it neither closes that execution nor opens another, and its r
 execution they decided about is still open, so an end the harness reported first is the one that stands.
 
 Changing the catalog: the catalog holds only the types and keys vibestd writes now. Adding an optional key raises
-`CATALOG_VERSION` by one; a file of the older catalog then opens as it is. A type or key that changes meaning or
+`CATALOG_VERSION` by one; a file of the older catalog then opens as it is. Inbox v1 is migration `20261121000000_inbox_v1`, before `20261122000000_execution_lifecycle`. It rewrites inbox facts only and does not read or rewrite execution events. The catalog number is `CATALOG_VERSION` in the schema, not a number chosen inside the migration.
+A type or key that changes meaning or
 structure, or is no longer written, is retired: it leaves the catalog, no old definition stays in the catalog and no
 projector reads one, and a ledger migration (below) rewrites the facts of the old shape in place. Changing the read model (a column, table,
 index or projector rule) raises `PROJECTION_VERSION` instead; a database with another projection version is rebuilt by replaying

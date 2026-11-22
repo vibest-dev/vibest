@@ -180,6 +180,7 @@ export const InboxDropped = fact("inbox.dropped", "session", {
 export const InboxUnresolved = fact("inbox.unresolved", "session", {
   history: InboxHistory,
   messageId: optional(Seq),
+  execution: optional(Seq),
   sender: optional(Sender),
   content: optional(Schema.String),
   senderExecutionId: optional(Seq),
@@ -245,7 +246,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 8
+export const CATALOG_VERSION = 9
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

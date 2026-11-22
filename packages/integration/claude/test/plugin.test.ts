@@ -254,7 +254,12 @@ describe("Claude plugin inbox", () => {
     assert.deepStrictEqual(h.submitted, [first])
     const own = await h.prompt(first, ownSubmit)
     assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
-    assert.deepStrictEqual(h.requests.at(-1)!.body, { hook_event_name: "PromptSubmit", origin: "vibest", execution: 1 })
+    assert.deepStrictEqual(h.requests.at(-1)!.body, {
+      hook_event_name: "PromptSubmit",
+      origin: "vibest",
+      execution: 1,
+      ids: [1],
+    })
     await h.tick()
     assert.lengthOf(
       h.requests.filter((r) => r.url.endsWith("/take")),

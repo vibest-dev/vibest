@@ -273,6 +273,16 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         { execution },
       )
 
+    const confirmBatch = (sessionId: string, execution: number, ids: ReadonlyArray<number>) =>
+      ids.length === 0
+        ? Effect.void
+        : moveInbox(
+            sql`session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+              AND ${sql.in("id", ids)}`,
+            "delivered",
+            { execution },
+          )
+
     const confirmTask = (sessionId: string, execution: number) =>
       moveInbox(
         sql`session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
@@ -311,6 +321,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       moveInbox,
       queueInbox,
       confirm,
+      confirmBatch,
       confirmTask,
       dropUnsent,
       linkTask,
@@ -339,6 +350,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       findSend,
       moveInbox,
       confirm,
+      confirmBatch,
       confirmTask,
       dropUnsent,
       queueSend,
@@ -451,6 +463,11 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
       confirm: Effect.fn("Db.inbox.confirm")((sessionId: string, execution: number) =>
         confirm(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      confirmBatch: Effect.fn("Db.inbox.confirmBatch")(
+        (sessionId: string, execution: number, ids: ReadonlyArray<number>) =>
+          confirmBatch(sessionId, execution, ids).pipe(Effect.asVoid, Effect.orDie),
       ),
 
       confirmTask: Effect.fn("Db.inbox.confirmTask")((sessionId: string, execution: number) =>

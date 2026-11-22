@@ -225,7 +225,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "a reply after a start report before a refused prompt is delivered, and the batch stays delivered",
+    "a start report while a write is still in flight does not deliver that batch",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -248,7 +248,7 @@ describe.concurrent("Session", () => {
         yield* sql<{
           status: string
         }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
-        [{ status: "delivered" }],
+        [{ status: "delivering" }],
       )
       assert.include(yield* replyOf(id), "landed")
       assert.isUndefined(

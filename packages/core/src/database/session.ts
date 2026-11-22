@@ -750,14 +750,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       acceptExecution: Effect.fn("Db.session.acceptExecution")((id: string, execution: number) =>
         tx(
           Effect.gen(function* () {
-            const accepted = yield* accept(id, execution)
-
-            const [placed] = yield* sql<{ ok: number }>`SELECT 1 AS ok FROM process
-              WHERE session_id = ${id} AND placed_at IS NOT NULL`
-
-            if (accepted && placed !== undefined) yield* inbox.confirmTask(id, execution)
-
-            return accepted
+            return yield* accept(id, execution)
           }),
         ).pipe(Effect.orDie),
       ),
@@ -863,7 +856,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (open === undefined) return
               yield* accept(id, open)
-              yield* inbox.confirm(id, open)
               yield* setStatus(id, "working")
             }),
           ).pipe(Effect.orDie),

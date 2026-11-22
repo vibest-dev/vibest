@@ -98,7 +98,9 @@ const make = Effect.gen(function* () {
       if (prompt.refused) return yield* sessions.typeTaken(who.id, prompt.execution)
 
       if (yield* db.session.acceptExecution(who.id, prompt.execution)) {
-        yield* db.inbox.confirm(who.id, prompt.execution)
+        if (prompt.ids !== undefined && prompt.ids.length > 0)
+          yield* db.inbox.confirmBatch(who.id, prompt.execution, prompt.ids)
+
         yield* db.session.setStatus(who.id, "working")
       }
 

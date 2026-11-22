@@ -820,7 +820,6 @@ export const expectReplied = async (w: World, sub: string) => {
     "execution.started",
     "inbox.delivery_started",
     "process.placed",
-    "inbox.delivered",
     "execution.ended",
   ])
 
@@ -830,7 +829,10 @@ export const expectReplied = async (w: World, sub: string) => {
     sub,
   )
 
-  expect(task?.status === "delivered" && task.execution !== null, `${sub}'s task row: ${JSON.stringify(task)}`)
+  expect(
+    task?.execution !== null && (task?.status === "delivered" || task?.status === "delivering"),
+    `${sub}'s task row: ${JSON.stringify(task)}`,
+  )
 
   const execution = row<{ status: string; reply: string | null }>(
     w,

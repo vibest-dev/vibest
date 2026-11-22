@@ -67,7 +67,10 @@ export interface HarnessDefinition {
   readonly executionEnd?: (event: HarnessEvent) => { readonly end: Schema.JsonObject } | undefined
   readonly userPrompt?: (
     event: HarnessEvent,
-  ) => { readonly text: string } | { readonly execution: number; readonly refused?: true } | undefined
+  ) =>
+    | { readonly text: string }
+    | { readonly execution: number; readonly refused?: true; readonly ids?: ReadonlyArray<number> }
+    | undefined
   readonly conversationOf?: (event: HarnessEvent) => string | undefined
 }
 

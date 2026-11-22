@@ -35,12 +35,17 @@ export const PI: HarnessDefinition = {
     event.type !== "agent_settled"
       ? undefined
       : { end: { text: Predicate.isString(event.text) ? event.text : "", error: "", aborted: false } },
-  userPrompt: (event) =>
-    event.type === "accepted" && Predicate.isNumber(event.execution)
-      ? { execution: event.execution }
-      : event.type !== "input" || !Predicate.isString(event.text) || event.text.trim() === ""
-        ? undefined
-        : { text: event.text },
+  userPrompt: (event) => {
+    if (event.type === "accepted" && Predicate.isNumber(event.execution)) {
+      const ids = Array.isArray(event.ids) ? event.ids.filter(Predicate.isNumber) : []
+
+      return ids.length > 0 ? { execution: event.execution, ids } : { execution: event.execution }
+    }
+
+    return event.type !== "input" || !Predicate.isString(event.text) || event.text.trim() === ""
+      ? undefined
+      : { text: event.text }
+  },
 }
 
 const noProvider = (harness: string) => (provider: string | null) =>

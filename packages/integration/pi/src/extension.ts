@@ -36,7 +36,9 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const decodeRefusal = Schema.decodeUnknownOption(Schema.String)
 
-const decodeVibestDetails = Schema.decodeUnknownOption(Schema.Struct({ execution: Schema.Number }))
+const decodeVibestDetails = Schema.decodeUnknownOption(
+  Schema.Struct({ execution: Schema.Number, ids: Schema.optional(Schema.Array(Schema.Number)) }),
+)
 
 const guarded = (sessionId: string) =>
   Effect.gen(function* () {
@@ -103,8 +105,15 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
           const details = decodeVibestDetails(message.details)
 
           if (Option.isNone(details)) return
+
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
-          const event = encodeJson({ type: "accepted", execution: details.value.execution })
+
+          const event = encodeJson({
+            type: "accepted",
+            execution: details.value.execution,
+            ...(details.value.ids !== undefined && { ids: details.value.ids }),
+          })
+
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
         }),
       )
@@ -212,7 +221,7 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
               customType: "vibest",
               content: taken.content,
               display: true,
-              details: { execution: taken.execution, detail: taken.detail },
+              details: { execution: taken.execution, ids: taken.ids, detail: taken.detail },
             },
             { triggerTurn: true },
           )

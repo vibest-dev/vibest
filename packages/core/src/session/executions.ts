@@ -23,6 +23,8 @@ import { SessionLive } from "./live.ts"
 
 export * as Executions from "./executions.ts"
 
+export const HANDOFF_UNPROVED = "unproved"
+
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const STOP_WAIT = Duration.seconds(10)
@@ -215,6 +217,7 @@ export const make = Effect.gen(function* () {
 
     if (!begun.opened) return undefined
     const execution = begun.execution
+    const already = yield* db.session.executionWasAccepted(session.id, execution)
 
     const standing = Effect.map(db.session.openExecution(session.id), (now) =>
       now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
@@ -241,6 +244,8 @@ export const make = Effect.gen(function* () {
       Effect.as(false),
       Effect.catchTag("RuntimeError", (error) =>
         Effect.gen(function* () {
+          if (already) return false
+
           const after = yield* standing
 
           if (after === "closed" || error.code === "unreachable" || after === "busy") return yield* Effect.fail(error)
@@ -251,21 +256,23 @@ export const make = Effect.gen(function* () {
       ),
     )
 
+    if (already && delivered === false) return HANDOFF_UNPROVED
+
     if (delivered) return undefined
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
     const confirm = confirmed(h, session, terminal, execution, subscription)
 
-    if (yield* confirm) return undefined
+    if (yield* confirm) return already ? HANDOFF_UNPROVED : undefined
 
     if (yield* settledElsewhere) return undefined
     yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
 
-    if (yield* confirm) return undefined
+    if (yield* confirm) return already ? HANDOFF_UNPROVED : undefined
 
     if (yield* settledElsewhere) return undefined
     yield* send.pipe(Effect.ignore)
 
-    if (yield* confirm) return undefined
+    if (yield* confirm) return already ? HANDOFF_UNPROVED : undefined
 
     if (yield* settledElsewhere) return undefined
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)

@@ -1,6 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
+import { Db } from "@vibest/core/database/db"
 import { checkLedger, open } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
+import { SessionLive } from "@vibest/core/session/live"
 import { tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { database } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { Effect, Exit, FileSystem, Layer, Path } from "effect"
@@ -94,150 +97,168 @@ const read = <A extends object>(
 ) => Effect.flatMap(SqlClient.SqlClient, query).pipe(Effect.provide(Platform.sqlite(file)))
 
 describe("ledger migration 20261121000000_inbox_v1", () => {
-  it.effect(
-    "confirms a handoff only when the recipient execution was accepted or finished, and import-check does not change the file",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const file = yield* oldLedger
-        const before = yield* fs.readFile(file)
+  it.effect("keeps an old requeue and its seq, and does not turn an execution id into delivery", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const file = yield* oldLedger
+      const before = yield* fs.readFile(file)
 
-        const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
-          Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
-        )
+      const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
+        Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
+      )
 
-        const checked = yield* Effect.exit(
-          checkLedger(stored).pipe(
-            Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))),
-          ),
-        )
+      const checked = yield* Effect.exit(
+        checkLedger(stored).pipe(
+          Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))),
+        ),
+      )
 
-        assert.isTrue(Exit.isSuccess(checked), String(checked))
-        assert.deepStrictEqual(yield* fs.readFile(file), before)
+      assert.isTrue(Exit.isSuccess(checked), String(checked))
+      assert.deepStrictEqual(yield* fs.readFile(file), before)
 
-        yield* open().pipe(Effect.provide(runner(file)))
+      yield* open().pipe(Effect.provide(runner(file)))
 
-        const events = yield* read<{ seq: number; type: string; data: string }>(
+      const events = yield* read<{ seq: number; type: string; data: string }>(
+        file,
+        (sql) => sql`SELECT seq, type, data FROM event WHERE aggregate = ${B} AND type LIKE 'inbox.%' ORDER BY seq`,
+      )
+
+      assert.deepStrictEqual(
+        events.map((row) => [row.seq, row.type, JSON.parse(row.data)]),
+        [
+          [2, "inbox.enqueued", { sender: agent, content: "review", requestId: "run-1" }],
+          [4, "inbox.unresolved", { history: "unconfirmed", messageId: 2, execution: 3 }],
+          [5, "inbox.enqueued", { sender: agent, content: "later", senderExecutionId: 2, requestId: "s-1" }],
+          [6, "inbox.delivery_started", { messageId: 5 }],
+          [7, "inbox.enqueued", { sender: agent, content: "no execution" }],
+          [8, "inbox.unresolved", { history: "delivered_without_execution", messageId: 7 }],
+          [9, "inbox.enqueued", { sender: agent, content: "broke" }],
+          [10, "inbox.unresolved", { history: "failed_unspecified", messageId: 9 }],
+          [11, "inbox.enqueued", { sender: agent, content: "waiting" }],
+          [12, "inbox.dropped", { messageId: 11, reason: "unrecorded" }],
+          [
+            13,
+            "inbox.unresolved",
+            { history: "route", sender: agent, content: "routed", transferId: "item-1", requestId: "route-1" },
+          ],
+          [15, "inbox.enqueued", { sender: agent, content: "booked" }],
+          [16, "inbox.unresolved", { history: "unconfirmed", messageId: 15, execution: 99 }],
+        ],
+      )
+      assert.deepStrictEqual(
+        yield* read(
           file,
-          (sql) => sql`SELECT seq, type, data FROM event WHERE aggregate = ${B} AND type LIKE 'inbox.%' ORDER BY seq`,
-        )
-
-        assert.deepStrictEqual(
-          events.map((row) => [row.seq, row.type, JSON.parse(row.data)]),
-          [
-            [2, "inbox.enqueued", { sender: agent, content: "review", requestId: "run-1" }],
-            [4, "inbox.delivered", { messageId: 2, recipientExecutionId: 3 }],
-            [5, "inbox.enqueued", { sender: agent, content: "later", senderExecutionId: 2, requestId: "s-1" }],
-            [6, "inbox.delivery_started", { messageId: 5 }],
-            [7, "inbox.enqueued", { sender: agent, content: "no execution" }],
-            [8, "inbox.unresolved", { history: "delivered_without_execution", messageId: 7 }],
-            [9, "inbox.enqueued", { sender: agent, content: "broke" }],
-            [10, "inbox.unresolved", { history: "failed_unspecified", messageId: 9 }],
-            [11, "inbox.enqueued", { sender: agent, content: "waiting" }],
-            [12, "inbox.dropped", { messageId: 11, reason: "unrecorded" }],
-            [
-              13,
-              "inbox.unresolved",
-              { history: "route", sender: agent, content: "routed", transferId: "item-1", requestId: "route-1" },
-            ],
-            [15, "inbox.enqueued", { sender: agent, content: "booked" }],
-            [16, "inbox.delivery_started", { messageId: 15, execution: 99 }],
-          ],
-        )
-        assert.deepStrictEqual(
-          yield* read(
-            file,
-            (sql) =>
-              sql`SELECT id, status, request, transfer_id, sender_execution_id, recipient_execution_id
+          (sql) =>
+            sql`SELECT id, status, request, transfer_id, sender_execution_id, recipient_execution_id
                 FROM inbox WHERE session_id = ${B} ORDER BY id`,
+        ),
+        [
+          {
+            id: 2,
+            status: "unresolved",
+            request: "run-1",
+            transferId: null,
+            senderExecutionId: null,
+            recipientExecutionId: null,
+          },
+          {
+            id: 5,
+            status: "delivering",
+            request: "s-1",
+            transferId: null,
+            senderExecutionId: 2,
+            recipientExecutionId: null,
+          },
+          {
+            id: 7,
+            status: "unresolved",
+            request: null,
+            transferId: null,
+            senderExecutionId: null,
+            recipientExecutionId: null,
+          },
+          {
+            id: 9,
+            status: "unresolved",
+            request: null,
+            transferId: null,
+            senderExecutionId: null,
+            recipientExecutionId: null,
+          },
+          {
+            id: 11,
+            status: "dropped",
+            request: null,
+            transferId: null,
+            senderExecutionId: null,
+            recipientExecutionId: null,
+          },
+          {
+            id: 13,
+            status: "unresolved",
+            request: "route-1",
+            transferId: "item-1",
+            senderExecutionId: null,
+            recipientExecutionId: null,
+          },
+          {
+            id: 15,
+            status: "unresolved",
+            request: null,
+            transferId: null,
+            senderExecutionId: null,
+            recipientExecutionId: null,
+          },
+        ],
+      )
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, message_id FROM session WHERE id = ${B}`), [
+        { id: B, messageId: 2 },
+      ])
+      assert.deepStrictEqual(
+        yield* read(file, (sql) => sql`SELECT seq, type FROM event WHERE aggregate = ${R} AND seq = 5`),
+        [{ seq: 5, type: "inbox.unresolved" }],
+      )
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, status FROM inbox WHERE session_id = ${R}`), [
+        { id: 3, status: "pending" },
+      ])
+      assert.deepStrictEqual(
+        yield* read(file, (sql) => sql`SELECT max(seq) AS seq FROM event WHERE aggregate = ${R}`),
+        [{ seq: 5 }],
+      )
+
+      const next = yield* Effect.gen(function* () {
+        const db = yield* Db.Service
+
+        return yield* db.inbox.insertSend(R, "after the requeue", { type: "user" })
+      }).pipe(
+        Effect.provide(
+          Db.layer.pipe(
+            Layer.provide(Projectors.layer),
+            Layer.provide(Bus.layer),
+            Layer.provide(SessionLive.layer),
+            Layer.provideMerge(Platform.sqlite(file)),
           ),
-          [
-            {
-              id: 2,
-              status: "delivered",
-              request: "run-1",
-              transferId: null,
-              senderExecutionId: null,
-              recipientExecutionId: 3,
-            },
-            {
-              id: 5,
-              status: "delivering",
-              request: "s-1",
-              transferId: null,
-              senderExecutionId: 2,
-              recipientExecutionId: null,
-            },
-            {
-              id: 7,
-              status: "unresolved",
-              request: null,
-              transferId: null,
-              senderExecutionId: null,
-              recipientExecutionId: null,
-            },
-            {
-              id: 9,
-              status: "unresolved",
-              request: null,
-              transferId: null,
-              senderExecutionId: null,
-              recipientExecutionId: null,
-            },
-            {
-              id: 11,
-              status: "dropped",
-              request: null,
-              transferId: null,
-              senderExecutionId: null,
-              recipientExecutionId: null,
-            },
-            {
-              id: 13,
-              status: "unresolved",
-              request: "route-1",
-              transferId: "item-1",
-              senderExecutionId: null,
-              recipientExecutionId: null,
-            },
-            {
-              id: 15,
-              status: "delivering",
-              request: null,
-              transferId: null,
-              senderExecutionId: null,
-              recipientExecutionId: 99,
-            },
-          ],
-        )
-        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, message_id FROM session WHERE id = ${B}`), [
-          { id: B, messageId: 2 },
-        ])
-        assert.deepStrictEqual(
-          yield* read(file, (sql) => sql`SELECT seq, type FROM event WHERE aggregate = ${R} AND seq = 5`),
-          [{ seq: 5, type: "inbox.unresolved" }],
-        )
-        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, status FROM inbox WHERE session_id = ${R}`), [
-          { id: 3, status: "pending" },
-        ])
-        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${E}`), [
-          { messageId: null },
-        ])
-        assert.deepStrictEqual(
-          yield* read(file, (sql) => sql`SELECT id, status, recipient_execution_id FROM inbox WHERE session_id = ${E}`),
-          [{ id: 5, status: "delivering", recipientExecutionId: 6 }],
-        )
-        assert.deepStrictEqual(
-          yield* read(file, (sql) => sql`SELECT status, recipient_execution_id FROM inbox WHERE session_id = ${C}`),
-          [{ status: "delivering", recipientExecutionId: 3 }],
-        )
-        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${C}`), [
-          { messageId: 2 },
-        ])
-        assert.deepStrictEqual(
-          yield* read(file, (sql) => sql`SELECT id, sent FROM execution WHERE session_id = ${A}`),
-          [{ id: 2, sent: 1 }],
-        )
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+        ),
+      )
+
+      assert.strictEqual(next?.id, 6)
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${E}`), [
+        { messageId: null },
+      ])
+      assert.deepStrictEqual(
+        yield* read(file, (sql) => sql`SELECT id, status, recipient_execution_id FROM inbox WHERE session_id = ${E}`),
+        [{ id: 5, status: "unresolved", recipientExecutionId: null }],
+      )
+      assert.deepStrictEqual(
+        yield* read(file, (sql) => sql`SELECT status, recipient_execution_id FROM inbox WHERE session_id = ${C}`),
+        [{ status: "unresolved", recipientExecutionId: null }],
+      )
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${C}`), [
+        { messageId: 2 },
+      ])
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, sent FROM execution WHERE session_id = ${A}`), [
+        { id: 2, sent: 1 },
+      ])
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

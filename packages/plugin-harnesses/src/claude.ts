@@ -149,10 +149,16 @@ export const claude: Harness.HarnessDefinition = {
   userPrompt: (event) => {
     if (event.hook_event_name !== "PromptSubmit") return undefined
 
-    if (event.origin === "vibest")
-      return Predicate.isNumber(event.execution)
-        ? { execution: event.execution, ...(event.refused === true && { refused: true as const }) }
-        : undefined
+    if (event.origin === "vibest") {
+      if (!Predicate.isNumber(event.execution)) return undefined
+      const ids = Array.isArray(event.ids) ? event.ids.filter(Predicate.isNumber) : []
+
+      return {
+        execution: event.execution,
+        ...(event.refused === true && { refused: true as const }),
+        ...(ids.length > 0 && { ids }),
+      }
+    }
 
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
 

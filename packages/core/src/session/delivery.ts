@@ -30,7 +30,7 @@ import {
   stateOf,
   type Terminal,
 } from "../runtimes.ts"
-import { busy, Executions, STOP_WAIT } from "./executions.ts"
+import { busy, Executions, HANDOFF_UNPROVED, STOP_WAIT } from "./executions.ts"
 import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
@@ -81,7 +81,17 @@ export const make = Effect.gen(function* () {
       const first = yield* taskInput(session, task)
       const notStarted = yield* into(first.text, first.onHandover)
 
-      if (notStarted) yield* notice(session, notStarted)
+      if (notStarted === HANDOFF_UNPROVED) return
+
+      if (notStarted) {
+        yield* notice(session, notStarted)
+
+        return
+      }
+
+      const execution = yield* db.session.openExecution(session.id)
+
+      if (execution !== undefined) yield* db.inbox.confirmTask(session.id, execution)
 
       return
     }
@@ -110,17 +120,10 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((notStarted) => {
         const rows = batch.filter((r) => claimed.includes(r.id))
 
-        if (rows.length === 0 || notStarted || handedInto === undefined) return Effect.void
+        if (notStarted === HANDOFF_UNPROVED || notStarted || rows.length === 0 || handedInto === undefined)
+          return Effect.void
 
-        return db.session
-          .executionWasAccepted(session.id, handedInto)
-          .pipe(
-            Effect.flatMap((accepted) =>
-              accepted
-                ? db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
-                : Effect.void,
-            ),
-          )
+        return db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
       }),
       Effect.catchTags({
         RuntimeError: (e) => {

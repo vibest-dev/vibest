@@ -356,6 +356,7 @@ export function register(on: On) {
         hook_event_name: "PromptSubmit",
         origin: "vibest",
         execution: taken.execution,
+        ids: taken.ids,
       })
 
       if (event.text.trimEnd().endsWith(taken.content.trim())) return next(event)

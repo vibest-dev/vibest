@@ -152,7 +152,7 @@ test(
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivering" }])
     yield* integration.prompt(
       { id: entryId, entry: true, harness: "pulling-pi" },
-      JSON.stringify({ type: "accepted", execution: taken!.execution }),
+      JSON.stringify({ type: "accepted", execution: taken!.execution, ids: taken!.ids }),
     )
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivered" }])
   }),
