@@ -851,17 +851,19 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               {
                 outcome: end.status,
                 ...(failure !== undefined && { failure }),
+                ...(end.conversation !== undefined && { conversation: end.conversation }),
                 reply: end.reply,
               },
               end.at,
               process,
+              end.execution,
             )
 
             if (recorded === "unaccepted") return "unaccepted" as const
 
             if (recorded === undefined) return undefined
 
-            if (!recorded.current) return end.status
+            if (!recorded.wrote || !recorded.current) return end.status
 
             if (end.conversation !== undefined && end.conversation !== current.conversation)
               yield* session.noteConversation(id, end.conversation, process)

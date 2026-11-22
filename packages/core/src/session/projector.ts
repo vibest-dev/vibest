@@ -24,19 +24,9 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
-import { localSessionOf, senderColumns, senderKey } from "../database/db-rows.ts"
+import { senderColumns, senderKey } from "../database/db-rows.ts"
 
 const sessionIdOf = (fact: Fact) => fact.sessionId!
-
-export const countSent = (
-  sql: SqlClient.SqlClient,
-  session: string | undefined,
-  kind: string,
-  execution: number | undefined,
-) =>
-  session === undefined || kind !== "send" || execution === undefined
-    ? Effect.void
-    : sql`UPDATE execution SET sent = sent + 1 WHERE session_id = ${session} AND id = ${execution}`
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -69,11 +59,9 @@ export const layer = Layer.effectDiscard(
       SessionDirectoryChanged,
       (fact) => sql`UPDATE session SET directory = ${fact.data.directory} WHERE id = ${sessionIdOf(fact)}`,
     )
-    yield* bus.project(SessionEnded, (fact) =>
-      Effect.andThen(
-        sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
-        sql`DELETE FROM outbox WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
-      ),
+    yield* bus.project(
+      SessionEnded,
+      (fact) => sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
     )
 
     yield* bus.project(
@@ -234,9 +222,7 @@ export const layer = Layer.effectDiscard(
             sender_execution_id)
           VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
             ${sender.machine}, ${sender.plugin}, ${senderKey(data.sender)}, ${data.about ?? null}, ${data.kind}, ${data.content},
-            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${data.execution ?? null})`.pipe(
-          Effect.andThen(countSent(sql, localSessionOf(data.sender), data.kind, data.execution)),
-        )
+            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${data.execution ?? null})`
       }),
     )
     yield* bus.project(

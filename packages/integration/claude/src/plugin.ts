@@ -153,6 +153,7 @@ export function register(on: On) {
   let mismatched = false
   let timer: { cancel: () => void } | undefined
   let processId: string | undefined
+  let bound: number | undefined
 
   const identity = async (host: Host) => {
     const sessionId = await host.env("VIBEST_SESSION_ID")
@@ -328,12 +329,16 @@ export function register(on: On) {
       const who = await identity(host).catch(() => undefined)
       idle = true
 
+      const execution = bound
+      bound = undefined
+
       if (who)
         void report(host, hookRoute("claude", "execution-end"), {
           hook_event_name: "ExecutionComplete",
           session_id: await host.conversation().catch(() => ""),
           reason: event.reason,
           last_assistant_message: event.answer,
+          ...(execution !== undefined && { execution }),
           ...(event.reason === "refusal" && { refusal: event.refusal }),
         })
     }
@@ -352,6 +357,7 @@ export function register(on: On) {
       if (list?.length === 0) full.delete(event.text)
 
       if (taken === undefined) return next(event)
+      bound = taken.execution
       await report(host, hookRoute("claude", "prompt"), {
         hook_event_name: "PromptSubmit",
         origin: "vibest",

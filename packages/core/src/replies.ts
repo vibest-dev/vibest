@@ -93,6 +93,7 @@ export type ObservedEnd = {
   readonly windows?: ReadonlyArray<string> | undefined
   readonly conversation: string | undefined
   readonly needsReady: boolean
+  readonly execution?: number | undefined
 }
 
 export const executionEndOf = (adapter: HarnessDefinition, raw: string, at: number): ObservedEnd | undefined => {
@@ -131,5 +132,6 @@ export const executionEndFrom = (adapter: HarnessDefinition, payload: Schema.Jso
         ? conversation
         : undefined,
     needsReady: adapter.ready === "integration",
+    ...(Predicate.isNumber(payload.execution) && { execution: payload.execution }),
   }
 }

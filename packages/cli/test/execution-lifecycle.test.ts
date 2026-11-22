@@ -271,9 +271,8 @@ describe("execution lifecycle", () => {
       yield* db.session.archive(S)
       assert.strictEqual(yield* db.inbox.sentIn(S, again), 1)
       assert.strictEqual(
-        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM outbox WHERE session_id = ${S} AND acked_at IS NULL`)[0]
-          ?.n,
-        0,
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM outbox WHERE session_id = ${S} AND kind = 'send'`)[0]?.n,
+        1,
       )
     }).pipe(Effect.provide(memoryDb())),
   )

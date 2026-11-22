@@ -279,5 +279,6 @@ export const outboxRows = Effect.flatMap(
     sql<{
       peerId: string
       sessionId: string
-    }>`SELECT peer_id, session_id FROM outbox WHERE acked_at IS NULL ORDER BY created_at`,
+    }>`SELECT o.peer_id, o.session_id FROM outbox o LEFT JOIN session s ON s.id = o.session_id
+        WHERE o.acked_at IS NULL AND s.ended_at IS NULL ORDER BY o.created_at`,
 )

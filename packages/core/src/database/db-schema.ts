@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 19
+export const PROJECTION_VERSION = 20
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -188,7 +188,6 @@ export const PROJECTION_SCHEMA = [
     reply        TEXT,
     ended_at     INTEGER,
     owner        INTEGER NOT NULL DEFAULT 0,
-    sent         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE owner = 1`,

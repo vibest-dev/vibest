@@ -352,7 +352,7 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("session.ended keeps the first end time and drops the session's outbox", () =>
+  it.effect("session.ended keeps the first end time and stops offering the session's outbox", () =>
     Effect.gen(function* () {
       const { sql, bus } = yield* story
       yield* bus.transaction(
@@ -364,7 +364,15 @@ describe("projectors", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
         { endedAt: 700 },
       ])
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox WHERE acked_at IS NULL"), [])
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox WHERE acked_at IS NULL"), [{ id: ITEM_2 }])
+      assert.deepStrictEqual(
+        yield* rowsOf(
+          sql,
+          `SELECT o.id FROM outbox o JOIN session s ON s.id = o.session_id
+            WHERE o.acked_at IS NULL AND s.ended_at IS NULL`,
+        ),
+        [],
+      )
     }).pipe(Effect.provide(memory())),
   )
 

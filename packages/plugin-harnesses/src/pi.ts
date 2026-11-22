@@ -105,6 +105,7 @@ export const pi: Harness.HarnessDefinition = {
         text: Predicate.isString(event.text) ? event.text : "",
         error: error || (aborted ? "aborted" : ""),
         aborted,
+        ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
       },
     }
   },

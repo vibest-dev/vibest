@@ -92,6 +92,53 @@ describe("observed execution end", () => {
   )
 
   test(
+    "a finished execution's report does not change the successor, which its own report can still finish",
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { id, db, row } = yield* spawnWorking(yield* makeRepository, "claude")
+      const integration = yield* Integration.Service
+      const a = (yield* db.session.openExecution(id))!
+      const who = { id, entry: false, harness: "claude" as const, process: row.process?.id }
+
+      const report = (execution: number, reply: string) =>
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: reply,
+          execution,
+          conversation_id: "obsolete",
+        })
+
+      yield* integration.executionEnd(who, report(a, "reply A"))
+      const b = (yield* db.session.startExecution(id, yield* Clock.currentTimeMillis)).execution
+      yield* db.session.acceptExecution(id, b)
+      yield* db.session.setStatus(id, "working")
+      const before = yield* db.session.getSession(id)
+      const facts = (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id}`)[0]?.n
+      yield* integration.executionEnd(who, report(a, "reply A"))
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: "reply A",
+          conversation_id: "obsolete",
+        }),
+      )
+      assert.deepStrictEqual(yield* db.session.getSession(id), before)
+      assert.strictEqual(
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id}`)[0]?.n,
+        facts,
+      )
+      assert.deepStrictEqual(yield* db.session.openExecution(id), b)
+      yield* integration.executionEnd(who, report(b, "reply B"))
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
+      assert.strictEqual(yield* replyOf(id), "reply B")
+    }),
+    { hooked: ["claude"] },
+  )
+
+  test(
     "a hook end is written while check holds the session lock",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

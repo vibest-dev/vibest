@@ -242,7 +242,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         o.from_session, o.from_agent, o.from_title, o.from_machine, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
       FROM outbox o LEFT JOIN session s ON s.id = o.session_id
-      WHERE o.peer_id = ${peer} AND o.acked_at IS NULL AND o.seq > ${after} AND coalesce(o.recipient, s.origin_session) IS NOT NULL
+      WHERE o.peer_id = ${peer} AND o.acked_at IS NULL AND s.ended_at IS NULL AND o.seq > ${after}
+        AND coalesce(o.recipient, s.origin_session) IS NOT NULL
       ORDER BY o.seq LIMIT ${limit}`.pipe(
       Effect.map((rows) =>
         rows.map(({ fromSession, fromAgent, fromTitle, fromMachine, ...row }): OutboxRow => ({

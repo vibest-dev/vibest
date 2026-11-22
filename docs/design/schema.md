@@ -223,9 +223,9 @@ session, so a row is named by both.
   repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The
   unique index `inbox_request` backs it: a second row would fail its transaction.
 - A send from a local agent session names the execution it had open (`execution` on `inbox.queued` and
-  `outbox.queued`); each raises that execution's `sent`, which a plugin's `ctx.session` reads, also after the outbox
-  row is acknowledged. A send forwarded straight to a session on another machine (one this session started
-  there) writes no local fact and is not counted.
+  `outbox.queued`). `ctx.session.sentIn` counts those rows, including an outbox row whose session has since ended.
+  Ending a session does not delete the row; a peer is not offered rows for an ended session. A send forwarded
+  straight to a session on another machine (one this session started there) writes no local fact and is not counted.
 - An execution end writes no inbox row. The recipient of a `notice` is `parent_session_id` while it lives, then the entry
   session, then `origin_session` through the outbox; an undeliverable `send` notifies its sender.
 
@@ -280,14 +280,15 @@ before it, if any. Superseded processes are not exits: no reader counts them as 
 An `execution.succeeded` the harness reported carries its reply. A changed conversation id is a `process.conversation`,
 not an execution field. An execution vibestd gives up (`execution.unresolved`: `lost` or `not_started`) is not a
 confirmed result: it frees the one live slot, and a later report that names that execution still lands on it.
-`sent` on the execution row is only the projection of those send facts: local `inbox.queued` sends and
-`outbox.queued` sends. Archive deletes unacked outbox rows and does not change the count. A machine-addressed send is
-forwarded and records no execution, so it adds nothing. One row has `owner = 1`. A successor's `execution.started`
-clears the previous owner and does not invent its outcome. An end report with no execution id settles a session only
-when exactly one started execution is still without a result; two of those make the report ambiguous and it changes
-neither.
+There is no stored send count. `sentIn` counts the `inbox` and `outbox` send rows for that execution, so ending the
+session does not change it. A machine-addressed send is forwarded and records no execution, so it adds nothing. One
+row has `owner = 1`. A successor's `execution.started` clears the previous owner and does not invent its outcome. An
+end report that names an execution settles that execution only. A report with no execution id, the same reply as an execution this process already finished, and no new
+conversation id changes nothing, so that retry cannot close the successor. A different reply, or a different
+conversation id, still settles the one open execution. Cursor and agy cannot name the execution, so a retry whose
+reply and conversation are unchanged is all they can exclude.
 
-A reported end or start is written only for the session's current process: the harness's integration sends the
+A report that names an execution is written on that execution and leaves a successor and the session unchanged. A report that does not name one is written only for the session's current process: the harness's integration sends the
 process id vibestd started it as (`VIBEST_PROCESS`, or the one the ready report's answer gave after an in-place
 restart), and a report naming another process is dropped. A reported end is also written only for the harness the
 current process runs, and, for a harness whose integration reports ready, only after that process's ready report

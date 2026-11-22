@@ -418,7 +418,13 @@ export const statements = Effect.gen(function* () {
   const confirmedOutcome = (outcome: string | null) =>
     outcome === "completed" || outcome === "failed" || outcome === "interrupted"
 
-  const recordObservedEnd = (id: string, end: ExecutionEnd, at: number | undefined, process: number | undefined) =>
+  const recordObservedEnd = (
+    id: string,
+    end: ExecutionEnd,
+    at: number | undefined,
+    process: number | undefined,
+    executionId?: number,
+  ) =>
     Effect.gen(function* () {
       const rows = yield* sql<{
         id: number
@@ -434,28 +440,56 @@ export const statements = Effect.gen(function* () {
       const candidates = inScope.filter((row) => row.started !== null && !confirmedOutcome(row.outcome))
       const owner = rows.find((row) => row.owner === 1)
       const apply = (execution: number) => finishExecution(id, execution, end, at)
-      const recorded = (execution: number) => ({ id: execution, current: owner?.id === execution })
+
+      const recorded = (execution: number, wrote: boolean) => ({
+        id: execution,
+        current: owner?.id === execution,
+        wrote,
+      })
+
+      if (executionId !== undefined) {
+        const named = rows.find((row) => row.id === executionId)
+
+        if (named === undefined || confirmedOutcome(named.outcome))
+          return named === undefined ? undefined : recorded(named.id, false)
+
+        return recorded(named.id, yield* apply(named.id))
+      }
+
+      const reserved = inScope.filter((row) => row.started === null && row.outcome === null)
+
+      const replay = [...inScope]
+        .reverse()
+        .find((row) => confirmedOutcome(row.outcome) && row.reply === (end.reply ?? null))
+
+      const currentConversation =
+        process === undefined
+          ? undefined
+          : (yield* sql<{ conversation: string | null }>`SELECT conversation FROM process
+              WHERE session_id = ${id} AND id = ${process}`)[0]?.conversation
+
+      if (
+        replay !== undefined &&
+        (candidates.length > 0 || reserved.length > 0) &&
+        (end.conversation === undefined || end.conversation === currentConversation)
+      )
+        return recorded(replay.id, false)
 
       if (candidates.length > 1) return undefined
 
       if (candidates.length === 1) {
         const candidate = candidates[0]!
 
-        if (!(yield* apply(candidate.id))) return recorded(candidate.id)
-
-        return recorded(candidate.id)
+        return recorded(candidate.id, yield* apply(candidate.id))
       }
-
-      const reserved = inScope.filter((row) => row.started === null && row.outcome === null)
 
       if (
         reserved.length === 1 &&
         (end.outcome === "completed" || end.outcome === "failed" || end.outcome === "interrupted")
       ) {
         const candidate = reserved[0]!
-        yield* apply(candidate.id)
 
-        return recorded(candidate.id)
+        return recorded(candidate.id, yield* apply(candidate.id))
       }
 
       if (reserved.length > 0) return "unaccepted" as const
@@ -464,13 +498,13 @@ export const statements = Effect.gen(function* () {
 
       const prior = [...inScope].reverse().find((row) => confirmedOutcome(row.outcome))
 
-      if (prior !== undefined && prior.reply === (end.reply ?? null)) return { id: prior.id, current: false }
+      if (prior !== undefined && prior.reply === (end.reply ?? null)) return recorded(prior.id, false)
 
       if (owner !== undefined || (process !== undefined && inScope.length === 0 && rows.length > 0)) return undefined
       const execution = yield* allocateExecution(id, at ?? (yield* now))
       yield* apply(execution)
 
-      return { id: execution, current: true }
+      return recorded(execution, true)
     })
 
   const setStatus = (id: string, status: AgentStatus) =>
