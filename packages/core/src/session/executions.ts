@@ -134,7 +134,7 @@ export const make = Effect.gen(function* () {
         Effect.map((picked) => (picked ? Option.some(true) : Option.none())),
       ),
       (event) =>
-        event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
+        event.type === "execution.started" && event.sessionId === session.id && event.data.executionId === execution
           ? Effect.succeed(Option.some(true))
           : event.type === "terminal.state" &&
               sameTerminal(event.terminal, terminal) &&
@@ -170,7 +170,11 @@ export const make = Effect.gen(function* () {
             sameTerminal(event.terminal, terminal) &&
             event.state !== "working" &&
             event.state !== "blocked") ||
-            (event.type === "execution.ended" && event.sessionId === session.id)
+            ((event.type === "execution.succeeded" ||
+              event.type === "execution.failed" ||
+              event.type === "execution.interrupted" ||
+              event.type === "execution.unresolved") &&
+              event.sessionId === session.id)
             ? Option.some(true)
             : Option.none(),
         ),

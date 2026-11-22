@@ -18,7 +18,19 @@ const observedEnd = (harness: string, payload: Schema.JsonObject) =>
     return executionEndFrom(adapter, payload, yield* Clock.currentTimeMillis)
   })
 
-const ends = (id: string) => eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.map((row) => row.data)))
+const ends = (id: string) =>
+  eventsOf(id).pipe(
+    Effect.map((rows) =>
+      rows.flatMap((row) =>
+        row.type === "execution.succeeded" ||
+        row.type === "execution.failed" ||
+        row.type === "execution.interrupted" ||
+        row.type === "execution.unresolved"
+          ? [row.data]
+          : [],
+      ),
+    ),
+  )
 
 describe("observed execution end", () => {
   test(
@@ -35,7 +47,7 @@ describe("observed execution end", () => {
       assert.strictEqual(yield* db.session.openExecution(id), execution)
       yield* db.session.acceptExecution(id, execution)
       yield* writeEnd(id, "pi", { text: "mine" })
-      assert.deepStrictEqual((yield* ends(id)).at(-1), { execution, outcome: "completed", reply: "mine" })
+      assert.deepStrictEqual((yield* ends(id)).at(-1), { executionId: execution, reply: "mine" })
     }),
     { hooked: ["pi"] },
   )

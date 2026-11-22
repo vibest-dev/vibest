@@ -158,7 +158,7 @@ const oldLedger = Effect.gen(function* () {
   yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [ledger] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
-    yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
+    yield* sql`DELETE FROM migration`
     yield* sql`UPDATE meta SET value = '2' WHERE key = 'catalog'`
 
     for (const [aggregate, seq, type, data] of catalog2(ledger!.value))
@@ -223,9 +223,18 @@ describe("ledger migration 20261119000000_one_sender", () => {
           "a retry of an acknowledged outbox send is one send; a pending relay is from the relaying session, not the author it wrapped",
         )
 
-        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT session_id, id, sent FROM execution`), [
-          { sessionId: S, id: 3, sent: 2 },
-        ])
+        assert.deepStrictEqual(
+          yield* read(
+            file,
+            (sql) => sql`SELECT session_id, id,
+              (SELECT count(*) FROM inbox WHERE sender_session_id = execution.session_id AND kind = 'send'
+                AND sender_execution_id = execution.id)
+              + (SELECT count(*) FROM outbox WHERE session_id = execution.session_id AND kind = 'send'
+                AND execution_id = execution.id) AS sent
+            FROM execution`,
+          ),
+          [{ sessionId: S, id: 3, sent: 2 }],
+        )
         assert.deepStrictEqual(
           yield* read(
             file,

@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
+import { ExecutionInterrupted, ExecutionSucceeded, ExecutionUnresolved, InboxQueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
 
@@ -364,8 +364,8 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
+  yield* reactor.on([ExecutionSucceeded, ExecutionInterrupted, ExecutionUnresolved], (event) =>
+    wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
   )
   yield* reactor.on([InboxQueued], (event) =>
     wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),

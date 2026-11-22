@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 17
+export const PROJECTION_VERSION = 18
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -180,14 +180,13 @@ export const PROJECTION_SCHEMA = [
     id           INTEGER NOT NULL,
     process_id   INTEGER,
     typed        TEXT,
-    started_at   INTEGER NOT NULL,
-    accepted_at  INTEGER,
+    booked_at    INTEGER NOT NULL,
+    started_at   INTEGER,
     outcome      TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),
     failure      TEXT,
     failure_kind TEXT CHECK (failure_kind IN ('limit')),
     reply        TEXT,
     ended_at     INTEGER,
-    sent         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL`,
@@ -208,6 +207,7 @@ export const PROJECTION_SCHEMA = [
     peer_item         TEXT,
     status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
     execution_id      INTEGER,
+    sender_execution_id INTEGER,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE INDEX inbox_status ON inbox (status, session_id)`,
@@ -241,6 +241,7 @@ export const PROJECTION_SCHEMA = [
     from_agent   TEXT,
     from_title   TEXT,
     from_machine TEXT,
+    execution_id INTEGER,
     created_at INTEGER NOT NULL,
     acked_at   INTEGER
   ) STRICT`,

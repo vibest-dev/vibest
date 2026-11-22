@@ -100,8 +100,10 @@ export const make = Effect.gen(function* () {
       const execution = yield* db.session.openExecution(id)
 
       if (working || execution !== undefined) {
+        let stopped = false
+
         if (working && h !== undefined && owned !== undefined) {
-          const stopped = yield* interruptAgent(h, session, owned)
+          stopped = yield* interruptAgent(h, session, owned)
           reasons.push(
             stopped
               ? "it was working: interrupted, then its terminal closed"
@@ -217,7 +219,12 @@ export const make = Effect.gen(function* () {
             message: `closing its terminal failed: ${failed.message}; it still runs`,
           })
 
-        if (execution !== undefined) yield* db.session.closeExecution(id, execution, "interrupted")
+        if (execution !== undefined && !interrupted)
+          yield* db.session.closeExecution(
+            id,
+            execution,
+            (yield* db.session.executionAccepted(id)) ? "lost" : "not_started",
+          )
         yield* db.session.stopProcess(id, by)
         yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
         const before = working ? interruptNote(interrupted) : ""

@@ -46,8 +46,8 @@ export type SessionColumns = {
   readonly pEndReason: string | null
   readonly oId: number | null
   readonly oProcess: number | null
+  readonly oBooked: number | null
   readonly oAt: number | null
-  readonly oAccepted: number | null
   readonly lId: number | null
   readonly lProcess: number | null
   readonly lOutcome: string | null
@@ -94,7 +94,7 @@ const processOf = (row: SessionColumns, integration: Integration | undefined) =>
       }
 
 const openExecutionOf = (row: SessionColumns) =>
-  row.oId === null ? null : { id: row.oId, process: row.oProcess, startedAt: row.oAt ?? 0, acceptedAt: row.oAccepted }
+  row.oId === null ? null : { id: row.oId, process: row.oProcess, bookedAt: row.oBooked ?? 0, startedAt: row.oAt }
 
 const lastExecutionOf = (row: SessionColumns) =>
   row.lId === null
@@ -141,7 +141,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
         p.ended_at AS p_ended, p.end_reason AS p_end_reason,
-        o.id AS o_id, o.process_id AS o_process, o.started_at AS o_at, o.accepted_at AS o_accepted,
+        o.id AS o_id, o.process_id AS o_process, o.booked_at AS o_booked, o.started_at AS o_at,
         l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,
         l.ended_at AS l_ended, l.reply AS l_reply, l.failure AS l_failure, l.failure_kind AS l_failure_kind
       FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id

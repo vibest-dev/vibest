@@ -347,7 +347,7 @@ const checks: ReadonlyArray<Check> = [
 
         const open = row<{ id: number; accepted: number | null }>(
           w,
-          "SELECT id, accepted_at AS accepted FROM execution WHERE session_id = ? AND outcome IS NULL",
+          "SELECT id, started_at AS accepted FROM execution WHERE session_id = ? AND outcome IS NULL",
           sub,
         )
 

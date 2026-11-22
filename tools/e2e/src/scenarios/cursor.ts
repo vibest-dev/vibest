@@ -457,7 +457,7 @@ const conversationAtStart: Check = {
         `the conversation was not recorded at the session start: ready ${JSON.stringify(ready)}, conversation ${JSON.stringify(noted)}`,
       )
       const conversation = (JSON.parse(noted[0]!.data) as { conversation: string }).conversation
-      await until("the first task taken", () => fact(id, "execution.accepted").length > 0, 60_000)
+      await until("the first task taken", () => fact(id, "execution.started").length > 0, 60_000)
       await closePane(id)
       expect(
         !c.executions(id).some((x) => x.outcome === "completed"),

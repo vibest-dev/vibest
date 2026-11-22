@@ -1,7 +1,12 @@
 import {
-  ExecutionAccepted,
-  ExecutionEnded,
+  ExecutionAllocated,
+  ExecutionFailed,
+  ExecutionInterrupted,
   ExecutionStarted,
+  ExecutionSucceeded,
+  ExecutionUnresolved,
+  type ExecutionFailure,
+  type ExecutionObservation,
   ProcessConversation,
   ProcessEnded,
   type ProcessEndReason,
@@ -155,33 +160,80 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => rows[0]?.id ?? undefined),
     )
 
-  const startExecution = (sessionId: string, at: number, typed?: string) =>
+  const nextExecutionId = (sessionId: string) =>
+    sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM execution WHERE session_id = ${sessionId}`.pipe(
+      Effect.map((rows) => rows[0]?.id ?? 1),
+    )
+
+  const executionOutcome = (sessionId: string, execution: number) =>
+    sql<{ outcome: string | null; started: number | null; booked: number; process: number | null }>`SELECT
+        outcome, started_at AS started, booked_at AS booked, process_id AS process FROM execution
+      WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]))
+
+  const releaseOtherProcess = (sessionId: string, at: number) =>
     Effect.gen(function* () {
       const process = yield* currentProcessId(sessionId)
 
-      const left = yield* sql<{ id: number }>`SELECT id FROM execution
+      const left = yield* sql<{ id: number; started: number | null }>`SELECT id, started_at AS started FROM execution
         WHERE session_id = ${sessionId} AND outcome IS NULL AND process_id IS NOT ${process ?? null}`
 
-      for (const { id } of left)
-        yield* publish(ExecutionEnded, { sessionId, at, data: { execution: id, outcome: "not_started" } })
-
-      return yield* publish(ExecutionStarted, {
-        sessionId,
-        at,
-        data: { ...(process !== undefined && { process }), ...(typed && { typed }) },
-      })
+      for (const row of left)
+        yield* publish(ExecutionUnresolved, {
+          sessionId,
+          at,
+          data: { executionId: row.id, observation: row.started === null ? "not_started" : "lost" },
+        })
     })
 
-  const acceptedAt = (id: string, execution: number) =>
-    sql<{ at: number | null }>`SELECT accepted_at AS at FROM execution
+  const allocateExecution = (sessionId: string, at: number, typed?: string) =>
+    Effect.gen(function* () {
+      yield* releaseOtherProcess(sessionId, at)
+      const executionId = yield* nextExecutionId(sessionId)
+      const process = yield* currentProcessId(sessionId)
+      yield* publish(ExecutionAllocated, {
+        sessionId,
+        at,
+        data: {
+          executionId,
+          ...(process !== undefined && { processId: process }),
+          ...(typed !== undefined && typed !== "" && { typed }),
+        },
+      })
+
+      return executionId
+    })
+
+  const startedAt = (id: string, execution: number) =>
+    sql<{ at: number | null }>`SELECT started_at AS at FROM execution
       WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
 
   const accept = (id: string, execution: number) =>
     Effect.gen(function* () {
       if ((yield* openExecution(id)) !== execution) return false
 
-      if ((yield* acceptedAt(id, execution)) === null)
-        yield* publish(ExecutionAccepted, { sessionId: id, data: { execution } })
+      if ((yield* startedAt(id, execution)) !== null) return true
+      const process = yield* currentProcessId(id)
+      yield* publish(ExecutionStarted, {
+        sessionId: id,
+        data: { executionId: execution, ...(process !== undefined && { processId: process }) },
+      })
+
+      return true
+    })
+
+  const finishable = (outcome: string | null | undefined) =>
+    outcome === undefined || outcome === null || outcome === "lost" || outcome === "not_started"
+
+  const releaseExecution = (sessionId: string, execution: number, observation: ExecutionObservation, at?: number) =>
+    Effect.gen(function* () {
+      const row = yield* executionOutcome(sessionId, execution)
+
+      if (row === undefined || row.outcome !== null) return false
+      yield* publish(ExecutionUnresolved, {
+        sessionId,
+        ...(at !== undefined && { at }),
+        data: { executionId: execution, observation },
+      })
 
       return true
     })
@@ -327,21 +379,97 @@ export const statements = Effect.gen(function* () {
       return true
     })
 
-  const endExecution = (id: string, end: ExecutionEnd, at?: number) =>
+  const finishExecution = (id: string, execution: number, end: ExecutionEnd, at?: number) =>
     Effect.gen(function* () {
-      const t = at ?? (yield* now)
-      const execution = (yield* openExecution(id)) ?? (yield* startExecution(id, t))
-      yield* publish(ExecutionEnded, {
-        sessionId: id,
-        at: t,
-        data: {
-          execution,
-          outcome: end.outcome,
-          ...(end.failure !== undefined && { failure: end.failure }),
-          ...(end.conversation !== undefined && { conversation: end.conversation }),
-          ...(end.reply !== undefined && { reply: end.reply }),
-        },
-      })
+      const row = yield* executionOutcome(id, execution)
+
+      if (row === undefined || !finishable(row.outcome)) return false
+      const stamp = at === undefined ? {} : { at }
+      const reply = end.reply
+
+      if (end.outcome === "completed")
+        yield* publish(ExecutionSucceeded, {
+          sessionId: id,
+          ...stamp,
+          data: { executionId: execution, ...(reply !== undefined && { reply }) },
+        })
+      else if (end.outcome === "failed") {
+        const failure: ExecutionFailure = end.failure ?? { message: "failed" }
+        yield* publish(ExecutionFailed, {
+          sessionId: id,
+          ...stamp,
+          data: { executionId: execution, failure, ...(reply !== undefined && { reply }) },
+        })
+      } else if (end.outcome === "interrupted")
+        yield* publish(ExecutionInterrupted, {
+          sessionId: id,
+          ...stamp,
+          data: {
+            executionId: execution,
+            ...(end.failure !== undefined && { reason: end.failure.message }),
+            ...(reply !== undefined && { reply }),
+          },
+        })
+      else {
+        const observation: ExecutionObservation = end.outcome === "not_started" ? "not_started" : "lost"
+        yield* publish(ExecutionUnresolved, {
+          sessionId: id,
+          ...stamp,
+          data: {
+            executionId: execution,
+            observation,
+            ...(end.failure !== undefined && { failure: end.failure }),
+            ...(reply !== undefined && { reply }),
+          },
+        })
+      }
+
+      return true
+    })
+
+  const recordObservedEnd = (id: string, end: ExecutionEnd, at: number | undefined, process: number | undefined) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{
+        id: number
+        booked: number
+        started: number | null
+        outcome: string | null
+        process: number | null
+      }>`SELECT id, booked_at AS booked, started_at AS started, outcome, process_id AS process FROM execution
+        WHERE session_id = ${id} ORDER BY id`
+
+      const live = rows.find((row) => row.outcome === null)
+      const sameProcess = (row: { readonly process: number | null }) => process === undefined || row.process === process
+
+      const prior = [...rows]
+        .reverse()
+        .find(
+          (row) =>
+            row !== live &&
+            sameProcess(row) &&
+            (row.outcome === "lost" || row.outcome === "not_started" || row.outcome === null),
+        )
+
+      const apply = (execution: number) => finishExecution(id, execution, end, at)
+
+      if (live !== undefined && live.started !== null && (at === undefined || at >= live.booked))
+        return (yield* apply(live.id)) ? live.id : undefined
+
+      if (live !== undefined && live.started === null) {
+        if (prior !== undefined && (at === undefined || at < live.booked))
+          return (yield* apply(prior.id)) ? prior.id : undefined
+
+        return "unaccepted" as const
+      }
+
+      if (live !== undefined && at !== undefined && at < live.booked && prior !== undefined)
+        return (yield* apply(prior.id)) ? prior.id : undefined
+
+      if (live === undefined && prior !== undefined) return (yield* apply(prior.id)) ? prior.id : undefined
+
+      if (end.outcome === "interrupted" || end.outcome === "lost" || end.outcome === "not_started") return undefined
+      const execution = yield* allocateExecution(id, at ?? (yield* now))
+      yield* apply(execution)
 
       return execution
     })
@@ -435,8 +563,11 @@ export const statements = Effect.gen(function* () {
     findEntrySessions,
     openExecution,
     workingExecutions,
-    startExecution,
-    acceptedAt,
+    allocateExecution,
+    startedAt,
+    releaseExecution,
+    finishExecution,
+    recordObservedEnd,
     accept,
     observable,
     isEntry,
@@ -449,7 +580,6 @@ export const statements = Effect.gen(function* () {
     labelOf,
     archive,
     noteConversation,
-    endExecution,
     setStatus,
     entrySessionsAt,
     processesAt,

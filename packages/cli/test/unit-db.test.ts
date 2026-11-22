@@ -364,7 +364,7 @@ describe("Db", () => {
         const working = (yield* db.session.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!
         assert.strictEqual(working.status, "working")
         assert.strictEqual(executionStateOf(working), "open")
-        assert.strictEqual(working.openExecution?.startedAt, 5)
+        assert.strictEqual(working.openExecution?.bookedAt, 5)
         yield* db.session.endExecution(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { outcome: "completed", failure: { message: "late" } },
@@ -476,13 +476,41 @@ describe("Db", () => {
 
       const execution = (id: string, at: number, end?: { at: number; outcome: string; reply?: string }) =>
         Effect.gen(function* () {
-          const start = yield* fact("execution.started", { sessionId: id, at, data: {} })
+          const [row] = yield* (yield* SqlClient.SqlClient)<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id
+            FROM execution WHERE session_id = ${id}`
+
+          const executionId = row?.id ?? 1
+          yield* fact("execution.allocated", { sessionId: id, at, data: { executionId } })
 
           if (end === undefined) return
-          yield* fact("execution.ended", {
+          const reply = end.reply === undefined ? {} : { reply: end.reply }
+
+          if (end.outcome === "completed") {
+            yield* fact("execution.succeeded", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+
+            return
+          }
+
+          if (end.outcome === "failed") {
+            yield* fact("execution.failed", {
+              sessionId: id,
+              at: end.at,
+              data: { executionId, failure: { message: "failed" }, ...reply },
+            })
+
+            return
+          }
+
+          if (end.outcome === "interrupted") {
+            yield* fact("execution.interrupted", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+
+            return
+          }
+
+          yield* fact("execution.unresolved", {
             sessionId: id,
             at: end.at,
-            data: { execution: start, outcome: end.outcome, ...(end.reply !== undefined && { reply: end.reply }) },
+            data: { executionId, observation: end.outcome, ...reply },
           })
         })
 

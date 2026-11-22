@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
+import { ExecutionFailed, InboxMoved, ProcessEnded } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
@@ -248,9 +248,7 @@ export const make = Effect.gen(function* () {
   const checkFailed = (id: string) =>
     Effect.forkIn(locked(id, true)(check(id)).pipe(logged(`check ${id}`)), scope).pipe(Effect.asVoid)
 
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void,
-  )
+  yield* reactor.on([ExecutionFailed], (event) => checkFailed(event.sessionId!))
   yield* reactor.on([InboxMoved], (event) =>
     event.data.to === "delivered"
       ? reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
