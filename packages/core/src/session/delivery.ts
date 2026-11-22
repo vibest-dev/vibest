@@ -79,7 +79,15 @@ export const make = Effect.gen(function* () {
 
     if (task !== undefined) {
       const first = yield* taskInput(session, task)
-      const notStarted = yield* into(first.text, first.onHandover)
+
+      const notStarted = yield* into(first.text, first.onHandover).pipe(
+        Effect.catchTag("HandoffRejected", (e) =>
+          db.inbox.inboxWithStatus(session.id, "delivering").pipe(
+            Effect.flatMap((rows) => undelivered(session, rows, e.message)),
+            Effect.as(undefined),
+          ),
+        ),
+      )
 
       if (notStarted === HANDOFF_UNPROVED) return
 
@@ -118,6 +126,11 @@ export const make = Effect.gen(function* () {
         return db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
       }),
       Effect.catchTags({
+        HandoffRejected: (e) => {
+          const rows = batch.filter((r) => claimed.includes(r.id))
+
+          return rows.length === 0 ? Effect.fail(e) : undelivered(session, rows, e.message)
+        },
         RuntimeError: (e) => {
           const rows = batch.filter((r) => claimed.includes(r.id))
 

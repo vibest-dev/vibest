@@ -813,4 +813,69 @@ describe.concurrent("Session", () => {
     }),
     { hooked: ["pi"] },
   )
+
+  test(
+    "a refusal before the text is written fails that batch even if another input was accepted",
+    Effect.gen(function* () {
+      const rt = yield* FakeRuntime
+      const integration = yield* Integration.Service
+      const sql = yield* SqlClient.SqlClient
+      const repo = yield* makeRepository
+      const { id, sessions, db, entryId } = yield* spawnWorking(repo, "cursor")
+      yield* writeEnd(id, "cursor", { text: "status: completed" })
+      yield* rt.endExecution(id)
+      yield* sessions.check(id)
+      yield* settled
+      const text = "PREHANDOFF-REFUSED"
+      const held = yield* rt.hold("send", id)
+      yield* sessions.send(id, text, { type: "agent", session: entryId }, "refusal")
+      yield* held.reached
+      const terminal = (yield* rt.terminalOf(id))!
+      const direct = "DIRECT unrelated concurrent input"
+      yield* rt.runtime.send(terminal, { text: direct })
+      yield* integration.prompt(
+        { id, entry: false, harness: "cursor", process: yield* db.session.currentProcessId(id) },
+        JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: direct }),
+      )
+      yield* held.release("failed")
+      yield* untilVirtual(sessions.inMemory, (memory) => memory.locks === 0)
+
+      const [row] = yield* sql<{ status: string }>`SELECT status FROM inbox
+        WHERE recipient_session_id = ${id} AND request_id = ${"refusal"}`.pipe(Effect.orDie)
+
+      const notices = yield* sql<{ recipient: string }>`SELECT recipient_session_id AS recipient FROM inbox
+        WHERE sender_type = 'vibest' AND instr(content, ${text}) > 0`.pipe(Effect.orDie)
+
+      const writes = yield* rt.callsTo("send")
+      assert.equal(writes.filter((call) => call.text?.includes(text)).length, 0)
+      assert.equal(row?.status, "failed")
+      assert.equal(notices.filter((notice) => notice.recipient === entryId).length, 1)
+    }),
+    { hooked: ["cursor"] },
+  )
+
+  test(
+    "a typed attempt that nothing picks up does not block the next send or type itself again",
+    Effect.gen(function* () {
+      const rt = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const { id, sessions } = yield* spawnWorking(repo, "cursor")
+      yield* writeEnd(id, "cursor", { text: "status: completed" })
+      yield* rt.endExecution(id)
+      yield* sessions.check(id)
+      yield* settled
+      yield* Ref.set(rt.skipPromptUpdates, 1)
+      yield* sessions.send(id, "FIRST AMBIGUOUS")
+      yield* until(rt.callsTo("send"), (calls) => calls.some((call) => call.text === "FIRST AMBIGUOUS"))
+      yield* sessions.send(id, "SECOND NEXT")
+      yield* TestClock.adjust("9 seconds")
+      yield* yieldToIo
+      yield* until(rt.callsTo("send"), (calls) => calls.some((call) => call.text === "SECOND NEXT"))
+      const writes = yield* rt.callsTo("send")
+      assert.equal(writes.filter((call) => call.text === "FIRST AMBIGUOUS").length, 1)
+      assert.equal(writes.filter((call) => call.keys?.includes("enter")).length, 0)
+      assert.equal(writes.filter((call) => call.text === "SECOND NEXT").length, 1)
+    }),
+    { hooked: ["cursor"] },
+  )
 })

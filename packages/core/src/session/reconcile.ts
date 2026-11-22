@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxDelivered, ProcessEnded } from "@vibest/schema/event"
+import { ExecutionEnded, InboxDelivered, InboxEnqueued, ProcessEnded } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
@@ -248,6 +248,22 @@ export const make = Effect.gen(function* () {
   )
   yield* reactor.on([InboxDelivered], (event) =>
     reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!)),
+  )
+  yield* reactor.on([InboxEnqueued], (event) =>
+    Effect.gen(function* () {
+      const id = event.sessionId!
+
+      if (id === undefined) return
+      const session = yield* db.session.getSession(id)
+
+      if (session === undefined || executionStateOf(session) !== "open" || (yield* db.session.executionTaken(id)))
+        return
+
+      if ((yield* db.inbox.pendingInbox(id)).length === 0) return
+
+      const left = Duration.toMillis(CONFIRM_TIMEOUT) - ((yield* Clock.currentTimeMillis) - executionStartedAt(session))
+      yield* reactor.arm(`miss:${id}`, Duration.millis(Math.max(left, 0)), checkSession(id))
+    }),
   )
   yield* reactor.on([TerminalState], (event) => onTerminal(event.processes, event.state === "working"))
   yield* reactor.on([TerminalExited], (event) => onTerminal(event.processes, false))

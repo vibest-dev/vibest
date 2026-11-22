@@ -1,6 +1,6 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
-import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule } from "effect"
+import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule, Schema } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
@@ -15,6 +15,7 @@ import {
   type AgentState,
   paneTail,
   type Runtime,
+  RuntimeError,
   stateOf,
   type Terminal,
   type AgentSeen,
@@ -24,6 +25,10 @@ import { SessionLive } from "./live.ts"
 export * as Executions from "./executions.ts"
 
 export const HANDOFF_UNPROVED = "unproved"
+
+export class HandoffRejected extends Schema.TaggedError<HandoffRejected>()("HandoffRejected", {
+  message: Schema.String,
+}) {}
 
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
@@ -196,15 +201,28 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(r.blockedNotified, false)
     yield* db.session.setStatus(session.id, state)
 
+    const missed = db.session.closeExecution(session.id, execution, "not_started")
+
+    const beforeText = (error: RuntimeError) =>
+      Effect.gen(function* () {
+        if (error.code === "unreachable") return yield* Effect.fail(error)
+
+        if (!(yield* db.session.executionWasAccepted(session.id, execution)) && (yield* standing) === "mine")
+          yield* missed
+
+        return yield* new HandoffRejected({ message: error.message })
+      })
+
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(
-        adapter.clearKeys === undefined ? Effect.void : h.send(terminal, { keys: [...adapter.clearKeys] }),
+        adapter.clearKeys === undefined
+          ? Effect.void
+          : h.send(terminal, { keys: [...adapter.clearKeys] }).pipe(Effect.catchTag("RuntimeError", beforeText)),
       ),
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
 
-    const missed = db.session.closeExecution(session.id, execution, "not_started")
     yield* send.pipe(
       Effect.catchTag("RuntimeError", (error) =>
         Effect.gen(function* () {
