@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 20
+export const PROJECTION_VERSION = 21
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -166,6 +166,7 @@ export const PROJECTION_SCHEMA = [
     integration_version  TEXT,
     integration_protocol INTEGER,
     conversation         TEXT,
+    conversation_at      INTEGER,
     started_at           INTEGER NOT NULL,
     placed_at            INTEGER,
     ready_at             INTEGER,

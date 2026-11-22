@@ -531,8 +531,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           }).pipe(Effect.orDie),
       ),
 
-      noteConversation: Effect.fn("Db.session.noteConversation")((id: string, conversation: string, process?: number) =>
-        tx(session.noteConversation(id, conversation, process)).pipe(Effect.orDie),
+      noteConversation: Effect.fn("Db.session.noteConversation")(
+        (id: string, conversation: string, process?: number, at?: number) =>
+          tx(session.noteConversation(id, conversation, process, at)).pipe(Effect.orDie),
       ),
 
       rename: Effect.fn("Db.session.rename")((id: string, name: string) =>
@@ -860,7 +861,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             )
 
             if (end.conversation !== undefined && end.conversation !== current.conversation)
-              yield* session.noteConversation(id, end.conversation, process)
+              yield* session.noteConversation(id, end.conversation, process, end.at)
 
             if (recorded === "unaccepted") return "unaccepted" as const
 

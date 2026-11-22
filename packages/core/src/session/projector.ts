@@ -71,11 +71,12 @@ export const layer = Layer.effectDiscard(
         const { data } = fact
 
         return Effect.andThen(
-          sql`INSERT INTO process (id, session_id, harness, provider, model, routing, conversation, runtime, terminal,
-              pid, started_at, placed_at)
+          sql`INSERT INTO process (id, session_id, harness, provider, model, routing, conversation, conversation_at,
+              runtime, terminal, pid, started_at, placed_at)
             VALUES (${fact.seq}, ${sessionIdOf(fact)}, ${data.harness}, ${data.provider ?? null}, ${data.model ?? null},
-              ${data.routing === undefined ? null : JSON.stringify(data.routing)}, ${data.resume ?? null}, ${data.runtime},
-              ${data.terminal ?? null}, ${data.pid ?? null}, ${fact.at}, ${data.terminal === undefined ? null : fact.at})`,
+              ${data.routing === undefined ? null : JSON.stringify(data.routing)}, ${data.resume ?? null},
+              ${data.resume === undefined ? null : fact.at}, ${data.runtime}, ${data.terminal ?? null},
+              ${data.pid ?? null}, ${fact.at}, ${data.terminal === undefined ? null : fact.at})`,
           sql`UPDATE session SET process_id = ${fact.seq} WHERE id = ${sessionIdOf(fact)}`,
         )
       }),
@@ -111,7 +112,11 @@ export const layer = Layer.effectDiscard(
       ProcessConversation,
       active(
         (fact) =>
-          sql`UPDATE process SET conversation = ${fact.data.conversation}
+          sql`UPDATE process SET
+              conversation = CASE WHEN conversation_at IS NULL OR conversation_at < ${fact.at}
+                THEN ${fact.data.conversation} ELSE conversation END,
+              conversation_at = CASE WHEN conversation_at IS NULL OR conversation_at < ${fact.at}
+                THEN ${fact.at} ELSE conversation_at END
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
       ),
     )

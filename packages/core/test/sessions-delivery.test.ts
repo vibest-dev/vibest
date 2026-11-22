@@ -414,8 +414,13 @@ describe.concurrent("Session", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-other")
+      yield* db.session.noteConversation(id, "c-123", current, 1)
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-other")
+      yield* TestClock.adjust("10 seconds")
       yield* herdr.updateAgent(id, (a) => ({ ...a, session: "h-9" }))
       yield* sessions.check(id)
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "h-9")
+      yield* db.session.noteConversation(id, "c-other", current, 1)
       assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "h-9")
     }),
   )

@@ -20,7 +20,7 @@ import {
 import { newId, sessionLabel } from "@vibest/schema/id"
 import { Routing } from "@vibest/schema/plugin"
 import { type AgentStatus, RuntimeAddress } from "@vibest/schema/session"
-import { Effect, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus } from "../bus.ts"
@@ -351,14 +351,24 @@ export const statements = Effect.gen(function* () {
       return true
     })
 
-  const noteConversation = (id: string, conversation: string, process?: number) =>
+  const noteConversation = (id: string, conversation: string, process?: number, at?: number) =>
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
 
       if (current === undefined || current.conversation === conversation) return false
 
       if (process !== undefined && process !== current.id) return false
-      yield* publish(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
+      const when = at ?? (yield* Clock.currentTimeMillis)
+
+      const [noted] = yield* sql<{ at: number | null }>`SELECT conversation_at AS at FROM process
+        WHERE session_id = ${id} AND id = ${current.id}`
+
+      if (noted?.at !== null && noted?.at !== undefined && when <= noted.at) return false
+      yield* publish(ProcessConversation, {
+        sessionId: id,
+        at: when,
+        data: { process: current.id, conversation },
+      })
 
       return true
     })
