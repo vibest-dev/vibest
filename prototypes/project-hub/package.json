@@ -1,0 +1,28 @@
+{
+  "name": "@vibest-prototype/project-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "dev": "bun --watch src/server.ts",
+    "build": "bun src/build-client.ts",
+    "cli": "bun src/cli.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.0",
+    "lucide-react": "^0.475.0",
+    "marked": "^15.0.7",
+    "mermaid": "^11.4.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.4",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "typescript": "^5.8.2"
+  }
+}
