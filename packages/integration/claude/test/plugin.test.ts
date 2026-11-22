@@ -267,6 +267,14 @@ describe("Claude plugin inbox", () => {
       "no take while the execution runs",
     )
     await h.executionComplete({ reason: "answer", answer: "done" })
+    await settle()
+    assert.deepStrictEqual(h.requests.filter((r) => r.url.endsWith("/execution-end")).at(-1)?.body, {
+      hook_event_name: "ExecutionComplete",
+      session_id: "c1",
+      reason: "answer",
+      last_assistant_message: "done",
+      execution: 1,
+    })
     await h.tick()
     await h.draw()
     assert.deepStrictEqual(h.submitted.at(-1), "Message from Vibest\nx")

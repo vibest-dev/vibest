@@ -1,4 +1,12 @@
-import { ExecutionAccepted, ExecutionEnded, InboxEnqueued, type Sender } from "@vibest/schema/event"
+import {
+  ExecutionFailed,
+  ExecutionInterrupted,
+  ExecutionStarted,
+  ExecutionSucceeded,
+  ExecutionUnresolved,
+  InboxEnqueued,
+  type Sender,
+} from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
@@ -68,14 +76,13 @@ export const layer = Layer.effect(
         for (const signal of (id === undefined ? undefined : waiting.get(id)) ?? []) Queue.offerUnsafe(signal, null)
       })
 
-    yield* reactor.on([ExecutionEnded], (event) =>
-      Effect.sync(() => handedOver.delete(handedKey(event.sessionId, event.data.execution))).pipe(
-        Effect.andThen(wake(event.sessionId)),
-      ),
+    const forgetHandover = (sessionId: string | undefined, execution: number) =>
+      Effect.sync(() => handedOver.delete(handedKey(sessionId, execution)))
+
+    yield* reactor.on([ExecutionSucceeded, ExecutionFailed, ExecutionInterrupted, ExecutionUnresolved], (event) =>
+      forgetHandover(event.sessionId, event.data.executionId).pipe(Effect.andThen(wake(event.sessionId))),
     )
-    yield* reactor.on([ExecutionAccepted], (event) =>
-      Effect.sync(() => void handedOver.delete(handedKey(event.sessionId, event.data.execution))),
-    )
+    yield* reactor.on([ExecutionStarted], (event) => forgetHandover(event.sessionId, event.data.executionId))
     yield* reactor.on([InboxEnqueued], (event) => wake(event.sessionId))
 
     const stream = (sessionId: string) =>

@@ -549,7 +549,7 @@ const checks: ReadonlyArray<Check> = [
         const accepted = () =>
           rows<{ n: number }>(
             w,
-            "SELECT count(*) AS n FROM execution WHERE session_id = ? AND accepted_at IS NOT NULL AND outcome IS NULL",
+            "SELECT count(*) AS n FROM execution WHERE session_id = ? AND started_at IS NOT NULL AND outcome IS NULL",
             id,
           )[0]?.n === 1
 

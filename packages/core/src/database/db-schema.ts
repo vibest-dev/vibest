@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 19
+export const PROJECTION_VERSION = 21
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -181,17 +181,17 @@ export const PROJECTION_SCHEMA = [
     id           INTEGER NOT NULL,
     process_id   INTEGER,
     typed        TEXT,
-    started_at   INTEGER NOT NULL,
-    accepted_at  INTEGER,
+    booked_at    INTEGER NOT NULL,
+    started_at   INTEGER,
     outcome      TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),
     failure      TEXT,
     failure_kind TEXT CHECK (failure_kind IN ('limit')),
     reply        TEXT,
     ended_at     INTEGER,
-    sent         INTEGER NOT NULL DEFAULT 0,
+    owner        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
-  `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL`,
+  `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE owner = 1`,
   `CREATE TABLE inbox (
     recipient_session_id        TEXT    NOT NULL,
     id                INTEGER NOT NULL,
@@ -201,13 +201,13 @@ export const PROJECTION_SCHEMA = [
     sender_title      TEXT,
     sender_machine    TEXT,
     sender_plugin     TEXT,
-    sender_key           TEXT    NOT NULL,
-    about_session_id     TEXT,
-    content              TEXT    NOT NULL,
-    request_id           TEXT,
-    transfer_id          TEXT,
-    status               TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped', 'unresolved')),
-    sender_execution_id  INTEGER,
+    sender_key             TEXT    NOT NULL,
+    about_session_id       TEXT,
+    content                TEXT    NOT NULL,
+    request_id             TEXT,
+    transfer_id            TEXT,
+    status                 TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped', 'unresolved')),
+    sender_execution_id    INTEGER,
     recipient_execution_id INTEGER,
     PRIMARY KEY (recipient_session_id, id)
   ) STRICT`,
@@ -241,6 +241,7 @@ export const PROJECTION_SCHEMA = [
     from_agent   TEXT,
     from_title   TEXT,
     from_machine TEXT,
+    execution_id INTEGER,
     created_at INTEGER NOT NULL,
     acked_at   INTEGER
   ) STRICT`,

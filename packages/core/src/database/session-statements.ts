@@ -1,7 +1,13 @@
 import {
-  ExecutionAccepted,
-  ExecutionEnded,
+  ExecutionAllocated,
+  ExecutionFailed,
+  ExecutionInput,
+  ExecutionInterrupted,
   ExecutionStarted,
+  ExecutionSucceeded,
+  ExecutionUnresolved,
+  type ExecutionFailure,
+  type ExecutionObservation,
   ProcessConversation,
   ProcessEnded,
   type ProcessEndReason,
@@ -14,7 +20,7 @@ import {
 import { newId, sessionLabel } from "@vibest/schema/id"
 import { Routing } from "@vibest/schema/plugin"
 import { type AgentStatus, RuntimeAddress } from "@vibest/schema/session"
-import { Clock, Effect, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus } from "../bus.ts"
@@ -88,7 +94,6 @@ export const statements = Effect.gen(function* () {
   const { publish, observe } = bus
   const afterCommitLive = (effect: Effect.Effect<void>) => bus.afterCommit(() => Effect.runSync(effect))
   const reads = ledgerReads(sql)
-  const now = Clock.currentTimeMillis
   const moving = new Set<string>()
 
   const remember = (row: Pick<SessionRow, "id" | "status" | "entry" | "endedAt">) =>
@@ -141,47 +146,78 @@ export const statements = Effect.gen(function* () {
     )
 
   const openExecution = (sessionId: string) =>
-    sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND outcome IS NULL`.pipe(
+    sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND owner = 1`.pipe(
       Effect.map((rows) => rows[0]?.id),
     )
 
   const workingExecutions = sql<{
     n: number
   }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
-      WHERE e.outcome IS NULL AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
+      WHERE e.owner = 1 AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
 
   const currentProcessId = (sessionId: string) =>
     sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
       Effect.map((rows) => rows[0]?.id ?? undefined),
     )
 
-  const startExecution = (sessionId: string, at: number, typed?: string) =>
+  const nextExecutionId = (sessionId: string) =>
+    sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM execution WHERE session_id = ${sessionId}`.pipe(
+      Effect.map((rows) => rows[0]?.id ?? 1),
+    )
+
+  const executionOutcome = (sessionId: string, execution: number) =>
+    sql<{ outcome: string | null; started: number | null; booked: number; process: number | null }>`SELECT
+        outcome, started_at AS started, booked_at AS booked, process_id AS process FROM execution
+      WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]))
+
+  const allocateExecution = (sessionId: string, at: number, typed?: string) =>
     Effect.gen(function* () {
+      const executionId = yield* nextExecutionId(sessionId)
       const process = yield* currentProcessId(sessionId)
-
-      const left = yield* sql<{ id: number }>`SELECT id FROM execution
-        WHERE session_id = ${sessionId} AND outcome IS NULL AND process_id IS NOT ${process ?? null}`
-
-      for (const { id } of left)
-        yield* publish(ExecutionEnded, { sessionId, at, data: { execution: id, outcome: "not_started" } })
-
-      return yield* publish(ExecutionStarted, {
+      yield* publish(ExecutionAllocated, {
         sessionId,
         at,
-        data: { ...(process !== undefined && { process }), ...(typed && { typed }) },
+        data: {
+          executionId,
+          ...(process !== undefined && { processId: process }),
+          ...(typed !== undefined && typed !== "" && { typed }),
+        },
       })
+
+      return executionId
     })
 
-  const acceptedAt = (id: string, execution: number) =>
-    sql<{ at: number | null }>`SELECT accepted_at AS at FROM execution
+  const startedAt = (id: string, execution: number) =>
+    sql<{ at: number | null }>`SELECT started_at AS at FROM execution
       WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
 
   const accept = (id: string, execution: number) =>
     Effect.gen(function* () {
       if ((yield* openExecution(id)) !== execution) return false
 
-      if ((yield* acceptedAt(id, execution)) === null)
-        yield* publish(ExecutionAccepted, { sessionId: id, data: { execution } })
+      if ((yield* startedAt(id, execution)) !== null) return true
+      const process = yield* currentProcessId(id)
+      yield* publish(ExecutionStarted, {
+        sessionId: id,
+        data: { executionId: execution, ...(process !== undefined && { processId: process }) },
+      })
+
+      return true
+    })
+
+  const finishable = (outcome: string | null | undefined) =>
+    outcome === undefined || outcome === null || outcome === "lost" || outcome === "not_started"
+
+  const releaseExecution = (sessionId: string, execution: number, observation: ExecutionObservation, at?: number) =>
+    Effect.gen(function* () {
+      const row = yield* executionOutcome(sessionId, execution)
+
+      if (row === undefined || row.outcome !== null) return false
+      yield* publish(ExecutionUnresolved, {
+        sessionId,
+        ...(at !== undefined && { at }),
+        data: { executionId: execution, observation },
+      })
 
       return true
     })
@@ -203,6 +239,15 @@ export const statements = Effect.gen(function* () {
 
       if (current === undefined || current.ended !== null || (process !== undefined && process !== current.id))
         return false
+
+      if (reason === "launch_failed") {
+        const execution = yield* openExecution(id)
+        const open = execution === undefined ? undefined : yield* executionOutcome(id, execution)
+
+        if (execution !== undefined && open?.process === current.id && open.started === null)
+          yield* releaseExecution(id, execution, "not_started", at)
+      }
+
       yield* publish(ProcessEnded, {
         sessionId: id,
         ...(at !== undefined && { at }),
@@ -327,23 +372,83 @@ export const statements = Effect.gen(function* () {
       return true
     })
 
-  const endExecution = (id: string, end: ExecutionEnd, at?: number) =>
+  const finishExecution = (id: string, execution: number, end: ExecutionEnd, at?: number) =>
     Effect.gen(function* () {
-      const t = at ?? (yield* now)
-      const execution = (yield* openExecution(id)) ?? (yield* startExecution(id, t))
-      yield* publish(ExecutionEnded, {
-        sessionId: id,
-        at: t,
-        data: {
-          execution,
-          outcome: end.outcome,
-          ...(end.failure !== undefined && { failure: end.failure }),
-          ...(end.conversation !== undefined && { conversation: end.conversation }),
-          ...(end.reply !== undefined && { reply: end.reply }),
-        },
-      })
+      const row = yield* executionOutcome(id, execution)
 
-      return execution
+      if (row === undefined || !finishable(row.outcome)) return false
+      const stamp = at === undefined ? {} : { at }
+      const reply = end.reply
+
+      if (end.outcome === "completed")
+        yield* publish(ExecutionSucceeded, {
+          sessionId: id,
+          ...stamp,
+          data: { executionId: execution, ...(reply !== undefined && { reply }) },
+        })
+      else if (end.outcome === "failed") {
+        const failure: ExecutionFailure = end.failure ?? { message: "failed" }
+        yield* publish(ExecutionFailed, {
+          sessionId: id,
+          ...stamp,
+          data: { executionId: execution, failure, ...(reply !== undefined && { reply }) },
+        })
+      } else if (end.outcome === "interrupted")
+        yield* publish(ExecutionInterrupted, {
+          sessionId: id,
+          ...stamp,
+          data: {
+            executionId: execution,
+            ...(end.failure !== undefined && { reason: end.failure.message }),
+            ...(reply !== undefined && { reply }),
+          },
+        })
+      else {
+        const observation: ExecutionObservation = end.outcome === "not_started" ? "not_started" : "lost"
+        yield* publish(ExecutionUnresolved, {
+          sessionId: id,
+          ...stamp,
+          data: {
+            executionId: execution,
+            observation,
+            ...(end.failure !== undefined && { failure: end.failure }),
+            ...(reply !== undefined && { reply }),
+          },
+        })
+      }
+
+      return true
+    })
+
+  const noteInput = (sessionId: string, execution: number, typed: string) =>
+    publish(ExecutionInput, { sessionId, data: { executionId: execution, typed } })
+
+  const confirmedOutcome = (outcome: string | null) =>
+    outcome === "completed" || outcome === "failed" || outcome === "interrupted"
+
+  const recordObservedEnd = (
+    id: string,
+    end: ExecutionEnd,
+    at: number | undefined,
+    _process: number | undefined,
+    executionId?: number,
+  ) =>
+    Effect.gen(function* () {
+      if (executionId === undefined) return undefined
+
+      const rows = yield* sql<{
+        id: number
+        outcome: string | null
+        owner: number
+      }>`SELECT id, outcome, owner FROM execution WHERE session_id = ${id}`
+
+      const named = rows.find((row) => row.id === executionId)
+
+      if (named === undefined || confirmedOutcome(named.outcome))
+        return named === undefined ? undefined : { id: named.id, current: false, wrote: false }
+      const wrote = yield* finishExecution(id, named.id, end, at)
+
+      return { id: named.id, current: rows.some((row) => row.owner === 1 && row.id === named.id), wrote }
     })
 
   const setStatus = (id: string, status: AgentStatus) =>
@@ -435,8 +540,12 @@ export const statements = Effect.gen(function* () {
     findEntrySessions,
     openExecution,
     workingExecutions,
-    startExecution,
-    acceptedAt,
+    allocateExecution,
+    noteInput,
+    startedAt,
+    releaseExecution,
+    finishExecution,
+    recordObservedEnd,
     accept,
     observable,
     isEntry,
@@ -449,7 +558,6 @@ export const statements = Effect.gen(function* () {
     labelOf,
     archive,
     noteConversation,
-    endExecution,
     setStatus,
     entrySessionsAt,
     processesAt,

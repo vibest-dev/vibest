@@ -111,14 +111,6 @@ export const make = Effect.gen(function* () {
       }),
   )
 
-  const pickedUp = (session: SessionRow, execution: number, state: "working" | "blocked") =>
-    Effect.gen(function* () {
-      yield* db.session.acceptExecution(session.id, execution)
-      yield* db.session.setStatus(session.id, state)
-
-      return true
-    })
-
   const settleAfterInterrupt = Effect.fn("Executions.settleAfterInterrupt")((
     h: Runtime,
     session: SessionRow,
@@ -144,7 +136,10 @@ export const make = Effect.gen(function* () {
             sameTerminal(event.terminal, terminal) &&
             event.state !== "working" &&
             event.state !== "blocked") ||
-            (event.type === "execution.ended" && event.sessionId === session.id)
+            ((event.type === "execution.succeeded" ||
+              event.type === "execution.failed" ||
+              event.type === "execution.interrupted") &&
+              event.sessionId === session.id)
             ? Option.some(true)
             : Option.none(),
         ),
@@ -207,8 +202,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         if (error.code === "unreachable") return yield* Effect.fail(error)
 
-        if (!(yield* db.session.executionWasAccepted(session.id, execution)) && (yield* standing) === "mine")
-          yield* missed
+        if (!(yield* db.session.executionTaken(session.id)) && (yield* standing) === "mine") yield* missed
 
         return yield* new HandoffRejected({ message: error.message })
       })
@@ -242,7 +236,7 @@ export const make = Effect.gen(function* () {
       yield* sessionState(h, terminal, Effect.succeed(state)).pipe(Effect.orElseSucceed(() => state)),
     )
 
-    if (seen === "working" || seen === "blocked") yield* pickedUp(session, execution, seen)
+    if (seen === "working" || seen === "blocked") yield* db.session.setStatus(session.id, seen)
 
     return HANDOFF_UNPROVED
   }, Effect.scoped)
@@ -273,11 +267,14 @@ export const make = Effect.gen(function* () {
 
     const taken = Effect.gen(function* () {
       if ((yield* db.session.openExecution(session.id)) !== execution) return true
+
+      if (yield* db.session.executionAccepted(session.id)) return true
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
 
-      if (state === "working") return yield* pickedUp(session, execution, state)
+      if (state !== "working" && state !== "blocked") return false
+      yield* db.session.setStatus(session.id, state)
 
-      return yield* db.session.executionAccepted(session.id)
+      return true
     })
 
     const process = (yield* db.session.getSession(session.id))?.process?.id

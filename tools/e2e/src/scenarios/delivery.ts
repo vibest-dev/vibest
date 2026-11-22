@@ -405,11 +405,11 @@ const checks: ReadonlyArray<Check> = [
         const seqOf = (type: string) =>
           row<{ seq: number }>(w, "SELECT min(seq) AS seq FROM event WHERE aggregate = ? AND type = ?", sub, type)?.seq
 
-        const started = seqOf("execution.started")
+        const started = seqOf("execution.allocated")
         const placed = seqOf("process.placed")
         expect(
           started !== undefined && placed !== undefined && started < placed,
-          `execution.started at ${started}, process.placed at ${placed}`,
+          `execution.allocated at ${started}, process.placed at ${placed}`,
         )
         expect(executionStarts(w, sub) === 1, `${executionStarts(w, sub)} executions, not one`)
       } finally {
@@ -584,12 +584,12 @@ const checks: ReadonlyArray<Check> = [
           `the subagent's executions: ${JSON.stringify(executions)}`,
         )
         expectFacts(w, sub, [
-          "execution.started",
-          "execution.ended",
+          "execution.allocated",
+          "execution.interrupted",
           "inbox.enqueued",
-          "execution.started",
+          "execution.allocated",
           "inbox.delivered",
-          "execution.ended",
+          "execution.succeeded",
         ])
       } finally {
         entryModel.stop()

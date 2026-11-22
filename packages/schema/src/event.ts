@@ -116,24 +116,62 @@ export const ProcessEnded = fact("process.ended", "session", {
   by: optional(Sender),
 })
 
-export const ExecutionStarted = fact("execution.started", "session", {
-  process: optional(Seq),
-  typed: optional(Text),
-})
-
-export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
 
 export type ExecutionOutcome = typeof ExecutionOutcome.Type
 
-export const ExecutionEnded = fact("execution.ended", "session", {
-  execution: Seq,
-  outcome: ExecutionOutcome,
-  failure: optional(
-    Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")), resetAt: optional(Schema.Number) }),
-  ),
-  conversation: optional(Text),
+export const ExecutionObservation = Schema.Literals(["lost", "not_started"])
+
+export type ExecutionObservation = typeof ExecutionObservation.Type
+
+export const ExecutionFailure = Schema.Struct({
+  message: Text,
+  kind: optional(Schema.Literal("limit")),
+  resetAt: optional(Schema.Number),
+})
+
+export type ExecutionFailure = typeof ExecutionFailure.Type
+
+export const ExecutionAllocated = fact("execution.allocated", "session", {
+  executionId: Seq,
+  processId: optional(Seq),
+  typed: optional(Text),
+})
+
+export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
+
+export const ExecutionStarted = fact("execution.started", "session", {
+  executionId: Seq,
+  processId: optional(Seq),
+})
+
+export const ExecutionSucceeded = fact("execution.succeeded", "session", {
+  executionId: Seq,
   reply: optional(Schema.String),
+})
+
+export const ExecutionFailed = fact("execution.failed", "session", {
+  executionId: Seq,
+  failure: ExecutionFailure,
+  reply: optional(Schema.String),
+})
+
+export const ExecutionInterrupted = fact("execution.interrupted", "session", {
+  executionId: Seq,
+  reason: optional(Text),
+  reply: optional(Schema.String),
+})
+
+export const ExecutionUnresolved = fact("execution.unresolved", "session", {
+  executionId: Seq,
+  observation: ExecutionObservation,
+  failure: optional(ExecutionFailure),
+  reply: optional(Schema.String),
+})
+
+export const ExecutionInput = fact("execution.input", "session", {
+  executionId: Seq,
+  typed: Text,
 })
 
 export const InboxHistory = Schema.Literals([
@@ -223,9 +261,14 @@ export const Catalog = {
   [ProcessPid.type]: ProcessPid,
   [ProcessConversation.type]: ProcessConversation,
   [ProcessEnded.type]: ProcessEnded,
-  [ExecutionStarted.type]: ExecutionStarted,
+  [ExecutionAllocated.type]: ExecutionAllocated,
   [ExecutionAccepted.type]: ExecutionAccepted,
-  [ExecutionEnded.type]: ExecutionEnded,
+  [ExecutionStarted.type]: ExecutionStarted,
+  [ExecutionSucceeded.type]: ExecutionSucceeded,
+  [ExecutionFailed.type]: ExecutionFailed,
+  [ExecutionInterrupted.type]: ExecutionInterrupted,
+  [ExecutionUnresolved.type]: ExecutionUnresolved,
+  [ExecutionInput.type]: ExecutionInput,
   [InboxEnqueued.type]: InboxEnqueued,
   [InboxDeliveryStarted.type]: InboxDeliveryStarted,
   [InboxDelivered.type]: InboxDelivered,
@@ -246,7 +289,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 9
+export const CATALOG_VERSION = 10
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

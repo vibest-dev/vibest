@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxEnqueued } from "@vibest/schema/event"
+import { ExecutionInterrupted, ExecutionSucceeded, ExecutionUnresolved, InboxEnqueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
@@ -292,7 +292,7 @@ export const make = Effect.gen(function* () {
 
     if (yield* starts.remove(id)) {
       if (known.process === null) {
-        yield* db.session.endUnstarted(id, "interrupted")
+        yield* db.session.endUnstarted(id, "not_started")
 
         return { message: `${id} was waiting for a free slot; it will not start` }
       }
@@ -323,17 +323,19 @@ export const make = Effect.gen(function* () {
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
-        const closed = yield* db.session.closeExecution(id, execution, "interrupted")
 
-        if (closed) yield* db.session.setStatus(id, "idle")
-        const last = closed ? undefined : yield* db.session.latestReply(id)
-
-        if (!closed && !(last?.execution === execution && last.status === "interrupted"))
+        if ((yield* db.session.openExecution(id)) === execution)
           return {
-            message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
+            message: `${id} is idle, but the interrupt was not confirmed; its execution is unchanged`,
           }
+        const last = yield* db.session.latestReply(id)
 
-        return { message: `${id} interrupted; its terminal, worktree and session are kept` }
+        if (last?.execution === execution && last.status === "interrupted")
+          return { message: `${id} interrupted; its terminal, worktree and session are kept` }
+
+        return {
+          message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
+        }
       }),
     ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) }))
   })
@@ -370,8 +372,8 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
+  yield* reactor.on([ExecutionSucceeded, ExecutionInterrupted, ExecutionUnresolved], (event) =>
+    wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
   )
   yield* reactor.on([InboxEnqueued], (event) =>
     wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),

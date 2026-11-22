@@ -113,10 +113,16 @@ const story = Effect.gen(function* () {
         },
       })
 
-      const execution = yield* emit(Catalog["execution.started"], {
+      const execution = subProcess
+      yield* emit(Catalog["execution.allocated"], {
+        sessionId: SUB,
+        at: 309,
+        data: { executionId: execution, processId: subProcess },
+      })
+      yield* emit(Catalog["execution.started"], {
         sessionId: SUB,
         at: 310,
-        data: { process: subProcess },
+        data: { executionId: execution, processId: subProcess },
       })
 
       yield* emit(Catalog["inbox.delivered"], {
@@ -124,10 +130,10 @@ const story = Effect.gen(function* () {
         at: 311,
         data: { messageId: task, recipientExecutionId: execution },
       })
-      yield* emit(Catalog["execution.ended"], {
+      yield* emit(Catalog["execution.succeeded"], {
         sessionId: SUB,
         at: 321,
-        data: { execution: execution, outcome: "completed", reply: "All tests pass." },
+        data: { executionId: execution, reply: "All tests pass." },
       })
 
       const result = yield* emit(Catalog["inbox.enqueued"], {
@@ -203,16 +209,22 @@ const story = Effect.gen(function* () {
         },
       })
 
-      const typed = yield* emit(Catalog["execution.started"], {
+      const typed = mainProcess
+      yield* emit(Catalog["execution.allocated"], {
+        sessionId: MAIN,
+        at: 539,
+        data: { executionId: typed, processId: mainProcess, typed: "hello" },
+      })
+      yield* emit(Catalog["execution.started"], {
         sessionId: MAIN,
         at: 540,
-        data: { process: mainProcess, typed: "hello" },
+        data: { executionId: typed, processId: mainProcess },
       })
 
-      yield* emit(Catalog["execution.ended"], {
+      yield* emit(Catalog["execution.failed"], {
         sessionId: MAIN,
         at: 541,
-        data: { execution: typed, outcome: "failed", failure: { message: "model overloaded" } },
+        data: { executionId: typed, failure: { message: "model overloaded" } },
       })
       yield* emit(Catalog["machine.removed"], { at: 600, data: { name: "mb" } })
 
@@ -330,7 +342,7 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("session.ended keeps the first end time and drops the session's outbox", () =>
+  it.effect("session.ended keeps the first end time and stops offering the session's outbox", () =>
     Effect.gen(function* () {
       const { sql, bus } = yield* story
       yield* bus.transaction(
@@ -342,7 +354,15 @@ describe("projectors", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
         { endedAt: 700 },
       ])
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox WHERE acked_at IS NULL"), [])
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT id FROM outbox WHERE acked_at IS NULL"), [{ id: ITEM_2 }])
+      assert.deepStrictEqual(
+        yield* rowsOf(
+          sql,
+          `SELECT o.id FROM outbox o JOIN session s ON s.id = o.session_id
+            WHERE o.acked_at IS NULL AND s.ended_at IS NULL`,
+        ),
+        [],
+      )
     }).pipe(Effect.provide(memory())),
   )
 
@@ -476,10 +496,10 @@ describe("projectors", () => {
     Effect.gen(function* () {
       const { sql, bus, execution, typed, subProcess, mainProcess } = yield* story
       yield* bus.transaction(
-        bus.publish(Catalog["execution.ended"], {
+        bus.publish(Catalog["execution.unresolved"], {
           sessionId: SUB,
           at: 999,
-          data: { execution: execution, outcome: "lost" },
+          data: { executionId: execution, observation: "lost" },
         }),
       )
       assert.deepStrictEqual(
@@ -603,6 +623,7 @@ describe("projectors", () => {
           fromAgent: null,
           fromTitle: null,
           fromMachine: null,
+          executionId: null,
           createdAt: 511,
           ackedAt: null,
         },

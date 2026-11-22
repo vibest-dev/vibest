@@ -93,7 +93,7 @@ const oldLedger = Effect.gen(function* () {
   yield* Effect.void.pipe(Effect.provide(database(file)))
   yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
+    yield* sql`DELETE FROM migration WHERE id IN (${MIGRATION}, '20261122000000_execution_lifecycle')`
     yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
 
     for (const [aggregate, seq, type, data] of facts)
@@ -307,9 +307,26 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
       if (retry === true || retry === "waiting" || retry === "parent-ended") return yield* Effect.die(retry)
 
       assert.strictEqual(retry.id, L)
-      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, sent FROM execution WHERE session_id = ${A}`), [
-        { id: 2, sent: 1 },
+
+      const sent = yield* Effect.gen(function* () {
+        const db = yield* Db.Service
+
+        return yield* db.inbox.sentIn(A, 2)
+      }).pipe(
+        Effect.provide(
+          Db.layer.pipe(
+            Layer.provide(Projectors.layer),
+            Layer.provide(Bus.layer),
+            Layer.provide(SessionLive.layer),
+            Layer.provideMerge(Platform.sqlite(file)),
+          ),
+        ),
+      )
+
+      assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id FROM execution WHERE session_id = ${A}`), [
+        { id: 2 },
       ])
+      assert.strictEqual(sent, 1)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

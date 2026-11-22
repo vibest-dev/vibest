@@ -342,7 +342,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
     const sql = yield* SqlClient.SqlClient
     const { transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, acceptedAt, observable, fromOldProcess, startExecution, creatorOf } = session
+    const { reads, openExecution, startedAt, observable, fromOldProcess, allocateExecution, creatorOf } = session
 
     const {
       inbox: inboxWhere,
@@ -384,7 +384,13 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       sentIn: Effect.fn("Db.inbox.sentIn")((sessionId: string, execution: number) =>
-        sql<{ sent: number }>`SELECT sent FROM execution WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(
+        sql<{ sent: number }>`SELECT
+            (SELECT count(*) FROM inbox m
+              WHERE m.sender_type = 'agent' AND m.sender_machine IS NULL
+                AND m.sender_session_id = ${sessionId} AND m.sender_execution_id = ${execution}
+                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id))
+            + (SELECT count(*) FROM outbox
+              WHERE session_id = ${sessionId} AND kind = 'send' AND execution_id = ${execution}) AS sent`.pipe(
           Effect.map((rows) => rows[0]?.sent ?? 0),
           Effect.orDie,
         ),
@@ -490,7 +496,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       unacceptedBatch: Effect.fn("Db.inbox.unacceptedBatch")((sessionId: string, execution: number) =>
         tx(
           Effect.gen(function* () {
-            if ((yield* openExecution(sessionId)) !== execution || (yield* acceptedAt(sessionId, execution)) !== null)
+            if ((yield* openExecution(sessionId)) !== execution || (yield* startedAt(sessionId, execution)) !== null)
               return undefined
 
             return yield* inboxWhere(
@@ -517,7 +523,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
             if (pending.length === 0) return undefined
             const batch = nextBatch(pending)
-            const execution = yield* startExecution(sessionId, yield* now)
+            const execution = yield* allocateExecution(sessionId, yield* now)
             yield* moveInbox(
               sql`recipient_session_id = ${sessionId} AND ${sql.in(
                 "id",

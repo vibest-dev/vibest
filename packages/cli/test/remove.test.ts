@@ -165,7 +165,7 @@ describe.concurrent("vibest archive: process proof", () => {
         })
 
       const reportedExecutionEndEvent = (id: string) =>
-        eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
+        eventsOf(id, "execution.succeeded").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
 
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ id: a.pane })
@@ -316,13 +316,14 @@ describe.concurrent("vibest archive: process proof", () => {
   )
 
   test(
-    "a working session is interrupted, then its terminal closed and its processes confirmed; the execution ends interrupted",
+    "a working session's idle sample is not an interrupt: the terminal still closes and the execution is not interrupted",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const { id, sessions, db, herdr, worktree } = yield* workingSession
-      const out = (yield* sessions.remove(id))!
+      const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed", worktree: "removed" })
-      assert.deepStrictEqual(out.reasons, ["it was working: interrupted, then its terminal closed"])
+      assert.include(out.reasons.join("\n"), "did not confirm the interrupt")
+      assert.notStrictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted")
       assert.lengthOf(
         (yield* herdr.callsTo("send")).filter((c: { keys?: ReadonlyArray<string> }) => c.keys),
         1,
@@ -330,7 +331,6 @@ describe.concurrent("vibest archive: process proof", () => {
       )
       const row = (yield* db.session.getSession(id))!
       assert.strictEqual(row.status, "unknown")
-      assert.strictEqual(executionStateOf(row), "interrupted")
       assert.isNotNull(exitedAt(row))
       assert.isFalse(yield* fs.exists(worktree))
     }),

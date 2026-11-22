@@ -45,8 +45,8 @@ test(
     )
     assert.deepStrictEqual(yield* inboxStatus(id), [{ status: "dropped" }])
     assert.deepStrictEqual(
-      yield* sql<{ accepted: number | null }>`SELECT accepted_at AS accepted FROM execution WHERE session_id = ${id}`,
-      [{ accepted: null }],
+      yield* sql<{ started: number | null }>`SELECT started_at AS started FROM execution WHERE session_id = ${id}`,
+      [{ started: null }],
     )
   }),
   { hooked: ["pi"] },
@@ -67,9 +67,9 @@ test(
     yield* until(inboxStatus(id, "not handed"), (rows) => rows[0]?.status !== "delivering")
     assert.notStrictEqual((yield* inboxStatus(id, "not handed"))[0]?.status, "delivered")
     assert.deepStrictEqual(
-      yield* sql<{ accepted: number | null }>`SELECT accepted_at AS accepted FROM execution
+      yield* sql<{ started: number | null }>`SELECT started_at AS started FROM execution
         WHERE session_id = ${id} AND id = ${execution}`,
-      [{ accepted: null }],
+      [{ started: null }],
     )
   }),
   { hooked: ["pi"] },

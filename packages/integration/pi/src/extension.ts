@@ -95,6 +95,7 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
       const layout = yield* Layout
       const root = yield* Ref.make(false)
       const reply = yield* Ref.make({ text: "", error: "" })
+      const bound = yield* Ref.make<number | undefined>(undefined)
       yield* pi.handle("session_start", (_e, ctx) => Ref.set(root, ctx.mode === "tui"))
       yield* pi.handle("agent_end", (e) => Ref.set(reply, lastReply(e.messages)))
       yield* pi.handle("message_start", (e, ctx) =>
@@ -105,7 +106,7 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
           const details = decodeVibestDetails(message.details)
 
           if (Option.isNone(details)) return
-
+          yield* Ref.set(bound, details.value.execution)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
 
           const event = encodeJson({
@@ -129,9 +130,23 @@ const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Rol
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
           const { text, error } = yield* Ref.get(reply)
+          const execution = yield* Ref.get(bound)
           const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
-          const event = encodeJson({ type: "agent_settled", text, error, aborted: e.aborted })
-          yield* hookCall(layout.socket, headers, (client) => client.ExecutionEnd({ sessionId, harness: "pi", event }))
+
+          const event = encodeJson({
+            type: "agent_settled",
+            text,
+            error,
+            aborted: e.aborted,
+            ...(execution !== undefined && { execution }),
+          })
+
+          const sent = yield* hookCall(layout.socket, headers, (client) =>
+            client.ExecutionEnd({ sessionId, harness: "pi", event }),
+          )
+
+          if (Exit.isSuccess(sent) && execution !== undefined)
+            yield* Ref.update(bound, (current) => (current === execution ? undefined : current))
         }),
       )
     }),

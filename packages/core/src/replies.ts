@@ -1,6 +1,6 @@
 import type { Sender } from "@vibest/schema/event"
 import type { Detail, HarnessId } from "@vibest/schema/session"
-import { Option, Predicate, Schema } from "effect"
+import { Option, Schema } from "effect"
 
 import type { HarnessDefinition } from "./plugin/domains.ts"
 
@@ -92,43 +92,41 @@ export type ObservedEnd = {
   readonly windows?: ReadonlyArray<string> | undefined
   readonly conversation: string | undefined
   readonly needsReady: boolean
+  readonly execution?: number | undefined
 }
 
 export const executionEndOf = (adapter: HarnessDefinition, raw: string, at: number): ObservedEnd | undefined => {
   const event = jsonObject(raw)
-  const payload = event && adapter.executionEnd?.(event)?.end
+  const observed = event && adapter.executionEnd?.(event)
 
-  return payload ? executionEndFrom(adapter, payload, at) : undefined
+  return observed ? executionEndFrom(adapter, observed, at) : undefined
 }
 
 const PLAIN_ID_NOT_A_FLAG = /^\w[\w.:-]{0,127}$/
 
-const errorOf = (payload: Schema.JsonObject) => {
-  const error = payload.error
-  const details = payload.error_details
-
-  if (!Predicate.isString(error) || !error) return undefined
-
-  return Predicate.isString(details) && details ? `${error}: ${details}` : error
-}
-
-export const executionEndFrom = (adapter: HarnessDefinition, payload: Schema.JsonObject, at: number): ObservedEnd => {
-  const text = payload[adapter.replyField]
-  const conversation = payload.conversation_id
-  const interrupted = payload.aborted === true
-  const error = interrupted ? undefined : errorOf(payload)
+export const executionEndFrom = (
+  adapter: HarnessDefinition,
+  observed: {
+    readonly reply: string
+    readonly failure?: string
+    readonly interrupted?: boolean
+    readonly conversation?: string
+    readonly execution?: number
+  },
+  at: number,
+): ObservedEnd => {
+  const failure = observed.interrupted ? undefined : observed.failure
+  const conversation = observed.conversation
 
   return {
     harness: adapter.id,
     at,
-    status: interrupted ? "interrupted" : error ? "failed" : "completed",
-    reply: Predicate.isString(text) ? text : "",
-    failure: error,
-    limited: isUsageLimitError(error),
-    conversation:
-      !adapter.ownSessionId && Predicate.isString(conversation) && PLAIN_ID_NOT_A_FLAG.test(conversation)
-        ? conversation
-        : undefined,
+    status: observed.interrupted ? "interrupted" : failure ? "failed" : "completed",
+    reply: observed.reply,
+    failure,
+    limited: isUsageLimitError(failure),
+    conversation: conversation !== undefined && PLAIN_ID_NOT_A_FLAG.test(conversation) ? conversation : undefined,
     needsReady: adapter.ready === "integration",
+    ...(observed.execution !== undefined && { execution: observed.execution }),
   }
 }

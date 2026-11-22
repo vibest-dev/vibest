@@ -181,6 +181,7 @@ const finishExecution = (
   })
 
 const executionOf = (message: SentMessage) => (message.details as { execution: number }).execution
+const idsOf = (message: SentMessage) => (message.details as { ids: ReadonlyArray<number> }).ids
 
 const executionEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
   mode,
@@ -262,12 +263,14 @@ describe("pi-vibest", () => {
           Effect.sync(() => s.messages.length),
           (n) => n === 1,
         )
+        assert.lengthOf(idsOf(s.messages[0]!.message), 1)
         assert.deepInclude(s.messages[0]?.message, {
           customType: "vibest",
           content: noticeEnvelope("survives the gap"),
           display: true,
           details: {
             execution: executionOf(s.messages[0]!.message),
+            ids: idsOf(s.messages[0]!.message),
             detail: [{ sender: { type: "vibest" }, message: "survives the gap" }],
           },
         })
@@ -564,7 +567,7 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
       yield* s.emit("input", { type: "input", text: "vibest handed this over", source: "extension" })
       yield* s.emit("input", { type: "input", text: "again", source: "interactive" })
-      assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
+      assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane\nagain", inbox: null }])
 
       const coordinator = yield* session({
         VIBEST_AGENT: "coordinator",

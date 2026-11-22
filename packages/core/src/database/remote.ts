@@ -89,7 +89,7 @@ export const statements = Effect.gen(function* () {
 
       const [open] =
         row.kind === "send"
-          ? yield* sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${row.sessionId} AND outcome IS NULL`
+          ? yield* sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${row.sessionId} AND owner = 1`
           : []
 
       yield* publish(OutboxQueued, {

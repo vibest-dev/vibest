@@ -31,15 +31,11 @@ describe.concurrent("Session", () => {
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
 
       const ended = yield* (yield* SqlClient.SqlClient)<{ data: string }>`SELECT data FROM event
-        WHERE aggregate = ${id} AND type = 'execution.ended'`.pipe(Effect.orDie)
+        WHERE aggregate = ${id} AND type = 'execution.failed'`.pipe(Effect.orDie)
 
       assert.deepStrictEqual(
-        ended.map((e) => {
-          const { outcome, failure } = JSON.parse(e.data)
-
-          return { outcome, failure }
-        }),
-        [{ outcome: "failed", failure: { message: "rate_limit: usage limit reached", kind: "limit" } }],
+        ended.map((e) => JSON.parse(e.data).failure),
+        [{ message: "rate_limit: usage limit reached", kind: "limit" }],
       )
     }),
   )
@@ -74,7 +70,7 @@ describe.concurrent("Session", () => {
       )
 
       const ended = yield* sql<{ data: string }>`SELECT data FROM event
-        WHERE aggregate = ${id} AND type = 'execution.ended'`.pipe(Effect.orDie)
+        WHERE aggregate = ${id} AND type = 'execution.failed'`.pipe(Effect.orDie)
 
       assert.deepStrictEqual(
         ended.map((e) => JSON.parse(e.data).failure),

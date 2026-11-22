@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
+import { executionStateOf } from "@vibest/core/database/db-rows"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
@@ -15,10 +15,26 @@ const observedEnd = (harness: string, payload: Schema.JsonObject) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses.Service).get(harness)
 
-    return executionEndFrom(adapter, payload, yield* Clock.currentTimeMillis)
+    const observed = adapter.executionEnd?.(payload)
+
+    if (observed === undefined) return yield* Effect.die("no observed end")
+
+    return executionEndFrom(adapter, observed, yield* Clock.currentTimeMillis)
   })
 
-const ends = (id: string) => eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.map((row) => row.data)))
+const ends = (id: string) =>
+  eventsOf(id).pipe(
+    Effect.map((rows) =>
+      rows.flatMap((row) =>
+        row.type === "execution.succeeded" ||
+        row.type === "execution.failed" ||
+        row.type === "execution.interrupted" ||
+        row.type === "execution.unresolved"
+          ? [row.data]
+          : [],
+      ),
+    ),
+  )
 
 describe("observed execution end", () => {
   test(
@@ -28,14 +44,17 @@ describe("observed execution end", () => {
       const before = yield* ends(id)
       const { execution } = yield* db.session.startExecution(id, yield* Clock.currentTimeMillis)
       assert.strictEqual(
-        yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "background" })),
-        "unaccepted",
+        yield* db.session.endObserved(id, yield* observedEnd("pi", { type: "agent_settled", text: "background" })),
+        "completed",
       )
-      assert.deepStrictEqual(yield* ends(id), before)
-      assert.strictEqual(yield* db.session.openExecution(id), execution)
-      yield* db.session.acceptExecution(id, execution)
-      yield* writeEnd(id, "pi", { text: "mine" })
-      assert.deepStrictEqual((yield* ends(id)).at(-1), { execution, outcome: "completed", reply: "mine" })
+      assert.deepStrictEqual((yield* ends(id)).at(-1), { executionId: execution, reply: "background" })
+      assert.strictEqual((yield* ends(id)).length, before.length + 1)
+      assert.isUndefined(yield* db.session.openExecution(id))
+      assert.strictEqual(
+        yield* db.session.endObserved(id, yield* observedEnd("pi", { type: "agent_settled", text: "background" })),
+        "completed",
+      )
+      assert.strictEqual((yield* ends(id)).length, before.length + 1)
     }),
     { hooked: ["pi"] },
   )
@@ -46,10 +65,12 @@ describe("observed execution end", () => {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
       const current = (yield* db.session.currentProcessId(id))!
       const earlier = current - 1
-      assert.isUndefined(yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "old" }), earlier))
+      assert.isUndefined(
+        yield* db.session.endObserved(id, yield* observedEnd("pi", { type: "agent_settled", text: "old" }), earlier),
+      )
       assert.deepStrictEqual(yield* ends(id), [])
       assert.strictEqual(
-        yield* db.session.endObserved(id, yield* observedEnd("pi", { text: "new" }), current),
+        yield* db.session.endObserved(id, yield* observedEnd("pi", { type: "agent_settled", text: "new" }), current),
         "completed",
       )
       yield* db.session.startObserved(id, "typed into the old process", yield* Clock.currentTimeMillis, earlier)
@@ -70,12 +91,55 @@ describe("observed execution end", () => {
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
       )
       const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(executionStateOf(row), "failed")
-      assert.isNotNull(exitedAt(row))
-      assert.deepStrictEqual(
-        (yield* db.inbox.inboxWithStatus(id, "failed")).map((r) => r.message),
-        ["queued"],
+      assert.strictEqual(executionStateOf(row), "interrupted")
+      assert.notStrictEqual(executionStateOf(row), "failed")
+    }),
+    { hooked: ["claude"] },
+  )
+
+  test(
+    "a finished execution's report does not change the successor, which its own report can still finish",
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { id, db, row } = yield* spawnWorking(yield* makeRepository, "claude")
+      const integration = yield* Integration.Service
+      const a = (yield* db.session.openExecution(id))!
+      const who = { id, entry: false, harness: "claude" as const, process: row.process?.id }
+
+      const report = (execution: number, reply: string) =>
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: reply,
+          execution,
+          conversation_id: "obsolete",
+        })
+
+      yield* integration.executionEnd(who, report(a, "reply A"))
+      const b = (yield* db.session.startExecution(id, yield* Clock.currentTimeMillis)).execution
+      yield* db.session.acceptExecution(id, b)
+      yield* db.session.setStatus(id, "working")
+      const before = yield* db.session.getSession(id)
+      const facts = (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id}`)[0]?.n
+      yield* integration.executionEnd(who, report(a, "reply A"))
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: "reply A",
+          conversation_id: "obsolete",
+        }),
       )
+      assert.deepStrictEqual(yield* db.session.getSession(id), before)
+      assert.strictEqual(
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id}`)[0]?.n,
+        facts,
+      )
+      assert.deepStrictEqual(yield* db.session.openExecution(id), b)
+      yield* integration.executionEnd(who, report(b, "reply A"))
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
+      assert.strictEqual(yield* replyOf(id), "reply A")
     }),
     { hooked: ["claude"] },
   )
@@ -88,9 +152,10 @@ describe("observed execution end", () => {
       const held = yield* herdr.hold("state", id)
       const checking = yield* Effect.forkChild(sessions.check(id))
       yield* held.reached
+      const execution = (yield* db.session.openExecution(id))!
       yield* (yield* Integration.Service).executionEnd(
         { id, entry: false, harness: "pi" },
-        JSON.stringify({ type: "agent_settled", text: "done while locked" }),
+        JSON.stringify({ type: "agent_settled", text: "done while locked", execution }),
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
       assert.strictEqual(yield* replyOf(id), "done while locked")
@@ -111,7 +176,7 @@ describe("observed execution end", () => {
       yield* sessions.send(id, "next")
       yield* held.reached
       const handed = yield* db.session.openExecution(id)
-      yield* writeEnd(id, "pi", { text: "done fast" })
+      yield* writeEnd(id, "pi", { type: "agent_settled", text: "done fast" })
       yield* held.release()
 
       const [row] = yield* until(
@@ -135,7 +200,7 @@ describe("observed execution end", () => {
       const held = yield* herdr.hold("send", id)
       const removing = yield* Effect.forkChild(sessions.remove(id))
       yield* held.reached
-      yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
+      yield* writeEnd(id, "pi", { type: "agent_settled", text: "", error: "aborted", aborted: true })
       yield* sessions.userPrompt(id, "typed during the archive")
       assert.isDefined(yield* db.session.openExecution(id))
       yield* held.release()
@@ -156,7 +221,7 @@ describe("observed execution end", () => {
       const held = yield* herdr.hold("send", id)
       const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
       yield* held.reached
-      yield* writeEnd(id, "pi", { text: "finished first" })
+      yield* writeEnd(id, "pi", { type: "agent_settled", text: "finished first" })
       yield* herdr.endExecution(id)
       yield* held.release()
       const result = yield* Fiber.join(interrupting)

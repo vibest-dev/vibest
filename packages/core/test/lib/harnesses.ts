@@ -5,7 +5,7 @@ import type { HarnessDefinition, HarnessesDomain } from "@vibest/core/plugin/dom
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { HarnessUnavailable } from "@vibest/schema/session"
-import { Effect, Layer, Match, Predicate, type Scope } from "effect"
+import { Effect, Layer, Predicate, type Scope } from "effect"
 
 const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
 
@@ -19,7 +19,6 @@ export const PI: HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  replyField: "text",
   ready: "integration",
   promptArgs: ["--"],
   launchArgs: (i) => [
@@ -31,10 +30,19 @@ export const PI: HarnessDefinition = {
     ...providerModel(i.provider, i.model),
   ],
   models: { args: () => [], answer: () => undefined },
-  executionEnd: (event) =>
-    event.type !== "agent_settled"
-      ? undefined
-      : { end: { text: Predicate.isString(event.text) ? event.text : "", error: "", aborted: false } },
+  executionEnd: (event) => {
+    if (event.type !== undefined && event.type !== "agent_settled") return undefined
+
+    if (event.hook_event_name !== undefined) return undefined
+    const aborted = event.aborted === true
+    const error = Predicate.isString(event.error) ? event.error : ""
+
+    return {
+      reply: Predicate.isString(event.text) ? event.text : "",
+      ...(aborted ? { interrupted: true } : error !== "" ? { failure: error } : {}),
+      ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
+    }
+  },
   userPrompt: (event) => {
     if (event.type === "accepted" && Predicate.isNumber(event.execution)) {
       const ids = Array.isArray(event.ids) ? event.ids.filter(Predicate.isNumber) : []
@@ -58,7 +66,6 @@ export const CLAUDE: HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  replyField: "last_assistant_message",
   ready: "integration",
   promptArgs: ["--"],
   checkProvider: noProvider("claude"),
@@ -71,27 +78,33 @@ export const CLAUDE: HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => [], answer: () => undefined },
-  executionEnd: (event) =>
-    event.hook_event_name !== "ExecutionComplete"
+  executionEnd: (event) => {
+    if (event.hook_event_name !== "ExecutionComplete") return undefined
+    const reply = Predicate.isString(event.last_assistant_message) ? event.last_assistant_message : ""
+    const execution = Predicate.isNumber(event.execution) ? event.execution : undefined
+    const named = execution === undefined ? {} : { execution }
+
+    if (event.reason === "aborted") return { reply, interrupted: true, ...named }
+
+    if (event.reason === "answer") return { reply, ...named }
+
+    return { reply, failure: "error: the execution ended on an API error", ...named }
+  },
+  userPrompt: (event) => {
+    if (event.hook_event_name === "PromptSubmit" && event.origin === "vibest" && Predicate.isNumber(event.execution)) {
+      const ids = Array.isArray(event.ids) ? event.ids.filter(Predicate.isNumber) : []
+
+      return {
+        execution: event.execution,
+        ...(event.refused === true && { refused: true as const }),
+        ...(ids.length > 0 && { ids }),
+      }
+    }
+
+    return event.hook_event_name !== "PromptSubmit" || !Predicate.isString(event.text) || !event.text.trim()
       ? undefined
-      : {
-          end: Match.value(event.reason).pipe(
-            Match.when("answer", () => event),
-            Match.when("aborted", () => ({
-              ...event,
-              aborted: true,
-              error: "interrupted",
-              error_details: "the execution was stopped in its terminal (Esc) before it ended",
-            })),
-            Match.orElse(() => ({ ...event, error: "error", error_details: "the execution ended on an API error" })),
-          ),
-        },
-  userPrompt: (event) =>
-    event.hook_event_name === "PromptSubmit" && event.origin === "vibest" && Predicate.isNumber(event.execution)
-      ? { execution: event.execution }
-      : event.hook_event_name !== "PromptSubmit" || !Predicate.isString(event.text) || !event.text.trim()
-        ? undefined
-        : { text: event.text },
+      : { text: event.text }
+  },
 }
 
 export const CURSOR: HarnessDefinition = {
@@ -101,7 +114,6 @@ export const CURSOR: HarnessDefinition = {
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
-  replyField: "text",
   ready: "runtime",
   promptArgs: ["--"],
   clearKeys: ["ctrl+u"],
@@ -116,9 +128,19 @@ export const CURSOR: HarnessDefinition = {
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (Predicate.isString(event.conversation_id) ? event.conversation_id : undefined),
-  executionEnd: (event) => (event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined),
+  executionEnd: (event) => {
+    if (event.hook_event_name !== "afterAgentResponse") return undefined
+    const conversation = Predicate.isString(event.conversation_id) ? event.conversation_id : undefined
+
+    return {
+      reply: Predicate.isString(event.text) ? event.text : "",
+      ...(conversation !== undefined && { conversation }),
+      ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
+    }
+  },
   userPrompt: (event) => {
-    if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
+    if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse")
+      return { activity: true }
 
     return event.hook_event_name === "beforeSubmitPrompt" && Predicate.isString(event.prompt) && event.prompt.trim()
       ? { text: event.prompt }

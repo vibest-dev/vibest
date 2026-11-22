@@ -123,7 +123,8 @@ CREATE TABLE session (
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
   process_id            INTEGER,                      -- its current process; its latest execution is its highest execution id
-  active_at             INTEGER
+  active_at             INTEGER,
+  message_id            INTEGER
 ) STRICT;
 CREATE INDEX session_project ON session (project_id);
 CREATE INDEX session_parent  ON session (parent_session_id);
@@ -153,22 +154,22 @@ CREATE TABLE process (                                -- id: the seq of its proc
 CREATE UNIQUE INDEX process_live ON process (session_id) WHERE ended_at IS NULL;
 CREATE INDEX process_terminal ON process (runtime, terminal) WHERE ended_at IS NULL AND terminal IS NOT NULL;
 
-CREATE TABLE execution (                              -- id: the seq of its execution.started in the session
+CREATE TABLE execution (                              -- id: a per-session integer, allocated before start evidence
   session_id TEXT    NOT NULL,
   id         INTEGER NOT NULL,
   process_id INTEGER,
-  typed      TEXT,                                    -- the text typed into the pane; none for one a delivery opened
-  started_at INTEGER NOT NULL,
-  accepted_at INTEGER,                                -- its execution.accepted: the harness took the input up
-  outcome    TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),  -- null: open
+  typed      TEXT,                                    -- direct input typed into the pane; none for a delivery
+  booked_at  INTEGER NOT NULL,                        -- when the id was allocated
+  started_at INTEGER,                                 -- null until start evidence; null on an end-only row
+  outcome    TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),  -- null: unknown or live
   failure    TEXT,
   failure_kind TEXT CHECK (failure_kind IN ('limit')),  -- limit: the harness hit its usage limit
-  reply      TEXT,                                    -- the reply its execution.ended carried; null: none (lost, an exit)
+  reply      TEXT,                                    -- text the terminal event carried; null: none
   ended_at   INTEGER,
-  sent       INTEGER NOT NULL DEFAULT 0,              -- sends this execution queued (inbox.enqueued senderExecutionId, outbox.queued); not delivery evidence
+  owner      INTEGER NOT NULL DEFAULT 0,              -- 1: the session's active execution
   PRIMARY KEY (session_id, id)
 ) STRICT;
-CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL;
+CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE owner = 1;
 
 CREATE TABLE inbox (                                  -- id: the seq of its inbox.enqueued, or of a historical route record, in the recipient session
   recipient_session_id    TEXT    NOT NULL,            -- the recipient
@@ -220,17 +221,18 @@ message.
   repeat that a relay sends elsewhere is still one message, and the same request from another sender is its own. The
   unique index `inbox_request` backs it: a second row would fail its transaction.
 - A send from a local agent session names the execution it had open (`senderExecutionId` on `inbox.enqueued`,
-  `execution` on `outbox.queued`); each raises that execution's `sent`, which a plugin's `ctx.session` reads, also
-  after the outbox row is acknowledged. `sent` counts those queues. It is not evidence the recipient was handed the
-  message. A send forwarded straight to a session on another machine writes no local inbox fact and is not counted.
-  A cross-machine transfer reuses the sender's existing item id as `transferId`; a local message leaves it empty.
-  An outbox acknowledgement means the peer accepted the item, not that the agent was handed it.
+  `execution` on `outbox.queued`). `ctx.session.sentIn` counts those rows, including an outbox row whose session has
+  since ended or been acknowledged, without counting the original delegation. Ending a session does not delete the
+  outbox row; a peer is not offered rows for an ended session. It is not evidence the recipient was handed the message.
+  A send forwarded straight to a session on another machine writes no local inbox fact and is not counted. A
+  cross-machine transfer reuses the sender's existing item id as `transferId`; a local message leaves it empty. An
+  outbox acknowledgement means the peer accepted the item, not that the agent was handed it.
 - An execution end writes no inbox row. The recipient of a `notice` is `parent_session_id` while it lives, then the entry
   session, then `origin_session` through the outbox; an undeliverable `send` notifies its sender.
 
 ## Facts
 
-`packages/schema/src/event.ts` defines 28 types, each with its aggregate kind (`session`, `project` or `ledger`) and a
+`packages/schema/src/event.ts` defines 34 types, each with its aggregate kind (`session`, `project` or `ledger`) and a
 Schema for its data. `Bus.publish` takes the aggregate from the kind: a session fact needs a session id and no project
 id, a project fact a project id and no session id, a ledger fact neither. A key marked optional is absent, never null, and a string key that is present is never empty. Encoding and
 decoding refuse keys a definition does not have, and encoding fails when its JSON does not decode back. `Routing` and
@@ -243,7 +245,7 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | project.moved                       | from, to, repositories                                                                                                                                                   |
 | project.repositories_changed        | repositories                                                                                                                                                             |
 | project.entry_changed               | session? (none: the project has no entry session)                                                                                                                        |
-| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}                                                                                              |
+| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, message? (the original delegation seq)                                                      |
 | session.renamed                     | name                                                                                                                                                                     |
 | session.directory_changed           | directory                                                                                                                                                                |
 | session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                                |
@@ -253,15 +255,20 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | process.pid                         | process, pid: a pid report that is not a ready report                                                                                                                    |
 | process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                |
 | process.ended                       | process, reason: exited, restart, move (an entry session moving terminal), archived, launch_failed, superseded, stopped; by? (stopped: who stopped it, a sender)         |
-| execution.started                   | process?, typed? (the text typed into the pane)                                                                                                                          |
-| execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)                                                              |
-| execution.ended                     | execution, outcome, failure? {message, kind?: limit, resetAt? (epoch ms)}, conversation?, reply? (the harness's reply, when it reported)                                 |
+| execution.allocated                 | executionId, processId?, typed? (direct input; not an inbox message). Allocating this id is not a start.                                                                 |
+| execution.accepted                  | execution. Historical catalog-5 fact kept at its original sequence; projected as a no-op, never a start.                                                                 |
+| execution.started                   | executionId, processId?. Only with attributable start evidence.                                                                                                          |
+| execution.succeeded                 | executionId, reply?. The run ended normally. Not task acceptance and not a message sent.                                                                                 |
+| execution.failed                    | executionId, failure {message, kind?: limit, resetAt?}, reply?. Only a confirmed error.                                                                                  |
+| execution.interrupted               | executionId, reason?, reply?. A stop request is not this event.                                                                                                          |
+| execution.unresolved                | executionId, observation: lost or not_started, failure?, reply?. Timeout or disconnect. Not a confirmed failure; a later terminal event for this id still applies.       |
+| execution.input                     | executionId, typed. Additional direct input submitted while an execution is open.                                                                                        |
 | inbox.enqueued                      | sender, content, senderExecutionId?, requestId?, transferId?, aboutSessionId? (a notice). Starts pending; the event carries no status                                    |
-| inbox.delivery_started              | messageId, and the execution when one is open. A reservation, not delivery, and not written again for each wait                                                          |
+| inbox.delivery_started              | messageId, execution? (the reserved recipient execution when one is open). A reservation, not delivery, and not written again for each wait                              |
 | inbox.delivered                     | messageId, recipientExecutionId. Both required: handed as that execution's input                                                                                         |
 | inbox.delivery_failed               | messageId, reason. A recorded failure, not an unknown result                                                                                                             |
 | inbox.dropped                       | messageId, reason. Local delivery responsibility ended (the entry session left, a waiting message withdrawn)                                                             |
-| inbox.unresolved                    | history: route, delivered_without_execution, or failed_unspecified. Migration only: an old record that cannot be stated as one of the above                              |
+| inbox.unresolved                    | history: route, delivered_without_execution, failed_unspecified, unconfirmed, or released. Migration only: an old record that cannot be stated as one of the above       |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                                                            |
 | peer.seen                           | id, name                                                                                                                                                                 |
 | outbox.queued                       | id, peer, session (the sender), recipient? (the session on the peer; else the sender's origin session), kind?, content, execution? (a send: the sender's open execution) |
@@ -277,11 +284,18 @@ is there; it stays one process. Any other start while the session still has a li
 `superseded`. One whose terminal never opened ends `launch_failed`, and the session's current process is then the one
 before it, if any. Superseded processes are not exits: no reader counts them as one.
 
-An `execution.ended` the harness reported carries its reply (`reply`) and, when it changed, its conversation id; the
-projector copies `reply` into the execution's `reply` and the conversation into the current process. An end vibestd
-decided (`lost`, `not_started`, an exit, an interrupt it closed) has no `reply`.
+An `execution.succeeded` the harness reported carries its reply. A changed conversation id is a `process.conversation`,
+not an execution field. An execution vibestd gives up (`execution.unresolved`: `lost` or `not_started`) is not a
+confirmed result: it frees the one live slot, and a later report that names that execution still lands on it.
+There is no stored send count. `sentIn` counts the `inbox` and `outbox` send rows for that execution, so ending the
+session does not change it. A machine-addressed send is forwarded and records no execution, so it adds nothing. One
+row has `owner = 1`. A successor's `execution.started` clears the previous owner and does not invent its outcome. An end report settles an execution only when it names that execution. The reply text is not an identity: a later
+execution finishes from its own report even when the reply matches an earlier one, and a retry that names the earlier
+execution changes nothing. A report that names no execution is not applied. Claude and Pi send the execution id they
+already knew; Cursor and agy cannot, so their end report does not choose an execution. A historical `execution.accepted`
+stays at its original sequence and is not a start.
 
-A reported end or start is written only for the session's current process: the harness's integration sends the
+A report that names an execution is written on that execution and leaves a successor and the session unchanged. The harness's integration sends the
 process id vibestd started it as (`VIBEST_PROCESS`, or the one the ready report's answer gave after an in-place
 restart), and a report naming another process is dropped. A reported end is also written only for the harness the
 current process runs, and, for a harness whose integration reports ready, only after that process's ready report
@@ -383,7 +397,7 @@ E2E runs it on every world's database at the end of each check.
 - Session or entry session by terminal: `process_terminal`, joined to `session.process_id` and
   `project.entry_session_id`.
 - In-place restart after an update: live sessions (`session_live`), their live process, compare the integration.
-  Order: restarting mark in memory, SIGTERM, then `execution.ended` (interrupted) and `process.ended` (restart), then the new
+  Order: restarting mark in memory, SIGTERM, then `process.ended` (restart); the execution is not given a result by the restart, then the new
   `process.started`. A refused SIGTERM writes nothing.
 - `ls`: sessions by project, the first `task` row, the latest execution and live process as above. `result`: the
   latest ended execution with its `reply`.
@@ -392,7 +406,7 @@ E2E runs it on every world's database at the end of each check.
 
 - One-shot timers (engine): a session's execution-end grace and missed-execution check. Lost with the process; the
   start-up reconcile stands in for them.
-- Live status: from the integration's events (working between `execution.started` and `execution.ended`, plus `blocked`), and
+- Live status: from the integration's events (working between `execution.started` and a terminal execution event, plus `blocked`), and
   from the runtime only for a harness with no integration.
 - On start, a `delivering` row (a hand-over that started and was not confirmed) stays `delivering`. It is not
   delivered again, it is not recorded as a failure, and it does not keep the daemon from stopping: the result is
@@ -404,10 +418,10 @@ E2E runs it on every world's database at the end of each check.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an
   open execution stays open, and the harness's execution end or reconciliation (idle, no result: lost) ends it.
 - An execution start an integration reports, or the runtime showing the session working while an execution is open,
-  is that execution's `execution.accepted`, written once. An execution end is its `execution.ended` fact, written as
-  the hook is admitted (a settlement, so it still lands while vibestd drains). The proof that an execution was taken up
-  is its acceptance or its typed text; an inbox row linked into it is not, since a task is linked before the runtime
-  gets it.
+  is that execution's `execution.started`, written once. An execution end is `execution.succeeded`, `execution.failed`
+  or `execution.interrupted`, written as the hook is admitted (a settlement, so it still lands while vibestd drains).
+  The proof that an execution was taken up is that start or its typed text; an inbox row linked into it is not, since a
+  task is linked before the runtime gets it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - An entry session moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 

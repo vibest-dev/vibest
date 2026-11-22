@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxDelivered, InboxEnqueued, ProcessEnded } from "@vibest/schema/event"
+import { ExecutionFailed, InboxDelivered, InboxEnqueued, ProcessEnded } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
@@ -92,9 +92,6 @@ export const make = Effect.gen(function* () {
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
 
     if (state !== undefined && session.status !== state) yield* db.session.setStatus(session.id, state)
-
-    if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(harnessIdOf(session)))
-      yield* db.session.acceptExecution(id, execution)
 
     const exited =
       state === undefined &&
@@ -193,19 +190,11 @@ export const make = Effect.gen(function* () {
     merge: (pending, next) => (pending === undefined || next === undefined ? undefined : Math.max(pending, next)),
   })
 
-  const onTerminal = (processes: ReadonlyArray<BoundProcess>, working: boolean) =>
+  const onTerminal = (processes: ReadonlyArray<BoundProcess>, _working: boolean) =>
     Effect.forEach(
       processes,
       ({ sessionId, process }) =>
         Effect.gen(function* () {
-          const session = working ? yield* db.session.getSession(sessionId) : undefined
-
-          const execution =
-            session && session.process?.id === process && !inbox.pulls(harnessIdOf(session))
-              ? yield* db.session.openExecution(sessionId)
-              : undefined
-
-          if (execution !== undefined) yield* db.session.acceptExecution(sessionId, execution)
           yield* wakes.wake(sessionId, process)
         }),
       { discard: true },
@@ -243,9 +232,7 @@ export const make = Effect.gen(function* () {
   const checkFailed = (id: string) =>
     Effect.forkIn(locked(id, true)(check(id)).pipe(logged(`check ${id}`)), scope).pipe(Effect.asVoid)
 
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void,
-  )
+  yield* reactor.on([ExecutionFailed], (event) => checkFailed(event.sessionId!))
   yield* reactor.on([InboxDelivered], (event) =>
     reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!)),
   )

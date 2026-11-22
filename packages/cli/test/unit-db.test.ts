@@ -231,7 +231,7 @@ describe("Db", () => {
           yield* sql<{
             input: string
           }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
-          [{ input: "kept" }],
+          [{ input: "kept\ndropped" }],
         )
       }),
     ),
@@ -246,6 +246,7 @@ describe("Db", () => {
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
           yield* db.session.insertSession(session(id), yield* projectOf("r"))
           yield* db.session.startObserved(id, "typed", 1)
+          const execution = yield* db.session.openExecution(id)
 
           const end = {
             harness: "pi",
@@ -259,7 +260,10 @@ describe("Db", () => {
 
           assert.isUndefined(yield* db.session.endObserved(id, { ...end, needsReady: true }))
           const current = (yield* db.session.getSession(id))!.process!.id
-          assert.strictEqual(yield* db.session.endObserved(id, { ...end, needsReady: true }, current), "completed")
+          assert.strictEqual(
+            yield* db.session.endObserved(id, { ...end, execution, needsReady: true }, current),
+            "completed",
+          )
         }),
       ),
   )
@@ -276,12 +280,14 @@ describe("Db", () => {
           parentSessionId: parent.sessionId,
         })
         yield* db.session.startObserved(id, "typed", 1)
+        const execution = yield* db.session.openExecution(id)
         assert.strictEqual((yield* db.session.getSession(id))?.status, "working")
         yield* sql`CREATE TRIGGER no_notice BEFORE INSERT ON inbox BEGIN SELECT RAISE(ABORT, 'no notice'); END`
 
         const end = {
           harness: "pi",
           at: 2,
+          execution,
           status: "failed" as const,
           reply: "",
           failure: "boom",
@@ -369,7 +375,7 @@ describe("Db", () => {
         const working = (yield* db.session.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!
         assert.strictEqual(working.status, "working")
         assert.strictEqual(executionStateOf(working), "open")
-        assert.strictEqual(working.openExecution?.startedAt, 5)
+        assert.strictEqual(working.openExecution?.bookedAt, 5)
         yield* db.session.endExecution(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { outcome: "completed", failure: { message: "late" } },
@@ -489,13 +495,41 @@ describe("Db", () => {
 
       const execution = (id: string, at: number, end?: { at: number; outcome: string; reply?: string }) =>
         Effect.gen(function* () {
-          const start = yield* fact("execution.started", { sessionId: id, at, data: {} })
+          const [row] = yield* (yield* SqlClient.SqlClient)<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id
+            FROM execution WHERE session_id = ${id}`
+
+          const executionId = row?.id ?? 1
+          yield* fact("execution.allocated", { sessionId: id, at, data: { executionId } })
 
           if (end === undefined) return
-          yield* fact("execution.ended", {
+          const reply = end.reply === undefined ? {} : { reply: end.reply }
+
+          if (end.outcome === "completed") {
+            yield* fact("execution.succeeded", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+
+            return
+          }
+
+          if (end.outcome === "failed") {
+            yield* fact("execution.failed", {
+              sessionId: id,
+              at: end.at,
+              data: { executionId, failure: { message: "failed" }, ...reply },
+            })
+
+            return
+          }
+
+          if (end.outcome === "interrupted") {
+            yield* fact("execution.interrupted", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+
+            return
+          }
+
+          yield* fact("execution.unresolved", {
             sessionId: id,
             at: end.at,
-            data: { execution: start, outcome: end.outcome, ...(end.reply !== undefined && { reply: end.reply }) },
+            data: { executionId, observation: end.outcome, ...reply },
           })
         })
 
@@ -555,7 +589,7 @@ describe("Db", () => {
       })
       assert.deepStrictEqual(briefs.get("11111111-1111-4111-8111-111111111111"), {
         task: null,
-        latest: { status: "lost", summary: "hidden", endedAt: 8 },
+        latest: { status: "lost", summary: "hidden", endedAt: null },
       })
       assert.isUndefined(briefs.get("00000000-0000-4000-8000-000000000000"))
       assert.strictEqual((yield* db.session.sessionBriefs([])).size, 0)

@@ -46,8 +46,8 @@ export type SessionColumns = {
   readonly pEndReason: string | null
   readonly oId: number | null
   readonly oProcess: number | null
+  readonly oBooked: number | null
   readonly oAt: number | null
-  readonly oAccepted: number | null
   readonly lId: number | null
   readonly lProcess: number | null
   readonly lOutcome: string | null
@@ -94,7 +94,7 @@ const processOf = (row: SessionColumns, integration: Integration | undefined) =>
       }
 
 const openExecutionOf = (row: SessionColumns) =>
-  row.oId === null ? null : { id: row.oId, process: row.oProcess, startedAt: row.oAt ?? 0, acceptedAt: row.oAccepted }
+  row.oId === null ? null : { id: row.oId, process: row.oProcess, bookedAt: row.oBooked ?? 0, startedAt: row.oAt }
 
 const lastExecutionOf = (row: SessionColumns) =>
   row.lId === null
@@ -103,7 +103,7 @@ const lastExecutionOf = (row: SessionColumns) =>
         id: row.lId,
         process: row.lProcess,
         outcome: row.lOutcome ?? "",
-        startedAt: row.lAt ?? 0,
+        startedAt: row.lAt,
         endedAt: row.lEnded,
         reply: row.lReply,
         failure:
@@ -141,11 +141,11 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
         p.ended_at AS p_ended, p.end_reason AS p_end_reason,
-        o.id AS o_id, o.process_id AS o_process, o.started_at AS o_at, o.accepted_at AS o_accepted,
+        o.id AS o_id, o.process_id AS o_process, o.booked_at AS o_booked, o.started_at AS o_at,
         l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,
         l.ended_at AS l_ended, l.reply AS l_reply, l.failure AS l_failure, l.failure_kind AS l_failure_kind
       FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-        LEFT JOIN execution o ON o.session_id = s.id AND o.outcome IS NULL
+        LEFT JOIN execution o ON o.session_id = s.id AND o.owner = 1
         LEFT JOIN execution l ON l.session_id = s.id AND l.id = (SELECT id FROM execution
           WHERE session_id = s.id AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1)
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
@@ -167,16 +167,23 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         outcome: string | null
         endedAt: number | null
         reply: string | null
+        owner: number | null
       }>`SELECT s.id,
           (SELECT i.content FROM inbox i WHERE i.recipient_session_id = s.id AND i.id = s.message_id) AS task,
-          t.id AS execution_id, t.outcome, t.ended_at, t.reply
+          t.id AS execution_id, t.outcome, t.ended_at, t.reply, t.owner AS owner
         FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
         WHERE ${sql.in("s.id", ids)}`
 
       const found = new Map<string, SessionBrief>()
 
       for (const row of rows) {
-        const raw = row.executionId === null ? undefined : (row.outcome ?? "working")
+        const raw =
+          row.executionId === null
+            ? undefined
+            : row.owner === 1 && row.outcome === null
+              ? "working"
+              : (row.outcome ?? undefined)
+
         const status = raw !== undefined && isMessageStatus(raw) ? raw : undefined
         found.set(row.id, {
           task: row.task === null ? null : unwrapped(row.task),
@@ -235,7 +242,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         o.from_session, o.from_agent, o.from_title, o.from_machine, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
       FROM outbox o LEFT JOIN session s ON s.id = o.session_id
-      WHERE o.peer_id = ${peer} AND o.acked_at IS NULL AND o.seq > ${after} AND coalesce(o.recipient, s.origin_session) IS NOT NULL
+      WHERE o.peer_id = ${peer} AND o.acked_at IS NULL AND o.seq > ${after}
+        AND coalesce(o.recipient, s.origin_session) IS NOT NULL
       ORDER BY o.seq LIMIT ${limit}`.pipe(
       Effect.map((rows) =>
         rows.map(({ fromSession, fromAgent, fromTitle, fromMachine, ...row }): OutboxRow => ({

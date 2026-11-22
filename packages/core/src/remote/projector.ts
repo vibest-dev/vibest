@@ -10,7 +10,6 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
-import { countSent } from "../session/projector.ts"
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -34,13 +33,15 @@ export const layer = Layer.effectDiscard(
           VALUES (${fact.data.id}, ${fact.data.name}, ${fact.at})
           ON CONFLICT (id) DO UPDATE SET name = excluded.name, connected_at = excluded.connected_at`,
     )
-    yield* bus.project(OutboxQueued, (fact) =>
-      sql`INSERT INTO outbox (id, seq, peer_id, session_id, recipient, kind, content, from_session, from_agent, from_title, from_machine, created_at)
+    yield* bus.project(
+      OutboxQueued,
+      (fact) =>
+        sql`INSERT INTO outbox (id, seq, peer_id, session_id, recipient, kind, content, from_session, from_agent,
+            from_title, from_machine, execution_id, created_at)
           VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.recipient ?? null},
-            ${fact.data.kind ?? "notice"},
-            ${fact.data.content}, ${fact.data.from?.session ?? null}, ${fact.data.from?.agent ?? null}, ${fact.data.from?.title ?? null}, ${fact.data.from?.machine ?? null}, ${fact.at})`.pipe(
-        Effect.andThen(countSent(sql, fact.data.session, fact.data.kind ?? "notice", fact.data.execution)),
-      ),
+            ${fact.data.kind ?? "notice"}, ${fact.data.content}, ${fact.data.from?.session ?? null},
+            ${fact.data.from?.agent ?? null}, ${fact.data.from?.title ?? null}, ${fact.data.from?.machine ?? null},
+            ${fact.data.execution ?? null}, ${fact.at})`,
     )
     yield* bus.project(
       OutboxAcked,
