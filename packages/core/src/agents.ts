@@ -57,7 +57,6 @@ const editorFor = (state: State, plugin: string) => {
       else reject({ id: definition.id, source: plugin, error: problem })
     },
     invalid: reject,
-    get: (id: string) => state.definitions.find((definition) => definition.id === id),
   }
 }
 

@@ -6,7 +6,7 @@ export interface AgentFile {
   readonly text: string | undefined
 }
 
-const KEYS = ["name", "description", "extends", "harness", "provider", "model"] as const
+const KEYS = ["name", "description", "harness", "provider", "model"] as const
 
 type Key = (typeof KEYS)[number]
 
@@ -95,57 +95,21 @@ const launchFields = ({ fields }: Parsed) => ({
   ...(fields.model !== undefined && { model: fields.model }),
 })
 
-export const agentsFrom = (
-  files: ReadonlyArray<AgentFile>,
-  registered: (id: string) => AgentDefinition | undefined,
-) => {
-  const parsed = files.map((file) => ({ file, result: parse(file) }))
-  const valid = new Map<string, Parsed>()
-  const invalidIds = new Set<string>()
-
-  for (const { result, file } of parsed)
-    if ("error" in result) invalidIds.add(idOf(file))
-    else valid.set(result.id, result)
-
-  const plain = (agent: Parsed): AgentDefinition => ({
-    id: agent.id,
-    description: agent.fields.description!,
-    system: agent.body,
-    ...launchFields(agent),
-  })
-
-  const on = (agent: Parsed, base: AgentDefinition): AgentDefinition => ({
-    ...plain(agent),
-    system: `${base.system}\n\n${agent.body}`,
-    ...(base.guard !== undefined && { guard: base.guard }),
-  })
-
-  const resolve = (agent: Parsed): AgentDefinition | Failed => {
-    const target = agent.fields.extends
-
-    if (target === undefined) return plain(agent)
-
-    const file = target === agent.id ? undefined : valid.get(target)
-
-    if (file !== undefined)
-      return file.fields.extends === undefined
-        ? on(agent, plain(file))
-        : failed(`extends ${target}, which itself extends ${file.fields.extends}; only one level is allowed`)
-
-    if (target !== agent.id && invalidIds.has(target)) return failed(`extends ${target}, which is invalid`)
-    const base = registered(target)
-
-    return base === undefined ? failed(`extends ${target}, but no registered agent has that id`) : on(agent, base)
-  }
-
+export const agentsFrom = (files: ReadonlyArray<AgentFile>) => {
   const definitions: Array<AgentDefinition> = []
   const invalid: Array<InvalidAgent> = []
 
-  for (const { file, result } of parsed) {
-    const resolved = "error" in result ? result : resolve(result)
+  for (const file of files) {
+    const result = parse(file)
 
-    if ("error" in resolved) invalid.push({ id: idOf(file), source: file.path, error: resolved.error })
-    else definitions.push(resolved)
+    if ("error" in result) invalid.push({ id: idOf(file), source: file.path, error: result.error })
+    else
+      definitions.push({
+        id: result.id,
+        description: result.fields.description!,
+        system: result.body,
+        ...launchFields(result),
+      })
   }
 
   return { definitions, invalid }
