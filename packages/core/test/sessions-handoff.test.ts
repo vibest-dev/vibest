@@ -13,7 +13,7 @@ import { TestClock } from "effect/testing"
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until, untilVirtual } from "./lib/observe.ts"
+import { until } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
 
@@ -244,26 +244,6 @@ test(
 
     for (let i = 0; i < 4; i++) yield* TestClock.adjust("9 seconds")
     assert.deepStrictEqual(yield* inboxStatus(id, "bound batch"), [{ status: "delivering" }])
-  }),
-  { hooked: ["pi"] },
-)
-
-test(
-  "a working terminal updates the session and does not accept the reserved execution",
-  Effect.gen(function* () {
-    const runtime = yield* FakeRuntime
-    const db = yield* Db.Service
-    const { id, sessions } = yield* idleSession(yield* makeRepository)
-    yield* runtime.updateAgent(id, (agent) => ({ ...agent, registerPrompt: false }))
-    const held = yield* runtime.hold("send", id)
-    yield* sessions.send(id, "bound batch")
-    yield* held.reached
-    yield* runtime.updateAgent(id, (agent) => ({ ...agent, status: "working", seq: agent.seq + 1 }))
-    yield* held.release()
-    yield* untilVirtual(sessions.inMemory, (memory) => memory.locks === 0)
-    assert.deepStrictEqual(yield* inboxStatus(id, "bound batch"), [{ status: "delivering" }])
-    assert.isFalse(yield* db.session.executionAccepted(id))
-    assert.strictEqual((yield* db.session.getSession(id))?.status, "working")
   }),
   { hooked: ["pi"] },
 )

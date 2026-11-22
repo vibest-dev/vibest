@@ -874,13 +874,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             if (open === undefined && end.status === "interrupted") return undefined
 
-            if (open !== undefined && (yield* acceptedAt(id, open)) === null) {
-              const handed =
-                (yield* sql`SELECT 1 FROM inbox WHERE recipient_session_id = ${id} AND recipient_execution_id = ${open} LIMIT 1`)
-                  .length > 0
-
-              if (!handed) return "unaccepted" as const
-            }
+            if (open !== undefined && (yield* acceptedAt(id, open)) === null) return "unaccepted" as const
 
             const failure = end.limited ? limitFailure(end.failure ?? "", end.resetAt) : failureOf(end.failure)
 

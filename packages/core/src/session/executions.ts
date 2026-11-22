@@ -242,7 +242,7 @@ export const make = Effect.gen(function* () {
       yield* sessionState(h, terminal, Effect.succeed(state)).pipe(Effect.orElseSucceed(() => state)),
     )
 
-    if (seen === "working" || seen === "blocked") yield* db.session.setStatus(session.id, seen)
+    if (seen === "working" || seen === "blocked") yield* pickedUp(session, execution, seen)
 
     return HANDOFF_UNPROVED
   }, Effect.scoped)
