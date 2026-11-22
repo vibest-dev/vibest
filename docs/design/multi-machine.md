@@ -213,10 +213,11 @@ a machine that is not connected fails at once; nothing is queued. The 1 MiB prom
 and passes `PromptTooLarge` through.
 
 After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
-recipient's project (none: logged and acknowledged); an inbox row whose `peer_item` is the outbox id (found: only
-acknowledged); otherwise an `inbox.queued` with `peerItem` set, from the remote agent session with its machine (a `notice` is from
-`"vibest"`), routed to the recipient while it
-has not ended, else to the project's entry session, `pending` when that one is present, else `dropped`. A `notice` has content
+recipient's project (none: logged and acknowledged); an inbox row whose `transfer_id` is the outbox id, or an outbox
+row already carrying that id (found: only acknowledged); otherwise an `inbox.enqueued` with `transferId` set to that
+id, from the remote agent session with its machine (a `notice` is from `"vibest"`), routed to the recipient while it
+has not ended, else to the project's entry session, pending when that one is present, else dropped without being
+handed to an agent. A forward to another machine reuses the same id on the outbox and writes no local delivery. A `notice` has content
 `<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Peer.Ack`. A pipe that drops
 between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
 copy was routed. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going

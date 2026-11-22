@@ -1,6 +1,6 @@
-import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
+import { ExecutionEnded, InboxEnqueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
@@ -116,27 +116,18 @@ export const make = Effect.gen(function* () {
           ? undelivered(session, rows, notStarted)
           : db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
       }),
-      Effect.onExit((exit) =>
-        Exit.isSuccess(exit) || claimed.length === 0
-          ? Effect.void
-          : db.inbox.setInboxStatus(session.id, claimed, "failed", "delivering"),
-      ),
       Effect.catchTags({
         RuntimeError: (e) =>
           claimed.length === 0
             ? Effect.fail(e)
             : e.code === "unreachable"
-              ? db.inbox.pendingInbox(session.id).pipe(
-                  Effect.flatMap((pending) =>
-                    pending.some((r) => claimed.includes(r.id))
-                      ? Effect.fail(e)
-                      : undelivered(
-                          session,
-                          batch.filter((r) => claimed.includes(r.id)),
-                          `the connection to ${runtimeOf(session)} broke after the message was handed over (${e.message}); it may have reached the session`,
-                        ),
-                  ),
-                )
+              ? db.inbox
+                  .pendingInbox(session.id)
+                  .pipe(
+                    Effect.flatMap((pending) =>
+                      pending.some((r) => claimed.includes(r.id)) ? Effect.fail(e) : Effect.void,
+                    ),
+                  )
               : undelivered(
                   session,
                   batch.filter((r) => claimed.includes(r.id)),
@@ -367,13 +358,8 @@ export const make = Effect.gen(function* () {
   yield* reactor.on([ExecutionEnded], (event) =>
     event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
   )
-  yield* reactor.on([InboxQueued], (event) =>
+  yield* reactor.on([InboxEnqueued], (event) =>
     wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),
-  )
-
-  yield* db.inbox.recoverDelivering(
-    (label, messages) =>
-      `A message to ${label} was not delivered: vibestd stopped while handing it over; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
   for (const id of yield* db.session.unstartedRuns()) {

@@ -70,7 +70,6 @@ const ENVELOPED =
 export const unwrapped = (rendered: string) => ENVELOPED.exec(rendered)?.[2] ?? rendered
 
 type Delivered = {
-  readonly kind: string
   readonly sender: Sender
   readonly message: string
 }

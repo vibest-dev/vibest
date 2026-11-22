@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
+import { ExecutionEnded, InboxDelivered, ProcessEnded } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
@@ -251,10 +251,8 @@ export const make = Effect.gen(function* () {
   yield* reactor.on([ExecutionEnded], (event) =>
     event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void,
   )
-  yield* reactor.on([InboxMoved], (event) =>
-    event.data.to === "delivered"
-      ? reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
-      : Effect.void,
+  yield* reactor.on([InboxDelivered], (event) =>
+    reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!)),
   )
   yield* reactor.on([TerminalState], (event) => onTerminal(event.processes, event.state === "working"))
   yield* reactor.on([TerminalExited], (event) => onTerminal(event.processes, false))

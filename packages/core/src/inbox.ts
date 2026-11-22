@@ -1,4 +1,4 @@
-import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued, type Sender } from "@vibest/schema/event"
+import { ExecutionAccepted, ExecutionEnded, InboxEnqueued, type Sender } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
@@ -76,8 +76,7 @@ export const layer = Layer.effect(
     yield* reactor.on([ExecutionAccepted], (event) =>
       Effect.sync(() => void handedOver.delete(handedKey(event.sessionId, event.data.execution))),
     )
-    yield* reactor.on([InboxQueued], (event) => wake(event.sessionId))
-    yield* reactor.on([InboxMoved], (event) => (event.data.to === "pending" ? wake(event.sessionId) : Effect.void))
+    yield* reactor.on([InboxEnqueued], (event) => wake(event.sessionId))
 
     const stream = (sessionId: string) =>
       Stream.unwrap(
@@ -123,6 +122,9 @@ export const layer = Layer.effect(
           session.id,
           rows.map((r) => r.id),
           "failed",
+          undefined,
+          undefined,
+          reason,
         )
         .pipe(
           Effect.andThen(

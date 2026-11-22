@@ -251,6 +251,29 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               )
                 return "parent-ended" as const
 
+              const message =
+                task === undefined
+                  ? undefined
+                  : yield* queueInbox({
+                      recipient: row.id,
+                      sender:
+                        parentSessionId !== undefined
+                          ? {
+                              type: "agent",
+                              ...((yield* remote.senderOf(parentSessionId)) ?? { session: parentSessionId }),
+                            }
+                          : origin?.reportTo !== undefined
+                            ? {
+                                type: "agent",
+                                session: origin.reportTo,
+                                machine: (yield* remote.peerName(origin.peer)) ?? origin.peer,
+                              }
+                            : { type: "user" },
+                      content: task,
+                      request,
+                      at: row.createdAt,
+                    })
+
               yield* publish(SessionCreated, {
                 sessionId: row.id,
                 at: row.createdAt,
@@ -267,6 +290,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(origin.reportTo !== undefined && { session: origin.reportTo }),
                     },
                   }),
+                  ...(message !== undefined && { message }),
                 },
               })
 
@@ -294,28 +318,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   sessionId: row.id,
                   at: row.exitedAt,
                   data: { process, reason: "exited" },
-                })
-
-              if (task !== undefined)
-                yield* queueInbox({
-                  recipient: row.id,
-                  kind: "task",
-                  sender:
-                    parentSessionId !== undefined
-                      ? {
-                          type: "agent",
-                          ...((yield* remote.senderOf(parentSessionId)) ?? { session: parentSessionId }),
-                        }
-                      : origin?.reportTo !== undefined
-                        ? {
-                            type: "agent",
-                            session: origin.reportTo,
-                            machine: (yield* remote.peerName(origin.peer)) ?? origin.peer,
-                          }
-                        : { type: "user" },
-                  content: task,
-                  status: "delivered",
-                  request,
                 })
 
               if (row.executionState !== "none") {
@@ -451,7 +453,19 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
                 const at = yield* now
 
-                if (!existing?.entry || fresh) {
+                const creating = !existing?.entry || fresh
+
+                const message =
+                  creating && start.firstInput !== undefined
+                    ? yield* queueInbox({
+                        recipient: id,
+                        sender: { type: "user" },
+                        content: start.firstInput,
+                        at,
+                      })
+                    : undefined
+
+                if (creating) {
                   if (existing?.entry) {
                     yield* endProcess(existing.entry, "archived", at)
                     yield* publish(SessionEnded, { sessionId: existing.entry, at, data: { reason: "replaced" } })
@@ -460,7 +474,13 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   yield* publish(SessionCreated, {
                     sessionId: id,
                     at,
-                    data: { project, agent: start.agent, name: "entry", directory: start.projectDirectory ?? "" },
+                    data: {
+                      project,
+                      agent: start.agent,
+                      name: "entry",
+                      directory: start.projectDirectory ?? "",
+                      ...(message !== undefined && { message }),
+                    },
                   })
                   yield* publish(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
                 }
@@ -506,17 +526,23 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   at,
                 )
 
-                if (start.firstInput !== undefined && resume === undefined)
-                  yield* queueInbox({
-                    recipient: entryId,
-                    kind: "task",
-                    sender: { type: "user" },
-                    content: start.firstInput,
-                    status: "delivered",
-                  })
+                if (start.firstInput !== undefined && resume === undefined) {
+                  const execution = yield* startExecution(entryId, at)
 
-                if (start.firstInput !== undefined && resume === undefined)
-                  yield* inbox.linkTask(entryId, yield* startExecution(entryId, at), at)
+                  if (message === undefined) {
+                    const queued = yield* queueInbox({
+                      recipient: entryId,
+                      sender: { type: "user" },
+                      content: start.firstInput,
+                      at,
+                    })
+
+                    yield* inbox.moveInbox(sql`session_id = ${entryId} AND id = ${queued}`, "delivered", { execution })
+                  }
+
+                  yield* inbox.linkTask(entryId, execution, at)
+                }
+
                 yield* afterCommit(() => void moving.delete(project))
 
                 if (!movingHere || fresh) yield* dropWaiting(entryId)

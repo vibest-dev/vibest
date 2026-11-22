@@ -228,7 +228,6 @@ export const fromOf = (row: FromSql): AgentFrom | null =>
 export type InboxSql = SenderSql & {
   readonly id: number
   readonly sessionId: string
-  readonly kind: string
   readonly content: string
   readonly status: string
 }
@@ -271,7 +270,6 @@ export const toInbox = (row: InboxSql) => {
     id: row.id,
     sender: senderOfRow(row),
     recipient: row.sessionId,
-    kind: row.kind,
     message: row.content,
     status: row.status,
   }

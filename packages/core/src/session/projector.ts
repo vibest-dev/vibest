@@ -3,8 +3,12 @@ import {
   ExecutionEnded,
   ExecutionStarted,
   type Fact,
-  InboxMoved,
-  InboxQueued,
+  InboxDelivered,
+  InboxDeliveryFailed,
+  InboxDeliveryStarted,
+  InboxDropped,
+  InboxEnqueued,
+  InboxUnresolved,
   ProcessConversation,
   ProcessEnded,
   ProcessPid,
@@ -52,10 +56,10 @@ export const layer = Layer.effectDiscard(
       const origin = data.origin
 
       return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_peer,
-          origin_project, origin_session, created_at, active_at)
+          origin_project, origin_session, created_at, active_at, message_id)
         VALUES (${sessionIdOf(fact)}, ${data.project}, ${data.parent ?? null}, ${data.agent}, ${data.name},
           ${data.directory}, ${origin?.peer ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null}, ${fact.at},
-          ${origin === undefined ? null : fact.at})`
+          ${origin === undefined ? null : fact.at}, ${data.message ?? null})`
     })
     yield* bus.project(
       SessionRenamed,
@@ -175,30 +179,89 @@ export const layer = Layer.effectDiscard(
       ),
     )
 
+    const inboxRow = (
+      session: string,
+      id: number,
+      row: {
+        readonly sender: Parameters<typeof senderColumns>[0]
+        readonly content: string
+        readonly status: string
+        readonly senderExecutionId?: number | undefined
+        readonly requestId?: string | undefined
+        readonly transferId?: string | undefined
+        readonly aboutSessionId?: string | undefined
+      },
+    ) => {
+      const sender = senderColumns(row.sender)
+
+      return Effect.gen(function* () {
+        yield* sql`INSERT INTO inbox (session_id, id, sender_type, sender_session_id, sender_agent, sender_title,
+          sender_machine, sender_plugin, sender_key, about_session_id, content, request, transfer_id, status,
+          sender_execution_id)
+        VALUES (${session}, ${id}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
+          ${sender.machine}, ${sender.plugin}, ${senderKey(row.sender)}, ${row.aboutSessionId ?? null}, ${row.content},
+          ${row.requestId ?? null}, ${row.transferId ?? null}, ${row.status}, ${row.senderExecutionId ?? null})`
+        yield* countSent(sql, localSessionOf(row.sender), "send", row.senderExecutionId)
+      })
+    }
+
     yield* bus.project(
-      InboxQueued,
-      active((fact) => {
-        const { data } = fact
-
-        const sender = senderColumns(data.sender)
-
-        return sql`INSERT INTO inbox (session_id, id, sender_type, sender_session_id, sender_agent, sender_title,
-            sender_machine, sender_plugin, sender_key, about_session_id, kind, content, request, peer_item, status)
-          VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
-            ${sender.machine}, ${sender.plugin}, ${senderKey(data.sender)}, ${data.about ?? null}, ${data.kind}, ${data.content},
-            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`.pipe(
-          Effect.andThen(countSent(sql, localSessionOf(data.sender), data.kind, data.execution)),
-        )
-      }),
+      InboxEnqueued,
+      active((fact) => inboxRow(sessionIdOf(fact), fact.seq, { ...fact.data, status: "pending" })),
     )
     yield* bus.project(
-      InboxMoved,
+      InboxDeliveryStarted,
       active(
         (fact) =>
-          sql`UPDATE inbox SET status = ${fact.data.to},
-              execution_id = coalesce(${fact.data.execution ?? null}, execution_id)
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.inbox}`,
+          sql`UPDATE inbox SET status = 'delivering'
+            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
       ),
+    )
+    yield* bus.project(
+      InboxDelivered,
+      active(
+        (fact) =>
+          sql`UPDATE inbox SET status = 'delivered', recipient_execution_id = ${fact.data.recipientExecutionId}
+            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+      ),
+    )
+    yield* bus.project(
+      InboxDeliveryFailed,
+      active(
+        (fact) =>
+          sql`UPDATE inbox SET status = 'failed'
+            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+      ),
+    )
+    yield* bus.project(
+      InboxDropped,
+      active(
+        (fact) =>
+          sql`UPDATE inbox SET status = 'dropped'
+            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+      ),
+    )
+    yield* bus.project(
+      InboxUnresolved,
+      active((fact) => {
+        const { data } = fact
+        const sender = data.sender
+        const content = data.content
+
+        if (data.messageId !== undefined || sender === undefined || content === undefined)
+          return sql`UPDATE inbox SET status = 'unresolved'
+            WHERE session_id = ${sessionIdOf(fact)} AND id = ${data.messageId ?? fact.seq}`
+
+        return inboxRow(sessionIdOf(fact), fact.seq, {
+          sender,
+          content,
+          status: "unresolved",
+          ...(data.senderExecutionId !== undefined && { senderExecutionId: data.senderExecutionId }),
+          ...(data.requestId !== undefined && { requestId: data.requestId }),
+          ...(data.transferId !== undefined && { transferId: data.transferId }),
+          ...(data.aboutSessionId !== undefined && { aboutSessionId: data.aboutSessionId }),
+        })
+      }),
     )
   }),
 )

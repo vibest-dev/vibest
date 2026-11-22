@@ -10,9 +10,7 @@ type Blocker = { readonly id: string; readonly reason: string }
 export interface StopDeps {
   readonly drain: Drain.Interface
   readonly bus: Bus.Interface
-  readonly deliveringInbox: Effect.Effect<
-    ReadonlyArray<{ readonly id: number; readonly kind: string; readonly sessionId: string }>
-  >
+  readonly deliveringInbox: Effect.Effect<ReadonlyArray<{ readonly id: number; readonly sessionId: string }>>
   readonly shutdown: Deferred.Deferred<void>
 }
 
@@ -31,7 +29,7 @@ export const stopOnce =
         last = [{ id: "inbox", reason: "checking unsettled delivery" }]
         last = (yield* deliveringInbox).map((row) => ({
           id: `inbox ${row.id}`,
-          reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
+          reason: `message for session ${row.sessionId}: delivery not settled`,
         }))
 
         return last
@@ -54,7 +52,11 @@ export const stopOnce =
         const accepted = yield* awaitEvent(
           acceptedOnceIdle,
           (event) =>
-            event.type === "drain.released" || event.type === "inbox.moved"
+            event.type === "drain.released" ||
+            event.type === "inbox.delivery_started" ||
+            event.type === "inbox.delivered" ||
+            event.type === "inbox.delivery_failed" ||
+            event.type === "inbox.dropped"
               ? acceptedOnceIdle
               : Effect.succeed(Option.none()),
           DRAIN_TIMEOUT,

@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-import { InboxKind, Sender } from "./event.ts"
+import { Sender } from "./event.ts"
 
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
 
@@ -18,7 +18,7 @@ export const ExecutionState = Schema.Literals([
 
 export type ExecutionState = typeof ExecutionState.Type
 
-export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"])
+export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped", "unresolved"])
 
 export type InboxStatus = typeof InboxStatus.Type
 
@@ -47,7 +47,6 @@ export const InboxRow = Schema.Struct({
   id: Schema.Number,
   sender: Sender,
   recipient: Schema.NullOr(Schema.String),
-  kind: InboxKind,
   message: Schema.String,
   status: InboxStatus,
 })

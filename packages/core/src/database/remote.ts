@@ -76,13 +76,14 @@ export const statements = Effect.gen(function* () {
       readonly from?: AgentFrom | undefined
       readonly at?: number
       readonly request?: string | undefined
+      readonly id?: string | undefined
     },
   ) =>
     Effect.gen(function* () {
       if (recipientSession === null) return false
 
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
-      const id = row.request ?? randomId()
+      const id = row.id ?? row.request ?? randomId()
 
       if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
 
@@ -195,7 +196,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (route === undefined) return "unknown" as const
 
-              if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
+              if (
+                (yield* reads.hasPeerItem(item.id)) ||
+                (yield* sql`SELECT 1 FROM outbox WHERE id = ${item.id}`).length > 0
+              )
+                return "duplicate" as const
               const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
 
               const content =
@@ -204,15 +209,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   : noticeEnvelope(`${item.sender}: ${item.content}`)
 
               if (heir !== undefined && "peer" in heir) {
-                yield* inbox.queueInbox({
-                  recipient: item.recipient,
-                  kind: item.kind,
-                  sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
-                  content,
-                  status: "dropped",
-                  peerItem: item.id,
-                })
                 yield* queueForPeer(heir.peer, heir.session, {
+                  id: item.id,
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
@@ -227,13 +225,12 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 target !== undefined &&
                 (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
 
+              if (target === undefined || !here) return "queued" as const
               yield* inbox.queueInbox({
-                recipient: target ?? item.recipient,
-                kind: item.kind,
+                recipient: target,
                 sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                 content,
-                status: here ? "pending" : "dropped",
-                peerItem: item.id,
+                transfer: item.id,
               })
 
               return "queued" as const

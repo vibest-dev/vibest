@@ -52,7 +52,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const failed = yield* lastScreen(h, session, execution)
       const queued = yield* db.inbox.pendingInbox(session.id)
-      const signed = queued.filter((r) => r.kind === "send" && localSessionOf(r.sender) !== undefined)
+      const signed = queued.filter((r) => localSessionOf(r.sender) !== undefined)
       const unsigned = queued.filter((r) => !signed.includes(r))
 
       if (signed.length > 0) yield* inbox.undelivered(session, signed, "it exited")
@@ -60,6 +60,9 @@ export const make = Effect.gen(function* () {
         session.id,
         unsigned.map((r) => r.id),
         "failed",
+        undefined,
+        undefined,
+        "it exited",
       )
       const lost = unsigned.map((r) => r.message).join("\n\n")
 

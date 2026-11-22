@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 17
+export const PROJECTION_VERSION = 18
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -147,7 +147,8 @@ export const PROJECTION_SCHEMA = [
     created_at            INTEGER NOT NULL,
     ended_at              INTEGER,
     process_id            INTEGER,
-    active_at             INTEGER
+    active_at             INTEGER,
+    message_id            INTEGER
   ) STRICT`,
   `CREATE INDEX session_project ON session (project_id)`,
   `CREATE INDEX session_parent ON session (parent_session_id)`,
@@ -200,23 +201,22 @@ export const PROJECTION_SCHEMA = [
     sender_title      TEXT,
     sender_machine    TEXT,
     sender_plugin     TEXT,
-    sender_key        TEXT    NOT NULL,
-    about_session_id  TEXT,
-    kind              TEXT    NOT NULL CHECK (kind IN ('task', 'send', 'notice')),
-    content           TEXT    NOT NULL,
-    request           TEXT,
-    peer_item         TEXT,
-    status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
-    execution_id      INTEGER,
+    sender_key           TEXT    NOT NULL,
+    about_session_id     TEXT,
+    content              TEXT    NOT NULL,
+    request              TEXT,
+    transfer_id          TEXT,
+    status               TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped', 'unresolved')),
+    sender_execution_id  INTEGER,
+    recipient_execution_id INTEGER,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE INDEX inbox_status ON inbox (status, session_id)`,
-  `CREATE INDEX inbox_kind ON inbox (session_id, kind, id)`,
   `CREATE INDEX inbox_sender ON inbox (sender_session_id) WHERE sender_session_id IS NOT NULL`,
   `CREATE INDEX inbox_about ON inbox (about_session_id) WHERE about_session_id IS NOT NULL`,
-  `CREATE INDEX inbox_execution ON inbox (session_id, execution_id) WHERE execution_id IS NOT NULL`,
+  `CREATE INDEX inbox_recipient_execution ON inbox (session_id, recipient_execution_id) WHERE recipient_execution_id IS NOT NULL`,
   `CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request) WHERE request IS NOT NULL`,
-  `CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL`,
+  `CREATE UNIQUE INDEX inbox_transfer ON inbox (transfer_id) WHERE transfer_id IS NOT NULL`,
   `CREATE TABLE machine (
     name         TEXT PRIMARY KEY,
     target       TEXT NOT NULL,
