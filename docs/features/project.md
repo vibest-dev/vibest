@@ -1,7 +1,13 @@
 # Projects
 
-Each repository (or directory of repositories) is a Project with its own folder of knowledge: preferences, docs,
-memories and artifacts. Each capability below says what it is and when it counts as working.
+Each repository (or directory of repositories) is a Project with its own folder of knowledge: `preferences.md`, `docs/`,
+`memories/` and `artifacts/`. Every session's system prompt carries `preferences.md` and the curated memory index
+`memories/MEMORY.md` (capped at 100 lines and 8,000 bytes on a line boundary, with a warning when truncated to compact
+under 70 lines; bootstrapped once newest-first up to 70 lines and 5,600 bytes when `MEMORY.md` is missing and `memories/`
+holds `.md` files), while topic files `memories/<name>.md` are read on demand or searched with
+`vibest project search <query> --kind memories`. Saving or updating a memory maintains both `memories/<name>.md` and its
+one-line entry in `memories/MEMORY.md`, updating or removing stale entries instead of only appending. Each capability
+below says what it is and when it counts as working.
 
 ## P1. Project info
 
