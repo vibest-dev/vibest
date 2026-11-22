@@ -157,19 +157,21 @@ describe.concurrent("vibest archive: process proof", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
 
-      const worktreeDeletedOutsideVibest = (w: Effect.Success<typeof idleSession>) =>
+      const worktreeDeletedOutsideVibest = (w: Effect.Success<typeof workingSession>) =>
         Effect.gen(function* () {
           yield* fs.remove(w.worktree, { recursive: true })
           yield* writeEnd(w.id, "pi", { text: `result of ${w.id}` })
+          yield* w.herdr.endExecution(w.id)
+          yield* w.sessions.check(w.id)
           yield* fs.writeFileString(w.rules, `rules of ${w.id}`)
         })
 
       const reportedExecutionEndEvent = (id: string) =>
         eventsOf(id, "execution.succeeded").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
 
-      const a = yield* idleSession
-      yield* a.herdr.runtime.close({ id: a.pane })
+      const a = yield* workingSession
       yield* worktreeDeletedOutsideVibest(a)
+      yield* a.herdr.runtime.close({ id: a.pane })
       yield* a.sessions.check(a.id)
       yield* until(a.db.session.getSession(a.id), (row) => (row ? exitedAt(row) : undefined) !== null)
       yield* settled
@@ -181,7 +183,7 @@ describe.concurrent("vibest archive: process proof", () => {
       assert.strictEqual(yield* reportedExecutionEndEvent(a.id), `result of ${a.id}`)
       assert.isFalse(yield* fs.exists(a.rules))
 
-      const b = yield* idleSession
+      const b = yield* workingSession
       yield* worktreeDeletedOutsideVibest(b)
       yield* settled
       assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", pane: "closed", worktree: "gone" })

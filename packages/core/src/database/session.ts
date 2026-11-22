@@ -524,8 +524,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   at,
                 )
 
+                let execution: number | undefined
+
                 if (start.firstInput !== undefined && resume === undefined) {
-                  const execution = yield* allocateExecution(entryId, at)
+                  execution = yield* allocateExecution(entryId, at)
 
                   if (message === undefined) {
                     const queued = yield* queueInbox({
@@ -552,6 +554,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   harnessSessionId: resume ?? null,
                   projectId: project,
                   process,
+                  ...(execution !== undefined && { execution }),
                   firstInput: resume === undefined ? start.firstInput : undefined,
                 }
               }),
@@ -879,8 +882,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             if (current === undefined || current.start.harness !== end.harness) return undefined
 
-            if (end.needsReady && current.readyAt === null && process !== undefined && process !== current.id)
-              return undefined
+            if (end.needsReady && current.readyAt === null && process !== current.id) return undefined
+
+            if (end.execution === undefined && process !== undefined && process !== current.id) return undefined
             const failure = end.limited ? limitFailure(end.failure ?? "", end.resetAt) : failureOf(end.failure)
 
             const recorded = yield* recordObservedEnd(
@@ -892,14 +896,34 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 reply: end.reply,
               },
               end.at,
-              process,
+              current.id,
               end.execution,
             )
 
-            if (end.conversation !== undefined && end.conversation !== current.conversation)
-              yield* session.noteConversation(id, end.conversation, process)
+            const updateConversation =
+              end.conversation !== undefined && end.conversation !== current.conversation
+                ? session.noteConversation(id, end.conversation, process)
+                : Effect.void
 
-            if (recorded === undefined) return undefined
+            if (recorded === undefined) {
+              yield* updateConversation
+
+              return undefined
+            }
+
+            if (recorded.kind === "duplicate") {
+              if (!recorded.active) yield* updateConversation
+
+              return end.status
+            }
+
+            yield* updateConversation
+
+            if (recorded.kind === "unmatched") {
+              yield* setStatus(id, "idle")
+
+              return undefined
+            }
 
             if (!recorded.wrote || !recorded.current) return end.status
 

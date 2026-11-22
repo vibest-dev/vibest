@@ -62,6 +62,7 @@ type Env =
   | "VIBEST_RUNTIME"
   | "VIBEST_HOME"
   | "VIBEST_PROCESS"
+  | "VIBEST_EXECUTION"
   | "HOME"
 
 function nativeHost($: EngineInterface) {
@@ -80,6 +81,8 @@ function nativeHost($: EngineInterface) {
           return $.env.get("VIBEST_HOME")
         case "VIBEST_PROCESS":
           return $.env.get("VIBEST_PROCESS")
+        case "VIBEST_EXECUTION":
+          return $.env.get("VIBEST_EXECUTION")
         case "HOME":
           return $.env.get("HOME")
       }
@@ -143,6 +146,13 @@ const errorOf = (body: Json | undefined) => {
   return Predicate.isString(error) ? error : undefined
 }
 
+const parseExecution = (raw: string | undefined) => {
+  if (raw === undefined || !/^[1-9]\d*$/.test(raw)) return undefined
+  const parsed = Number(raw)
+
+  return Number.isSafeInteger(parsed) ? parsed : undefined
+}
+
 export function register(on: On) {
   const queue: Array<Taken> = []
   const full = new Map<string, Array<Taken>>()
@@ -154,6 +164,15 @@ export function register(on: On) {
   let timer: { cancel: () => void } | undefined
   let processId: string | undefined
   let bound: number | undefined
+  let initialBoundRead = false
+
+  const ensureInitialBound = async (host: Host) => {
+    if (initialBoundRead) return
+    initialBoundRead = true
+    const initial = parseExecution(await host.env("VIBEST_EXECUTION").catch(() => undefined))
+
+    if (bound === undefined) bound = initial
+  }
 
   const identity = async (host: Host) => {
     const sessionId = await host.env("VIBEST_SESSION_ID")
@@ -266,6 +285,7 @@ export function register(on: On) {
 
   on("session.start", async ($, e, next) => {
     const host = nativeHost($)
+    await ensureInitialBound(host)
 
     if (await identity(host).catch(() => undefined)) {
       const pid = await host.claudeCodePid().catch(() => undefined)
@@ -328,6 +348,7 @@ export function register(on: On) {
       const host = nativeHost($)
       const who = await identity(host).catch(() => undefined)
       idle = true
+      await ensureInitialBound(host)
 
       const execution = bound
       bound = undefined
@@ -357,6 +378,7 @@ export function register(on: On) {
       if (list?.length === 0) full.delete(event.text)
 
       if (taken === undefined) return next(event)
+      initialBoundRead = true
       bound = taken.execution
       await report(host, hookRoute("claude", "prompt"), {
         hook_event_name: "PromptSubmit",

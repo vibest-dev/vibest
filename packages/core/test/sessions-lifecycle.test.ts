@@ -185,16 +185,21 @@ describe.concurrent("Session", () => {
         yield* held.release()
         yield* Fiber.join(removing)
         const after = yield* spawnWorking(repo, harness)
+        yield* after.db.session.acceptExecution(after.id, (yield* after.db.session.openExecution(after.id))!)
         yield* after.sessions.remove(after.id)
         yield* writeEnd(after.id, harness, aborted, 60_000)
         yield* TestClock.adjust("2 minutes")
 
-        for (const { id, sessions, db } of [during, after]) {
+        for (const [entry, expected] of [
+          [during, "interrupted"],
+          [after, "lost"],
+        ] as const) {
+          const { id, sessions, db } = entry
           const row = (yield* db.session.getSession(id))!
           assert.isTrue(archived(row), id)
           yield* sessions.check(id)
           assert.deepStrictEqual(yield* executionAndSentCounts(id), { executions: 1, sent: 0 }, id)
-          assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted", id)
+          assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), expected, id)
           const pending = yield* entryPending(db, row.projectId)
           assert.ok(pending.every((item) => item.message.includes("was not delivered")))
         }

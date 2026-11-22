@@ -140,6 +140,7 @@ describe("restart in place", () => {
     Effect.gen(function* () {
       const { db, sessions, id } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
+      yield* db.session.acceptExecution(id, (yield* db.session.openExecution(id))!)
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       const ran = yield* herdr.hold("run")
@@ -295,6 +296,7 @@ describe("restart in place", () => {
       const identity = new Set([
         "VIBEST_SESSION_ID",
         "VIBEST_PROCESS",
+        "VIBEST_EXECUTION",
         "VIBEST_PROJECT_ID",
         "VIBEST_PROJECT_DIR",
         "VIBEST_AGENT",

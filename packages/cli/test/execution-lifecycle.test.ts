@@ -293,8 +293,20 @@ describe("execution lifecycle", () => {
       yield* db.session.closeExecution(S, first, "lost", { failure: { message: "no end hook" } })
       const second = (yield* db.session.startExecution(S, 2)).execution
       yield* db.session.acceptExecution(S, second)
-      assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 3, "reply A")))
+      yield* db.session.setStatus(S, "working")
+      assert.isUndefined(
+        yield* db.session.endObserved(S, { ...harnessEnd("completed", 3, "reply A"), conversation: "conv-ambig" }),
+      )
       assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 4, "reply A")))
+      const afterAmbiguous = (yield* db.session.getSession(S))!
+      assert.strictEqual(afterAmbiguous.status, "idle")
+      assert.strictEqual(afterAmbiguous.process?.conversation, "conv-ambig")
+      assert.strictEqual(
+        (yield* sql<{
+          n: number
+        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+        0,
+      )
       assert.deepStrictEqual(
         yield* sql<{ id: number; outcome: string | null; reply: string | null }>`SELECT id, outcome, reply
           FROM execution WHERE session_id = ${S} ORDER BY id`,
@@ -317,6 +329,54 @@ describe("execution lifecycle", () => {
         null,
       )
     }).pipe(Effect.provide(memoryDb())),
+  )
+
+  it.effect(
+    "unkeyed end settles sole active owned execution without faking started_at, and unowned unkeyed end only updates conversation and idle status",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* withSession
+        const sql = yield* SqlClient.SqlClient
+        yield* db.session.setStatus(S, "working")
+        assert.isUndefined(
+          yield* db.session.endObserved(S, { ...harnessEnd("completed", 5, "unowned"), conversation: "conv-unowned" }),
+        )
+        const unowned = (yield* db.session.getSession(S))!
+        assert.strictEqual(unowned.status, "idle")
+        assert.strictEqual(unowned.process?.conversation, "conv-unowned")
+        assert.strictEqual(
+          (yield* sql<{
+            n: number
+          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+          0,
+        )
+
+        const sole = (yield* db.session.startExecution(S, 10)).execution
+        yield* db.session.setStatus(S, "working")
+        assert.strictEqual(
+          yield* db.session.endObserved(S, { ...harnessEnd("completed", 11, "sole reply"), conversation: "conv-sole" }),
+          "completed",
+        )
+        const settled = (yield* db.session.getSession(S))!
+        assert.strictEqual(settled.status, "idle")
+        assert.strictEqual(settled.process?.conversation, "conv-sole")
+
+        const [row] = yield* sql<{
+          id: number
+          outcome: string | null
+          reply: string | null
+          started: number | null
+          owner: number
+        }>`SELECT id, outcome, reply, started_at AS started, owner FROM execution WHERE session_id = ${S} AND id = ${sole}`
+
+        assert.deepStrictEqual(row, {
+          id: sole,
+          outcome: "completed",
+          reply: "sole reply",
+          started: null,
+          owner: 0,
+        })
+      }).pipe(Effect.provide(memoryDb())),
   )
 
   it.effect("a trailing accepted fact keeps its sequence through migration and the next append", () =>

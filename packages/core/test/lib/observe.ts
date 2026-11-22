@@ -65,7 +65,14 @@ export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject
 
     const bound = Predicate.isNumber(named) || harness !== "pi" ? named : yield* db.session.openExecution(id)
 
-    const body = Predicate.isNumber(bound) ? { ...payload, execution: bound } : payload
+    const withHook =
+      harness === "cursor" && payload.hook_event_name === undefined
+        ? { hook_event_name: "afterAgentResponse", ...payload }
+        : (harness === "pi" || harness.endsWith("-pi")) && payload.type === undefined
+          ? { type: "agent_settled", ...payload }
+          : payload
+
+    const body = Predicate.isNumber(bound) ? { ...withHook, execution: bound } : withHook
     const observed = adapter.executionEnd?.(body)
 
     if (observed === undefined) return

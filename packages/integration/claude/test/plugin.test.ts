@@ -212,6 +212,56 @@ describe("Claude plugin requests", () => {
     await h.fire(2000)
     assert.lengthOf(h.requests, 2, "taken: no more tries")
   })
+
+  it("VIBEST_EXECUTION binds the first turn once and is cleared after settle or replaced by inbox take", async () => {
+    const h = host({ ...WORKER, VIBEST_EXECUTION: "7" })
+    await h.start()
+    await h.executionComplete({ reason: "answer", answer: "first" })
+    await h.executionComplete({ reason: "answer", answer: "second" })
+    await settle()
+    const ends = h.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body)
+    assert.deepStrictEqual(ends, [
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "first",
+        execution: 7,
+      },
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "second",
+      },
+    ])
+
+    const replaced = host({ ...WORKER, VIBEST_EXECUTION: "7" })
+    const takes = [batch(12, [{ sender: { type: "vibest" }, message: "pulled" }], "pulled")]
+    replaced.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
+    await replaced.start()
+    await replaced.draw()
+    await replaced.prompt("Message from Vibest\npulled", ownSubmit)
+    await replaced.executionComplete({ reason: "answer", answer: "from pull" })
+    await replaced.executionComplete({ reason: "answer", answer: "later" })
+    await settle()
+    const replacedEnds = replaced.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body)
+    assert.deepStrictEqual(replacedEnds, [
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "from pull",
+        execution: 12,
+      },
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "later",
+      },
+    ])
+  })
 })
 
 describe("Claude plugin inbox", () => {

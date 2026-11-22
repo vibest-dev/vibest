@@ -589,6 +589,100 @@ describe("pi-vibest", () => {
   )
 
   test(
+    "VIBEST_EXECUTION binds the first turn once and is cleared after settle or replaced by inbox pull",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projectOf("r")
+      const id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      yield* db.session.insertSession({ id, ...idleRow("pi") }, project)
+      const first = (yield* db.session.startExecution(id, 1)).execution
+      const processId = (yield* db.session.currentProcessId(id))!
+      yield* db.session.patchLive(id, { ready: 1 })
+
+      const s = yield* session({
+        VIBEST_AGENT: "general",
+        VIBEST_SESSION_ID: id,
+        VIBEST_PROJECT_ID: project,
+        VIBEST_PROCESS: String(processId),
+        VIBEST_EXECUTION: String(first),
+        VIBEST_CLI: "vibest",
+      })
+
+      yield* s.emit("session_start", { reason: "startup" }, tuiStart)
+      yield* s.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "first turn" }] }] },
+        tuiStart,
+      )
+      yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* until(
+        sql<{ outcome: string | null; reply: string | null }>`SELECT outcome, reply FROM execution
+          WHERE session_id = ${id} AND id = ${first}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.outcome === "completed",
+      )
+
+      const lost = (yield* db.session.startExecution(id, 2)).execution
+      yield* db.session.closeExecution(id, lost, "lost", { failure: { message: "gone" } })
+      const second = (yield* db.session.startExecution(id, 3)).execution
+      yield* s.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "second turn" }] }] },
+        tuiStart,
+      )
+      yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* TestClock.withLive(Effect.sleep("100 millis"))
+      assert.strictEqual(
+        (yield* sql<{
+          outcome: string | null
+        }>`SELECT outcome FROM execution WHERE session_id = ${id} AND id = ${second}`)[0]?.outcome,
+        null,
+      )
+
+      const id2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+      yield* db.session.insertSession({ id: id2, ...idleRow("pi") }, project)
+      const initial = (yield* db.session.startExecution(id2, 1)).execution
+      yield* db.session.closeExecution(id2, initial, "lost", { failure: { message: "gone" } })
+      const pulled = (yield* db.session.startExecution(id2, 2)).execution
+      const process2 = (yield* db.session.currentProcessId(id2))!
+      yield* db.session.patchLive(id2, { ready: 1 })
+
+      const s2 = yield* session({
+        VIBEST_AGENT: "general",
+        VIBEST_SESSION_ID: id2,
+        VIBEST_PROJECT_ID: project,
+        VIBEST_PROCESS: String(process2),
+        VIBEST_EXECUTION: String(initial),
+        VIBEST_CLI: "vibest",
+      })
+
+      yield* s2.emit("session_start", { reason: "startup" }, tuiStart)
+      yield* s2.emit(
+        "message_start",
+        { message: { role: "custom", customType: "vibest", details: { execution: pulled } } },
+        tuiStart,
+      )
+      yield* s2.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "pulled reply" }] }] },
+        tuiStart,
+      )
+      yield* s2.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* until(
+        sql<{ outcome: string | null; reply: string | null }>`SELECT outcome, reply FROM execution
+          WHERE session_id = ${id2} AND id = ${pulled}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.outcome === "completed",
+      )
+      assert.strictEqual(
+        (yield* sql<{
+          outcome: string | null
+        }>`SELECT outcome FROM execution WHERE session_id = ${id2} AND id = ${initial}`)[0]?.outcome,
+        "lost",
+      )
+    }),
+  )
+
+  test(
     "Coordinator: a TUI startup execution reports its session id once; /new, /resume and /fork report before the next execution",
     Effect.gen(function* () {
       const db = yield* Db.Service

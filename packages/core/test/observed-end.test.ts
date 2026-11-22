@@ -167,7 +167,7 @@ describe("observed execution end", () => {
   )
 
   test(
-    "a message is delivered into the execution it was handed to, even when that execution ended before the delivery was recorded",
+    "a typed message stays bound to the execution it was handed to, even when that execution ended before the send finished",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -178,14 +178,14 @@ describe("observed execution end", () => {
       const handed = yield* db.session.openExecution(id)
       yield* writeEnd(id, "pi", { type: "agent_settled", text: "done fast" })
       yield* held.release()
+      yield* until(sessions.inMemory, (m) => m.locks === 0)
 
-      const [row] = yield* until(
-        sql<{ status: string; execution: number | null }>`SELECT status, recipient_execution_id AS execution FROM inbox
-          WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
-        (rows) => rows[0]?.status === "delivered",
-      )
+      const [row] = yield* sql<{ status: string; execution: number | null }>`SELECT
+          status, recipient_execution_id AS execution FROM inbox
+        WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(Effect.orDie)
 
       assert.isDefined(handed)
+      assert.strictEqual(row!.status, "delivering")
       assert.strictEqual(row!.execution, handed)
     }),
     { hooked: ["pi"] },

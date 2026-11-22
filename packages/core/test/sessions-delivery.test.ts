@@ -541,6 +541,7 @@ describe.concurrent("Session", () => {
         [["completed", true]],
       )
       const [open] = yield* herdr.callsTo("open")
+      assert.strictEqual(open!.env.VIBEST_EXECUTION, "1")
       assert.include(open!.argv.slice(-2).join(" "), "--first")
       assert.include(open!.argv.at(-1)!, "do it")
       assert.isFalse((yield* herdr.callsTo("send")).some((call) => call.text !== undefined))
@@ -582,7 +583,7 @@ describe.concurrent("Session", () => {
   )
 
   test(
-    "Cursor on a runtime with no status for it: the task is in its launch argv; activity marks the session working without starting or delivering an execution, and an unkeyed end does not finish it",
+    "Cursor on a runtime with no status for it: the task is in its launch argv; activity marks the session working without starting or delivering an execution, and an unkeyed end finishes the sole owned execution without faking started_at",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -622,8 +623,16 @@ describe.concurrent("Session", () => {
 
       assert.deepStrictEqual(after, before)
       yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
+      const finished = (yield* db.session.getSession(id))!
+      assert.strictEqual(executionStateOf(finished), "completed")
+      assert.strictEqual(finished.status, "idle")
       assert.isFalse(yield* db.session.executionAccepted(id))
-      assert.notStrictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
+
+      const afterEnd = yield* sql<{
+        started: number | null
+      }>`SELECT count(*) AS started FROM execution WHERE session_id = ${id} AND started_at IS NOT NULL`
+
+      assert.deepStrictEqual(afterEnd, [{ started: 0 }])
       assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
     }),
   )

@@ -31,9 +31,7 @@ export const PI: HarnessDefinition = {
   ],
   models: { args: () => [], answer: () => undefined },
   executionEnd: (event) => {
-    if (event.type !== undefined && event.type !== "agent_settled") return undefined
-
-    if (event.hook_event_name !== undefined) return undefined
+    if (event.type !== "agent_settled") return undefined
     const aborted = event.aborted === true
     const error = Predicate.isString(event.error) ? event.error : ""
 
@@ -131,9 +129,11 @@ export const CURSOR: HarnessDefinition = {
   executionEnd: (event) => {
     if (event.hook_event_name !== "afterAgentResponse") return undefined
     const conversation = Predicate.isString(event.conversation_id) ? event.conversation_id : undefined
+    const error = Predicate.isString(event.error) ? event.error : ""
 
     return {
       reply: Predicate.isString(event.text) ? event.text : "",
+      ...(error !== "" && { failure: error }),
       ...(conversation !== undefined && { conversation }),
       ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
     }

@@ -81,9 +81,11 @@ export const cursor: Harness.HarnessDefinition = {
   executionEnd: (event) => {
     if (event.hook_event_name !== "afterAgentResponse") return undefined
     const conversation = Predicate.isString(event.conversation_id) ? event.conversation_id : undefined
+    const error = Predicate.isString(event.error) ? event.error : ""
 
     return {
       reply: Predicate.isString(event.text) ? event.text : "",
+      ...(error !== "" && { failure: error }),
       ...(conversation !== undefined && { conversation }),
       ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
     }

@@ -430,25 +430,57 @@ export const statements = Effect.gen(function* () {
     id: string,
     end: ExecutionEnd,
     at: number | undefined,
-    _process: number | undefined,
+    currentProcess: number,
     executionId?: number,
   ) =>
     Effect.gen(function* () {
-      if (executionId === undefined) return undefined
+      if (executionId !== undefined) {
+        const rows = yield* sql<{
+          id: number
+          outcome: string | null
+          owner: number
+        }>`SELECT id, outcome, owner FROM execution WHERE session_id = ${id}`
+
+        const named = rows.find((row) => row.id === executionId)
+
+        if (named === undefined) return undefined
+
+        if (confirmedOutcome(named.outcome))
+          return { kind: "duplicate" as const, id: named.id, active: rows.some((row) => row.owner === 1) }
+        const wrote = yield* finishExecution(id, named.id, end, at)
+
+        return {
+          kind: "settled" as const,
+          id: named.id,
+          current: rows.some((row) => row.owner === 1 && row.id === named.id),
+          wrote,
+        }
+      }
 
       const rows = yield* sql<{
         id: number
         outcome: string | null
         owner: number
-      }>`SELECT id, outcome, owner FROM execution WHERE session_id = ${id}`
+        reply: string | null
+      }>`SELECT id, outcome, owner, reply FROM execution
+        WHERE session_id = ${id} AND process_id = ${currentProcess} ORDER BY id`
 
-      const named = rows.find((row) => row.id === executionId)
+      const active = rows.find((row) => row.owner === 1)
+      const reply = end.reply ?? null
 
-      if (named === undefined || confirmedOutcome(named.outcome))
-        return named === undefined ? undefined : { id: named.id, current: false, wrote: false }
-      const wrote = yield* finishExecution(id, named.id, end, at)
+      const duplicate =
+        reply !== null && reply !== ""
+          ? rows.findLast((row) => confirmedOutcome(row.outcome) && row.outcome === end.outcome && row.reply === reply)
+          : undefined
 
-      return { id: named.id, current: rows.some((row) => row.owner === 1 && row.id === named.id), wrote }
+      if (duplicate !== undefined) return { kind: "duplicate" as const, id: duplicate.id, active: active !== undefined }
+
+      const unresolvedEarlier = rows.some((row) => row.id !== active?.id && !confirmedOutcome(row.outcome))
+
+      if (active === undefined || unresolvedEarlier) return { kind: "unmatched" as const }
+      const wrote = yield* finishExecution(id, active.id, end, at)
+
+      return { kind: "settled" as const, id: active.id, current: true, wrote }
     })
 
   const setStatus = (id: string, status: AgentStatus) =>
