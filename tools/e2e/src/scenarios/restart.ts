@@ -756,7 +756,7 @@ const checks: ReadonlyArray<Check> = [
             try {
               return db
                 .query<{ content: string }, [string]>(
-                  `SELECT content FROM inbox WHERE about_session_id = ? AND kind = 'notice' ORDER BY id`,
+                  `SELECT content FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest' ORDER BY id`,
                 )
                 .all(id)
                 .map((r) => r.content)

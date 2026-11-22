@@ -151,10 +151,11 @@ describe("vibest.sock", () => {
       yield* until(db.session.executionAccepted(first.id), (accepted) => accepted)
 
       const queued = (request: string) =>
-        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'inbox.queued'
-          AND json_extract(data, '$.request') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
+        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'inbox.enqueued'
+          AND json_extract(data, '$.requestId') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
 
-      const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE kind = 'send'`.pipe(
+      const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox i WHERE i.sender_type != 'vibest'
+          AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = i.session_id AND s.message_id = i.id)`.pipe(
         Effect.map((rows) => rows[0]!.n),
       )
 

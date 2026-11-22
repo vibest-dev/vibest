@@ -814,18 +814,18 @@ export const expectFacts = (w: World, sessionId: string, expected: ReadonlyArray
 
 export const expectReplied = async (w: World, sub: string) => {
   expectFacts(w, sub, [
+    "inbox.enqueued",
     "session.created",
     "process.started",
-    "inbox.queued",
     "execution.started",
-    "inbox.moved",
+    "inbox.delivered",
     "process.placed",
     "execution.ended",
   ])
 
   const task = row<{ status: string; execution: number | null }>(
     w,
-    "SELECT status, execution_id AS execution FROM inbox WHERE session_id = ? AND kind = 'task'",
+    "SELECT i.status, i.recipient_execution_id AS execution FROM inbox i JOIN session s ON s.id = i.session_id AND s.message_id = i.id WHERE i.session_id = ?",
     sub,
   )
 

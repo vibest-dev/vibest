@@ -80,14 +80,14 @@ export const piProject = async (w: World, name: string) => {
 
   const sendRow = (id: string, message: string) =>
     q<{ id: number; status: string }>(
-      "SELECT id, status FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
+      "SELECT id, status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND content = ? ORDER BY id DESC LIMIT 1",
       id,
       message,
     )
 
   const notices = (id: string, text: string) =>
     q<{ n: number }>(
-      "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice' AND instr(content, ?) > 0",
+      "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest' AND instr(content, ?) > 0",
       id,
       text,
     )?.n ?? 0
@@ -376,7 +376,7 @@ const checks: ReadonlyArray<Check> = [
 
         const copies = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ?",
+          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND content = ?",
           sub,
           message,
         )
@@ -463,8 +463,11 @@ const checks: ReadonlyArray<Check> = [
         expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
 
         const text =
-          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE about_session_id = ? AND kind = 'notice'", sub)
-            ?.c ?? ""
+          row<{ c: string }>(
+            w,
+            "SELECT content AS c FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'",
+            sub,
+          )?.c ?? ""
 
         const kept = await fs.stat(worktree).then(
           () => true,
@@ -514,8 +517,10 @@ const checks: ReadonlyArray<Check> = [
 
         const input = row<{ n: number }>(
           w,
-          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.inbox'
-            WHERE e.aggregate = ? AND e.type = 'inbox.moved' AND i.kind = 'task' AND e.data ->> '$.execution' IS NOT NULL`,
+          `SELECT count(*) AS n FROM event e
+            JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.messageId'
+            JOIN session s ON s.id = i.session_id AND s.message_id = i.id
+            WHERE e.aggregate = ? AND e.type = 'inbox.delivered' AND e.data ->> '$.recipientExecutionId' IS NOT NULL`,
           sub,
         )?.n
 
@@ -633,7 +638,7 @@ const checks: ReadonlyArray<Check> = [
 
         const rows = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send'",
+          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_type != 'vibest'",
           sub,
         )?.n
 

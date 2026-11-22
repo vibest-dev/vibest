@@ -115,7 +115,7 @@ describe("observed execution end", () => {
       yield* held.release()
 
       const [row] = yield* until(
-        sql<{ status: string; execution: number | null }>`SELECT status, execution_id AS execution FROM inbox
+        sql<{ status: string; execution: number | null }>`SELECT status, recipient_execution_id AS execution FROM inbox
           WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )

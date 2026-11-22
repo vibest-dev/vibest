@@ -26,8 +26,16 @@ made while an execution runs waits until it ends and then opens the next executi
 
 ## S54. A first task is delivered once
 
-A session's first task is delivered once, as one execution that completes with its reply; no other message is delivered
-into that execution.
+A session's original message, the one recorded with the session when it is created, is delivered once, as one execution
+that completes with its reply; no other message is delivered into that execution. A message that arrives while that
+one is still waiting stays out of it.
+
+## Unconfirmed hand-over
+
+A message vibestd has started handing over, and then cannot confirm, stays in that unconfirmed hand-over. It is not
+delivered again and it is not a failure. A hand-over that failed for a recorded reason is a failure, and the two are
+different. `vibest result` and the task line follow the message recorded with the session, not `sent` and not the
+earliest inbox row.
 
 ## S11. Claude entry session inbox
 

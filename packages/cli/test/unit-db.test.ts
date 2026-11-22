@@ -326,8 +326,8 @@ describe("Db", () => {
           task: "do it",
         })
         assert.deepStrictEqual(
-          yield* sql`SELECT kind, content, status FROM inbox WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
-          [{ kind: "task", content: "do it", status: "delivered" }],
+          yield* sql`SELECT content, status FROM inbox WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
+          [{ content: "do it", status: "pending" }],
         )
         assert.deepStrictEqual(yield* db.inbox.pendingInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), [])
         assert.strictEqual(
@@ -409,7 +409,7 @@ describe("Db", () => {
           Effect.map(
             sql<{
               recipient: string
-            }>`SELECT session_id AS recipient FROM inbox WHERE kind = 'notice' AND instr(content, ${summary}) > 0`,
+            }>`SELECT session_id AS recipient FROM inbox WHERE sender_type = 'vibest' AND instr(content, ${summary}) > 0`,
             (rows) => rows.map((row) => row.recipient),
           )
 
@@ -431,7 +431,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a peer item for an ended session goes to its nearest living creator, once; with none only a dropped row stays",
+    "a peer item for an ended session goes to its nearest living creator, once; with none, nothing is written locally",
     () =>
       Effect.gen(function* () {
         const db = yield* Db.Service
@@ -456,17 +456,14 @@ describe("Db", () => {
           sql<{
             recipient: string
             status: string
-          }>`SELECT session_id AS recipient, status FROM inbox WHERE kind = 'notice'`
+          }>`SELECT session_id AS recipient, status FROM inbox WHERE sender_type = 'vibest'`
 
         assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
         assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "duplicate")
         assert.deepStrictEqual(yield* rows(), [{ recipient: creator, status: "pending" }])
         yield* db.session.archive(creator)
         assert.strictEqual(yield* db.remote.receivePeerItem(item("8c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
-        assert.deepStrictEqual(yield* rows(), [
-          { recipient: creator, status: "pending" },
-          { recipient: ended, status: "dropped" },
-        ])
+        assert.deepStrictEqual(yield* rows(), [{ recipient: creator, status: "pending" }])
       }).pipe(Effect.provide(memoryDb())),
   )
 
@@ -559,7 +556,7 @@ describe("Db", () => {
           const noticeStatus = (content: string) =>
             Effect.map(
               sql<{ status: string }>`SELECT status FROM inbox
-              WHERE about_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${noticeEnvelope(content)}`,
+              WHERE about_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND sender_type = 'vibest' AND content = ${noticeEnvelope(content)}`,
               (rows) => rows.map((row) => row.status).join(),
             )
 
@@ -583,7 +580,8 @@ describe("Db", () => {
           assert.strictEqual(row!.status, "pending")
           assert.deepStrictEqual(yield* db.inbox.claim(row!.recipient!, [row!.id]), [row!.id])
           assert.deepStrictEqual(yield* db.inbox.claim(row!.recipient!, [row!.id]), [])
-          yield* db.inbox.setInboxStatus(row!.recipient!, [row!.id], "delivered", "delivering")
+          const execution = (yield* db.session.startExecution(row!.recipient!, 1)).execution
+          yield* db.inbox.setInboxStatus(row!.recipient!, [row!.id], "delivered", "delivering", execution)
           assert.strictEqual(yield* noticeStatus("hi"), "delivered")
           yield* db.inbox.insertInbox({
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

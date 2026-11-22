@@ -295,7 +295,7 @@ describe.concurrent("Session", () => {
         sql<{
           id: number
           status: string
-        }>`SELECT id, status AS status FROM inbox WHERE session_id = ${receiverId} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE session_id = ${receiverId} AND kind IN ('task', 'send')) ORDER BY id`.pipe(
+        }>`SELECT id, status AS status FROM inbox WHERE session_id = ${receiverId} AND sender_type != 'vibest' AND id > (SELECT min(id) FROM inbox WHERE session_id = ${receiverId} AND sender_type != 'vibest') ORDER BY id`.pipe(
           Effect.orDie,
         )
 
@@ -345,11 +345,7 @@ describe.concurrent("Session", () => {
       yield* held.reached
       yield* sessions.send(id, "second")
       yield* held.release("unreachable")
-      yield* until(notices, (rows) => rows.length === 1)
-      assert.match(
-        (yield* notices)[0]!,
-        /^A message to .* was not delivered: the connection to herdr broke after the message was handed over.*it may have reached the session\n\nfirst$/s,
-      )
+      yield* sessions.check(id)
       yield* sessions.check(id)
       assert.deepStrictEqual(pick(yield* db.session.getSession(id)), { status: "idle", executionState: "open" })
       assert.deepStrictEqual(
@@ -367,7 +363,11 @@ describe.concurrent("Session", () => {
         ["first", "second"],
       )
       assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
-      const later = (yield* notices).slice(1)
+      assert.deepStrictEqual(
+        (yield* db.inbox.inboxWithStatus(id, "delivering")).map((r) => r.message),
+        ["first"],
+      )
+      const later = yield* notices
       assert.strictEqual(later.length, 1)
       assert.include(later[0], "did not start the execution it was sent; it is idle and takes queued messages again")
     }),
@@ -668,13 +668,13 @@ describe.concurrent("Session", () => {
           ...db,
           inbox: {
             ...db.inbox,
-            setInboxStatus: (sessionId, ids, status, from, into) =>
+            setInboxStatus: (sessionId, ids, status, from, into, reason) =>
               status === "failed" && from === undefined
                 ? Deferred.succeed(failing, undefined).pipe(
                     Effect.andThen(Deferred.await(go)),
-                    Effect.andThen(db.inbox.setInboxStatus(sessionId, ids, status, from, into)),
+                    Effect.andThen(db.inbox.setInboxStatus(sessionId, ids, status, from, into, reason)),
                   )
-                : db.inbox.setInboxStatus(sessionId, ids, status, from, into),
+                : db.inbox.setInboxStatus(sessionId, ids, status, from, into, reason),
           },
         }),
       },
@@ -725,7 +725,7 @@ describe.concurrent("Session", () => {
       const prompts = (yield* herdr.callsTo("send")).length
 
       const notices = entryPending(db, (yield* db.session.getSession(id))!.projectId).pipe(
-        Effect.map((rows) => rows.filter((r) => r.kind === "notice")),
+        Effect.map((rows) => rows.filter((r) => r.sender.type === "vibest")),
       )
 
       const held = yield* herdr.hold("state", id)

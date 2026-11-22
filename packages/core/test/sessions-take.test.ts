@@ -44,7 +44,9 @@ const entryAsked = Effect.gen(function* () {
 
 const inboxStatuses = (sender: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    sql<{ status: string }>`SELECT status FROM inbox WHERE sender_session_id = ${sender} AND kind = 'send'`.pipe(
+    sql<{
+      status: string
+    }>`SELECT status FROM inbox WHERE sender_session_id = ${sender} AND sender_type = 'agent'`.pipe(
       Effect.orDie,
       Effect.map((rows) => rows.map((row) => row.status)),
     ),

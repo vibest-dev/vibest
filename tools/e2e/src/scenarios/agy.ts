@@ -331,7 +331,7 @@ const checks: ReadonlyArray<Check> = [
 
         const handed = rows<{ content: string }>(
           w,
-          "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+          "SELECT content FROM inbox WHERE session_id = ? AND recipient_execution_id = ?",
           entry,
           a.executions(entry).at(-1)!.id,
         )

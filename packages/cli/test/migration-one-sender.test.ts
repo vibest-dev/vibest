@@ -120,32 +120,39 @@ const catalog2 = (ledger: string): ReadonlyArray<Fact> => [
 ]
 
 const rewritten = {
-  [`${S} 2`]: { kind: "task", content: "do it", status: "delivered", sender: { type: "agent", session: E } },
+  [`${S} 2`]: {
+    type: "inbox.enqueued",
+    sender: { type: "agent", session: E },
+    content: "do it",
+  },
   [`${E} 2`]: {
-    kind: "send",
-    content: "done",
-    status: "pending",
+    type: "inbox.enqueued",
     sender: { type: "agent", session: S, agent: "general", title: "sub" },
-    execution: 3,
+    content: "done",
+    senderExecutionId: 3,
   },
-  [`${E} 3`]: { kind: "notice", content: "sub archived", status: "pending", sender: { type: "vibest" }, about: S },
-  [`${E} 4`]: { kind: "send", content: "later", status: "pending", sender: { type: "agent", session: S } },
-  [`${S} 5`]: { kind: "send", content: "typed by the user", status: "pending", sender: { type: "user" } },
-  [`${R} 2`]: {
-    kind: "task",
-    content: "remote task",
-    status: "pending",
-    sender: { type: "agent", session: "far", machine: "box" },
-  },
-  [`${E} 5`]: {
-    kind: "notice",
-    content: "far ended",
-    status: "pending",
-    peerItem: "item-1",
+  [`${E} 3`]: {
+    type: "inbox.enqueued",
     sender: { type: "vibest" },
+    content: "sub archived",
+    aboutSessionId: S,
   },
-  [`${S} 6`]: { kind: "send", content: "q", status: "dropped", request: "q1", sender: { type: "agent", session: E } },
-  [`${R} 3`]: { kind: "send", content: "q", status: "pending", sender: { type: "agent", session: E } },
+  [`${E} 4`]: { type: "inbox.enqueued", sender: { type: "agent", session: S }, content: "later" },
+  [`${S} 5`]: { type: "inbox.enqueued", sender: { type: "user" }, content: "typed by the user" },
+  [`${R} 2`]: {
+    type: "inbox.enqueued",
+    sender: { type: "agent", session: "far", machine: "box" },
+    content: "remote task",
+  },
+  [`${E} 5`]: { type: "inbox.enqueued", sender: { type: "vibest" }, content: "far ended", transferId: "item-1" },
+  [`${S} 6`]: {
+    type: "inbox.unresolved",
+    history: "route",
+    sender: { type: "agent", session: E },
+    content: "q",
+    requestId: "q1",
+  },
+  [`${R} 3`]: { type: "inbox.enqueued", sender: { type: "agent", session: E }, content: "q" },
 }
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
@@ -158,7 +165,7 @@ const oldLedger = Effect.gen(function* () {
   yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [ledger] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
-    yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
+    yield* sql`DELETE FROM migration WHERE id IN (${MIGRATION}, '20261121000000_inbox_v1')`
     yield* sql`UPDATE meta SET value = '2' WHERE key = 'catalog'`
 
     for (const [aggregate, seq, type, data] of catalog2(ledger!.value))
@@ -198,13 +205,15 @@ describe("ledger migration 20261119000000_one_sender", () => {
 
         yield* open().pipe(Effect.provide(runner(file)))
 
-        const inbox = yield* read<{ aggregate: string; seq: number; data: string }>(
+        const inbox = yield* read<{ aggregate: string; seq: number; type: string; data: string }>(
           file,
-          (sql) => sql`SELECT aggregate, seq, data FROM event WHERE type = 'inbox.queued'`,
+          (sql) => sql`SELECT aggregate, seq, type, data FROM event WHERE type LIKE 'inbox.%' ORDER BY position`,
         )
 
         assert.deepStrictEqual(
-          Object.fromEntries(inbox.map((row) => [`${row.aggregate} ${row.seq}`, JSON.parse(row.data)])),
+          Object.fromEntries(
+            inbox.map((row) => [`${row.aggregate} ${row.seq}`, { type: row.type, ...JSON.parse(row.data) }]),
+          ),
           rewritten,
         )
 

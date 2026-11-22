@@ -5,7 +5,7 @@ import type { Sender } from "@vibest/schema/event"
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const alpha: Sender = { type: "agent", session: A, agent: "general", title: "Alpha" }
 
-const row = (message: string, sender: Sender, kind = "send") => ({ kind, sender, message })
+const row = (message: string, sender: Sender) => ({ sender, message })
 
 describe("delivery detail", () => {
   it("an agent message keeps the sender and the unwrapped text", () => {
@@ -18,7 +18,7 @@ describe("delivery detail", () => {
     const pasted = sessionEnvelope(A, "an example")
 
     assert.deepStrictEqual(
-      detailOf([row(noticeEnvelope("gone\nmore"), { type: "vibest" }, "notice"), row(pasted, { type: "user" })]),
+      detailOf([row(noticeEnvelope("gone\nmore"), { type: "vibest" }), row(pasted, { type: "user" })]),
       [
         { sender: { type: "vibest" }, message: "gone\nmore" },
         { sender: { type: "user" }, message: pasted },

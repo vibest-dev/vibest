@@ -577,7 +577,7 @@ const checks: ReadonlyArray<Check> = [
         const toEntry = () =>
           rows<{ status: string }>(
             w,
-            "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send' AND sender_session_id IS NOT NULL",
+            "SELECT status FROM inbox WHERE session_id = ? AND sender_type != 'vibest' AND sender_session_id IS NOT NULL",
             entryId,
           ).map((r) => r.status)
 
@@ -638,7 +638,7 @@ const checks: ReadonlyArray<Check> = [
         const sent = () =>
           rows<{ id: number; status: string }>(
             w,
-            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
+            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND sender_type != 'vibest'",
             sub,
             entryId,
           )
@@ -655,10 +655,8 @@ const checks: ReadonlyArray<Check> = [
           )?.n
 
         expect(
-          fact("type = 'inbox.queued' AND seq = ?") === 1 &&
-            fact(
-              "type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
-            ) === 1,
+          fact("type = 'inbox.enqueued' AND seq = ?") === 1 &&
+            fact("type = 'inbox.delivered' AND json_extract(data, '$.messageId') = ?") === 1,
           `the send ${sent()[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
         )
         const line = `Message from @General · Send probe (${sub.slice(0, 8)})\nhello-claude`

@@ -187,7 +187,8 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
     rows<Execution>(w, "SELECT id, outcome, reply, typed FROM execution WHERE session_id = ? ORDER BY id", id)
 
   const notices = (id: string) =>
-    row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice'", id)?.n ?? 0
+    row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'", id)
+      ?.n ?? 0
 
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
 
@@ -317,7 +318,7 @@ const reports = (runtime: Runtime): Check => ({
 
       const handed = rows<{ content: string }>(
         w,
-        "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+        "SELECT content FROM inbox WHERE session_id = ? AND recipient_execution_id = ?",
         id,
         fresh.id,
       ).map((r) => r.content)
@@ -396,7 +397,7 @@ const noApprovalDialog: Check = {
 
       const sent = row<{ n: number }>(
         w,
-        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send' AND instr(content, 'i12-hello') > 0",
+        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND instr(content, 'i12-hello') > 0",
         id,
       )?.n
 
@@ -538,7 +539,7 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
 
       const handed = rows<{ content: string }>(
         w,
-        "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+        "SELECT content FROM inbox WHERE session_id = ? AND recipient_execution_id = ?",
         entry,
         two.id,
       ).map((r) => r.content)

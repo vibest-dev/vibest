@@ -43,8 +43,8 @@ describe("sends from sessions", () => {
         const { db, project, entryId } = yield* setup
         assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { type: "agent", session: A }))
         assert.deepStrictEqual(
-          (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
-          [["send", { type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
+          (yield* entryPending(db, project)).map((r) => [r.sender, r.recipient]),
+          [[{ type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
         )
       }),
     ),
@@ -167,12 +167,11 @@ describe("sends from sessions", () => {
 
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "queued")
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "duplicate")
-        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE session_id = ${ended}`, [
-          { status: "dropped" },
-        ])
+        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE session_id = ${ended}`, [])
         const out = yield* db.remote.outboxOf(peer)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
+        assert.strictEqual(out[0]!.id, item.id, "the forward reuses the incoming transfer id")
         assert.deepInclude(
           out[0]!,
           { sessionId: ended, from: null },

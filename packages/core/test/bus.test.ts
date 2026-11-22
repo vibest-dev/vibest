@@ -89,16 +89,13 @@ const story = Effect.gen(function* () {
         data: { project: P, agent: "subagent", name: "tests", directory: "/w/app/wt", parent: MAIN },
       })
 
-      const task = yield* emit(Catalog["inbox.queued"], {
+      const task = yield* emit(Catalog["inbox.enqueued"], {
         sessionId: SUB,
         at: 301,
         data: {
-          kind: "task",
-          recipient: SUB,
           sender: { type: "agent", session: MAIN },
           content: "fix it",
-          status: "delivered",
-          request: "r-1",
+          requestId: "r-1",
         },
       })
 
@@ -122,10 +119,10 @@ const story = Effect.gen(function* () {
         data: { process: subProcess },
       })
 
-      yield* emit(Catalog["inbox.moved"], {
+      yield* emit(Catalog["inbox.delivered"], {
         sessionId: SUB,
         at: 311,
-        data: { inbox: task, to: "delivered", execution: execution },
+        data: { messageId: task, recipientExecutionId: execution },
       })
       yield* emit(Catalog["execution.ended"], {
         sessionId: SUB,
@@ -133,21 +130,17 @@ const story = Effect.gen(function* () {
         data: { execution: execution, outcome: "completed", reply: "All tests pass." },
       })
 
-      const result = yield* emit(Catalog["inbox.queued"], {
+      const result = yield* emit(Catalog["inbox.enqueued"], {
         sessionId: MAIN,
         at: 322,
         data: {
-          kind: "notice",
-          recipient: MAIN,
           sender: { type: "vibest" },
-          about: SUB,
+          aboutSessionId: SUB,
           content: "",
-          status: "pending",
         },
       })
 
-      yield* emit(Catalog["inbox.moved"], { sessionId: MAIN, at: 323, data: { inbox: result, to: "delivering" } })
-      yield* emit(Catalog["inbox.moved"], { sessionId: MAIN, at: 324, data: { inbox: result, to: "delivered" } })
+      yield* emit(Catalog["inbox.delivery_started"], { sessionId: MAIN, at: 323, data: { messageId: result } })
 
       yield* emit(Catalog["process.ended"], {
         sessionId: SUB,
@@ -200,16 +193,13 @@ const story = Effect.gen(function* () {
       })
       yield* emit(Catalog["outbox.acked"], { at: 520, data: { peer: PEER, ids: [ITEM] } })
 
-      const notice = yield* emit(Catalog["inbox.queued"], {
+      const notice = yield* emit(Catalog["inbox.enqueued"], {
         sessionId: MAIN,
         at: 530,
         data: {
-          kind: "notice",
-          recipient: MAIN,
           sender: { type: "vibest" },
           content: "remote done",
-          status: "pending",
-          peerItem: ITEM,
+          transferId: ITEM,
         },
       })
 
@@ -531,8 +521,8 @@ describe("projectors", () => {
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
-          `SELECT id, session_id, sender_session_id, about_session_id, kind, content, request, peer_item,
-            status, execution_id FROM inbox ORDER BY session_id = '${SUB}' DESC, id`,
+          `SELECT id, session_id, sender_session_id, about_session_id, content, request, transfer_id,
+            status, recipient_execution_id FROM inbox ORDER BY session_id = '${SUB}' DESC, id`,
         ),
         [
           {
@@ -540,36 +530,33 @@ describe("projectors", () => {
             sessionId: SUB,
             senderSessionId: MAIN,
             aboutSessionId: null,
-            kind: "task",
             content: "fix it",
             request: "r-1",
-            peerItem: null,
+            transferId: null,
             status: "delivered",
-            executionId: execution,
+            recipientExecutionId: execution,
           },
           {
             id: result,
             sessionId: MAIN,
             senderSessionId: null,
             aboutSessionId: SUB,
-            kind: "notice",
             content: "",
             request: null,
-            peerItem: null,
-            status: "delivered",
-            executionId: null,
+            transferId: null,
+            status: "delivering",
+            recipientExecutionId: null,
           },
           {
             id: notice,
             sessionId: MAIN,
             senderSessionId: null,
             aboutSessionId: null,
-            kind: "notice",
             content: "remote done",
             request: null,
-            peerItem: ITEM,
+            transferId: ITEM,
             status: "pending",
-            executionId: null,
+            recipientExecutionId: null,
           },
         ],
       )
@@ -582,15 +569,12 @@ describe("projectors", () => {
 
       const exit = yield* bus
         .transaction(
-          bus.publish(Catalog["inbox.queued"], {
+          bus.publish(Catalog["inbox.enqueued"], {
             sessionId: MAIN,
             data: {
-              kind: "notice",
-              recipient: MAIN,
               sender: { type: "vibest" },
               content: "again",
-              status: "pending",
-              peerItem: ITEM,
+              transferId: ITEM,
             },
           }),
         )
@@ -770,9 +754,9 @@ describe("bus", () => {
             sessionId: MAIN,
             data: { project: P, agent: "main", name: "main", directory: "" },
           })
-          yield* bus.publish(Catalog["inbox.queued"], {
+          yield* bus.publish(Catalog["inbox.enqueued"], {
             sessionId: MAIN,
-            data: { kind: "send", sender: { type: "agent", session: MAIN }, content: "hi", status: "pending" },
+            data: { sender: { type: "agent", session: MAIN }, content: "hi" },
           })
           yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
           yield* bus.publish(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })
@@ -782,7 +766,7 @@ describe("bus", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT position, aggregate, seq, type FROM event ORDER BY position"), [
         { position: 1, aggregate: P, seq: 1, type: "project.created" },
         { position: 2, aggregate: MAIN, seq: 1, type: "session.created" },
-        { position: 3, aggregate: MAIN, seq: 2, type: "inbox.queued" },
+        { position: 3, aggregate: MAIN, seq: 2, type: "inbox.enqueued" },
         { position: 4, aggregate: ledgerId!.value, seq: 1, type: "peer.seen" },
         { position: 5, aggregate: P, seq: 2, type: "project.entry_changed" },
       ])

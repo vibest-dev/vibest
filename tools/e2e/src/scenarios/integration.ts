@@ -188,8 +188,11 @@ const checks: ReadonlyArray<Check> = [
           await until(`${id}'s result`, async () => (await executionState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
           expect(
-            (row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send'", id)
-              ?.n ?? 0) > 0,
+            (row<{ n: number }>(
+              w,
+              "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest'",
+              id,
+            )?.n ?? 0) > 0,
             `${id}'s plain vibest send never reached vibestd`,
           )
         }
@@ -454,8 +457,11 @@ const checks: ReadonlyArray<Check> = [
           expect((await aborted()) === 1, `execution ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
 
           const notices = () =>
-            row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice'", id)
-              ?.n
+            row<{ n: number }>(
+              w,
+              "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'",
+              id,
+            )?.n
 
           await w.ok(["send", id, HOLD])
           await until("the second held execution at the model", () => held === 2, 60_000)
@@ -526,7 +532,7 @@ const checks: ReadonlyArray<Check> = [
 
           const waiting = row<{ status: string; execution: number | null }>(
             w,
-            "SELECT status, execution_id AS execution FROM inbox WHERE session_id = ? AND content LIKE '%SECOND-ASK%'",
+            "SELECT status, recipient_execution_id AS execution FROM inbox WHERE session_id = ? AND content LIKE '%SECOND-ASK%'",
             id,
           )
 
@@ -558,7 +564,7 @@ const checks: ReadonlyArray<Check> = [
 
           const delivered = rows<{ content: string; status: string; execution: number }>(
             w,
-            "SELECT content, status, execution_id AS execution FROM inbox WHERE session_id = ? AND kind = 'send' ORDER BY id",
+            "SELECT content, status, recipient_execution_id AS execution FROM inbox WHERE session_id = ? AND sender_type != 'vibest' ORDER BY id",
             id,
           )
 

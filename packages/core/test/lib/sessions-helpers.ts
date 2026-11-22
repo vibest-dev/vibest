@@ -153,7 +153,7 @@ export const sqlNotices = (sessionId: string) =>
 
     const rows = yield* sql<{
       message: string
-    }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.about_session_id = ${sessionId} ORDER BY m.id`.pipe(
+    }>`SELECT m.content AS message FROM inbox m WHERE m.sender_type = 'vibest' AND m.about_session_id = ${sessionId} ORDER BY m.id`.pipe(
       Effect.orDie,
     )
 
