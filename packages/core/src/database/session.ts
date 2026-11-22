@@ -537,7 +537,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       at,
                     })
 
-                    yield* inbox.moveInbox(sql`session_id = ${entryId} AND id = ${queued}`, "delivered", { execution })
+                    yield* inbox.moveInbox(sql`session_id = ${entryId} AND id = ${queued}`, "delivering", {
+                      execution,
+                    })
                   }
 
                   yield* inbox.linkTask(entryId, execution, at)
@@ -746,7 +748,15 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       acceptExecution: Effect.fn("Db.session.acceptExecution")((id: string, execution: number) =>
-        tx(accept(id, execution)).pipe(Effect.orDie),
+        tx(
+          Effect.gen(function* () {
+            const accepted = yield* accept(id, execution)
+
+            if (accepted) yield* inbox.confirm(id, execution)
+
+            return accepted
+          }),
+        ).pipe(Effect.orDie),
       ),
 
       executionAccepted: Effect.fn("Db.session.executionAccepted")((id: string) =>
@@ -755,6 +765,13 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
           return execution !== undefined && (yield* acceptedAt(id, execution)) !== null
         }).pipe(Effect.orDie),
+      ),
+
+      executionWasAccepted: Effect.fn("Db.session.executionWasAccepted")((id: string, execution: number) =>
+        acceptedAt(id, execution).pipe(
+          Effect.map((at) => at !== null),
+          Effect.orDie,
+        ),
       ),
 
       admitProcess: Effect.fn("Db.session.admitProcess")((id: string, start: ProcessStart, max: number | undefined) =>
@@ -783,9 +800,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           tx(
             Effect.gen(function* () {
               const at = yield* now
-              const execution = yield* startExecution(id, at)
-              yield* inbox.linkTask(id, execution, at)
+              yield* startExecution(id, at)
               yield* endExecution(id, { outcome })
+              yield* inbox.moveInbox(
+                sql`session_id = ${id} AND status IN ('pending', 'delivering')
+                  AND id = (SELECT message_id FROM session WHERE id = ${id})`,
+                "dropped",
+                { reason: "the session did not start" },
+              )
 
               if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice })
             }),
@@ -843,6 +865,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (open === undefined) return
               yield* accept(id, open)
+              yield* inbox.confirm(id, open)
               yield* setStatus(id, "working")
             }),
           ).pipe(Effect.orDie),

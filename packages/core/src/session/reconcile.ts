@@ -137,16 +137,11 @@ export const make = Effect.gen(function* () {
     const unstarted = !worked && (idle || inbox.pulls(harnessIdOf(session)))
 
     if (unstarted && unconfirmed <= 0) {
-      const reason = "its start was not confirmed; it may still run, but a late reply is not collected"
-
       const closed =
         execution !== undefined &&
         (yield* db.session.closeExecution(id, execution, "not_started", {
           notice: `${sessionLabel(session)} did not start the execution it was sent; it is idle and takes queued messages again (if it starts late, that reply is not collected)`,
         }))
-
-      if (closed && execution !== undefined)
-        yield* inbox.undelivered(session, yield* db.inbox.deliveredIn(id, execution), reason)
 
       if (closed) yield* deliverQueued(h, { ...session, openExecution: null }, terminal)
 

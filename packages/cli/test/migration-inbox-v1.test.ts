@@ -42,6 +42,9 @@ const facts = [
     "inbox.queued",
     { kind: "send", sender: agent, content: "routed", status: "dropped", peerItem: "item-1", request: "route-1" },
   ],
+  [B, 14, "execution.accepted", { execution: 3 }],
+  [B, 15, "inbox.queued", { kind: "send", sender: agent, content: "booked", status: "pending" }],
+  [B, 16, "inbox.moved", { inbox: 15, to: "delivered", execution: 99 }],
 ] as const
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
@@ -70,7 +73,7 @@ const read = <A extends object>(
 
 describe("ledger migration 20261121000000_inbox_v1", () => {
   it.effect(
-    "keeps a confirmed handoff only when the old move names an execution, leaves the rest unresolved, and import-check does not change the file",
+    "confirms a handoff only when the recipient execution was accepted or finished, and import-check does not change the file",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -115,6 +118,8 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
               "inbox.unresolved",
               { history: "route", sender: agent, content: "routed", transferId: "item-1", requestId: "route-1" },
             ],
+            [15, "inbox.enqueued", { sender: agent, content: "booked" }],
+            [16, "inbox.unresolved", { history: "unconfirmed", messageId: 15 }],
           ],
         )
         assert.deepStrictEqual(
@@ -170,6 +175,14 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
               status: "unresolved",
               request: "route-1",
               transferId: "item-1",
+              senderExecutionId: null,
+              recipientExecutionId: null,
+            },
+            {
+              id: 15,
+              status: "unresolved",
+              request: null,
+              transferId: null,
               senderExecutionId: null,
               recipientExecutionId: null,
             },

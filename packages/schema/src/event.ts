@@ -136,7 +136,12 @@ export const ExecutionEnded = fact("execution.ended", "session", {
   reply: optional(Schema.String),
 })
 
-export const InboxHistory = Schema.Literals(["route", "delivered_without_execution", "failed_unspecified"])
+export const InboxHistory = Schema.Literals([
+  "route",
+  "delivered_without_execution",
+  "failed_unspecified",
+  "unconfirmed",
+])
 
 export type InboxHistory = typeof InboxHistory.Type
 
@@ -151,7 +156,10 @@ export const InboxEnqueued = fact("inbox.enqueued", "session", {
   aboutSessionId: optional(Text),
 })
 
-export const InboxDeliveryStarted = fact("inbox.delivery_started", "session", { messageId: Seq })
+export const InboxDeliveryStarted = fact("inbox.delivery_started", "session", {
+  messageId: Seq,
+  execution: optional(Seq),
+})
 
 export const InboxDelivered = fact("inbox.delivered", "session", {
   messageId: Seq,
@@ -236,7 +244,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 6
+export const CATALOG_VERSION = 7
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

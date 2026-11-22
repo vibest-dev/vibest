@@ -213,7 +213,8 @@ export const layer = Layer.effectDiscard(
       InboxDeliveryStarted,
       active(
         (fact) =>
-          sql`UPDATE inbox SET status = 'delivering'
+          sql`UPDATE inbox SET status = 'delivering',
+              recipient_execution_id = coalesce(${fact.data.execution ?? null}, recipient_execution_id)
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
       ),
     )

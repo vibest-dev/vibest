@@ -70,7 +70,19 @@ describe.concurrent("an idle session takes its next batch", () => {
       const taken = yield* inbox.take(entryId, undefined)
       assert.include(taken!.content, "a question")
       assert.deepStrictEqual(yield* db.session.openExecution(entryId), taken!.execution)
+
+      const statusOf = SqlClient.SqlClient.pipe(
+        Effect.flatMap(
+          (sql) => sql<{ status: string }>`SELECT status FROM inbox
+            WHERE session_id = ${entryId} AND instr(content, 'a question') > 0`,
+        ),
+        Effect.map((rows) => rows.map((row) => row.status)),
+      )
+
+      assert.deepStrictEqual(yield* statusOf, ["delivering"])
       assert.isUndefined(yield* inbox.take(entryId, undefined))
+      assert.isTrue(yield* db.session.acceptExecution(entryId, taken!.execution))
+      assert.deepStrictEqual(yield* statusOf, ["delivered"])
     }),
   )
 
@@ -89,14 +101,15 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a batch the harness never accepts ends not_started and fails its messages",
+    "a batch the harness never accepts ends not_started and is not recorded as failed",
     Effect.gen(function* () {
       const { db, sessions, inbox, entryId, sender } = yield* entryAsked
       const { execution } = (yield* inbox.take(entryId, undefined))!
-      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivered"])
+      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
       yield* TestClock.adjust("9 seconds")
       yield* sessions.check(entryId)
-      yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+      yield* until(db.session.getSession(entryId), (row) => row?.openExecution == null)
+      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
       assert.isUndefined(yield* db.session.openExecution(entryId))
       assert.isFalse(yield* db.session.acceptExecution(entryId, execution))
     }),
@@ -120,7 +133,7 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a batch an earlier vibestd took is never typed by the fallback, and ends not_started with its message failed",
+    "a batch an earlier vibestd took is never typed by the fallback, and ends not_started without a failure",
     Effect.gen(function* () {
       const { db, sessions, entryId, sender } = yield* entryAsked
       const herdr = yield* FakeRuntime
@@ -133,7 +146,8 @@ describe.concurrent("an idle session takes its next batch", () => {
       )
       yield* TestClock.adjust("9 seconds")
       yield* sessions.check(entryId)
-      yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+      yield* until(db.session.getSession(entryId), (row) => row?.openExecution == null)
+      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
       assert.isUndefined(yield* db.session.openExecution(entryId))
     }),
   )
@@ -181,7 +195,8 @@ describe.concurrent("an idle session takes its next batch", () => {
         assert.isFalse(yield* db.session.executionAccepted(entryId))
         yield* TestClock.adjust("9 seconds")
         yield* sessions.check(entryId)
-        yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+        yield* until(db.session.getSession(entryId), (row) => row?.openExecution == null)
+        assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
         assert.isUndefined(yield* db.session.openExecution(entryId))
       }),
     )

@@ -33,6 +33,10 @@ const Moved = Schema.Struct({
   execution: optional(Schema.Number),
 })
 
+const Accepted = Schema.Struct({ execution: Schema.Number })
+
+const Ended = Schema.Struct({ execution: Schema.Number, outcome: Schema.String })
+
 type Row = {
   readonly position: number
   readonly aggregate: string
@@ -81,16 +85,33 @@ export const migration = {
   up: (tx: SqlClient.SqlClient) =>
     Effect.gen(function* () {
       const rows = yield* tx<Row>`SELECT position, aggregate, seq, type, data FROM event
-        WHERE type IN ('session.created', 'inbox.queued', 'inbox.moved')
+        WHERE type IN ('session.created', 'inbox.queued', 'inbox.moved', 'execution.accepted', 'execution.ended')
         ORDER BY position`
 
       const created = new Map<string, number>()
       const delegation = new Map<string, number>()
+      const confirmed = new Set<string>()
+
+      for (const row of rows) {
+        if (row.type === "execution.accepted") {
+          const data = yield* decode(Accepted, row)
+          confirmed.add(`${row.aggregate}:${data.execution}`)
+        }
+
+        if (row.type === "execution.ended") {
+          const data = yield* decode(Ended, row)
+
+          if (data.outcome === "completed" || data.outcome === "failed")
+            confirmed.add(`${row.aggregate}:${data.execution}`)
+        }
+      }
 
       const replace = (row: Row, type: string, data: Written) =>
         tx`UPDATE event SET type = ${type}, data = ${JSON.stringify(data)} WHERE position = ${row.position}`
 
       for (const row of rows) {
+        if (row.type !== "session.created" && row.type !== "inbox.queued" && row.type !== "inbox.moved") continue
+
         if (row.type === "session.created") {
           created.set(row.aggregate, row.position)
           continue
@@ -124,13 +145,20 @@ export const migration = {
           continue
         }
 
-        if (data.to === "delivered" && data.execution !== undefined) {
+        if (
+          data.to === "delivered" &&
+          data.execution !== undefined &&
+          confirmed.has(`${row.aggregate}:${data.execution}`)
+        ) {
           yield* replace(row, "inbox.delivered", { messageId, recipientExecutionId: data.execution })
           continue
         }
 
         if (data.to === "delivered") {
-          yield* replace(row, "inbox.unresolved", { history: "delivered_without_execution", messageId })
+          yield* replace(row, "inbox.unresolved", {
+            history: data.execution === undefined ? "delivered_without_execution" : "unconfirmed",
+            messageId,
+          })
           continue
         }
 

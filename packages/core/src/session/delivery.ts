@@ -97,7 +97,7 @@ export const make = Effect.gen(function* () {
     yield* into(
       batch.map((r) => r.message).join("\n\n"),
       Effect.flatMap(db.session.openExecution(session.id), (execution) =>
-        db.inbox.claim(session.id, ids).pipe(
+        db.inbox.claim(session.id, ids, execution).pipe(
           Effect.tap((got) =>
             Effect.sync(() => {
               claimed.push(...got)
@@ -110,11 +110,17 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((notStarted) => {
         const rows = batch.filter((r) => claimed.includes(r.id))
 
-        if (rows.length === 0) return Effect.void
+        if (rows.length === 0 || notStarted || handedInto === undefined) return Effect.void
 
-        return notStarted
-          ? undelivered(session, rows, notStarted)
-          : db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
+        return db.session
+          .executionWasAccepted(session.id, handedInto)
+          .pipe(
+            Effect.flatMap((accepted) =>
+              accepted
+                ? db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
+                : Effect.void,
+            ),
+          )
       }),
       Effect.catchTags({
         RuntimeError: (e) =>

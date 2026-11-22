@@ -129,11 +129,7 @@ export const layer = Layer.effect(
         .pipe(
           Effect.andThen(
             Effect.forEach(
-              [
-                ...Map.groupBy(rows, (r) =>
-                  r.kind === "send" && r.sender !== undefined ? (localSessionOf(r.sender) ?? null) : null,
-                ),
-              ],
+              [...Map.groupBy(rows, (r) => (r.sender === undefined ? null : (localSessionOf(r.sender) ?? null)))],
               ([sender, group]) => {
                 const message = `A message to ${sessionLabel(session)} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
 

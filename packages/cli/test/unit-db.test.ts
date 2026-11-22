@@ -642,6 +642,27 @@ describe("Db", () => {
       ),
   )
 
+  it.effect("a session cancelled before it launches did not receive its first message", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db.Service
+        const sql = yield* SqlClient.SqlClient
+        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        yield* db.session.insertSession(session(id), yield* projectOf("r"), { cwd: "/w", task: "do it" })
+        yield* db.session.endUnstarted(id, "not_started", "did not start")
+        assert.deepStrictEqual(yield* sql<{ status: string }>`SELECT status FROM inbox WHERE session_id = ${id}`, [
+          { status: "dropped" },
+        ])
+        assert.deepStrictEqual(
+          yield* sql<{
+            n: number
+          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id} AND type = 'inbox.delivered'`,
+          [{ n: 0 }],
+        )
+      }),
+    ),
+  )
+
   it.effect("moving a project whose path has a non-BMP character carries its child session directories along", () =>
     Effect.gen(function* () {
       const db = yield* Db.Service

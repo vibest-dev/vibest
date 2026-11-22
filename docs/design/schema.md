@@ -257,7 +257,7 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)                                                              |
 | execution.ended                     | execution, outcome, failure? {message, kind?: limit, resetAt? (epoch ms)}, conversation?, reply? (the harness's reply, when it reported)                                 |
 | inbox.enqueued                      | sender, content, senderExecutionId?, requestId?, transferId?, aboutSessionId? (a notice). Starts pending; the event carries no status                                    |
-| inbox.delivery_started              | messageId. Claimed for a real hand-over. Not success, and not written again for each wait                                                                                |
+| inbox.delivery_started              | messageId, and the execution when one is open. A reservation, not delivery, and not written again for each wait                                                          |
 | inbox.delivered                     | messageId, recipientExecutionId. Both required: handed as that execution's input                                                                                         |
 | inbox.delivery_failed               | messageId, reason. A recorded failure, not an unknown result                                                                                                             |
 | inbox.dropped                       | messageId, reason. Local delivery responsibility ended (the entry session left, a waiting message withdrawn)                                                             |

@@ -57,7 +57,11 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
           for (const r of moved) {
             if (to === "delivering") {
-              yield* publish(InboxDeliveryStarted, { sessionId: r.session, at, data: { messageId: r.id } })
+              yield* publish(InboxDeliveryStarted, {
+                sessionId: r.session,
+                at,
+                data: { messageId: r.id, ...(detail?.execution !== undefined && { execution: detail.execution }) },
+              })
               continue
             }
 
@@ -119,10 +123,10 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           WHERE i.session_id = ${sessionId} AND i.status = 'pending' AND i.recipient_execution_id IS NULL`
 
         if (task !== undefined)
-          yield* publish(InboxDelivered, {
+          yield* publish(InboxDeliveryStarted, {
             sessionId,
             at,
-            data: { messageId: task.id, recipientExecutionId: execution },
+            data: { messageId: task.id, execution },
           })
       })
 
@@ -262,6 +266,13 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         }
       })
 
+    const confirm = (sessionId: string, execution: number) =>
+      moveInbox(
+        sql`session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}`,
+        "delivered",
+        { execution },
+      )
+
     const dropWaiting = (entry: string) =>
       Effect.gen(function* () {
         const dropped = yield* moveInbox(sql`status = 'pending' AND session_id = ${entry}`, "dropped", {
@@ -283,6 +294,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       findSend,
       moveInbox,
       queueInbox,
+      confirm,
       linkTask,
       queueSend,
       queuedFrom,
@@ -308,6 +320,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       inboxIn,
       findSend,
       moveInbox,
+      confirm,
       queueSend,
       queuedFrom,
       liveRecipient,
@@ -402,17 +415,22 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         Effect.orDie,
       ),
 
-      claim: Effect.fn("Db.inbox.claim")((sessionId: string, ids: ReadonlyArray<number>) =>
+      claim: Effect.fn("Db.inbox.claim")((sessionId: string, ids: ReadonlyArray<number>, execution?: number) =>
         Effect.gen(function* () {
           if (ids.length === 0) return []
 
           const claimed = yield* moveInbox(
             sql`session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
             "delivering",
+            execution === undefined ? undefined : { execution },
           )
 
           return claimed.map((k) => k.id)
         }).pipe(Effect.orDie),
+      ),
+
+      confirm: Effect.fn("Db.inbox.confirm")((sessionId: string, execution: number) =>
+        confirm(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
       ),
 
       unacceptedBatch: Effect.fn("Db.inbox.unacceptedBatch")((sessionId: string, execution: number) =>
@@ -422,8 +440,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
               return undefined
 
             return yield* inboxWhere(
-              sql`m.session_id = ${sessionId} AND m.status = 'delivered' AND m.recipient_execution_id = ${execution}
-                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.session_id AND s.message_id = m.id)`,
+              sql`m.session_id = ${sessionId} AND m.status = 'delivering' AND m.recipient_execution_id = ${execution}`,
             )
           }),
         ).pipe(Effect.orDie),
@@ -452,7 +469,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
                 "id",
                 batch.map((r) => r.id),
               )}`,
-              "delivered",
+              "delivering",
               { execution },
             )
 

@@ -32,8 +32,10 @@ one is still waiting stays out of it.
 
 ## Unconfirmed hand-over
 
-A message vibestd has started handing over, and then cannot confirm, stays in that unconfirmed hand-over. It is not
-delivered again and it is not a failure. A hand-over that failed for a recorded reason is a failure, and the two are
+Taking a batch, claiming it, or putting it in the launch arguments starts a hand-over; it is not delivery. Delivery is
+the recipient execution accepting that hand-over. A message vibestd has started handing over, and then cannot confirm,
+stays in that unconfirmed hand-over. It is not delivered again and it is not a failure. A session that never launches
+did not receive its first message. A hand-over that failed for a recorded reason is a failure, and the two are
 different. `vibest result` and the task line follow the message recorded with the session, not `sent` and not the
 earliest inbox row.
 
