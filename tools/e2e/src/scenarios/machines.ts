@@ -421,7 +421,7 @@ const checks: ReadonlyArray<Check> = [
 
         expect(
           started?.peer === a.id &&
-            /session\.created .*process\.started .*execution\.started .*execution\.ended .*session\.ended/.test(
+            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.ended/.test(
               started.facts,
             ),
           `B's session started for A: ${JSON.stringify(started)}`,

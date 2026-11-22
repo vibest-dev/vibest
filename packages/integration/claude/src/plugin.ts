@@ -164,6 +164,7 @@ export function register(on: On) {
   let timer: { cancel: () => void } | undefined
   let processId: string | undefined
   let bound: number | undefined
+  let initialPending: number | undefined
   let initialBoundRead = false
 
   const ensureInitialBound = async (host: Host) => {
@@ -171,7 +172,10 @@ export function register(on: On) {
     initialBoundRead = true
     const initial = parseExecution(await host.env("VIBEST_EXECUTION").catch(() => undefined))
 
-    if (bound === undefined) bound = initial
+    if (bound === undefined && initial !== undefined) {
+      bound = initial
+      initialPending = initial
+    }
   }
 
   const identity = async (host: Host) => {
@@ -360,6 +364,7 @@ export function register(on: On) {
 
       const execution = bound
       bound = undefined
+      initialPending = undefined
 
       if (who)
         void report(host, hookRoute("claude", "execution-end"), {
@@ -387,6 +392,7 @@ export function register(on: On) {
 
       if (taken === undefined) return next(event)
       initialBoundRead = true
+      initialPending = undefined
       bound = taken.execution
       await report(host, hookRoute("claude", "prompt"), {
         hook_event_name: "PromptSubmit",
@@ -400,8 +406,16 @@ export function register(on: On) {
       return next({ ...event, context: [...(event.context ?? []), taken.content] })
     }
 
+    await ensureInitialBound(host)
+
+    if (event.origin.kind === "composer" && initialPending !== undefined) {
+      initialPending = undefined
+
+      return next(event)
+    }
+
     if (event.origin.kind === "composer" || event.origin.kind === "bridge") {
-      initialBoundRead = true
+      initialPending = undefined
       bound = undefined
     }
 

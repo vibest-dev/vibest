@@ -111,7 +111,9 @@ export const make = Effect.gen(function* () {
         yield* reactor.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
     } else yield* Ref.set(r.launchRechecked, false)
 
-    if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && h.session !== undefined) {
+    const adapter = yield* harnesses.get(harnessIdOf(session))
+
+    if (!adapter.ownSessionId && h.session !== undefined) {
       const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
 
       if (sessionId !== null && sessionId !== (session.process?.conversation ?? null))
@@ -130,7 +132,9 @@ export const make = Effect.gen(function* () {
     const idle = s === "idle"
     const ended = idle && worked
     const now = yield* Clock.currentTimeMillis
-    const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - executionStartedAt(session))
+    const readyAt = session.process?.readyAt ?? null
+    const awaitingReady = adapter.ready === "integration" && readyAt === null
+    const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - Math.max(executionStartedAt(session), readyAt ?? 0))
 
     const pulledUnaccepted =
       !worked &&
@@ -138,7 +142,7 @@ export const make = Effect.gen(function* () {
       inbox.pulls(harnessIdOf(session)) &&
       (yield* db.inbox.hasUnacceptedPulledBatch(id, execution))
 
-    const unstarted = !worked && (idle || pulledUnaccepted)
+    const unstarted = !worked && ((idle && !awaitingReady) || pulledUnaccepted)
 
     if (unstarted && unconfirmed <= 0) {
       const closed =

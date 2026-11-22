@@ -361,16 +361,11 @@ export const make = Effect.gen(function* () {
         const session = yield* db.session.getSession(id)
 
         if (session === undefined) return
-        const r = yield* sessionLive.track(id)
         const rows = yield* db.inbox.unacceptedBatch(id, execution)
 
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
         const h = yield* runtimes.route(runtimeOf(session))
-        yield* Ref.set(r.prompting, true).pipe(
-          Effect.andThen(h.send(terminalOf(session), { text: inboxContent(rows) })),
-          Effect.ensuring(Ref.set(r.prompting, false)),
-          Effect.ignore,
-        )
+        yield* h.send(terminalOf(session), { text: inboxContent(rows) }).pipe(Effect.ignore)
       }).pipe(Effect.catchTag("NoRuntime", () => Effect.void)),
     )
   })

@@ -158,6 +158,49 @@ describe("observed execution end", () => {
   )
 
   test(
+    "a refused pulled batch that falls back to typed input settles on its unkeyed interrupted end",
+    Effect.gen(function* () {
+      const inbox = yield* Inbox.Service
+      const integration = yield* Integration.Service
+      const { id, db, row } = yield* spawnWorking(yield* makeRepository, "pulling-claude")
+      const who = { id, entry: false, harness: "pulling-claude" as const, process: row.process?.id }
+      const first = (yield* db.session.openExecution(id))!
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "answer",
+          last_assistant_message: "Turn 1 answer",
+          execution: first,
+        }),
+      )
+      yield* db.inbox.insertSend(id, "Hold until stopped")
+      const taken = (yield* inbox.take(id, row.process?.id))!
+      yield* integration.prompt(
+        who,
+        JSON.stringify({
+          hook_event_name: "PromptSubmit",
+          origin: "composer",
+          text: "Hold until stopped",
+        }),
+      )
+      yield* integration.executionEnd(
+        who,
+        JSON.stringify({
+          hook_event_name: "ExecutionComplete",
+          reason: "aborted",
+          last_assistant_message: "",
+        }),
+      )
+      assert.isUndefined(yield* db.session.openExecution(id))
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted")
+      assert.strictEqual(yield* replyOf(id), "")
+      assert.strictEqual(taken.execution, first + 1)
+    }),
+    { hooked: ["pi", "pulling-claude"], harnesses: [PULLING_CLAUDE] },
+  )
+
+  test(
     "a finished execution's report does not change the successor, which its own report can still finish",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

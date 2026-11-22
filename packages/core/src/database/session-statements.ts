@@ -492,8 +492,8 @@ export const statements = Effect.gen(function* () {
 
       if (unresolvedEarlier) return { kind: "unmatched" as const }
 
-      if (active.started === null) {
-        if (needsReady && active.typed === null) return { kind: "unaccepted" as const }
+      if (active.started === null && active.typed === null) {
+        if (needsReady) return { kind: "unaccepted" as const }
 
         if (pulls) {
           const unacceptedPulled =

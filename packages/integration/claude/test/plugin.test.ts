@@ -259,8 +259,31 @@ describe("Claude plugin requests", () => {
       },
     ])
 
-    const userPrompted = host({ ...WORKER, VIBEST_EXECUTION: "9" })
+    const launchArgv = host({ ...WORKER, VIBEST_EXECUTION: "9" })
+    await launchArgv.start()
+    await launchArgv.prompt("initial launch argv prompt", { kind: "composer" })
+    await launchArgv.executionComplete({ reason: "answer", answer: "turn 1 answer" })
+    await settle()
+    assert.deepStrictEqual(
+      launchArgv.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt")).map((r) => r.body),
+      [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 9 }],
+    )
+    assert.deepStrictEqual(
+      launchArgv.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body),
+      [
+        {
+          hook_event_name: "ExecutionComplete",
+          session_id: "c1",
+          reason: "answer",
+          last_assistant_message: "turn 1 answer",
+          execution: 9,
+        },
+      ],
+    )
+
+    const userPrompted = host({ ...WORKER, VIBEST_EXECUTION: "11" })
     await userPrompted.start()
+    await userPrompted.prompt("initial launch argv prompt", { kind: "composer" })
     await userPrompted.prompt("typed by user", { kind: "composer" })
     await userPrompted.executionComplete({ reason: "answer", answer: "user reply" })
     await settle()
