@@ -394,9 +394,10 @@ E2E runs it on every world's database at the end of each check.
 - Live status: from the integration's events (working between `execution.started` and `execution.ended`, plus `blocked`), and
   from the runtime only for a harness with no integration.
 - On start, a `delivering` row (a hand-over that started and was not confirmed) stays `delivering`. It is not
-  delivered again and it is not recorded as a failure: the result is unknown. A pulled batch is `delivered` and
-  attached to its execution by `take`, so it has no `delivering` state; a batch the harness never took up is settled
-  by the execution's confirmation timeout (`not_started`).
+  delivered again, it is not recorded as a failure, and it does not keep the daemon from stopping: the result is
+  unknown. `take` and the launch arguments only reserve the batch (`inbox.delivery_started`). Delivery is the
+  integration reporting that this execution's input was submitted, or a typed send that both wrote the batch and
+  was accepted. A session that never launches does not receive its first message.
 - Restarting mark: the end events are written after SIGTERM, so a crash before it leaves the old process running,
   and a crash after it leaves an unended process with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an

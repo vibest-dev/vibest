@@ -248,9 +248,9 @@ const sendChecks: ReadonlyArray<Check> = [
         expect(
           countFacts(
             w,
-            "type = 'inbox.enqueued' AND json_extract(data, '$.sender.session') = ? AND json_extract(data, '$.recipient') = ?",
-            id,
+            "aggregate = ? AND type = 'inbox.enqueued' AND json_extract(data, '$.sender.session') = ?",
             siblingId,
+            id,
           ) === 0,
           "inbox.queued was written for the refused send",
         )

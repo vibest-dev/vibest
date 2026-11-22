@@ -82,7 +82,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       assert.deepStrictEqual(yield* statusOf, ["delivering"])
       assert.isUndefined(yield* inbox.take(entryId, undefined))
       assert.isTrue(yield* db.session.acceptExecution(entryId, taken!.execution))
-      assert.deepStrictEqual(yield* statusOf, ["delivered"])
+      assert.deepStrictEqual(yield* statusOf, ["delivering"])
     }),
   )
 

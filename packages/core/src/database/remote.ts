@@ -196,11 +196,13 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (route === undefined) return "unknown" as const
 
-              if (
-                (yield* reads.hasPeerItem(item.id)) ||
-                (yield* sql`SELECT 1 FROM outbox WHERE id = ${item.id}`).length > 0
-              )
-                return "duplicate" as const
+              if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
+
+              const [forwarded] = yield* sql<{ session: string }>`SELECT session_id AS session FROM outbox
+                WHERE id = ${item.id}`
+
+              if (forwarded !== undefined && forwarded.session === item.recipient) return "duplicate" as const
+
               const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
 
               const content =
@@ -225,7 +227,21 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 target !== undefined &&
                 (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
 
-              if (target === undefined || !here) return "queued" as const
+              if (target === undefined || !here) {
+                const queued = yield* inbox.queueInbox({
+                  recipient: item.recipient,
+                  sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
+                  content,
+                  transfer: item.id,
+                })
+
+                yield* inbox.moveInbox(sql`session_id = ${item.recipient} AND id = ${queued}`, "dropped", {
+                  reason: "the entry session is not running",
+                })
+
+                return "queued" as const
+              }
+
               yield* inbox.queueInbox({
                 recipient: target,
                 sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },

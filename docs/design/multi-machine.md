@@ -119,9 +119,7 @@ started it is the `origin` of its `session.created` fact (peer, project, reportT
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to that creator as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
-inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
-B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
+Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to that creator as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. A forward writes no local inbox row: the outbox item is the receipt, and it is not an inbox delivery. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
 `Peer.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
 same request id finds it and queues nothing. Archiving a peer session (`session.ended`) deletes its unacknowledged

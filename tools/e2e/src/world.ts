@@ -818,8 +818,9 @@ export const expectReplied = async (w: World, sub: string) => {
     "session.created",
     "process.started",
     "execution.started",
-    "inbox.delivered",
+    "inbox.delivery_started",
     "process.placed",
+    "inbox.delivered",
     "execution.ended",
   ])
 

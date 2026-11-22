@@ -11,6 +11,9 @@ import * as Platform from "#platform"
 const P = "11111111-1111-4111-8111-111111111111"
 const A = "22222222-2222-4222-8222-222222222222"
 const B = "33333333-3333-4333-8333-333333333333"
+const R = "44444444-4444-4444-8444-444444444444"
+const E = "55555555-5555-4555-8555-555555555555"
+const C = "66666666-6666-4666-8666-666666666666"
 const MIGRATION = "20261121000000_inbox_v1"
 
 const agent = { type: "agent" as const, session: A }
@@ -45,6 +48,25 @@ const facts = [
   [B, 14, "execution.accepted", { execution: 3 }],
   [B, 15, "inbox.queued", { kind: "send", sender: agent, content: "booked", status: "pending" }],
   [B, 16, "inbox.moved", { inbox: 15, to: "delivered", execution: 99 }],
+  [R, 1, "session.created", { project: P, agent: "general", name: "r", directory: "/p" }],
+  [R, 3, "inbox.queued", { kind: "send", sender: { type: "user" }, content: "cut", status: "pending" }],
+  [R, 4, "inbox.moved", { inbox: 3, to: "delivering" }],
+  [R, 5, "inbox.moved", { inbox: 3, to: "pending" }],
+  [E, 1, "session.created", { project: P, agent: "general", name: "entry", directory: "/p" }],
+  [E, 2, "execution.ended", { execution: 1, outcome: "completed" }],
+  [E, 5, "inbox.queued", { kind: "task", sender: { type: "user" }, content: "later bootstrap", status: "delivered" }],
+  [E, 6, "execution.started", {}],
+  [E, 7, "inbox.moved", { inbox: 5, to: "delivered", execution: 6 }],
+  [C, 1, "session.created", { project: P, agent: "general", name: "c", directory: "/p", parent: A }],
+  [
+    C,
+    2,
+    "inbox.queued",
+    { kind: "task", sender: agent, content: "wait no launch", status: "delivered", request: "delegation" },
+  ],
+  [C, 3, "execution.started", {}],
+  [C, 4, "inbox.moved", { inbox: 2, to: "delivered", execution: 3 }],
+  [C, 5, "execution.ended", { execution: 3, outcome: "interrupted" }],
 ] as const
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
@@ -119,7 +141,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
               { history: "route", sender: agent, content: "routed", transferId: "item-1", requestId: "route-1" },
             ],
             [15, "inbox.enqueued", { sender: agent, content: "booked" }],
-            [16, "inbox.unresolved", { history: "unconfirmed", messageId: 15 }],
+            [16, "inbox.delivery_started", { messageId: 15, execution: 99 }],
           ],
         )
         assert.deepStrictEqual(
@@ -180,16 +202,37 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
             },
             {
               id: 15,
-              status: "unresolved",
+              status: "delivering",
               request: null,
               transferId: null,
               senderExecutionId: null,
-              recipientExecutionId: null,
+              recipientExecutionId: 99,
             },
           ],
         )
         assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, message_id FROM session WHERE id = ${B}`), [
           { id: B, messageId: 2 },
+        ])
+        assert.deepStrictEqual(
+          yield* read(file, (sql) => sql`SELECT seq, type FROM event WHERE aggregate = ${R} AND seq = 5`),
+          [{ seq: 5, type: "inbox.unresolved" }],
+        )
+        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT id, status FROM inbox WHERE session_id = ${R}`), [
+          { id: 3, status: "pending" },
+        ])
+        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${E}`), [
+          { messageId: null },
+        ])
+        assert.deepStrictEqual(
+          yield* read(file, (sql) => sql`SELECT id, status, recipient_execution_id FROM inbox WHERE session_id = ${E}`),
+          [{ id: 5, status: "delivering", recipientExecutionId: 6 }],
+        )
+        assert.deepStrictEqual(
+          yield* read(file, (sql) => sql`SELECT status, recipient_execution_id FROM inbox WHERE session_id = ${C}`),
+          [{ status: "delivering", recipientExecutionId: 3 }],
+        )
+        assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${C}`), [
+          { messageId: 2 },
         ])
         assert.deepStrictEqual(
           yield* read(file, (sql) => sql`SELECT id, sent FROM execution WHERE session_id = ${A}`),

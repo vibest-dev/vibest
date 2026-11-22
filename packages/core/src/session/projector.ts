@@ -249,6 +249,10 @@ export const layer = Layer.effectDiscard(
         const sender = data.sender
         const content = data.content
 
+        if (data.history === "released" && data.messageId !== undefined)
+          return sql`UPDATE inbox SET status = 'pending', recipient_execution_id = NULL
+            WHERE session_id = ${sessionIdOf(fact)} AND id = ${data.messageId}`
+
         if (data.messageId !== undefined || sender === undefined || content === undefined)
           return sql`UPDATE inbox SET status = 'unresolved'
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${data.messageId ?? fact.seq}`

@@ -752,7 +752,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           Effect.gen(function* () {
             const accepted = yield* accept(id, execution)
 
-            if (accepted) yield* inbox.confirm(id, execution)
+            const [placed] = yield* sql<{ ok: number }>`SELECT 1 AS ok FROM process
+              WHERE session_id = ${id} AND placed_at IS NOT NULL`
+
+            if (accepted && placed !== undefined) yield* inbox.confirmTask(id, execution)
 
             return accepted
           }),
@@ -802,12 +805,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               const at = yield* now
               yield* startExecution(id, at)
               yield* endExecution(id, { outcome })
-              yield* inbox.moveInbox(
-                sql`session_id = ${id} AND status IN ('pending', 'delivering')
-                  AND id = (SELECT message_id FROM session WHERE id = ${id})`,
-                "dropped",
-                { reason: "the session did not start" },
-              )
+              yield* inbox.dropUnsent(id, "the session did not start")
 
               if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice })
             }),

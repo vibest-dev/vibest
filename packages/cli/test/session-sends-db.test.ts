@@ -37,6 +37,38 @@ const setup = Effect.gen(function* () {
 })
 
 describe("sends from sessions", () => {
+  it.effect("an outbound transfer id is not proof that the same id was received", () =>
+    memory(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { db, project, entryId } = yield* setup
+        const peer = "11111111-1111-4111-8111-111111111111"
+        const remote = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const id = "11111111-1111-4111-8111-111111111112"
+
+        yield* db.remote.notePeer({ id: peer, name: "peer-b" })
+        yield* db.session.insertSession(session(B), project, { cwd: "/w", task: "child" })
+        yield* db.remote.sendToPeer(B, peer, remote, "orig", id)
+        yield* db.remote.ackOutbox(peer, [id])
+
+        const back = {
+          id,
+          recipient: entryId,
+          kind: "send" as const,
+          sender: "peer-b/dddddddd",
+          from: { session: remote, machine: "peer-b" },
+          content: "orig",
+        }
+
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "queued")
+        assert.deepStrictEqual(yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE transfer_id = ${id}`, [
+          { n: 1 },
+        ])
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "duplicate")
+      }),
+    ),
+  )
+
   it.effect("a send to the entry session waits as a pending row like a send to any session", () =>
     memory(
       Effect.gen(function* () {

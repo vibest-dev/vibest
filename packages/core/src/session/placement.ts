@@ -215,6 +215,7 @@ export const make = Effect.gen(function* () {
         yield* db.session.closeExecution(session.id, opened, failure === undefined ? "not_started" : "failed", {
           failure,
         })
+        yield* db.inbox.dropUnsent(session.id, failure?.message ?? "the session did not start")
       })
 
     const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError((cause) => abandoned(cause)))

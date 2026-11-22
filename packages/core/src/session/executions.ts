@@ -243,9 +243,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const after = yield* standing
 
-          if (after === "closed") return true
-
-          if (error.code === "unreachable" || after === "busy") return yield* Effect.fail(error)
+          if (after === "closed" || error.code === "unreachable" || after === "busy") return yield* Effect.fail(error)
           yield* missed
 
           return yield* error

@@ -54,6 +54,7 @@ type Written = {
   readonly transferId?: string
   readonly aboutSessionId?: string
   readonly messageId?: number
+  readonly execution?: number
   readonly recipientExecutionId?: number
   readonly reason?: string
 }
@@ -88,7 +89,7 @@ export const migration = {
         WHERE type IN ('session.created', 'inbox.queued', 'inbox.moved', 'execution.accepted', 'execution.ended')
         ORDER BY position`
 
-      const created = new Map<string, number>()
+      const created = new Map<string, { position: number; seq: number }>()
       const delegation = new Map<string, number>()
       const confirmed = new Set<string>()
 
@@ -113,14 +114,21 @@ export const migration = {
         if (row.type !== "session.created" && row.type !== "inbox.queued" && row.type !== "inbox.moved") continue
 
         if (row.type === "session.created") {
-          created.set(row.aggregate, row.position)
+          created.set(row.aggregate, { position: row.position, seq: row.seq })
           continue
         }
 
         if (row.type === "inbox.queued") {
           const data = yield* decode(Queued, row)
+          const birth = created.get(row.aggregate)
 
-          if (!delegation.has(row.aggregate) && data.kind === "task") delegation.set(row.aggregate, row.seq)
+          if (
+            !delegation.has(row.aggregate) &&
+            data.kind === "task" &&
+            birth !== undefined &&
+            row.seq === birth.seq + 1
+          )
+            delegation.set(row.aggregate, row.seq)
           const body = bodyOf(data)
 
           if (data.status === "dropped") {
@@ -136,7 +144,7 @@ export const migration = {
         const messageId = data.inbox
 
         if (data.to === "pending") {
-          yield* tx`DELETE FROM event WHERE position = ${row.position}`
+          yield* replace(row, "inbox.unresolved", { history: "released", messageId })
           continue
         }
 
@@ -154,11 +162,13 @@ export const migration = {
           continue
         }
 
+        if (data.to === "delivered" && data.execution !== undefined) {
+          yield* replace(row, "inbox.delivery_started", { messageId, execution: data.execution })
+          continue
+        }
+
         if (data.to === "delivered") {
-          yield* replace(row, "inbox.unresolved", {
-            history: data.execution === undefined ? "delivered_without_execution" : "unconfirmed",
-            messageId,
-          })
+          yield* replace(row, "inbox.unresolved", { history: "delivered_without_execution", messageId })
           continue
         }
 
@@ -171,11 +181,11 @@ export const migration = {
       }
 
       for (const [aggregate, seq] of delegation) {
-        const position = created.get(aggregate)
+        const birth = created.get(aggregate)
 
-        if (position !== undefined)
+        if (birth !== undefined)
           yield* tx`UPDATE event SET data = json_patch(data, ${JSON.stringify({ message: seq })})
-            WHERE position = ${position}`
+            WHERE position = ${birth.position}`
       }
     }),
 }

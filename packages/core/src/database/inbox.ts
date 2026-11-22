@@ -273,6 +273,22 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         { execution },
       )
 
+    const confirmTask = (sessionId: string, execution: number) =>
+      moveInbox(
+        sql`session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+          AND id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
+        "delivered",
+        { execution },
+      )
+
+    const dropUnsent = (sessionId: string, reason: string) =>
+      moveInbox(
+        sql`session_id = ${sessionId} AND status IN ('pending', 'delivering')
+          AND id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
+        "dropped",
+        { reason },
+      )
+
     const dropWaiting = (entry: string) =>
       Effect.gen(function* () {
         const dropped = yield* moveInbox(sql`status = 'pending' AND session_id = ${entry}`, "dropped", {
@@ -295,6 +311,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       moveInbox,
       queueInbox,
       confirm,
+      confirmTask,
+      dropUnsent,
       linkTask,
       queueSend,
       queuedFrom,
@@ -321,6 +339,8 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       findSend,
       moveInbox,
       confirm,
+      confirmTask,
+      dropUnsent,
       queueSend,
       queuedFrom,
       liveRecipient,
@@ -431,6 +451,21 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
       confirm: Effect.fn("Db.inbox.confirm")((sessionId: string, execution: number) =>
         confirm(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      confirmTask: Effect.fn("Db.inbox.confirmTask")((sessionId: string, execution: number) =>
+        confirmTask(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      dropUnsent: Effect.fn("Db.inbox.dropUnsent")((sessionId: string, reason: string) =>
+        dropUnsent(sessionId, reason).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      unsentDelegation: Effect.fn("Db.inbox.unsentDelegation")((sessionId: string) =>
+        inboxWhere(
+          sql`m.session_id = ${sessionId} AND m.status IN ('pending', 'delivering')
+            AND m.id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
+        ).pipe(Effect.orDie),
       ),
 
       unacceptedBatch: Effect.fn("Db.inbox.unacceptedBatch")((sessionId: string, execution: number) =>

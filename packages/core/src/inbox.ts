@@ -145,9 +145,15 @@ export const layer = Layer.effect(
     )
 
     const dropQueue = Effect.fn("Inbox.dropQueue")((session: SessionRow, reason: string) =>
-      db.inbox
-        .pendingInbox(session.id)
-        .pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason)))),
+      Effect.gen(function* () {
+        const pending = yield* db.inbox.pendingInbox(session.id)
+        const task = yield* db.inbox.unsentDelegation(session.id)
+        const rows = task.length === 0 ? pending : [...pending, ...task]
+
+        if (rows.length === 0) return
+
+        yield* undelivered(session, rows, reason)
+      }),
     )
 
     const claimRetype = Effect.fn("Inbox.claimRetype")((sessionId: string, execution: number) =>

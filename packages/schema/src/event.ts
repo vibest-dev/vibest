@@ -141,6 +141,7 @@ export const InboxHistory = Schema.Literals([
   "delivered_without_execution",
   "failed_unspecified",
   "unconfirmed",
+  "released",
 ])
 
 export type InboxHistory = typeof InboxHistory.Type
@@ -244,7 +245,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 7
+export const CATALOG_VERSION = 8
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

@@ -123,22 +123,26 @@ export const make = Effect.gen(function* () {
           )
       }),
       Effect.catchTags({
-        RuntimeError: (e) =>
-          claimed.length === 0
-            ? Effect.fail(e)
-            : e.code === "unreachable"
-              ? db.inbox
-                  .pendingInbox(session.id)
-                  .pipe(
-                    Effect.flatMap((pending) =>
-                      pending.some((r) => claimed.includes(r.id)) ? Effect.fail(e) : Effect.void,
-                    ),
-                  )
-              : undelivered(
-                  session,
-                  batch.filter((r) => claimed.includes(r.id)),
-                  e.message,
+        RuntimeError: (e) => {
+          const rows = batch.filter((r) => claimed.includes(r.id))
+
+          if (claimed.length === 0) return Effect.fail(e)
+
+          if (e.code === "unreachable")
+            return db.inbox
+              .pendingInbox(session.id)
+              .pipe(
+                Effect.flatMap((pending) =>
+                  pending.some((r) => claimed.includes(r.id)) ? Effect.fail(e) : Effect.void,
                 ),
+              )
+
+          if (handedInto === undefined) return undelivered(session, rows, e.message)
+
+          return db.session
+            .executionWasAccepted(session.id, handedInto)
+            .pipe(Effect.flatMap((accepted) => (accepted ? Effect.void : undelivered(session, rows, e.message))))
+        },
         NotReady: (e) => {
           const rows = batch.filter((r) => claimed.includes(r.id))
 
