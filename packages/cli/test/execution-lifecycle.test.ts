@@ -6,7 +6,7 @@ import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { projectOf, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { database, session } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { CATALOG_VERSION } from "@vibest/schema/event"
+import { Catalog, CATALOG_VERSION } from "@vibest/schema/event"
 import { Effect, Exit, FileSystem, Layer, Path } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -180,25 +180,102 @@ describe("execution lifecycle", () => {
         assert.isNull(solo?.started)
         assert.strictEqual(solo?.reply, "solo")
 
-        const lost = (yield* db.session.startExecution(S, 30)).execution
-        yield* db.session.acceptExecution(S, lost)
-        yield* db.session.closeExecution(S, lost, "lost", { failure: { message: "gone" } })
-        const next = (yield* db.session.startExecution(S, 100)).execution
-        assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 50, "late")), "completed")
+        const first = (yield* db.session.startExecution(S, 30)).execution
+        yield* db.session.acceptExecution(S, first)
+        const successor = first + 1
+        const bus = yield* Bus.Service
+        yield* bus.transaction(
+          Effect.gen(function* () {
+            yield* bus.publish(Catalog["execution.allocated"], {
+              sessionId: S,
+              at: 40,
+              data: { executionId: successor },
+            })
+            yield* bus.publish(Catalog["execution.started"], {
+              sessionId: S,
+              at: 41,
+              data: { executionId: successor },
+            })
+          }),
+        )
+        assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 50, "late")))
 
-        const rows = yield* sql<{ id: number; outcome: string | null; reply: string | null; started: number | null }>`
-        SELECT id, outcome, reply, started_at AS started FROM execution WHERE session_id = ${S} AND id IN (${lost}, ${next})
-          ORDER BY id`
+        const rows = yield* sql<{
+          id: number
+          outcome: string | null
+          reply: string | null
+          started: number | null
+          owner: number
+        }>`SELECT id, outcome, reply, started_at AS started, owner FROM execution
+          WHERE session_id = ${S} AND id IN (${first}, ${successor}) ORDER BY id`
 
-        const earlier = rows.find((row) => row.id === lost)
-        const later = rows.find((row) => row.id === next)
-        assert.strictEqual(earlier?.outcome, "completed")
-        assert.strictEqual(earlier?.reply, "late")
-        assert.notStrictEqual(earlier?.started, null)
-        assert.strictEqual(later?.outcome ?? null, null)
-        assert.strictEqual(later?.reply ?? null, null)
-        assert.isNull(later?.started ?? null)
+        assert.deepStrictEqual(rows, [
+          { id: first, outcome: null, reply: null, started: rows[0]?.started ?? null, owner: 0 },
+          { id: successor, outcome: null, reply: null, started: rows[1]?.started ?? null, owner: 1 },
+        ])
+        assert.notStrictEqual(rows[0]?.started, null)
+        assert.notStrictEqual(rows[1]?.started, null)
+        assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 60, "again")), undefined)
+        assert.strictEqual(
+          (yield* sql<{
+            n: number
+          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+          1,
+        )
       }).pipe(Effect.provide(memoryDb())),
+  )
+
+  it.effect("a repeated end is idempotent, and a queued send still counts after its outbox row is deleted", () =>
+    Effect.gen(function* () {
+      const db = yield* withSession
+      const sql = yield* SqlClient.SqlClient
+      const execution = (yield* db.session.startExecution(S, 5)).execution
+      yield* db.session.acceptExecution(S, execution)
+      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 6, "once")), "completed")
+      assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 7, "twice")), "completed")
+      assert.strictEqual(
+        (yield* sql<{
+          n: number
+        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+        1,
+      )
+
+      const again = (yield* db.session.startExecution(S, 8)).execution
+      const bus = yield* Bus.Service
+      yield* bus.transaction(
+        bus.publish(Catalog["outbox.queued"], {
+          at: 9,
+          data: {
+            id: "66666666-6666-4666-8666-666666666661",
+            peer: "55555555-5555-4555-8555-555555555555",
+            session: S,
+            kind: "send",
+            content: "remote",
+            execution: again,
+          },
+        }),
+      )
+      assert.strictEqual(yield* db.inbox.sentIn(S, again), 1)
+      yield* bus.transaction(
+        bus.publish(Catalog["outbox.queued"], {
+          at: 10,
+          data: {
+            id: "66666666-6666-4666-8666-666666666662",
+            peer: "55555555-5555-4555-8555-555555555555",
+            session: S,
+            content: "a notice",
+          },
+        }),
+      )
+      assert.strictEqual(yield* db.inbox.sentIn(S, again), 1)
+      yield* db.session.archive(S)
+      assert.strictEqual(yield* db.inbox.sentIn(S, again), 1)
+      assert.strictEqual(
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM outbox WHERE session_id = ${S} AND acked_at IS NULL`)[0]
+          ?.n,
+        0,
+      )
+    }).pipe(Effect.provide(memoryDb())),
   )
 
   it.effect(

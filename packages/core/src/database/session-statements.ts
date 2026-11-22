@@ -146,14 +146,14 @@ export const statements = Effect.gen(function* () {
     )
 
   const openExecution = (sessionId: string) =>
-    sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND outcome IS NULL`.pipe(
+    sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND owner = 1`.pipe(
       Effect.map((rows) => rows[0]?.id),
     )
 
   const workingExecutions = sql<{
     n: number
   }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
-      WHERE e.outcome IS NULL AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
+      WHERE e.owner = 1 AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
 
   const currentProcessId = (sessionId: string) =>
     sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
@@ -170,24 +170,8 @@ export const statements = Effect.gen(function* () {
         outcome, started_at AS started, booked_at AS booked, process_id AS process FROM execution
       WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]))
 
-  const releaseOtherProcess = (sessionId: string, at: number) =>
-    Effect.gen(function* () {
-      const process = yield* currentProcessId(sessionId)
-
-      const left = yield* sql<{ id: number; started: number | null }>`SELECT id, started_at AS started FROM execution
-        WHERE session_id = ${sessionId} AND outcome IS NULL AND process_id IS NOT ${process ?? null}`
-
-      for (const row of left)
-        yield* publish(ExecutionUnresolved, {
-          sessionId,
-          at,
-          data: { executionId: row.id, observation: row.started === null ? "not_started" : "lost" },
-        })
-    })
-
   const allocateExecution = (sessionId: string, at: number, typed?: string) =>
     Effect.gen(function* () {
-      yield* releaseOtherProcess(sessionId, at)
       const executionId = yield* nextExecutionId(sessionId)
       const process = yield* currentProcessId(sessionId)
       yield* publish(ExecutionAllocated, {
@@ -431,43 +415,48 @@ export const statements = Effect.gen(function* () {
     Effect.gen(function* () {
       const rows = yield* sql<{
         id: number
-        booked: number
         started: number | null
         outcome: string | null
         process: number | null
-      }>`SELECT id, booked_at AS booked, started_at AS started, outcome, process_id AS process FROM execution
+        owner: number
+      }>`SELECT id, started_at AS started, outcome, process_id AS process, owner FROM execution
         WHERE session_id = ${id} ORDER BY id`
 
-      const live = rows.find((row) => row.outcome === null)
       const sameProcess = (row: { readonly process: number | null }) => process === undefined || row.process === process
-
-      const prior = [...rows]
-        .reverse()
-        .find(
-          (row) =>
-            row !== live &&
-            sameProcess(row) &&
-            (row.outcome === "lost" || row.outcome === "not_started" || row.outcome === null),
-        )
-
+      const started = rows.filter((row) => row.started !== null && sameProcess(row))
+      const unsettled = started.filter((row) => row.outcome === null)
+      const owner = rows.find((row) => row.owner === 1)
       const apply = (execution: number) => finishExecution(id, execution, end, at)
 
-      if (live !== undefined && live.started !== null && (at === undefined || at >= live.booked))
-        return (yield* apply(live.id)) ? live.id : undefined
+      if (unsettled.length > 1) return undefined
 
-      if (live !== undefined && live.started === null) {
-        if (prior !== undefined && (at === undefined || at < live.booked))
-          return (yield* apply(prior.id)) ? prior.id : undefined
+      if (unsettled.length === 1) {
+        const candidate = unsettled[0]!
 
-        return "unaccepted" as const
+        if (owner !== undefined && owner.started === null && candidate.id !== owner.id) {
+          if (!(yield* apply(candidate.id))) return candidate.id
+
+          return candidate.id
+        }
+
+        if (owner !== undefined && owner.started === null) return "unaccepted" as const
+
+        if (owner !== undefined && owner.id !== candidate.id) return undefined
+
+        if (!(yield* apply(candidate.id))) return candidate.id
+
+        return candidate.id
       }
 
-      if (live !== undefined && at !== undefined && at < live.booked && prior !== undefined)
-        return (yield* apply(prior.id)) ? prior.id : undefined
+      if (owner !== undefined && owner.started === null) return "unaccepted" as const
 
-      if (live === undefined && prior !== undefined) return (yield* apply(prior.id)) ? prior.id : undefined
+      if (started.length > 0) return started[started.length - 1]!.id
 
       if (end.outcome === "interrupted" || end.outcome === "lost" || end.outcome === "not_started") return undefined
+
+      if (rows.some((row) => row.started === null && row.outcome !== null && sameProcess(row)))
+        return rows.filter((row) => sameProcess(row)).at(-1)?.id
+
       const execution = yield* allocateExecution(id, at ?? (yield* now))
       yield* apply(execution)
 

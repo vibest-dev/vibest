@@ -280,8 +280,12 @@ before it, if any. Superseded processes are not exits: no reader counts them as 
 An `execution.succeeded` the harness reported carries its reply. A changed conversation id is a `process.conversation`,
 not an execution field. An execution vibestd gives up (`execution.unresolved`: `lost` or `not_started`) is not a
 confirmed result: it frees the one live slot, and a later report that names that execution still lands on it.
-`execution.sent` is not stored. `sentIn` and `latest.sent` count the sender's local `inbox.queued` sends and its
-`outbox.queued` sends for that execution.
+`sent` on the execution row is only the projection of those send facts: local `inbox.queued` sends and
+`outbox.queued` sends. Archive deletes unacked outbox rows and does not change the count. A machine-addressed send is
+forwarded and records no execution, so it adds nothing. One row has `owner = 1`. A successor's `execution.started`
+clears the previous owner and does not invent its outcome. An end report with no execution id settles a session only
+when exactly one started execution is still without a result; two of those make the report ambiguous and it changes
+neither.
 
 A reported end or start is written only for the session's current process: the harness's integration sends the
 process id vibestd started it as (`VIBEST_PROCESS`, or the one the ready report's answer gave after an in-place

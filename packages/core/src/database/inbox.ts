@@ -312,11 +312,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       sentIn: Effect.fn("Db.inbox.sentIn")((sessionId: string, execution: number) =>
-        sql<{ sent: number }>`SELECT
-            (SELECT count(*) FROM inbox WHERE sender_session_id = ${sessionId} AND kind = 'send'
-              AND sender_execution_id = ${execution})
-            + (SELECT count(*) FROM outbox WHERE session_id = ${sessionId} AND kind = 'send'
-              AND execution_id = ${execution}) AS sent`.pipe(
+        sql<{ sent: number }>`SELECT sent FROM execution WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(
           Effect.map((rows) => rows[0]?.sent ?? 0),
           Effect.orDie,
         ),

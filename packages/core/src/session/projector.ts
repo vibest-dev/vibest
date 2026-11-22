@@ -23,9 +23,19 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
-import { senderColumns, senderKey } from "../database/db-rows.ts"
+import { localSessionOf, senderColumns, senderKey } from "../database/db-rows.ts"
 
 const sessionIdOf = (fact: Fact) => fact.sessionId!
+
+export const countSent = (
+  sql: SqlClient.SqlClient,
+  session: string | undefined,
+  kind: string,
+  execution: number | undefined,
+) =>
+  session === undefined || kind !== "send" || execution === undefined
+    ? Effect.void
+    : sql`UPDATE execution SET sent = sent + 1 WHERE session_id = ${session} AND id = ${execution}`
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -138,27 +148,36 @@ export const layer = Layer.effectDiscard(
 
     yield* bus.project(
       ExecutionAllocated,
-      active(
-        (fact) =>
-          sql`INSERT INTO execution (session_id, id, process_id, typed, booked_at)
-            VALUES (${sessionIdOf(fact)}, ${fact.data.executionId}, ${fact.data.processId ?? null},
-              ${fact.data.typed ?? null}, ${fact.at})`,
+      active((fact) =>
+        Effect.gen(function* () {
+          const session = sessionIdOf(fact)
+          yield* sql`INSERT INTO execution (session_id, id, process_id, typed, booked_at, owner)
+              VALUES (${session}, ${fact.data.executionId}, ${fact.data.processId ?? null},
+                ${fact.data.typed ?? null}, ${fact.at}, 0)`
+          yield* sql`UPDATE execution SET owner = 1 WHERE session_id = ${session} AND id = ${fact.data.executionId}
+              AND NOT EXISTS (SELECT 1 FROM execution WHERE session_id = ${session} AND owner = 1)`
+        }),
       ),
     )
     yield* bus.project(
       ExecutionStarted,
-      active(
-        (fact) =>
-          sql`UPDATE execution SET started_at = coalesce(started_at, ${fact.at}),
-              process_id = coalesce(${fact.data.processId ?? null}, process_id)
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.executionId} AND started_at IS NULL`,
+      active((fact) =>
+        Effect.gen(function* () {
+          const session = sessionIdOf(fact)
+          const id = fact.data.executionId
+          yield* sql`UPDATE execution SET owner = 0 WHERE session_id = ${session} AND id != ${id}
+              AND EXISTS (SELECT 1 FROM execution WHERE session_id = ${session} AND id = ${id} AND started_at IS NULL)`
+          yield* sql`UPDATE execution SET started_at = coalesce(started_at, ${fact.at}), owner = 1,
+                process_id = coalesce(${fact.data.processId ?? null}, process_id)
+              WHERE session_id = ${session} AND id = ${id} AND started_at IS NULL`
+        }),
       ),
     )
     yield* bus.project(
       ExecutionSucceeded,
       active(
         (fact) =>
-          sql`UPDATE execution SET outcome = 'completed', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at}
+          sql`UPDATE execution SET outcome = 'completed', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at}, owner = 0
             WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
       ),
     )
@@ -168,7 +187,7 @@ export const layer = Layer.effectDiscard(
         (fact) =>
           sql`UPDATE execution SET outcome = 'failed', reply = ${fact.data.reply ?? null},
               failure = ${fact.data.failure.message}, failure_kind = ${fact.data.failure.kind ?? null},
-              ended_at = ${fact.at}
+              ended_at = ${fact.at}, owner = 0
             WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
       ),
     )
@@ -176,7 +195,8 @@ export const layer = Layer.effectDiscard(
       ExecutionInterrupted,
       active(
         (fact) =>
-          sql`UPDATE execution SET outcome = 'interrupted', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at}
+          sql`UPDATE execution SET outcome = 'interrupted', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at},
+              owner = 0
             WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
       ),
     )
@@ -184,7 +204,7 @@ export const layer = Layer.effectDiscard(
       ExecutionUnresolved,
       active(
         (fact) =>
-          sql`UPDATE execution SET outcome = ${fact.data.observation}, ended_at = ${fact.at},
+          sql`UPDATE execution SET outcome = ${fact.data.observation}, ended_at = ${fact.at}, owner = 0,
               reply = ${fact.data.reply ?? null},
               failure = ${fact.data.failure?.message ?? null}, failure_kind = ${fact.data.failure?.kind ?? null}
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.executionId} AND outcome IS NULL`,
@@ -203,7 +223,9 @@ export const layer = Layer.effectDiscard(
             sender_execution_id)
           VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${sender.type}, ${sender.session}, ${sender.agent}, ${sender.title},
             ${sender.machine}, ${sender.plugin}, ${senderKey(data.sender)}, ${data.about ?? null}, ${data.kind}, ${data.content},
-            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${data.execution ?? null})`
+            ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${data.execution ?? null})`.pipe(
+          Effect.andThen(countSent(sql, localSessionOf(data.sender), data.kind, data.execution)),
+        )
       }),
     )
     yield* bus.project(

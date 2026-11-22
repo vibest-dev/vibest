@@ -145,7 +145,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,
         l.ended_at AS l_ended, l.reply AS l_reply, l.failure AS l_failure, l.failure_kind AS l_failure_kind
       FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-        LEFT JOIN execution o ON o.session_id = s.id AND o.outcome IS NULL
+        LEFT JOIN execution o ON o.session_id = s.id AND o.owner = 1
         LEFT JOIN execution l ON l.session_id = s.id AND l.id = (SELECT id FROM execution
           WHERE session_id = s.id AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1)
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
@@ -167,17 +167,24 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         outcome: string | null
         endedAt: number | null
         reply: string | null
+        owner: number | null
       }>`SELECT s.id,
           (SELECT i.content FROM inbox i WHERE i.session_id = s.id AND i.kind = 'task'
             ORDER BY i.id LIMIT 1) AS task,
-          t.id AS execution_id, t.outcome, t.ended_at, t.reply
+          t.id AS execution_id, t.outcome, t.ended_at, t.reply, t.owner AS owner
         FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
         WHERE ${sql.in("s.id", ids)}`
 
       const found = new Map<string, SessionBrief>()
 
       for (const row of rows) {
-        const raw = row.executionId === null ? undefined : (row.outcome ?? "working")
+        const raw =
+          row.executionId === null
+            ? undefined
+            : row.owner === 1 && row.outcome === null
+              ? "working"
+              : (row.outcome ?? undefined)
+
         const status = raw !== undefined && isMessageStatus(raw) ? raw : undefined
         found.set(row.id, {
           task: row.task === null ? null : unwrapped(row.task),
