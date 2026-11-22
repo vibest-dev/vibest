@@ -28,8 +28,7 @@ builtin of its id, and before user plugins, so a plugin replaces a file. To pick
 its own, a builtin may give its revision as an effect (`revise`) that answers the revision together with the plugin
 built from what it read: the plugin scan, which already rereads the sources every second, runs it (here one read of the
 folder, hashed) and reactivates the plugin when the revision changes, so the registered definitions are always the bytes
-that were hashed. Reactivation restarts the plugins after it in load order, as any changed plugin does. `extends` is
-resolved with `editor.get`, against what is registered when the transform runs. A file that cannot be registered goes to
+that were hashed. Reactivation restarts the plugins after it in load order, as any changed plugin does. A file that cannot be registered goes to
 `editor.invalid({ id, source, error })`, which removes an earlier definition of that id (a later plugin may add it again), and which `vibest agent list`, `vibest doctor` and the refusal of
 `vibest run --agent` report.
 

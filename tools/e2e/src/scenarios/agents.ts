@@ -73,11 +73,7 @@ const runId = async (w: World, args: ReadonlyArray<string>) =>
 const resultOf = (w: World, id: string, marker: string) =>
   until(`the answer of ${marker}`, async () => (await replyOf(w, id)).includes(`done-${marker}`), 90_000)
 
-const extendsGeneral = (system: string, mark: string) => {
-  const builtin = system.indexOf(GENERAL_START)
-
-  return builtin >= 0 && builtin < system.indexOf(mark)
-}
+const ownPrompt = (system: string, mark: string) => system.includes(mark) && !system.includes(GENERAL_START)
 
 const claudeAgentsPlugin = (folder: string) => `import fs from "node:fs"
 import path from "node:path"
@@ -162,18 +158,27 @@ const invalidOverrideRefuses = async (w: World) => {
   await listed(w, "builtin general back", (l) => l.agents.some((a) => a.id === "general"))
 }
 
-const invalidBaseInvalidatesChild = async (w: World) => {
-  const base = await writeAgent(w, "base.md", '---\ndescription: " "\n---\nBase.\n')
-  const child = await writeAgent(w, "child.md", "---\ndescription: valid child\nextends: base\n---\nChild.\n")
+const extendsRefuses = async (w: World) => {
+  const file = await writeAgent(
+    w,
+    "general.md",
+    "---\ndescription: does the work itself, with my rules\nextends: general\n---\nGENERAL-PLUS-MARK\n",
+  )
+
   await listed(
     w,
-    "base and child invalid with their paths",
+    "general with extends is invalid and not listed",
     (l) =>
-      l.invalid.some((a) => a.id === "base" && a.source === base) &&
-      l.invalid.some((a) => a.id === "child" && a.source === child) &&
-      l.agents.every((a) => a.id !== "child"),
+      l.invalid.some((a) => a.id === "general" && a.error.includes("unknown key extends")) &&
+      l.agents.every((a) => a.id !== "general"),
   )
-  await Promise.all([fs.rm(base), fs.rm(child)])
+  const plain = await w.viaEntry(["run", "pi", "--", ask("extendsgone")])
+  expect(
+    plain.code !== 0 && plain.stdout.includes("general is invalid") && plain.stdout.includes("unknown key extends"),
+    `a plain run with extends: general: ${plain.code} ${plain.stdout}`,
+  )
+  await fs.rm(file)
+  await listed(w, "builtin general back after extends", (l) => l.agents.some((a) => a.id === "general"))
 }
 
 const unreadableFolderReported = async (w: World) => {
@@ -191,23 +196,11 @@ const unreadableFolderReported = async (w: World) => {
   }
 }
 
-const extendsOnlyRegistered = async (w: World) => {
-  await writeAgent(w, "extender.md", "---\ndescription: extends general\nextends: general\n---\nMore.\n")
-  await listed(w, "extender listed", (l) => l.agents.some((a) => a.id === "extender"))
-  await fs.writeFile(path.join(w.vibestHome, "vibest.json"), JSON.stringify({ plugins: ["-vibest.agent"] }))
-  await listed(
-    w,
-    "extender invalid once general is not registered",
-    (l) =>
-      l.agents.every((a) => a.id !== "general" && a.id !== "extender") && l.invalid.some((a) => a.id === "extender"),
-  )
-}
-
 const checks: ReadonlyArray<Check> = [
   {
     id: "S60",
     title:
-      "a file in ~/.vibest/agents defines an agent: vibest agent list shows it without restarting vibestd, vibest run --agent starts it with the extended prompt then the file's, every new session's facts list it, and removing the file removes it",
+      "a file in ~/.vibest/agents defines an agent on its own: vibest agent list shows it without restarting vibestd, vibest run --agent starts it with that file's prompt and not a builtin's, every new session's facts list it, and removing the file removes it",
     run: async (w) => {
       needs("pi", "herdr")
       const { model } = await withEntry(w, "file")
@@ -218,7 +211,7 @@ const checks: ReadonlyArray<Check> = [
         const file = await writeAgent(
           w,
           "reviewer.md",
-          "---\ndescription: reviews a change for real bugs\nextends: general\n---\nREVIEWER-MARK\n",
+          "---\ndescription: reviews a change for real bugs\n---\nREVIEWER-MARK\n",
         )
 
         await listed(w, "reviewer listed", (l) =>
@@ -229,7 +222,7 @@ const checks: ReadonlyArray<Check> = [
         await resultOf(w, id, "reviewer")
         expect((await entry(w, id))?.agent === "reviewer", `the session's agent: ${JSON.stringify(await entry(w, id))}`)
         const system = model.systemOf("reviewer") ?? ""
-        expect(extendsGeneral(system, "REVIEWER-MARK"), "the prompt is not general's text followed by the file's")
+        expect(ownPrompt(system, "REVIEWER-MARK"), "the prompt is not the file's own text")
         expect(system.includes("reviewer (reviews a change for real bugs)"), "the session facts do not list reviewer")
         await fs.rm(file)
         await listed(w, "reviewer gone", (l) => l.agents.every((a) => a.id !== "reviewer"))
@@ -277,9 +270,8 @@ const checks: ReadonlyArray<Check> = [
         await resultOf(w, id, "fine")
         expect((model.systemOf("fine") ?? "").includes("FINE-MARK"), "fine's prompt")
         await invalidOverrideRefuses(w)
-        await invalidBaseInvalidatesChild(w)
+        await extendsRefuses(w)
         await unreadableFolderReported(w)
-        await extendsOnlyRegistered(w)
       } finally {
         model.stop()
       }
@@ -323,7 +315,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S63",
     title:
-      "a file general.md with extends: general replaces the builtin general: a plain vibest run gets the builtin text and then the file's, and removing the file restores the builtin",
+      "a file general.md replaces the builtin general with only its own prompt: a plain vibest run gets the file's text and not the builtin's, and removing the file restores the builtin",
     run: async (w) => {
       needs("pi", "herdr")
       const { model } = await withEntry(w, "general")
@@ -332,7 +324,7 @@ const checks: ReadonlyArray<Check> = [
         const file = await writeAgent(
           w,
           "general.md",
-          "---\ndescription: does the work itself, with my rules\nextends: general\n---\nGENERAL-PLUS-MARK\n",
+          "---\ndescription: does the work itself, with my rules\n---\nGENERAL-PLUS-MARK\n",
         )
 
         await listed(w, "general from the file", (l) =>
@@ -340,7 +332,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const id = await runId(w, ["pi", "--", ask("plain")])
         await resultOf(w, id, "plain")
-        expect(extendsGeneral(model.systemOf("plain") ?? "", "GENERAL-PLUS-MARK"), "plain run's prompt")
+        expect(ownPrompt(model.systemOf("plain") ?? "", "GENERAL-PLUS-MARK"), "plain run's prompt")
         await fs.rm(file)
         await listed(w, "builtin general back", (l) =>
           l.agents.some((a) => a.id === "general" && a.plugin === "vibest.agent"),

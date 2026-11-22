@@ -45,7 +45,7 @@ export const agentFilesPlugin = (home: string) =>
           ctx.agent.transform((editor) => {
             if (snapshot.unreadable !== undefined)
               editor.invalid({ source: folder, error: `the folder cannot be read: ${snapshot.unreadable}` })
-            const { definitions, invalid } = agentsFrom(snapshot.files, editor.get)
+            const { definitions, invalid } = agentsFrom(snapshot.files)
 
             for (const definition of definitions) editor.add(definition)
 
