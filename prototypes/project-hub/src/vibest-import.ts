@@ -105,6 +105,7 @@ export function importVibestProjectReadOnly(
 
   if (fs.existsSync(candidateDbPath) && fs.statSync(candidateDbPath).isFile()) {
     const extDb = new Database(candidateDbPath, { readonly: true })
+    extDb.exec("PRAGMA query_only = ON")
 
     try {
       const projectRowRaw = extDb

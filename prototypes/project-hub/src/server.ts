@@ -6,9 +6,9 @@ import url from "node:url"
 import { z } from "zod"
 
 import { buildClientAssets } from "./build-client.ts"
-import { previewVerdictForStatus } from "./database-rows.ts"
 import { HubDatabase } from "./database.ts"
 import { generateArchitectureScene, type ArchitecturePreset } from "./excalidraw-templates.ts"
+import { injectHtmlPreviewBridge } from "./preview-bridge.ts"
 import {
   ArtifactKindSchema,
   ArtifactMetadataSchema,
@@ -150,6 +150,30 @@ function errorResponse(message: string, status = 400): Response {
   })
 }
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"])
+
+function isAllowedRequestOrigin(originHeader: string, requestUrl: URL, boundHostname: string): boolean {
+  if (originHeader === "null" || originHeader.trim().length === 0) {
+    return false
+  }
+
+  try {
+    const parsedOrigin = new URL(originHeader)
+
+    if (parsedOrigin.origin !== requestUrl.origin) {
+      return false
+    }
+
+    return LOOPBACK_HOSTS.has(parsedOrigin.hostname) || parsedOrigin.hostname === boundHostname
+  } catch {
+    return false
+  }
+}
+
+function isStateMutatingMethod(method: string): boolean {
+  return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE"
+}
+
 function contentTypeForPath(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase()
 
@@ -270,8 +294,13 @@ export async function createHubServer(options?: {
       const parsedUrl = new URL(req.url)
       const pathname = parsedUrl.pathname
       const method = req.method
+      const originHeader = req.headers.get("origin")
 
       if (pathname === "/ws") {
+        if (originHeader !== null && !isAllowedRequestOrigin(originHeader, parsedUrl, hostname)) {
+          return errorResponse("Cross-origin WebSocket rejected", 403)
+        }
+
         const upgraded = bunServer.upgrade(req, {
           data: { connectedAt: Date.now() },
         })
@@ -279,6 +308,18 @@ export async function createHubServer(options?: {
         if (upgraded) return undefined
 
         return errorResponse("WebSocket upgrade failed", 400)
+      }
+
+      if (pathname.startsWith("/api/") && isStateMutatingMethod(method)) {
+        if (originHeader !== null && !isAllowedRequestOrigin(originHeader, parsedUrl, hostname)) {
+          return errorResponse("Cross-origin mutation rejected", 403)
+        }
+
+        const contentType = (req.headers.get("content-type") ?? "").toLowerCase()
+
+        if (!contentType.startsWith("application/json")) {
+          return errorResponse("Content-Type must be application/json", 415)
+        }
       }
 
       try {
@@ -446,6 +487,11 @@ export async function createHubServer(options?: {
 
         if (pathname === "/api/artifacts" && method === "POST") {
           const body = CreateArtifactBodySchema.parse(await req.json())
+          const targetProject = hubDb.getProject(body.projectId)
+
+          if (!targetProject) {
+            return errorResponse(`Project not found: ${body.projectId}`, 404)
+          }
 
           const content =
             body.kind === "whiteboard" && body.content.trim().length === 0
@@ -454,6 +500,7 @@ export async function createHubServer(options?: {
 
           const artifact = hubDb.putArtifact({
             ...body,
+            projectId: targetProject.id,
             content,
           })
 
@@ -473,15 +520,13 @@ export async function createHubServer(options?: {
           const content = hubDb.readArtifactContent(artifact.id, requestedVersion, variantParam)
           const threads = hubDb.listCommentThreads(artifact.id)
 
-          const previewVerdict = previewVerdictForStatus(artifact.reviewStatus)
-
-          const { payload, targetSessionId } = hubDb.buildAgentReviewPayload(artifact.id, previewVerdict)
+          const { payload, targetSessionId } = hubDb.getCurrentReviewPayload(artifact.id)
 
           return jsonResponse({
             artifact,
             content,
             threads,
-            agentPayloadPreview: artifact.lastReviewPayload ?? payload,
+            agentPayloadPreview: payload,
             targetSessionId: targetSessionId ?? null,
           })
         }
@@ -499,12 +544,14 @@ export async function createHubServer(options?: {
           const versionParam = parsedUrl.searchParams.get("version")
           const requestedVersion = versionParam ? Number(versionParam) : undefined
           const html = hubDb.readArtifactContent(artifact.id, requestedVersion, variantParam)
+          const bridgedHtml = injectHtmlPreviewBridge(html)
 
-          return new Response(html, {
+          return new Response(bridgedHtml, {
             status: 200,
             headers: {
               "content-type": "text/html; charset=utf-8",
               "cache-control": "no-store",
+              "content-security-policy": "sandbox allow-scripts",
             },
           })
         }
@@ -593,7 +640,7 @@ export async function createHubServer(options?: {
           const artifactId = decodeURIComponent(answerQuestionMatch[1] ?? "")
           const body = AnswerQuestionBodySchema.parse(await req.json())
           const updated = hubDb.answerQuestion(artifactId, body.questionId, body.selectedOptionIds)
-          const { payload } = hubDb.buildAgentReviewPayload(updated.id, "commented")
+          const { payload } = hubDb.getCurrentReviewPayload(updated.id)
 
           return jsonResponse({ artifact: updated, agentPayloadPreview: payload })
         }
@@ -611,7 +658,7 @@ export async function createHubServer(options?: {
             anchor: body.anchor,
           })
 
-          const { payload } = hubDb.buildAgentReviewPayload(artifactId, "commented")
+          const { payload } = hubDb.getCurrentReviewPayload(artifactId)
 
           return jsonResponse({ thread, agentPayloadPreview: payload }, 201)
         }

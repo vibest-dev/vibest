@@ -9,9 +9,9 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react"
-import { marked } from "marked"
 import { useState } from "react"
 
+import { renderSafeMarkdownHtml } from "../markdown-safe.ts"
 import type { Artifact, CommentAnchor } from "../schema.ts"
 
 function renderGateIcon(status: "passed" | "failed" | "pending") {
@@ -204,7 +204,7 @@ export function VerifyCardView(props: {
         <div
           className="markdown-body"
           style={{ marginTop: 22 }}
-          dangerouslySetInnerHTML={{ __html: String(marked.parse(content, { async: false, gfm: true })) }}
+          dangerouslySetInnerHTML={{ __html: renderSafeMarkdownHtml(content) }}
         />
       )}
     </div>

@@ -1,79 +1,63 @@
 import { Crosshair, Hand, MousePointerClick, SquareDashedMousePointer } from "lucide-react"
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from "react"
+import { z } from "zod"
 
 import type { Artifact, CommentAnchor, CommentThread } from "../schema.ts"
 
 export type HtmlAnnotationMode = "interact" | "pick" | "region"
 
-interface HoverTargetInfo {
-  selector: string
-  tagName: string
-  textPreview: string
-  left: number
-  top: number
-  width: number
-  height: number
-  xRatio: number
-  yRatio: number
-  wRatio: number
-  hRatio: number
-}
+const HoverTargetSchema = z.object({
+  selector: z.string(),
+  tagName: z.string(),
+  textPreview: z.string(),
+  left: z.number(),
+  top: z.number(),
+  width: z.number(),
+  height: z.number(),
+  xRatio: z.number(),
+  yRatio: z.number(),
+  wRatio: z.number(),
+  hRatio: z.number(),
+})
+
+type HoverTargetInfo = z.infer<typeof HoverTargetSchema>
+
+const RectBoxSchema = z.object({
+  left: z.number(),
+  top: z.number(),
+  width: z.number(),
+  height: z.number(),
+})
+
+type ResolvedOverlayBox = z.infer<typeof RectBoxSchema>
+
+const BridgeIncomingMessageSchema = z.discriminatedUnion("type", [
+  z.object({
+    source: z.literal("vibest-hub-bridge"),
+    type: z.literal("bridge-ready"),
+  }),
+  z.object({
+    source: z.literal("vibest-hub-bridge"),
+    type: z.literal("hover-element"),
+    target: HoverTargetSchema.nullable(),
+  }),
+  z.object({
+    source: z.literal("vibest-hub-bridge"),
+    type: z.literal("picked-element"),
+    target: HoverTargetSchema.nullable(),
+  }),
+  z.object({
+    source: z.literal("vibest-hub-bridge"),
+    type: z.literal("selector-rects"),
+    rects: z.record(z.string(), RectBoxSchema.nullable()),
+  }),
+])
 
 interface PendingDraftAnchor {
   anchor: CommentAnchor
   popoverLeft: number
   popoverTop: number
   summaryLabel: string
-}
-
-interface ResolvedOverlayBox {
-  left: number
-  top: number
-  width: number
-  height: number
-}
-
-function buildUniqueSelector(el: Element): string {
-  if (el.id) {
-    return `#${CSS.escape(el.id)}`
-  }
-
-  const parts: string[] = []
-  let current: Element | null = el
-
-  while (current && current.tagName.toLowerCase() !== "html" && parts.length < 4) {
-    const tag = current.tagName.toLowerCase()
-
-    if (current.id) {
-      parts.unshift(`#${CSS.escape(current.id)}`)
-      break
-    }
-
-    const classList = Array.from(current.classList).slice(0, 2)
-
-    const classSuffix = classList.length > 0 ? `.${classList.map((c) => CSS.escape(c)).join(".")}` : ""
-
-    const parentEl: Element | null = current.parentElement
-
-    if (parentEl) {
-      const sameTagSiblings = Array.from(parentEl.children).flatMap((sib) =>
-        sib.tagName === current?.tagName ? [sib] : [],
-      )
-
-      if (sameTagSiblings.length > 1) {
-        const idx = sameTagSiblings.indexOf(current) + 1
-        parts.unshift(`${tag}${classSuffix}:nth-of-type(${idx})`)
-      } else {
-        parts.unshift(`${tag}${classSuffix}`)
-      }
-    } else {
-      parts.unshift(`${tag}${classSuffix}`)
-    }
-
-    current = parentEl
-  }
-
-  return parts.join(" > ") || el.tagName.toLowerCase()
 }
 
 function modeHintText(mode: HtmlAnnotationMode, count: number, variantId: string): string {
@@ -84,6 +68,20 @@ function modeHintText(mode: HtmlAnnotationMode, count: number, variantId: string
       return "Click and drag across any visual area to draw a region annotation."
     case "interact":
       return `${count} pin(s) on ${variantId} — switch to Pick Element or Region Select to annotate.`
+  }
+}
+
+function normalizeTargetRatios(target: HoverTargetInfo, wrapper: HTMLDivElement | null): HoverTargetInfo {
+  if (!wrapper) return target
+  const stageWidth = wrapper.clientWidth || 1
+  const stageHeight = wrapper.clientHeight || 1
+
+  return {
+    ...target,
+    xRatio: target.left / stageWidth,
+    yRatio: target.top / stageHeight,
+    wRatio: target.width / stageWidth,
+    hRatio: target.height / stageHeight,
   }
 }
 
@@ -103,6 +101,10 @@ export function HtmlAnnotator(props: {
 
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const modeRef = useRef<HtmlAnnotationMode>(mode)
+  modeRef.current = mode
+  const variantIdRef = useRef<string>(variantId)
+  variantIdRef.current = variantId
 
   const [regionStyle, setRegionStyle] = useState<"box" | "circle">("box")
   const [hoverInfo, setHoverInfo] = useState<HoverTargetInfo | null>(null)
@@ -111,46 +113,133 @@ export function HtmlAnnotator(props: {
   const [draft, setDraft] = useState<PendingDraftAnchor | null>(null)
   const [commentText, setCommentText] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [domRectsByThread, setDomRectsByThread] = useState<Record<string, ResolvedOverlayBox>>({})
-  const [iframeLoadedTick, setIframeLoadedTick] = useState(0)
+  const [bridgeRectsByThread, setBridgeRectsByThread] = useState<Record<string, ResolvedOverlayBox | null>>({})
+  const [layoutTick, setLayoutTick] = useState(0)
 
-  const visibleThreads = threads.flatMap((t) => {
-    if (t.anchor.kind === "dom" && t.anchor.variantId === variantId) return [t]
+  const visibleThreads = useMemo(
+    () =>
+      threads.flatMap((t) => {
+        if (t.anchor.kind === "dom" && t.anchor.variantId === variantId) return [t]
 
-    if (t.anchor.kind === "region" && t.anchor.variantId === variantId) return [t]
+        if (t.anchor.kind === "region" && t.anchor.variantId === variantId) return [t]
 
-    return []
-  })
+        return []
+      }),
+    [threads, variantId],
+  )
 
-  const recomputeDomThreadBoxes = useCallback(() => {
+  const openDraftForPickedTarget = useCallback((picked: HoverTargetInfo) => {
     const wrapper = wrapperRef.current
-    const iframe = iframeRef.current
-    const doc = iframe?.contentDocument
+    const normalized = normalizeTargetRatios(picked, wrapper)
+    const stageWidth = wrapper?.clientWidth || 800
+    const stageHeight = wrapper?.clientHeight || 620
 
-    if (!wrapper || !iframe || !doc) return
+    const popLeft = Math.min(Math.max(16, normalized.left + normalized.width / 2 - 155), Math.max(16, stageWidth - 326))
 
-    const stageWidth = wrapper.clientWidth || 1
-    const stageHeight = wrapper.clientHeight || 1
+    const popTop = Math.min(Math.max(16, normalized.top + normalized.height + 12), Math.max(16, stageHeight - 210))
+
+    setDraft({
+      anchor: {
+        kind: "dom",
+        variantId: variantIdRef.current,
+        selector: normalized.selector,
+        tagName: normalized.tagName,
+        textPreview: normalized.textPreview,
+        xRatio: normalized.xRatio,
+        yRatio: normalized.yRatio,
+        wRatio: normalized.wRatio,
+        hRatio: normalized.hRatio,
+      },
+      popoverLeft: popLeft,
+      popoverTop: popTop,
+      summaryLabel: `${normalized.tagName} ${normalized.selector}${normalized.textPreview ? ` "${normalized.textPreview}"` : ""}`,
+    })
+    setCommentText("")
+  }, [])
+
+  const requestDomSelectorRects = useCallback(() => {
+    const win = iframeRef.current?.contentWindow
+
+    if (!win) return
+
+    const domQueries = visibleThreads.flatMap((t) =>
+      t.anchor.kind === "dom" ? [{ id: t.id, selector: t.anchor.selector }] : [],
+    )
+
+    win.postMessage(
+      {
+        source: "vibest-hub-parent",
+        type: "query-selectors",
+        threads: domQueries,
+      },
+      "*",
+    )
+  }, [visibleThreads])
+
+  useEffect(() => {
+    setBridgeRectsByThread({})
+    setHoverInfo(null)
+    requestDomSelectorRects()
+  }, [variantId, version, requestDomSelectorRects])
+
+  useEffect(() => {
+    const onMessage = (ev: MessageEvent) => {
+      if (!iframeRef.current || ev.source !== iframeRef.current.contentWindow) return
+      const parsed = BridgeIncomingMessageSchema.safeParse(ev.data)
+
+      if (!parsed.success) return
+      const msg = parsed.data
+
+      switch (msg.type) {
+        case "bridge-ready":
+          requestDomSelectorRects()
+          break
+        case "hover-element":
+          if (modeRef.current === "pick") {
+            setHoverInfo(msg.target ? normalizeTargetRatios(msg.target, wrapperRef.current) : null)
+          }
+
+          break
+        case "picked-element":
+          if (modeRef.current === "pick" && msg.target) {
+            setHoverInfo(normalizeTargetRatios(msg.target, wrapperRef.current))
+            openDraftForPickedTarget(msg.target)
+          }
+
+          break
+        case "selector-rects":
+          setBridgeRectsByThread(msg.rects)
+          break
+      }
+    }
+
+    const onResize = () => {
+      setLayoutTick((n) => n + 1)
+      requestDomSelectorRects()
+    }
+
+    window.addEventListener("message", onMessage)
+    window.addEventListener("resize", onResize)
+
+    return () => {
+      window.removeEventListener("message", onMessage)
+      window.removeEventListener("resize", onResize)
+    }
+  }, [openDraftForPickedTarget, requestDomSelectorRects])
+
+  const resolvedBoxesByThread = useMemo(() => {
+    void layoutTick
+    const wrapper = wrapperRef.current
+    const stageWidth = wrapper?.clientWidth || 800
+    const stageHeight = wrapper?.clientHeight || 620
     const nextBoxes: Record<string, ResolvedOverlayBox> = {}
 
     for (const thread of visibleThreads) {
       if (thread.anchor.kind === "dom") {
-        let matchedEl: Element | null = null
+        const liveRect = bridgeRectsByThread[thread.id]
 
-        try {
-          matchedEl = doc.querySelector(thread.anchor.selector)
-        } catch {
-          matchedEl = null
-        }
-
-        if (matchedEl) {
-          const r = matchedEl.getBoundingClientRect()
-          nextBoxes[thread.id] = {
-            left: r.left,
-            top: r.top,
-            width: r.width,
-            height: r.height,
-          }
+        if (liveRect) {
+          nextBoxes[thread.id] = liveRect
         } else {
           nextBoxes[thread.id] = {
             left: thread.anchor.xRatio * stageWidth,
@@ -169,24 +258,16 @@ export function HtmlAnnotator(props: {
       }
     }
 
-    setDomRectsByThread(nextBoxes)
-  }, [visibleThreads])
-
-  useEffect(() => {
-    recomputeDomThreadBoxes()
-    const onResize = () => recomputeDomThreadBoxes()
-    window.addEventListener("resize", onResize)
-
-    return () => window.removeEventListener("resize", onResize)
-  }, [recomputeDomThreadBoxes, iframeLoadedTick, activeThreadId])
+    return nextBoxes
+  }, [bridgeRectsByThread, layoutTick, visibleThreads])
 
   const previewSrc = `/api/artifacts/${encodeURIComponent(artifact.id)}/preview?variant=${encodeURIComponent(variantId)}&version=${version}`
 
   const handleOverlayMouseMove = (e: MouseEvent<HTMLDivElement>) => {
     const wrapper = wrapperRef.current
-    const iframe = iframeRef.current
+    const win = iframeRef.current?.contentWindow
 
-    if (!wrapper || !iframe) return
+    if (!wrapper) return
 
     const bounds = wrapper.getBoundingClientRect()
     const localX = Math.max(0, Math.min(bounds.width, e.clientX - bounds.left))
@@ -198,94 +279,56 @@ export function HtmlAnnotator(props: {
       return
     }
 
-    if (mode === "pick") {
-      const doc = iframe.contentDocument
-
-      if (!doc) return
-      const target = doc.elementFromPoint(localX, localY)
-
-      if (!target || target === doc.documentElement || target === doc.body) {
-        setHoverInfo(null)
-
-        return
-      }
-
-      const rect = target.getBoundingClientRect()
-      const selector = buildUniqueSelector(target)
-      const rawText = (target.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 48)
-      setHoverInfo({
-        selector,
-        tagName: target.tagName.toLowerCase(),
-        textPreview: rawText,
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-        xRatio: rect.left / (bounds.width || 1),
-        yRatio: rect.top / (bounds.height || 1),
-        wRatio: rect.width / (bounds.width || 1),
-        hRatio: rect.height / (bounds.height || 1),
-      })
+    if (mode === "pick" && win) {
+      win.postMessage(
+        {
+          source: "vibest-hub-parent",
+          type: "inspect-point",
+          x: localX,
+          y: localY,
+        },
+        "*",
+      )
     }
   }
 
   const handleOverlayClick = (e: MouseEvent<HTMLDivElement>) => {
     if (mode !== "pick") return
     const wrapper = wrapperRef.current
-    const iframe = iframeRef.current
+    const win = iframeRef.current?.contentWindow
 
-    if (!wrapper || !iframe) return
+    if (!wrapper) return
 
     const bounds = wrapper.getBoundingClientRect()
     const localX = Math.max(0, Math.min(bounds.width, e.clientX - bounds.left))
     const localY = Math.max(0, Math.min(bounds.height, e.clientY - bounds.top))
-    const doc = iframe.contentDocument
 
-    let picked = hoverInfo
-
-    if (!picked && doc) {
-      const target = doc.elementFromPoint(localX, localY)
-
-      if (target && target !== doc.documentElement) {
-        const rect = target.getBoundingClientRect()
-        picked = {
-          selector: buildUniqueSelector(target),
-          tagName: target.tagName.toLowerCase(),
-          textPreview: (target.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 48),
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
-          xRatio: rect.left / (bounds.width || 1),
-          yRatio: rect.top / (bounds.height || 1),
-          wRatio: rect.width / (bounds.width || 1),
-          hRatio: rect.height / (bounds.height || 1),
-        }
-      }
+    if (win) {
+      win.postMessage(
+        {
+          source: "vibest-hub-parent",
+          type: "pick-point",
+          x: localX,
+          y: localY,
+        },
+        "*",
+      )
+    } else if (hoverInfo) {
+      openDraftForPickedTarget(hoverInfo)
     }
+  }
 
-    if (!picked) return
-
-    const popLeft = Math.min(Math.max(16, picked.left + picked.width / 2 - 155), Math.max(16, bounds.width - 326))
-    const popTop = Math.min(Math.max(16, picked.top + picked.height + 12), Math.max(16, bounds.height - 210))
-
-    setDraft({
-      anchor: {
-        kind: "dom",
-        variantId,
-        selector: picked.selector,
-        tagName: picked.tagName,
-        textPreview: picked.textPreview,
-        xRatio: picked.xRatio,
-        yRatio: picked.yRatio,
-        wRatio: picked.wRatio,
-        hRatio: picked.hRatio,
+  const handleOverlayWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (mode === "interact") return
+    iframeRef.current?.contentWindow?.postMessage(
+      {
+        source: "vibest-hub-parent",
+        type: "scroll-by",
+        dx: e.deltaX,
+        dy: e.deltaY,
       },
-      popoverLeft: popLeft,
-      popoverTop: popTop,
-      summaryLabel: `${picked.tagName} ${picked.selector}${picked.textPreview ? ` "${picked.textPreview}"` : ""}`,
-    })
-    setCommentText("")
+      "*",
+    )
   }
 
   const handleOverlayMouseDown = (e: MouseEvent<HTMLDivElement>) => {
@@ -445,9 +488,13 @@ export function HtmlAnnotator(props: {
         <iframe
           ref={iframeRef}
           src={previewSrc}
+          sandbox="allow-scripts"
           title={`${artifact.title} (${variantId})`}
           className="html-stage-iframe"
-          onLoad={() => setIframeLoadedTick((n) => n + 1)}
+          onLoad={() => {
+            setLayoutTick((n) => n + 1)
+            requestDomSelectorRects()
+          }}
         />
 
         <div
@@ -456,6 +503,7 @@ export function HtmlAnnotator(props: {
           onMouseMove={handleOverlayMouseMove}
           onMouseLeave={() => setHoverInfo(null)}
           onClick={handleOverlayClick}
+          onWheel={handleOverlayWheel}
           onMouseDown={handleOverlayMouseDown}
           onMouseUp={handleOverlayMouseUp}
         >
@@ -490,7 +538,7 @@ export function HtmlAnnotator(props: {
           )}
 
           {visibleThreads.map((thread) => {
-            const box = domRectsByThread[thread.id]
+            const box = resolvedBoxesByThread[thread.id]
 
             if (!box) return null
             const isSelected = activeThreadId === thread.id

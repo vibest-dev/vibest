@@ -1,3 +1,6 @@
+import fs from "node:fs"
+import path from "node:path"
+
 import { z } from "zod"
 
 import {
@@ -171,6 +174,98 @@ export function knowledgeCategoryForPath(relativePath: string): KnowledgeFileEnt
   if (relativePath.startsWith("memories/")) return "memories"
 
   return "docs"
+}
+
+export function assertSafeIdentifier(rawValue: string, fieldLabel: string): string {
+  const trimmed = rawValue.trim()
+
+  if (
+    trimmed.length === 0 ||
+    trimmed.length > 128 ||
+    trimmed === "." ||
+    trimmed === ".." ||
+    !/^[a-zA-Z0-9._-]+$/.test(trimmed)
+  ) {
+    throw new Error(`Invalid ${fieldLabel}: ${rawValue}`)
+  }
+
+  return trimmed
+}
+
+export function resolveContainedPath(rootDir: string, ...segments: string[]): string {
+  const resolvedRoot = path.resolve(rootDir)
+
+  for (const segment of segments) {
+    if (segment.length === 0 || segment.includes("\0")) {
+      throw new Error("Invalid path segment")
+    }
+  }
+
+  const resolvedTarget = path.resolve(resolvedRoot, ...segments)
+
+  if (!resolvedTarget.startsWith(resolvedRoot + path.sep)) {
+    throw new Error(`Path escapes root directory: ${segments.join("/")}`)
+  }
+
+  return resolvedTarget
+}
+
+export interface SafeKnowledgePathResolution {
+  readonly resolvedPath: string
+  readonly canonicalRelativePath: string
+  readonly category: KnowledgeFileEntry["category"]
+}
+
+export function resolveSafeKnowledgeFilePath(knowledgeRoot: string, relativePath: string): SafeKnowledgePathResolution {
+  if (
+    relativePath.length === 0 ||
+    relativePath.includes("\0") ||
+    relativePath.includes("\\") ||
+    relativePath.endsWith("/")
+  ) {
+    throw new Error(`Invalid knowledge path: ${relativePath}`)
+  }
+
+  const normalized = path.posix.normalize(relativePath).replace(/^\/+/, "")
+
+  if (normalized.endsWith("/") || normalized === "." || normalized === ".." || normalized.includes("../")) {
+    throw new Error(`Invalid knowledge path: ${relativePath}`)
+  }
+
+  const isPreferences = normalized === "preferences.md"
+  const isMemoryDoc = normalized.startsWith("memories/") && normalized.length > "memories/".length
+  const isDesignDoc = normalized.startsWith("docs/") && normalized.length > "docs/".length
+
+  if (!isPreferences && !isMemoryDoc && !isDesignDoc) {
+    throw new Error(`Invalid knowledge path: ${relativePath}`)
+  }
+
+  if (!/\.(md|txt|json)$/.test(normalized)) {
+    throw new Error(`Unsupported knowledge file extension: ${relativePath}`)
+  }
+
+  const resolvedPath = resolveContainedPath(knowledgeRoot, normalized)
+
+  if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory()) {
+    throw new Error(`Knowledge path points to a directory: ${relativePath}`)
+  }
+
+  const resolvedRoot = path.resolve(knowledgeRoot)
+  let ancestor = path.dirname(resolvedPath)
+
+  while (ancestor.startsWith(resolvedRoot + path.sep)) {
+    if (fs.existsSync(ancestor) && !fs.statSync(ancestor).isDirectory()) {
+      throw new Error(`Knowledge parent path is not a directory: ${relativePath}`)
+    }
+
+    ancestor = path.dirname(ancestor)
+  }
+
+  return {
+    resolvedPath,
+    canonicalRelativePath: normalized,
+    category: knowledgeCategoryForPath(normalized),
+  }
 }
 
 export function hydrateProjectRow(row: z.infer<typeof ProjectRowSchema>): Project {

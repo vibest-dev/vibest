@@ -567,7 +567,7 @@ textarea {
 }
 
 .annotation-region.circle {
-  border-radius: 9999px;
+  border-radius: 50%;
 }
 
 .annotation-region.active {

@@ -2,7 +2,6 @@ import fs from "node:fs"
 import path from "node:path"
 import url from "node:url"
 
-import { previewVerdictForStatus } from "./database-rows.ts"
 import { HubDatabase } from "./database.ts"
 import { ArtifactKindSchema, TaskStatusSchema, type ArtifactKind } from "./schema.ts"
 import { seedDefaultDemoProject } from "./seed.ts"
@@ -11,12 +10,14 @@ import { importVibestProjectReadOnly } from "./vibest-import.ts"
 const MODULE_DIR = path.dirname(url.fileURLToPath(import.meta.url))
 const DEFAULT_DATA_DIR = path.resolve(MODULE_DIR, "..", ".data")
 
-interface ParsedArgs {
+const BOOLEAN_CLI_FLAGS = new Set(["json", "request-review", "help"])
+
+export interface ParsedArgs {
   positionals: string[]
   flags: Map<string, string[]>
 }
 
-function parseCliArgs(argv: string[]): ParsedArgs {
+export function parseCliArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
   const flags = new Map<string, string[]>()
   let idx = 0
@@ -25,6 +26,17 @@ function parseCliArgs(argv: string[]): ParsedArgs {
     const token = argv[idx]
 
     if (token === undefined) break
+
+    if (token === "--") {
+      positionals.push(...argv.slice(idx + 1))
+      break
+    }
+
+    if (token === "-h") {
+      flags.set("help", [...(flags.get("help") ?? []), "true"])
+      idx += 1
+      continue
+    }
 
     if (token.startsWith("--")) {
       const eqIdx = token.indexOf("=")
@@ -36,14 +48,19 @@ function parseCliArgs(argv: string[]): ParsedArgs {
         idx += 1
       } else {
         const key = token.slice(2)
-        const next = argv[idx + 1]
 
-        if (next !== undefined && !next.startsWith("--")) {
-          flags.set(key, [...(flags.get(key) ?? []), next])
-          idx += 2
-        } else {
+        if (BOOLEAN_CLI_FLAGS.has(key)) {
           flags.set(key, [...(flags.get(key) ?? []), "true"])
           idx += 1
+        } else {
+          const next = argv[idx + 1]
+
+          if (next !== undefined && !next.startsWith("--") && next !== "-h") {
+            flags.set(key, [...(flags.get(key) ?? []), next])
+            idx += 2
+          } else {
+            throw new Error(`Missing value for --${key}`)
+          }
         }
       }
     } else {
@@ -62,13 +79,17 @@ function getFlag(flags: Map<string, string[]>, key: string): string | undefined 
 }
 
 function hasFlag(flags: Map<string, string[]>, key: string): boolean {
-  return flags.has(key)
+  const val = getFlag(flags, key)
+
+  return val !== undefined && val !== "false" && val !== "0"
 }
 
 async function notifyLiveServerIfRunning(serverUrl: string): Promise<void> {
   try {
     await fetch(`${serverUrl}/api/notify-reload`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
       signal: AbortSignal.timeout(400),
     })
   } catch {
@@ -421,9 +442,7 @@ export async function runCli(argv: string[]): Promise<number> {
         if (!artifact) throw new Error(`Artifact not found: ${artifactRef}`)
         const threads = hubDb.listCommentThreads(artifact.id)
 
-        const verdictForPreview = previewVerdictForStatus(artifact.reviewStatus)
-
-        const { payload } = hubDb.buildAgentReviewPayload(artifact.id, verdictForPreview)
+        const { payload } = hubDb.getCurrentReviewPayload(artifact.id)
 
         if (asJson) {
           console.log(
@@ -435,14 +454,14 @@ export async function runCli(argv: string[]): Promise<number> {
                 reviewStatus: artifact.reviewStatus,
                 answers: artifact.answers,
                 threads,
-                agentPayload: artifact.lastReviewPayload ?? payload,
+                agentPayload: payload,
               },
               null,
               2,
             ),
           )
         } else {
-          console.log(artifact.lastReviewPayload ?? payload)
+          console.log(payload)
         }
 
         return 0

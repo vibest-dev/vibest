@@ -296,7 +296,8 @@ export function applyFactToReadModel(db: Database, fact: HubEventFact): void {
       db.query(
         `UPDATE artifact
          SET version = ?, summary = ?, content_path = ?, review_status = ?,
-             metadata_json = ?, questions_json = ?, versions_json = ?, updated_at = ?
+             metadata_json = ?, questions_json = ?, last_review_payload = NULL,
+             versions_json = ?, updated_at = ?
          WHERE id = ?`,
       ).run(
         fact.version,
@@ -313,7 +314,7 @@ export function applyFactToReadModel(db: Database, fact: HubEventFact): void {
     }
 
     case "artifact.metadata_updated": {
-      db.query("UPDATE artifact SET metadata_json = ?, updated_at = ? WHERE id = ?").run(
+      db.query("UPDATE artifact SET metadata_json = ?, last_review_payload = NULL, updated_at = ? WHERE id = ?").run(
         JSON.stringify(fact.metadata),
         fact.updatedAt,
         fact.artifactId,
@@ -332,7 +333,7 @@ export function applyFactToReadModel(db: Database, fact: HubEventFact): void {
         [fact.questionId]: [...fact.selectedOptionIds],
       }
 
-      db.query("UPDATE artifact SET answers_json = ?, updated_at = ? WHERE id = ?").run(
+      db.query("UPDATE artifact SET answers_json = ?, last_review_payload = NULL, updated_at = ? WHERE id = ?").run(
         JSON.stringify(nextAnswers),
         fact.updatedAt,
         fact.artifactId,
@@ -361,6 +362,10 @@ export function applyFactToReadModel(db: Database, fact: HubEventFact): void {
         c.createdAt,
         c.updatedAt,
       )
+      db.query("UPDATE artifact SET last_review_payload = NULL, updated_at = ? WHERE id = ?").run(
+        c.updatedAt,
+        c.artifactId,
+      )
       break
     }
 
@@ -375,14 +380,26 @@ export function applyFactToReadModel(db: Database, fact: HubEventFact): void {
         fact.updatedAt,
         fact.threadId,
       )
+      db.query("UPDATE artifact SET last_review_payload = NULL, updated_at = ? WHERE id = ?").run(
+        fact.updatedAt,
+        existing.artifactId,
+      )
       break
     }
 
     case "comment.resolved_changed": {
+      const raw = db.query("SELECT * FROM comment_thread WHERE id = ?").get(fact.threadId)
+
+      if (raw === null) break
+      const existing = hydrateThreadRow(ThreadRowSchema.parse(raw))
       db.query("UPDATE comment_thread SET resolved = ?, updated_at = ? WHERE id = ?").run(
         fact.resolved ? 1 : 0,
         fact.updatedAt,
         fact.threadId,
+      )
+      db.query("UPDATE artifact SET last_review_payload = NULL, updated_at = ? WHERE id = ?").run(
+        fact.updatedAt,
+        existing.artifactId,
       )
       break
     }

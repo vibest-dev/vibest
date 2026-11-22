@@ -1,7 +1,7 @@
 import { BookOpen, Eye, FilePlus2, Save } from "lucide-react"
-import { marked } from "marked"
 import { useCallback, useEffect, useState } from "react"
 
+import { renderSafeMarkdownHtml } from "../markdown-safe.ts"
 import type { KnowledgeFileEntry } from "../schema.ts"
 import { hubApi } from "./api.ts"
 
@@ -54,14 +54,19 @@ export function KnowledgeView(props: { projectId: string; refreshSignal: number 
   }
 
   const handleCreateFile = async () => {
-    const cleaned = newPathInput.trim().replace(/^\/+/, "")
+    const cleaned = newPathInput.trim().replace(/^\/+|\/+$/g, "")
 
-    if (!cleaned) return
+    if (!cleaned || cleaned === "memories" || cleaned === "docs") return
+
+    const ensureAllowedExt = (candidate: string): string =>
+      /\.(md|txt|json)$/.test(candidate) ? candidate : `${candidate}.md`
 
     const targetPath =
-      cleaned === "preferences.md" || cleaned.startsWith("memories/") || cleaned.startsWith("docs/")
-        ? cleaned
-        : `memories/${cleaned.endsWith(".md") ? cleaned : `${cleaned}.md`}`
+      cleaned === "preferences.md"
+        ? "preferences.md"
+        : cleaned.startsWith("memories/") || cleaned.startsWith("docs/")
+          ? ensureAllowedExt(cleaned)
+          : `memories/${ensureAllowedExt(cleaned)}`
 
     await hubApi.saveKnowledgeFile(projectId, targetPath, `# ${targetPath}\n\n`)
     setNewPathInput("")
@@ -175,7 +180,7 @@ export function KnowledgeView(props: { projectId: string; refreshSignal: number 
               className="markdown-body"
               style={{ padding: "8px 4px" }}
               dangerouslySetInnerHTML={{
-                __html: String(marked.parse(content, { async: false, gfm: true })),
+                __html: renderSafeMarkdownHtml(content),
               }}
             />
           )}

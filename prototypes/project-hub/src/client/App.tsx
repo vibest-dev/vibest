@@ -2,6 +2,7 @@ import { BookOpen, FolderPlus, Kanban, Layers, Moon, Sun, TerminalSquare } from 
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { BoardViewData } from "../schema.ts"
+import { formatWorkspaceHash, parseWorkspaceHash, type NavTab } from "../workspace-hash.ts"
 import { hubApi, type ArtifactWithCount, type ProjectSummary } from "./api.ts"
 import { ArtifactStudio } from "./ArtifactStudio.tsx"
 import { ArtifactsGalleryView, BoardView } from "./BoardView.tsx"
@@ -9,16 +10,15 @@ import { KnowledgeView } from "./KnowledgeView.tsx"
 import { AddProjectModal, NewArtifactModal, NewTaskModal } from "./Modals.tsx"
 import { SessionsView } from "./SessionsView.tsx"
 
-type NavTab = "board" | "artifacts" | "sessions" | "knowledge"
-
 export function App() {
+  const initialRoute = parseWorkspaceHash(window.location.hash)
   const [theme, setTheme] = useState<"dark" | "light">("dark")
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [detectedVibestDir, setDetectedVibestDir] = useState<string | null>(null)
-  const [activeProjectId, setActiveProjectId] = useState<string>("")
-  const activeProjectIdRef = useRef<string>("")
-  const [activeTab, setActiveTab] = useState<NavTab>("board")
-  const [openArtifactId, setOpenArtifactId] = useState<string | null>(null)
+  const [activeProjectId, setActiveProjectId] = useState<string>(() => initialRoute.projectId ?? "")
+  const activeProjectIdRef = useRef<string>(initialRoute.projectId ?? "")
+  const [activeTab, setActiveTab] = useState<NavTab>(() => initialRoute.tab)
+  const [openArtifactId, setOpenArtifactId] = useState<string | null>(() => initialRoute.artifactId)
 
   const [board, setBoard] = useState<BoardViewData | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactWithCount[]>([])
@@ -57,6 +57,33 @@ export function App() {
 
   useEffect(() => {
     void loadProjectsAndWorkspace()
+  }, [loadProjectsAndWorkspace])
+
+  useEffect(() => {
+    if (!activeProjectId) return
+    const nextHash = formatWorkspaceHash(activeProjectId, activeTab, openArtifactId)
+
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, "", nextHash)
+    }
+  }, [activeProjectId, activeTab, openArtifactId])
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const parsed = parseWorkspaceHash(window.location.hash)
+      setActiveTab(parsed.tab)
+      setOpenArtifactId(parsed.artifactId)
+
+      if (parsed.projectId && parsed.projectId !== activeProjectIdRef.current) {
+        activeProjectIdRef.current = parsed.projectId
+        setActiveProjectId(parsed.projectId)
+        void loadProjectsAndWorkspace(parsed.projectId)
+      }
+    }
+
+    window.addEventListener("hashchange", onHashChange)
+
+    return () => window.removeEventListener("hashchange", onHashChange)
   }, [loadProjectsAndWorkspace])
 
   useEffect(() => {

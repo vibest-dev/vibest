@@ -13,6 +13,7 @@ import {
   SessionRowSchema,
   TaskRowSchema,
   ThreadRowSchema,
+  assertSafeIdentifier,
   extensionForArtifactKind,
   formatAnchorForAgent,
   formatSessionFactsMarkdown,
@@ -21,8 +22,10 @@ import {
   hydrateSessionRow,
   hydrateTaskRow,
   hydrateThreadRow,
-  knowledgeCategoryForPath,
   nextReviewStatusForVerdict,
+  previewVerdictForStatus,
+  resolveContainedPath,
+  resolveSafeKnowledgeFilePath,
   type AgentReviewPayloadResult,
   type SubmitReviewResult,
 } from "./database-rows.ts"
@@ -88,22 +91,30 @@ export class HubDatabase {
     }
   }
 
+  projectsRoot(): string {
+    const root = path.resolve(this.dataDir, "projects")
+    fs.mkdirSync(root, { recursive: true })
+
+    return root
+  }
+
   projectDir(projectId: string): string {
-    const dir = path.join(this.dataDir, "projects", projectId)
+    const safeProjectId = assertSafeIdentifier(projectId, "projectId")
+    const dir = resolveContainedPath(this.projectsRoot(), safeProjectId)
     fs.mkdirSync(dir, { recursive: true })
 
     return dir
   }
 
   knowledgeDir(projectId: string): string {
-    const dir = path.join(this.projectDir(projectId), "knowledge")
+    const dir = resolveContainedPath(this.projectDir(projectId), "knowledge")
     fs.mkdirSync(dir, { recursive: true })
 
     return dir
   }
 
   artifactsDir(projectId: string): string {
-    const dir = path.join(this.projectDir(projectId), "artifacts")
+    const dir = resolveContainedPath(this.projectDir(projectId), "artifacts")
     fs.mkdirSync(dir, { recursive: true })
 
     return dir
@@ -211,9 +222,10 @@ export class HubDatabase {
     entrySessionId?: string
   }): Project {
     const now = Date.now()
+    const safeId = assertSafeIdentifier(input.id ?? `proj-${crypto.randomUUID().slice(0, 8)}`, "projectId")
 
     const project: Project = {
-      id: input.id ?? `proj-${crypto.randomUUID().slice(0, 8)}`,
+      id: safeId,
       name: input.name,
       slug: slugifyText(input.name),
       description: input.description,
@@ -380,26 +392,54 @@ export class HubDatabase {
     authorSessionId?: string
     extraFiles?: Array<{ fileName: string; content: string }>
   }): Artifact {
+    const project = this.getProject(input.projectId)
+
+    if (!project) {
+      throw new Error(`Project not found: ${input.projectId}`)
+    }
+
     const now = Date.now()
-    const slug = input.slug ?? slugifyText(input.title)
+    const slug = assertSafeIdentifier(input.slug ?? slugifyText(input.title), "artifact slug")
+    const projectsRoot = this.projectsRoot()
+    const projectArtifactsRoot = this.artifactsDir(project.id)
 
     const existingBySlugRaw = this.db
       .query("SELECT * FROM artifact WHERE project_id = ? AND slug = ?")
-      .get(input.projectId, slug)
+      .get(project.id, slug)
 
     const ext = extensionForArtifactKind(input.kind)
 
+    const writeExtraFiles = (targetArtifactFolder: string) => {
+      for (const extra of input.extraFiles ?? []) {
+        if (extra.fileName.includes("/") || extra.fileName.includes("\\") || extra.fileName.endsWith("/")) {
+          throw new Error(`Invalid extra file path: ${extra.fileName}`)
+        }
+
+        const safeExtraName = assertSafeIdentifier(extra.fileName, "extraFile")
+        const extraPath = resolveContainedPath(targetArtifactFolder, safeExtraName)
+
+        if (!extraPath.startsWith(projectsRoot + path.sep)) {
+          throw new Error(`Extra file path escapes projects root: ${extra.fileName}`)
+        }
+
+        fs.writeFileSync(extraPath, extra.content, "utf8")
+      }
+    }
+
     if (existingBySlugRaw !== null && input.id === undefined) {
       const existing = hydrateArtifactRow(ArtifactRowSchema.parse(existingBySlugRaw))
+      const safeExistingId = assertSafeIdentifier(existing.id, "artifactId")
       const nextVersion = existing.version + 1
-      const artifactFolder = path.join(this.artifactsDir(input.projectId), existing.id, `v${nextVersion}`)
-      fs.mkdirSync(artifactFolder, { recursive: true })
-      const contentPath = path.join(artifactFolder, `index.${ext}`)
-      fs.writeFileSync(contentPath, input.content, "utf8")
+      const artifactFolder = resolveContainedPath(projectArtifactsRoot, safeExistingId, `v${nextVersion}`)
 
-      for (const extra of input.extraFiles ?? []) {
-        fs.writeFileSync(path.join(artifactFolder, path.basename(extra.fileName)), extra.content, "utf8")
+      if (!artifactFolder.startsWith(projectsRoot + path.sep)) {
+        throw new Error(`Artifact path escapes projects root: ${existing.id}`)
       }
+
+      fs.mkdirSync(artifactFolder, { recursive: true })
+      const contentPath = resolveContainedPath(artifactFolder, `index.${ext}`)
+      fs.writeFileSync(contentPath, input.content, "utf8")
+      writeExtraFiles(artifactFolder)
 
       this.appendFact(
         `artifact:${existing.id}`,
@@ -423,19 +463,21 @@ export class HubDatabase {
       return refreshed
     }
 
-    const id = input.id ?? `art-${crypto.randomUUID().slice(0, 8)}`
-    const artifactFolder = path.join(this.artifactsDir(input.projectId), id, "v1")
-    fs.mkdirSync(artifactFolder, { recursive: true })
-    const contentPath = path.join(artifactFolder, `index.${ext}`)
-    fs.writeFileSync(contentPath, input.content, "utf8")
+    const id = assertSafeIdentifier(input.id ?? `art-${crypto.randomUUID().slice(0, 8)}`, "artifactId")
+    const artifactFolder = resolveContainedPath(projectArtifactsRoot, id, "v1")
 
-    for (const extra of input.extraFiles ?? []) {
-      fs.writeFileSync(path.join(artifactFolder, path.basename(extra.fileName)), extra.content, "utf8")
+    if (!artifactFolder.startsWith(projectsRoot + path.sep)) {
+      throw new Error(`Artifact path escapes projects root: ${id}`)
     }
+
+    fs.mkdirSync(artifactFolder, { recursive: true })
+    const contentPath = resolveContainedPath(artifactFolder, `index.${ext}`)
+    fs.writeFileSync(contentPath, input.content, "utf8")
+    writeExtraFiles(artifactFolder)
 
     const artifact: Artifact = {
       id,
-      projectId: input.projectId,
+      projectId: project.id,
       ...(input.taskId !== undefined && { taskId: input.taskId }),
       slug,
       title: input.title,
@@ -676,6 +718,29 @@ export class HubDatabase {
     }
   }
 
+  getCurrentReviewPayload(artifactId: string): AgentReviewPayloadResult {
+    const artifact = this.getArtifact(artifactId)
+
+    if (!artifact) throw new Error(`Artifact not found: ${artifactId}`)
+
+    const verdict = previewVerdictForStatus(artifact.reviewStatus)
+    const live = this.buildAgentReviewPayload(artifact.id, verdict)
+
+    if (artifact.lastReviewPayload !== undefined && artifact.reviewStatus !== "requested") {
+      const threads = this.listCommentThreads(artifact.id)
+      const hasNewerComments = threads.some((t) => t.updatedAt > artifact.updatedAt)
+
+      if (!hasNewerComments) {
+        return {
+          payload: artifact.lastReviewPayload,
+          targetSessionId: live.targetSessionId,
+        }
+      }
+    }
+
+    return live
+  }
+
   submitReview(input: {
     artifactId: string
     verdict: ReviewVerdict
@@ -864,42 +929,37 @@ export class HubDatabase {
   }
 
   readKnowledgeFile(projectId: string, relativePath: string): string {
-    const safePath = this.resolveKnowledgePath(projectId, relativePath)
+    const project = this.getProject(projectId)
 
-    if (!fs.existsSync(safePath)) throw new Error(`Knowledge file not found: ${relativePath}`)
+    if (!project) throw new Error(`Project not found: ${projectId}`)
+    const { resolvedPath } = resolveSafeKnowledgeFilePath(this.knowledgeDir(project.id), relativePath)
 
-    return fs.readFileSync(safePath, "utf8")
+    if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isFile()) {
+      throw new Error(`Knowledge file not found: ${relativePath}`)
+    }
+
+    return fs.readFileSync(resolvedPath, "utf8")
   }
 
   writeKnowledgeFile(projectId: string, relativePath: string, content: string): KnowledgeFileEntry {
-    const safePath = this.resolveKnowledgePath(projectId, relativePath)
-    fs.mkdirSync(path.dirname(safePath), { recursive: true })
-    fs.writeFileSync(safePath, content, "utf8")
-    const stat = fs.statSync(safePath)
-    const category = knowledgeCategoryForPath(relativePath)
+    const project = this.getProject(projectId)
+
+    if (!project) throw new Error(`Project not found: ${projectId}`)
+
+    const { resolvedPath, canonicalRelativePath, category } = resolveSafeKnowledgeFilePath(
+      this.knowledgeDir(project.id),
+      relativePath,
+    )
+
+    fs.mkdirSync(path.dirname(resolvedPath), { recursive: true })
+    fs.writeFileSync(resolvedPath, content, "utf8")
+    const stat = fs.statSync(resolvedPath)
 
     return {
-      relativePath,
+      relativePath: canonicalRelativePath,
       category,
       sizeBytes: stat.size,
       updatedAt: Math.floor(stat.mtimeMs),
     }
-  }
-
-  private resolveKnowledgePath(projectId: string, relativePath: string): string {
-    const normalized = path.posix.normalize(relativePath).replace(/^\/+/, "")
-
-    if (normalized !== "preferences.md" && !normalized.startsWith("memories/") && !normalized.startsWith("docs/")) {
-      throw new Error(`Invalid knowledge path: ${relativePath}`)
-    }
-
-    const root = this.knowledgeDir(projectId)
-    const resolved = path.resolve(root, normalized)
-
-    if (!resolved.startsWith(root + path.sep)) {
-      throw new Error(`Path escapes knowledge root: ${relativePath}`)
-    }
-
-    return resolved
   }
 }

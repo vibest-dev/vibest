@@ -1,37 +1,29 @@
 import { Excalidraw, convertToExcalidrawElements, restoreElements } from "@excalidraw/excalidraw"
 import { CheckCircle2, Layers, MessageSquarePlus, PlusCircle, Sparkles } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { z } from "zod"
 
 import type { Artifact, CommentAnchor, CommentThread } from "../schema.ts"
+import {
+  WhiteboardAutoSaver,
+  WhiteboardElementDigestArraySchema,
+  WhiteboardInteractionAppStateSchema,
+  computeWhiteboardSceneDigest,
+  isWhiteboardInteractionActive,
+  type WhiteboardDigestElement,
+  type WhiteboardSaveStatus,
+} from "../whiteboard-sync.ts"
 import { hubApi } from "./api.ts"
-
-const LooseElementSchema = z
-  .object({
-    id: z.string(),
-    type: z.string(),
-    isDeleted: z.boolean().optional(),
-    text: z.string().optional(),
-    containerId: z.string().nullable().optional(),
-    x: z.number().optional(),
-    y: z.number().optional(),
-  })
-  .passthrough()
-
-const LooseElementArraySchema = z.array(LooseElementSchema)
 
 type ExcalidrawPropsType = Parameters<typeof Excalidraw>[0]
 
 type ExcalidrawApiInstance = Parameters<NonNullable<ExcalidrawPropsType["excalidrawAPI"]>>[0]
-
-type ExcalidrawElementList = ReturnType<ExcalidrawApiInstance["getSceneElements"]>
 
 interface RestoredSceneState {
   elements: ReturnType<typeof restoreElements>
   viewBackgroundColor: string
 }
 
-function saveStatusText(saveState: "saved" | "saving" | "dirty"): string {
+function saveStatusText(saveState: WhiteboardSaveStatus): string {
   switch (saveState) {
     case "saved":
       return "Auto-saved (.excalidraw)"
@@ -59,8 +51,8 @@ function restoreSceneFromJson(raw: string): RestoredSceneState {
 }
 
 function summarizeElementLabel(
-  el: z.infer<typeof LooseElementSchema>,
-  allElements: ReadonlyArray<z.infer<typeof LooseElementSchema>>,
+  el: WhiteboardDigestElement,
+  allElements: ReadonlyArray<WhiteboardDigestElement>,
 ): string {
   if (el.text && el.text.trim().length > 0) {
     return el.text.replace(/\s+/g, " ").trim().slice(0, 42)
@@ -74,8 +66,10 @@ function summarizeElementLabel(
     return boundText.text.replace(/\s+/g, " ").trim().slice(0, 42)
   }
 
-  return `${el.type}:${el.id.slice(0, 12)}`
+  return `${el.type ?? "element"}:${el.id.slice(0, 12)}`
 }
+
+export { computeWhiteboardSceneDigest, isWhiteboardInteractionActive }
 
 export function WhiteboardStage(props: {
   artifact: Artifact
@@ -88,8 +82,7 @@ export function WhiteboardStage(props: {
   const { artifact, initialContent, threads, activeThreadId, onCreateComment, onReloadRequested } = props
 
   const apiRef = useRef<ExcalidrawApiInstance | null>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSavedDigestRef = useRef<string>("")
+  const autoSaverRef = useRef<WhiteboardAutoSaver | null>(null)
 
   const initialContentRef = useRef<string>(initialContent)
   initialContentRef.current = initialContent
@@ -107,14 +100,14 @@ export function WhiteboardStage(props: {
     [initialScene],
   )
 
-  const [saveState, setSaveState] = useState<"saved" | "saving" | "dirty">("saved")
+  const [saveState, setSaveState] = useState<WhiteboardSaveStatus>("saved")
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [sceneNodes, setSceneNodes] = useState<Array<{ id: string; label: string; x: number; y: number }>>([])
   const [showPinComposer, setShowPinComposer] = useState(false)
   const [pinBody, setPinBody] = useState("")
   const [manualNodeId, setManualNodeId] = useState<string>("")
 
-  const refreshNodeDirectory = useCallback((elements: ReadonlyArray<z.infer<typeof LooseElementSchema>>) => {
+  const refreshNodeDirectory = useCallback((elements: ReadonlyArray<WhiteboardDigestElement>) => {
     const livePrimary = elements.flatMap((el) => {
       if (el.isDeleted) return []
 
@@ -149,12 +142,25 @@ export function WhiteboardStage(props: {
   }, [])
 
   useEffect(() => {
-    const loose = LooseElementArraySchema.parse(initialScene.elements)
+    const loose = WhiteboardElementDigestArraySchema.parse(initialScene.elements)
     refreshNodeDirectory(loose)
-    lastSavedDigestRef.current = JSON.stringify(
-      loose.flatMap((e) => (e.isDeleted ? [] : [{ id: e.id, x: e.x, y: e.y, text: e.text }])),
+
+    const saver = new WhiteboardAutoSaver(
+      async (scenePayload) => {
+        await hubApi.saveArtifactContent(artifact.id, { content: scenePayload })
+      },
+      (status) => setSaveState(status),
+      300,
     )
-  }, [initialScene, refreshNodeDirectory])
+
+    saver.resetBaseline(loose, initialScene.viewBackgroundColor)
+    autoSaverRef.current = saver
+
+    return () => {
+      saver.dispose()
+      autoSaverRef.current = null
+    }
+  }, [artifact.id, initialScene, refreshNodeDirectory])
 
   useEffect(() => {
     if (!activeThreadId || !apiRef.current) return
@@ -182,50 +188,7 @@ export function WhiteboardStage(props: {
     }
   }, [activeThreadId, threads])
 
-  const scheduleSave = useCallback(
-    (elements: ExcalidrawElementList, viewBackgroundColor?: string) => {
-      const loose = LooseElementArraySchema.parse(elements)
-
-      const digest = JSON.stringify(
-        loose.flatMap((e) => (e.isDeleted ? [] : [{ id: e.id, x: e.x, y: e.y, text: e.text }])),
-      )
-
-      if (digest === lastSavedDigestRef.current) return
-      lastSavedDigestRef.current = digest
-      setSaveState("dirty")
-
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current)
-      }
-
-      saveTimerRef.current = setTimeout(() => {
-        setSaveState("saving")
-
-        const payload = JSON.stringify(
-          {
-            type: "excalidraw",
-            version: 2,
-            source: "https://vibest.local/project-hub",
-            elements,
-            appState: {
-              viewBackgroundColor: viewBackgroundColor ?? "#ffffff",
-            },
-            files: {},
-          },
-          null,
-          2,
-        )
-
-        void hubApi
-          .saveArtifactContent(artifact.id, { content: payload })
-          .then(() => setSaveState("saved"))
-          .catch(() => setSaveState("dirty"))
-      }, 450)
-    },
-    [artifact.id],
-  )
-
-  const handleAddDiagramNode = async () => {
+  const handleAddDiagramNode = () => {
     if (!apiRef.current) return
     const current = apiRef.current.getSceneElements()
     const index = sceneNodes.length + 1
@@ -261,8 +224,9 @@ export function WhiteboardStage(props: {
     })
     setSelectedIds([primaryId])
     setManualNodeId(primaryId)
-    refreshNodeDirectory(LooseElementArraySchema.parse(nextElements))
-    scheduleSave(nextElements, "#ffffff")
+    const parsedNext = WhiteboardElementDigestArraySchema.parse(nextElements)
+    refreshNodeDirectory(parsedNext)
+    autoSaverRef.current?.recordChange(parsedNext, { viewBackgroundColor: "#ffffff" })
   }
 
   const handleApplyTemplate = async (preset: "vibest-architecture" | "event-pipeline" | "multi-agent-review") => {
@@ -274,7 +238,9 @@ export function WhiteboardStage(props: {
       apiRef.current.scrollToContent(restored.elements, { fitToViewport: true, animate: true })
     }
 
-    refreshNodeDirectory(LooseElementArraySchema.parse(restored.elements))
+    const parsedRestored = WhiteboardElementDigestArraySchema.parse(restored.elements)
+    refreshNodeDirectory(parsedRestored)
+    autoSaverRef.current?.resetBaseline(parsedRestored, restored.viewBackgroundColor)
     await onReloadRequested()
   }
 
@@ -307,13 +273,17 @@ export function WhiteboardStage(props: {
 
   const handleExcalidrawChange = useCallback<NonNullable<ExcalidrawPropsType["onChange"]>>(
     (elements, appState) => {
-      const parsedEls = LooseElementArraySchema.safeParse(elements)
+      const parsedEls = WhiteboardElementDigestArraySchema.safeParse(elements)
 
       if (parsedEls.success) {
         refreshNodeDirectory(parsedEls.data)
+        const parsedApp = WhiteboardInteractionAppStateSchema.safeParse(appState)
+        autoSaverRef.current?.recordChange(
+          parsedEls.data,
+          parsedApp.success ? parsedApp.data : { viewBackgroundColor: appState.viewBackgroundColor },
+        )
       }
 
-      scheduleSave(elements, appState.viewBackgroundColor)
       const rawSel = appState.selectedElementIds ?? {}
       const nextSelected = Object.entries(rawSel).flatMap(([id, picked]) => (picked ? [id] : []))
 
@@ -321,7 +291,7 @@ export function WhiteboardStage(props: {
         prev.length === nextSelected.length && prev.every((v, idx) => v === nextSelected[idx]) ? prev : nextSelected,
       )
     },
-    [refreshNodeDirectory, scheduleSave],
+    [refreshNodeDirectory],
   )
 
   return (
@@ -343,7 +313,7 @@ export function WhiteboardStage(props: {
             type="button"
             data-testid="wb-add-node-btn"
             className="btn btn-sm"
-            onClick={() => void handleAddDiagramNode()}
+            onClick={() => handleAddDiagramNode()}
           >
             <PlusCircle size={13} /> Add Architecture Node
           </button>

@@ -1,18 +1,19 @@
 import { MessageSquareQuote } from "lucide-react"
-import { marked } from "marked"
 import mermaid from "mermaid"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 
+import { renderSafeMarkdownHtml } from "../markdown-safe.ts"
+import { applyQuoteHighlightsToDom } from "../quote-dom.ts"
 import type { CommentAnchor, CommentThread } from "../schema.ts"
-
-function escapeHtml(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
-}
 
 interface MarkdownSegment {
   kind: "markdown" | "mermaid"
   raw: string
 }
+
+type RenderedSegment =
+  | { readonly kind: "mermaid"; readonly raw: string }
+  | { readonly kind: "markdown"; readonly html: string }
 
 function splitMermaidBlocks(markdownSource: string): MarkdownSegment[] {
   const segments: MarkdownSegment[] = []
@@ -46,25 +47,9 @@ function splitMermaidBlocks(markdownSource: string): MarkdownSegment[] {
   return segments
 }
 
-function injectQuoteHighlights(html: string, threads: CommentThread[], activeThreadId: string | null): string {
-  let result = html
-
-  for (const thread of threads) {
-    if (thread.anchor.kind !== "quote") continue
-    const snippet = escapeHtml(thread.anchor.quote.trim())
-
-    if (snippet.length < 4) continue
-    const idx = result.indexOf(snippet)
-
-    if (idx !== -1) {
-      const cls = `anchored-quote${activeThreadId === thread.id ? " active" : ""}`
-      const replacement = `<mark class="${cls}" data-thread-id="${thread.id}">${snippet} <strong>[#${thread.pinNumber}]</strong></mark>`
-      result = result.slice(0, idx) + replacement + result.slice(idx + snippet.length)
-    }
-  }
-
-  return result
-}
+const SanitizedHtmlSegment = memo(function SanitizedHtmlSegment(props: { html: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: props.html }} />
+})
 
 function MermaidBlock(props: { chart: string; index: number }) {
   const [svgHtml, setSvgHtml] = useState<string>("")
@@ -117,6 +102,7 @@ export function MarkdownViewer(props: {
 }) {
   const { content, threads, activeThreadId, onSelectThread, onCreateComment } = props
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
 
   const [selectedQuote, setSelectedQuote] = useState<{
     quote: string
@@ -126,20 +112,36 @@ export function MarkdownViewer(props: {
   const [commentBody, setCommentBody] = useState("")
   const [saving, setSaving] = useState(false)
 
-  const segments = useMemo(() => splitMermaidBlocks(content), [content])
+  const renderedSegments = useMemo<RenderedSegment[]>(
+    () =>
+      splitMermaidBlocks(content).map((seg): RenderedSegment => {
+        if (seg.kind === "mermaid") {
+          return { kind: "mermaid", raw: seg.raw }
+        }
+
+        return { kind: "markdown", html: renderSafeMarkdownHtml(seg.raw) }
+      }),
+    [content],
+  )
 
   useEffect(() => {
-    if (!activeThreadId || !containerRef.current) return
-    const mark = containerRef.current.querySelector(`[data-thread-id="${CSS.escape(activeThreadId)}"]`)
+    const bodyEl = bodyRef.current
 
-    if (mark instanceof HTMLElement) {
-      mark.scrollIntoView({ behavior: "smooth", block: "center" })
+    if (!bodyEl) return
+    applyQuoteHighlightsToDom(bodyEl, threads, activeThreadId)
+
+    if (activeThreadId) {
+      const mark = bodyEl.querySelector(`[data-thread-id="${CSS.escape(activeThreadId)}"]`)
+
+      if (mark instanceof HTMLElement) {
+        mark.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
     }
-  }, [activeThreadId])
+  }, [renderedSegments, threads, activeThreadId])
 
   const captureCurrentSelection = () => {
     const selection = window.getSelection()
-    const root = containerRef.current
+    const root = bodyRef.current
 
     if (!selection || selection.isCollapsed || !root) return
     const text = selection.toString().replace(/\s+/g, " ").trim()
@@ -276,6 +278,7 @@ export function MarkdownViewer(props: {
       )}
 
       <div
+        ref={bodyRef}
         className="markdown-body"
         data-testid="markdown-rendered-body"
         onClick={(ev) => {
@@ -290,15 +293,12 @@ export function MarkdownViewer(props: {
           }
         }}
       >
-        {segments.map((seg, index) => {
+        {renderedSegments.map((seg, index) => {
           if (seg.kind === "mermaid") {
             return <MermaidBlock key={`m-${index}`} chart={seg.raw} index={index} />
           }
 
-          const rawHtml = String(marked.parse(seg.raw, { async: false, gfm: true }))
-          const highlighted = injectQuoteHighlights(rawHtml, threads, activeThreadId)
-
-          return <div key={`md-${index}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
+          return <SanitizedHtmlSegment key={`md-${index}`} html={seg.html} />
         })}
       </div>
     </div>

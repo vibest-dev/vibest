@@ -64,16 +64,27 @@ export function ArtifactStudio(props: {
   const [verdictFeedback, setVerdictFeedback] = useState<string | null>(null)
   const [submittingVerdict, setSubmittingVerdict] = useState(false)
 
-  const loadDetail = useCallback(async () => {
-    const data = await hubApi.getArtifactDetail(artifactId, selectedVersion, selectedVariantId)
-    setDetail(data)
+  useEffect(() => {
+    setSelectedVersion(undefined)
+    setSelectedVariantId(undefined)
+    setActiveThreadId(null)
+    setVerdictFeedback(null)
+  }, [artifactId])
 
-    if (!selectedVariantId && data.artifact.metadata.selectedVariantId) {
-      setSelectedVariantId(data.artifact.metadata.selectedVariantId)
-    } else if (!selectedVariantId && data.artifact.metadata.variants?.[0]) {
-      setSelectedVariantId(data.artifact.metadata.variants[0].id)
+  const loadDetail = useCallback(async () => {
+    try {
+      const data = await hubApi.getArtifactDetail(artifactId, selectedVersion, selectedVariantId)
+      setDetail(data)
+
+      if (!selectedVariantId && data.artifact.metadata.selectedVariantId) {
+        setSelectedVariantId(data.artifact.metadata.selectedVariantId)
+      } else if (!selectedVariantId && data.artifact.metadata.variants?.[0]) {
+        setSelectedVariantId(data.artifact.metadata.variants[0].id)
+      }
+    } catch {
+      onBack()
     }
-  }, [artifactId, selectedVersion, selectedVariantId])
+  }, [artifactId, onBack, selectedVersion, selectedVariantId])
 
   useEffect(() => {
     void loadDetail()
