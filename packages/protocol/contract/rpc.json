@@ -16596,7 +16596,7 @@
       }
     },
     "Team.List": {
-      "access": "agent",
+      "access": "session",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -16681,9 +16681,6 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoCallingSessionEncoded"
               }
             ]
           },
@@ -16722,21 +16719,6 @@
               "_tag",
               "method",
               "message"
-            ],
-            "additionalProperties": true
-          },
-          "NoCallingSessionEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NoCallingSession"
-                ]
-              }
-            },
-            "required": [
-              "_tag"
             ],
             "additionalProperties": true
           },

@@ -522,7 +522,7 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Team.List", {
       payload: { team: Schema.optional(Schema.String) },
       success: Schema.Struct({ team: Schema.String, members: Schema.Array(TeamMember) }),
-      error: Schema.Union([Forbidden, NoCallingSession]),
+      error: Schema.Union([Forbidden]),
     }),
   ),
   scoped(

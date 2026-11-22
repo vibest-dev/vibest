@@ -332,7 +332,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
             local(yield* creatorOf(sender)) === recipient ||
             local(yield* creatorOf(recipient)) === sender ||
             (yield* sql`SELECT 1 FROM session a JOIN session b ON b.project_id = a.project_id AND b.team = a.team
-              WHERE a.id = ${sender} AND b.id = ${recipient}`).length > 0
+              WHERE a.id = ${sender} AND b.id = ${recipient} AND a.id != b.id`).length > 0
           )
         }).pipe(Effect.orDie),
       ),

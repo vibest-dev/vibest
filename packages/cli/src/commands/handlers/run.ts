@@ -10,10 +10,12 @@ import { Commands } from "../commands.ts"
 export default Runtime.handler(Commands.commands.run, (o) =>
   Effect.gen(function* () {
     if (!(yield* caller).agent) return yield* new NoCallingSession()
+
+    if (o.team.length > 1) return yield* new EmptyInput({ message: "give --team only once" })
     const [harness, raw] = o.words.length === 2 ? o.words : [undefined, o.words[0]!]
     const prompt = yield* input(raw, "prompt")
     const files = yield* readAttachments(o.file)
-    const team = Option.getOrUndefined(o.team)
+    const team = o.team[0]
 
     const spawned = yield* requested((client, request, ping) =>
       Effect.gen(function* () {

@@ -864,4 +864,17 @@ describe("vibest.sock", () => {
       )
     }),
   )
+
+  test(
+    "Team.List from a CLI caller without a session fails Forbidden naming vibest ls --team, not vibest run",
+    Effect.gen(function* () {
+      const cli = asCli(yield* client, yield* makeRepository)
+
+      for (const payload of [{}, { team: "t-1234" }]) {
+        const refused = yield* Effect.flip(cli["Team.List"](payload))
+        assert.strictEqual(refused._tag, "Forbidden")
+        assert.strictEqual(refused.message, "vibest ls --team is run by an agent in a session")
+      }
+    }),
+  )
 })

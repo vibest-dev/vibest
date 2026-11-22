@@ -167,7 +167,11 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const c = yield* Caller
 
-        if (!Predicate.isTagged(c, "Session")) return yield* new NoCallingSession()
+        if (!Predicate.isTagged(c, "Session"))
+          return yield* new Forbidden({
+            method: "Team.List",
+            message: "vibest ls --team is run by an agent in a session",
+          })
         const id = team ?? (yield* db.session.sessionIdentity(c.sessionId))?.team ?? undefined
 
         if (id === undefined)

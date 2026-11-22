@@ -20,7 +20,7 @@ export const ACCESS = {
   Spawn: "agent",
   Launch: "cli",
   List: ["agent", "peer"],
-  "Team.List": "agent",
+  "Team.List": "session",
   Get: ["agent", "peer"],
   "Inbox.Subscribe": "session",
   "Inbox.Take": "session",

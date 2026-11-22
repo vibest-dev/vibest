@@ -158,6 +158,25 @@ describe("sends from sessions", () => {
     ),
   )
 
+  it.effect("Db.inbox.maySend refuses a session sending to itself, including a team member", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, entryId } = yield* setup
+        assert.isTrue(
+          yield* db.session.insertSession(session(B), project, {
+            cwd: "/w",
+            task: "t",
+            parentSessionId: entryId,
+            team: "new",
+          }),
+        )
+        assert.isFalse(yield* db.inbox.maySend(B, B))
+        assert.isFalse(yield* db.inbox.maySend(A, A))
+        assert.isFalse(yield* db.inbox.maySend(entryId, entryId))
+      }),
+    ),
+  )
+
   it.effect(
     "a session whose creator has ended still names it as its creator, and its notices go to the nearest creator above that is running",
     () =>
