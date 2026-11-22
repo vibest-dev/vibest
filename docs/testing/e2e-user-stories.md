@@ -155,7 +155,7 @@ Status: now.
 
 _Workers share Project knowledge, and a plugin picks the harness for me._
 
-- The entry session writes `memories/decisions.md` in the project folder with its file tool; a worker's rules list it in the memory index.
+- The entry session writes `memories/decisions.md` and its one-line entry in `memories/MEMORY.md` in the project folder with its file tool; a worker's system prompt includes `memories/MEMORY.md` under `# Project memories`, and topic files in `memories/` are read on demand or searched with `vibest project search <query> --kind memories`.
 - A routing plugin in `$VIBEST_HOME/plugins` picks Cursor for `test`-related tasks; `vibest plugins` shows its calls;
   editing the plugin file changes the choice without a daemon restart; a plugin that refuses blocks the run with its
   reason.

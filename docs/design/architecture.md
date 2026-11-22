@@ -251,8 +251,8 @@ AgentDefinition    Harness    Subscription    Machine
   every conversation and every subagent sees the same preferences and memory index.
 - **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/`): `preferences.md` (how the user likes work done), `docs/`,
   `memories/` and `artifacts/`, read and written by every Agent of the Project with its own file tools; the guard
-  keeps each Agent to its own project's folder. `preferences.md` is added to every agent's rules (16,000 characters).
-  Memories are an index of at most 200 lines, not the file text. A subagent's `## Remember` section is a proposal the entry session may write to memories.
+  keeps each Agent to its own project's folder. `preferences.md` is added to every agent's system prompt (16,000 characters).
+  `memories/MEMORY.md` is the curated memory index loaded into every session's system prompt (capped at 100 lines and 8,000 bytes on a line boundary, with a truncation warning to compact under 70 lines; when `MEMORY.md` is missing and `memories/` holds `.md` topic files, vibest bootstraps `MEMORY.md` once newest-first up to 70 lines and 5,600 bytes). Topic files `memories/<name>.md` are not enumerated into the prompt; they are read on demand or searched with `vibest project search <query> --kind memories`. A subagent's `## Remember` section is a proposal: saving or updating a memory maintains both `memories/<name>.md` and its one-line entry in `memories/MEMORY.md`, updating or removing stale entries instead of only appending.
 - **Labels** are free key/value pairs for references outside vibest; grouping uses `runID`.
 - **Conventions (borrowed):** branded IDs with a type prefix and a sortable body (`prj_`, `wsp_`, `run_`,
   `agt_`, `msg_`, `evt_`), each exposing `ID.create()`; one `time` struct per entity; archiving is a
