@@ -75,8 +75,15 @@ git's own repair would rewrite every worktree of the repository, the user's incl
 
 Agents read and write the project folder with their own file tools; vibestd only names its paths and searches its
 text. Search reads every file per query; an index is the next step once a project folder grows past a few hundred
-files. The system prompt indexes `memories/` by each file's frontmatter `description` (one `description:` line, not a
-folded YAML block), else its first non-empty line.
+files. The system prompt loads the curated index `memories/MEMORY.md` (trimmed and capped at 100 lines and 8,000 bytes
+on a line boundary, with an explicit warning when truncated to compact under 70 lines) rather than enumerating
+`memories/*.md`; topic files in `memories/` are read on demand or searched with
+`vibest project search <query> --kind memories`, and saving or updating a memory maintains both `memories/<name>.md`
+and its one-line entry in `memories/MEMORY.md` (updating or removing stale entries instead of only appending). When
+`memories/MEMORY.md` does not exist yet and `.md` files exist in `memories/`, vibest bootstraps `memories/MEMORY.md`
+once, sorted by `mtime` descending (deterministic tie-breaker by path), stopping at 70 lines and 5,600 bytes with each
+line built from the file's frontmatter `description` (one `description:` line, not a folded YAML block) or first
+non-empty line and clipped to 150 characters.
 
 ## DDL
 
@@ -120,6 +127,7 @@ CREATE TABLE session (
   origin_peer           TEXT,                         -- started by another vibestd: its id
   origin_project        TEXT,                         -- and its project there
   origin_session        TEXT,                         -- and the session there its notices and sends go to (that project's entry session)
+  team                  TEXT,                         -- team id (t-xxxx) from a bare vibest run --team; written once, never inherited. Members of one team in a project may send to each other
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
   process_id            INTEGER,                      -- its current process; its latest execution is its highest execution id
@@ -245,7 +253,7 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | project.moved                       | from, to, repositories                                                                                                                                                   |
 | project.repositories_changed        | repositories                                                                                                                                                             |
 | project.entry_changed               | session? (none: the project has no entry session)                                                                                                                        |
-| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, message? (the original delegation seq)                                                      |
+| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, team?, message? (the original delegation seq)                                               |
 | session.renamed                     | name                                                                                                                                                                     |
 | session.directory_changed           | directory                                                                                                                                                                |
 | session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                                |

@@ -128,6 +128,7 @@ export const make = Effect.gen(function* () {
       checkout: (yield* db.session.sessionIdentity(session.id))?.entry,
       sharer: yield* db.session.earlierSharer(session.id),
       creator: yield* db.session.creatorLabel(session.id),
+      team: (yield* db.session.sessionIdentity(session.id))?.team ?? undefined,
       projectDir: layout.project(session.projectId),
       agents: agents.all,
       ...(yield* projectText(layout.project(session.projectId))),

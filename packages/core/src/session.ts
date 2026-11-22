@@ -33,7 +33,7 @@ import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
 import { type Outdated, Restart } from "./session/restart.ts"
 import type { SendRefused } from "./session/sends.ts"
-import { Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
+import { Spawn, type SpawnInput, type Spawned, type TeamRefused } from "./session/spawn.ts"
 import { gitState, mainCheckout } from "./worktree.ts"
 
 export * as Session from "./session.ts"
@@ -105,6 +105,7 @@ export interface Interface {
     | AgentRefused
     | PluginsNotActive
     | NoSuchSession
+    | TeamRefused
   >
   readonly send: (id: string, message: string, sender?: Sender, request?: string) => Effect.Effect<void, NoSuchSession>
   readonly deliverTo: (

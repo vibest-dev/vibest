@@ -21,7 +21,7 @@ import { newId, sessionLabel } from "@vibest/schema/id"
 import { Routing } from "@vibest/schema/plugin"
 import { type AgentStatus, RuntimeAddress } from "@vibest/schema/session"
 import { Effect, Schema } from "effect"
-import { SqlClient, type Statement } from "effect/sql"
+import { SqlClient, type SqlError, type Statement } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { SessionLive } from "../session/live.ts"
@@ -587,6 +587,82 @@ export const statements = Effect.gen(function* () {
       }
     }).pipe(Effect.orDie)
 
+  const teamOwner = (project: string, team: string) =>
+    sql<{ owner: string | null }>`SELECT parent_session_id AS owner FROM session
+      WHERE project_id = ${project} AND team = ${team} LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.owner ?? undefined))
+
+  const unusedTeamId = (project: string): Effect.Effect<string, SqlError.SqlError> =>
+    sql<{ id: string }>`SELECT 't-' || lower(hex(randomblob(2))) AS id`.pipe(
+      Effect.flatMap(([row]) =>
+        teamOwner(project, row!.id).pipe(
+          Effect.flatMap((owner) => (owner === undefined ? Effect.succeed(row!.id) : unusedTeamId(project))),
+        ),
+      ),
+    )
+
+  const teamLive = (project: string, team: string) =>
+    sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+
+  const mayListTeam = (project: string, team: string, caller: string) =>
+    sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team}
+      AND (id = ${caller} OR parent_session_id = ${caller}) LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.orDie,
+    )
+
+  const teamMembers = (project: string, team: string) =>
+    sql<{ id: string; parent: string | null }>`SELECT id, parent_session_id AS parent FROM session
+      WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL ORDER BY created_at, rowid`.pipe(
+      Effect.orDie,
+    )
+
+  const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
+    Effect.gen(function* () {
+      const processes = yield* sql<{
+        id: number
+        pid: number | null
+        terminal: string | null
+      }>`SELECT id, pid, terminal FROM process WHERE session_id = ${sessionId}`
+
+      if (pid !== undefined && processes.some((p) => p.id !== current && p.pid === pid)) return false
+
+      if (reporter === undefined || reporter === current) return true
+      const terminalOf = (id: number) => processes.find((p) => p.id === id)?.terminal ?? null
+
+      return pid !== undefined && terminalOf(reporter) !== null && terminalOf(reporter) === terminalOf(current)
+    })
+
+  const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
+    sql<{ ok: number }>`SELECT (
+      EXISTS (
+        SELECT 1 FROM execution t JOIN process p ON p.session_id = t.session_id AND p.id = t.process_id
+        WHERE t.session_id = ${sessionId} AND (t.started_at IS NOT NULL OR t.outcome IS NOT NULL)
+          AND p.conversation = ${harnessSessionId}
+      )
+      OR (
+        EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
+        AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND conversation = ${harnessSessionId})
+      )
+    ) AS ok`.pipe(
+      Effect.map((rows) => rows[0]?.ok === 1),
+      Effect.orDie,
+    )
+
+  const latestReply = (sessionId: string) =>
+    sql<{
+      execution: number
+      status: string
+      text: string | null
+      failure: string | null
+      endedAt: number
+    }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
+      WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
+      Effect.map((rows) => rows[0]),
+      Effect.orDie,
+    )
+
   return {
     reads,
     afterCommitLive,
@@ -627,6 +703,14 @@ export const statements = Effect.gen(function* () {
     conversationOf,
     creatorOf,
     nearestAlive,
+    teamOwner,
+    unusedTeamId,
+    teamLive,
+    mayListTeam,
+    teamMembers,
+    fromCurrentHarness,
+    canResumeConversation,
+    latestReply,
   }
 })
 

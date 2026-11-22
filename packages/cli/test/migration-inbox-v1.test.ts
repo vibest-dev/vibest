@@ -304,7 +304,8 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
         ),
       )
 
-      if (retry === true || retry === "waiting" || retry === "parent-ended") return yield* Effect.die(retry)
+      if (retry === true || retry === "waiting" || retry === "parent-ended" || !("id" in retry))
+        return yield* Effect.die(retry)
 
       assert.strictEqual(retry.id, L)
 

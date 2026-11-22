@@ -1,6 +1,6 @@
 import { type SocketConnector } from "@vibest/client/socket-connector"
 import { type Layout } from "@vibest/schema/layout"
-import { Effect, Predicate } from "effect"
+import { Effect, Predicate, Stdio } from "effect"
 import { Command } from "effect/cli"
 import { type HttpClient } from "effect/http"
 
@@ -78,9 +78,15 @@ export function handlers(root: Spec.Any, handlers: RuntimeHandlers): Array<LazyH
 export function run(
   commands: Spec.Any,
   handlers: ReadonlyArray<LazyHandler>,
-  options: { readonly version: string; readonly extra: Extra },
+  options: {
+    readonly version: string
+    readonly extra: Extra
+    readonly args?: (args: ReadonlyArray<string>) => ReadonlyArray<string>
+  },
 ) {
-  return Command.run(provide(commands, handlers, options.extra), { version: options.version })
+  const command = Command.runWith(provide(commands, handlers, options.extra), { version: options.version })
+
+  return Stdio.Stdio.use(({ args }) => Effect.flatMap(args, (args) => command(options.args?.(args) ?? args)))
 }
 
 function provide(node: Spec.Any, handlers: ReadonlyArray<LazyHandler>, extra?: Extra): ProvidedCommand {

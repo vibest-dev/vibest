@@ -84,15 +84,12 @@ manage (send to, interrupt, peek at, archive) only the sessions it started.
 
 A user defines an agent with one Markdown file, `~/.vibest/agents/<id>.md`: the file name is the id (lowercase letters,
 digits and `-`, starting with a letter, at most 32 characters), the frontmatter holds `description` (required) and
-optionally `name` (equal to the file name), `extends`, `harness`, `provider` and `model`, and the text after it is the
-prompt. With `extends: <id>` the prompt is that definition's prompt, a blank line, then the file's, and that
-definition's guard applies. `extends` looks at the agents registered before the files (the builtins and nothing a
-config removed) and at the other files, one level only: a file named by `extends` must not extend anything itself.
+optionally `name` (equal to the file name), `harness`, `provider` and `model`, and the text after it is the prompt.
+Each file is a whole definition: it does not take another agent's prompt or guard.
 
 ```markdown
 ---
 description: reviews a change for real bugs, each with a reproduction; changes no code
-extends: general
 harness: pi
 provider: cpamp
 model: gpt-6.2-astra
@@ -102,19 +99,20 @@ You are a reviewer. Read the diff of the branch you are given against main …
 ```
 
 A saved file is listed by `vibest agent list` within a few seconds, without restarting vibestd, and removing it
-removes the agent. `vibest run --agent <id>` starts a session with the joined prompt, and the session facts of every
+removes the agent. `vibest run --agent <id>` starts a session with that file's prompt, and the session facts of every
 new session list the agents it can start (`<id> (<description>)`, the first 20). `vibest agent show <id>` prints one
 definition with its whole prompt. A session takes an edited file at its next process start, never mid-conversation.
 
 ## S61. An invalid agent file
 
 A file that breaks a rule (a bad file name, an unknown or repeated key, no or a blank description, an empty prompt,
-`provider` or `model` without `harness`, `name` unlike the file name, an `extends` that names nothing, an invalid file
-or goes two levels deep) registers nothing and is reported, never dropped: under `invalid` in `vibest agent list` with its path and error, in
-`vibest doctor` with the fix, and by `vibest run --agent <id>`, which is refused with that error. An invalid file whose id is a builtin's (`general.md`)
+`provider` or `model` without `harness`, `name` unlike the file name) registers nothing and is reported, never dropped:
+under `invalid` in `vibest agent list` with its path and error, in `vibest doctor` with the fix, and by
+`vibest run --agent <id>`, which is refused with that error. An invalid file whose id is a builtin's (`general.md`)
 does not fall back to the builtin: starts of that agent, a plain `vibest run` included, are refused with the file's error
-until it is fixed or removed. A folder that cannot be read is reported the same way, with the agents it last read kept.
-The other files still load.
+until it is fixed or removed. A file that still names `extends` is that case: `extends` is an unknown key, so the old
+file is refused instead of loaded as a definition of its own. A folder that cannot be read is reported the same way,
+with the agents it last read kept. The other files still load.
 
 ## S62. An agent's own harness
 
@@ -125,8 +123,9 @@ from the file.
 
 ## S63. Replacing a builtin agent
 
-A file whose id is a builtin's (`general.md`, `coordinator.md`) replaces it for every new start; with `extends` naming
-its own id it keeps the builtin's prompt and guard and adds to them. Removing the file restores the builtin.
+A file whose id is a builtin's (`general.md`, `coordinator.md`) replaces it for every new start. The file is the whole
+definition: it does not keep the builtin's prompt or its extra guard. The rules every agent has still apply. Removing
+the file restores the builtin.
 
 ## S64. The entry session as another agent
 
@@ -154,6 +153,28 @@ session removes `<project folder>/sessions/<session id>/`. A file over 10 MiB, o
 not a regular file refuses the run. With `--machine`, the files go with the run and the vibestd there copies them into its own project folder, so
 the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest
 update` there.
+
+## S67. Teams
+
+A team is a running group of sessions, as a session is a run of an agent definition: it has an id, not a name.
+`vibest run --team` with no id starts the session as the first member of a new team whose id vibest makes (`t-` and four hex
+digits, unique in the project) and prints it with the session id: `{"id": …, "team": "t-3f2a"}`. `vibest run --team
+<team id>` adds the session to that team and prints the id too. The word after `--team` is taken as the id only when it has the
+id's form (`t-` and four lowercase hex digits); anything else (a harness name, `--`, another flag) is left alone, so
+`vibest run --team pi -- <task>` starts a new team and runs Pi. Only the session that created the team may add members;
+any other session is refused with an error naming that session, and an id no team in this project has is refused; in both
+cases nothing starts. A team whose members have all been archived has ended: `--team <id>` is then refused and the id
+never comes back; this is checked in the same transaction as the new member, so a last archive and an addition happen in
+one order. Two bare `--team` always give two teams, whoever runs them. A session's team is set when it is
+created and never changes; a session started without `--team` is in no team, even when its creator is. `--team` with `--machine` is
+refused.
+
+Members of one team may `vibest send` to each other while they are unfinished (S46, S47 still refuse everyone else); a
+send to an archived teammate is refused and goes to no one else. Interrupt, peek and archive stay with the session that
+started each one. `vibest ls --team [<team id>]` prints JSON `{team, members}`: each unfinished member's id, agent,
+title, status and `startedBy`; without an id it is the caller's own team, and a session in no team gets an error. It answers only the session that
+created the team and its members; any other session is refused, even when it knows the id. A
+member's system prompt names its team id and says that `vibest ls --team` lists who is in it now.
 
 ## S58. Listing worktrees
 

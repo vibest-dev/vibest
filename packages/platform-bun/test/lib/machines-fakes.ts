@@ -158,7 +158,7 @@ export const fakeSpawns =
           },
         )
 
-        const before = Predicate.isObject(inserted) ? inserted : undefined
+        const before = Predicate.isObject(inserted) && "id" in inserted ? inserted : undefined
 
         return {
           id: before?.id ?? id,

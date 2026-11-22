@@ -411,8 +411,13 @@ export const make = (session: Session.Statements, inbox: Statements) =>
           const local = (creator: Session.Creator) =>
             creator !== undefined && "local" in creator ? creator.local : undefined
 
-          return local(yield* creatorOf(sender)) === recipient || local(yield* creatorOf(recipient)) === sender
-        }),
+          return (
+            local(yield* creatorOf(sender)) === recipient ||
+            local(yield* creatorOf(recipient)) === sender ||
+            (yield* sql`SELECT 1 FROM session a JOIN session b ON b.project_id = a.project_id AND b.team = a.team
+              WHERE a.id = ${sender} AND b.id = ${recipient} AND a.id != b.id`).length > 0
+          )
+        }).pipe(Effect.orDie),
       ),
 
       linkTask: Effect.fn("Db.inbox.linkTask")((id: string) =>

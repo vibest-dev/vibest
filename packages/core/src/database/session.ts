@@ -39,6 +39,13 @@ import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
 import type * as Session from "./session-statements.ts"
 
+export type TeamStart = "new" | { readonly join: string }
+
+export type TeamRefusal =
+  | { readonly team: string; readonly teamOwner: string }
+  | { readonly teamUnknown: string }
+  | { readonly teamEnded: string }
+
 export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
 
 export type SessionFilter = {
@@ -85,6 +92,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       unusedId,
       conversationOf,
       creatorOf,
+      fromCurrentHarness,
+      canResumeConversation,
     } = session
 
     const { queueInbox, insertInboxRow, dropWaiting } = inbox
@@ -102,39 +111,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         }
       })
 
-    const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
-      Effect.gen(function* () {
-        const processes = yield* sql<{
-          id: number
-          pid: number | null
-          terminal: string | null
-        }>`SELECT id, pid, terminal FROM process WHERE session_id = ${sessionId}`
-
-        if (pid !== undefined && processes.some((p) => p.id !== current && p.pid === pid)) return false
-
-        if (reporter === undefined || reporter === current) return true
-        const terminalOf = (id: number) => processes.find((p) => p.id === id)?.terminal ?? null
-
-        return pid !== undefined && terminalOf(reporter) !== null && terminalOf(reporter) === terminalOf(current)
-      })
-
-    const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
-      sql<{ ok: number }>`SELECT (
-        EXISTS (
-          SELECT 1 FROM execution t JOIN process p ON p.session_id = t.session_id AND p.id = t.process_id
-          WHERE t.session_id = ${sessionId} AND (t.started_at IS NOT NULL OR t.outcome IS NOT NULL)
-            AND p.conversation = ${harnessSessionId}
-        )
-        OR (
-          EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
-          AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND conversation = ${harnessSessionId})
-        )
-      ) AS ok`.pipe(
-        Effect.map((rows) => rows[0]?.ok === 1),
-        Effect.orDie,
-      )
-
     return {
+      mayListTeam: Effect.fn("Db.session.mayListTeam")(session.mayListTeam),
+
+      teamMembers: Effect.fn("Db.session.teamMembers")(session.teamMembers),
+
       sessionParents: Effect.fn("Db.session.sessionParents")((ids: ReadonlyArray<string>) =>
         (ids.length === 0
           ? Effect.succeed<ReadonlyArray<{ id: string; parentSessionId: string | null }>>([])
@@ -230,6 +211,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             request,
             origin,
             max,
+            team,
           }: {
             readonly cwd?: string
             readonly task?: string
@@ -237,8 +219,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly request?: string | undefined
             readonly origin?: Remote.PeerStart | undefined
             readonly max?: number | undefined
+            readonly team?: TeamStart | undefined
           } = {},
-        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended"> =>
+        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended" | TeamRefusal> =>
           tx(
             Effect.gen(function* () {
               if (request !== undefined) {
@@ -252,6 +235,19 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 (yield* sql`SELECT 1 FROM session WHERE id = ${parentSessionId} AND ended_at IS NOT NULL`).length > 0
               )
                 return "parent-ended" as const
+
+              const teamId =
+                team === undefined ? undefined : team === "new" ? yield* session.unusedTeamId(project) : team.join
+
+              if (team !== undefined && team !== "new") {
+                const owner = yield* session.teamOwner(project, team.join)
+
+                if (owner === undefined) return { teamUnknown: team.join }
+
+                if (!(yield* session.teamLive(project, team.join))) return { teamEnded: team.join }
+
+                if (owner !== parentSessionId) return { team: team.join, teamOwner: owner }
+              }
 
               const message =
                 task === undefined
@@ -293,6 +289,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     },
                   }),
                   ...(message !== undefined && { message }),
+                  ...(teamId !== undefined && { team: teamId }),
                 },
               })
 
@@ -370,8 +367,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           projectId: string
           agent: string
           harness: string
+          team: string | null
           entry: number
-        }>`SELECT a.id, a.project_id, a.agent,
+        }>`SELECT a.id, a.project_id, a.agent, a.team,
             coalesce(p.harness, '') AS harness,
             q.entry_session_id = a.id AS entry
           FROM session a JOIN project q ON q.id = a.project_id
@@ -974,19 +972,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           ).pipe(Effect.orDie),
       ),
 
-      latestReply: Effect.fn("Db.session.latestReply")((sessionId: string) =>
-        sql<{
-          execution: number
-          status: string
-          text: string | null
-          failure: string | null
-          endedAt: number
-        }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
-          WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.orDie,
-        ),
-      ),
+      latestReply: Effect.fn("Db.session.latestReply")(session.latestReply),
 
       projectOfSession: Effect.fn("Db.session.projectOfSession")((sessionId: string) =>
         sql<{ project: string }>`SELECT project_id AS project FROM session WHERE id = ${sessionId}`.pipe(

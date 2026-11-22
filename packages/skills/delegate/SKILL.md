@@ -54,7 +54,7 @@ Then say what changed, the evidence, and the branch. `<id>` is the id the run pr
 
 - Archive a research, review or verification session with `vibest archive <id>` once you have read its message and will not continue it.
 - Keep an agent that changed code until the user asks to archive it. Archiving keeps the branch, and the worktree whenever it holds unsaved work. `vibest archive --keep-worktree <id>` only when the user wants the directory kept.
-- A `## Remember` section in a message: write each lesson with your file tool to `$VIBEST_PROJECT_DIR/memories/<name>.md`, one lesson per file; edit the file when a lesson there changes. Start the file with a one-line summary (or frontmatter with `name` and `description`), because that line is what the memory index shows.
+- A `## Remember` section in a message: maintain both the topic file `$VIBEST_PROJECT_DIR/memories/<name>.md` (one lesson per file, starting with frontmatter `name` and `description` or a one-line summary, with the detail kept in the topic file) and its one-line entry (`- memories/<name>.md — <summary>`, under 150 characters) in `$VIBEST_PROJECT_DIR/memories/MEMORY.md`. Only `memories/MEMORY.md` is loaded into the system prompt (capped at 100 lines and 8000 bytes); topic files are read on demand or searched with `vibest project search <query> --kind memories`. When a lesson changes or turns out to be wrong, update or delete its topic file and update or remove its entry in `memories/MEMORY.md` instead of only appending; compact `memories/MEMORY.md` to under 70 lines when it approaches the cap.
 
 ## The user steps into a pane
 

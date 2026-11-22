@@ -64,17 +64,19 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "P8",
     title:
-      "a Pi entry session, a Pi subagent and a Claude subagent (fake models) each write and read artifacts/<who>.md in the project folder with their file tools, without a permission prompt; a write into another project's folder is refused",
+      "a Pi entry session, a Pi subagent and a Claude subagent (fake models) each write and read artifacts/<who>.md in the project folder without a permission prompt, another project's folder is refused, and sessions receive bootstrapped or curated memories/MEMORY.md without unindexed topic bodies",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const other = (await w.json<Info>(["project", "info"], { cwd: await newRepository(w, "files-other") })).directory
       await fs.mkdir(path.join(other, "artifacts"), { recursive: true })
       const results: Record<string, Array<string>> = {}
       const dirs: Record<string, string> = {}
+      const systems: Record<string, string> = {}
 
       const pi = fakeOpenAI(
         filesExecution(results, other, { write: "write", read: "read", path: "path", bash: "bash" }),
         dirs,
+        systems,
       )
 
       const claudeExecution = filesExecution(results, other, {
@@ -89,6 +91,7 @@ const checks: ReadonlyArray<Check> = [
 
         if (r.tools.length === 0 || dir === undefined || r.results.length > 3) return "ok"
         dirs.claude = dir
+        systems.claude = r.system
         const last = r.results.at(-1)
 
         return claudeExecution(
@@ -106,6 +109,12 @@ const checks: ReadonlyArray<Check> = [
         const repo = await newRepository(w, "files")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-files", pi.url)}`
         await w.daemon()
+        const info = await w.json<Info>(["project", "info"], { cwd: repo })
+        await fs.mkdir(info.memories, { recursive: true })
+        await fs.writeFile(
+          path.join(info.memories, "legacy.md"),
+          "---\nname: legacy\ndescription: bootstrapped-summary-p8\n---\nLEGACY_TOPIC_BODY_P8\n",
+        )
         await w.startEntry({
           harness: "pi",
           session,
@@ -113,6 +122,14 @@ const checks: ReadonlyArray<Check> = [
           env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
+        expect(
+          (await fs.readFile(path.join(info.memories, "MEMORY.md"), "utf8")) ===
+            "- memories/legacy.md — bootstrapped-summary-p8\n",
+          "entry launch did not bootstrap memories/MEMORY.md",
+        )
+        await fs.writeFile(path.join(info.memories, "MEMORY.md"), "- memories/curated.md — curated-index-entry-p8\n")
+        await fs.writeFile(path.join(info.memories, "curated.md"), "CURATED_TOPIC_BODY_P8\n")
+        await fs.writeFile(path.join(info.memories, "unindexed.md"), "UNINDEXED_SUMMARY_P8\nUNINDEXED_BODY_P8\n")
 
         const run = async (args: ReadonlyArray<string>) =>
           (
@@ -154,6 +171,33 @@ const checks: ReadonlyArray<Check> = [
           "projects",
           row<{ p: string }>(w, "SELECT project_id AS p FROM session WHERE id = ?", entryId ?? "")?.p ?? "",
         )
+
+        expect(
+          (systems.main ?? "").includes("# Project memories") &&
+            (systems.main ?? "").includes("- memories/legacy.md — bootstrapped-summary-p8") &&
+            !(systems.main ?? "").includes("LEGACY_TOPIC_BODY_P8"),
+          `main system prompt memories: ${systems.main}`,
+        )
+
+        for (const sub of ["pi", "claude"] as const) {
+          const sys = systems[sub] ?? ""
+          expect(
+            sys.includes("# Project memories") &&
+              sys.includes("vibest project search <query> --kind memories") &&
+              sys.includes("- memories/curated.md — curated-index-entry-p8"),
+            `${sub} system prompt missing curated MEMORY.md: ${sys}`,
+          )
+
+          for (const excluded of [
+            "CURATED_TOPIC_BODY_P8",
+            "UNINDEXED_SUMMARY_P8",
+            "UNINDEXED_BODY_P8",
+            "unindexed.md",
+            "bootstrapped-summary-p8",
+            "LEGACY_TOPIC_BODY_P8",
+          ])
+            expect(!sys.includes(excluded), `${sub} system prompt leaked ${excluded}`)
+        }
 
         for (const who of ["pi", "claude", "main"]) {
           expect(dirs[who] === own, `${who}'s system prompt names ${dirs[who]}, not ${own}`)
