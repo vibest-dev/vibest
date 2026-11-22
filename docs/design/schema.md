@@ -153,19 +153,18 @@ CREATE TABLE process (                                -- id: the seq of its proc
 CREATE UNIQUE INDEX process_live ON process (session_id) WHERE ended_at IS NULL;
 CREATE INDEX process_terminal ON process (runtime, terminal) WHERE ended_at IS NULL AND terminal IS NOT NULL;
 
-CREATE TABLE execution (                              -- id: the seq of its execution.started in the session
+CREATE TABLE execution (                              -- id: a per-session integer, allocated before start evidence
   session_id TEXT    NOT NULL,
   id         INTEGER NOT NULL,
   process_id INTEGER,
-  typed      TEXT,                                    -- the text typed into the pane; none for one a delivery opened
-  started_at INTEGER NOT NULL,
-  accepted_at INTEGER,                                -- its execution.accepted: the harness took the input up
-  outcome    TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),  -- null: open
+  typed      TEXT,                                    -- direct input typed into the pane; none for a delivery
+  booked_at  INTEGER NOT NULL,                        -- when the id was allocated
+  started_at INTEGER,                                 -- null until start evidence; null on an end-only row
+  outcome    TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),  -- null: the live one
   failure    TEXT,
   failure_kind TEXT CHECK (failure_kind IN ('limit')),  -- limit: the harness hit its usage limit
-  reply      TEXT,                                    -- the reply its execution.ended carried; null: none (lost, an exit)
+  reply      TEXT,                                    -- text the terminal event carried; null: none
   ended_at   INTEGER,
-  sent       INTEGER NOT NULL DEFAULT 0,              -- the sends queued with this execution named (inbox.queued, outbox.queued)
   PRIMARY KEY (session_id, id)
 ) STRICT;
 CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL;
@@ -255,9 +254,12 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | process.pid                         | process, pid: a pid report that is not a ready report                                                                                                                                                             |
 | process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                                         |
 | process.ended                       | process, reason: exited, restart, move (an entry session moving terminal), archived, launch_failed, superseded, stopped; by? (stopped: who stopped it, a sender)                                                  |
-| execution.started                   | process?, typed? (the text typed into the pane)                                                                                                                                                                   |
-| execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)                                                                                                       |
-| execution.ended                     | execution, outcome, failure? {message, kind?: limit, resetAt? (epoch ms)}, conversation?, reply? (the harness's reply, when it reported)                                                                          |
+| execution.allocated                 | executionId, processId?, typed? (direct input; not an inbox message). Allocating this id is not a start.                                                                                                          |
+| execution.started                   | executionId, processId?. Only with start evidence: the harness took the input, or the runtime saw it working.                                                                                                     |
+| execution.succeeded                 | executionId, reply?. The run ended normally. Not task acceptance and not a message sent.                                                                                                                          |
+| execution.failed                    | executionId, failure {message, kind?: limit, resetAt?}, reply?. Only a confirmed error.                                                                                                                           |
+| execution.interrupted               | executionId, reason?, reply?. A stop request is not this event.                                                                                                                                                   |
+| execution.unresolved                | executionId, observation: lost or not_started, failure?, reply?. Timeout or disconnect. Not a confirmed failure; a later terminal event for this id still applies.                                                |
 | inbox.queued                        | kind: task, send or notice, recipient?, sender, about? (a notice: the session it is about), content, status: pending, delivered or dropped, request?, peerItem?, execution? (a send: the sender's open execution) |
 | inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                                                                                                             |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                                                                                                     |
@@ -275,9 +277,11 @@ is there; it stays one process. Any other start while the session still has a li
 `superseded`. One whose terminal never opened ends `launch_failed`, and the session's current process is then the one
 before it, if any. Superseded processes are not exits: no reader counts them as one.
 
-An `execution.ended` the harness reported carries its reply (`reply`) and, when it changed, its conversation id; the
-projector copies `reply` into the execution's `reply` and the conversation into the current process. An end vibestd
-decided (`lost`, `not_started`, an exit, an interrupt it closed) has no `reply`.
+An `execution.succeeded` the harness reported carries its reply. A changed conversation id is a `process.conversation`,
+not an execution field. An execution vibestd gives up (`execution.unresolved`: `lost` or `not_started`) is not a
+confirmed result: it frees the one live slot, and a later report that names that execution still lands on it.
+`execution.sent` is not stored. `sentIn` and `latest.sent` count the sender's local `inbox.queued` sends and its
+`outbox.queued` sends for that execution.
 
 A reported end or start is written only for the session's current process: the harness's integration sends the
 process id vibestd started it as (`VIBEST_PROCESS`, or the one the ready report's answer gave after an in-place
@@ -382,7 +386,7 @@ E2E runs it on every world's database at the end of each check.
 - Session or entry session by terminal: `process_terminal`, joined to `session.process_id` and
   `project.entry_session_id`.
 - In-place restart after an update: live sessions (`session_live`), their live process, compare the integration.
-  Order: restarting mark in memory, SIGTERM, then `execution.ended` (interrupted) and `process.ended` (restart), then the new
+  Order: restarting mark in memory, SIGTERM, then `process.ended` (restart); the execution is not given a result by the restart, then the new
   `process.started`. A refused SIGTERM writes nothing.
 - `ls`: sessions by project, the first `task` row, the latest execution and live process as above. `result`: the
   latest ended execution with its `reply`.
@@ -391,7 +395,7 @@ E2E runs it on every world's database at the end of each check.
 
 - One-shot timers (engine): a session's execution-end grace and missed-execution check. Lost with the process; the
   start-up reconcile and `recoverDelivering` stand in for them.
-- Live status: from the integration's events (working between `execution.started` and `execution.ended`, plus `blocked`), and
+- Live status: from the integration's events (working between `execution.started` and a terminal execution event, plus `blocked`), and
   from the runtime only for a harness with no integration.
 - On start, `recoverDelivering` (one transaction) moves every `delivering` row (a message vibestd was typing when it
   stopped) to `failed`, each with an `inbox.moved`, and tells its sender once ("may or may not have arrived"); it is not
@@ -402,10 +406,10 @@ E2E runs it on every world's database at the end of each check.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an
   open execution stays open, and the harness's execution end or reconciliation (idle, no result: lost) ends it.
 - An execution start an integration reports, or the runtime showing the session working while an execution is open,
-  is that execution's `execution.accepted`, written once. An execution end is its `execution.ended` fact, written as
-  the hook is admitted (a settlement, so it still lands while vibestd drains). The proof that an execution was taken up
-  is its acceptance or its typed text; an inbox row linked into it is not, since a task is linked before the runtime
-  gets it.
+  is that execution's `execution.started`, written once. An execution end is `execution.succeeded`, `execution.failed`
+  or `execution.interrupted`, written as the hook is admitted (a settlement, so it still lands while vibestd drains).
+  The proof that an execution was taken up is that start or its typed text; an inbox row linked into it is not, since a
+  task is linked before the runtime gets it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - An entry session moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 
