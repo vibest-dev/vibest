@@ -44,7 +44,7 @@ export const SessionProcess = Schema.Struct({
   machine: Schema.String,
   terminal: Schema.NullOr(Schema.String),
   pid: Schema.NullOr(Schema.Number),
-  conversation: Schema.NullOr(Schema.String),
+  harnessSessionId: Schema.NullOr(Schema.String),
   placedAt: Schema.NullOr(Schema.Number),
   readyAt: Schema.NullOr(Schema.Number),
   endedAt: Schema.NullOr(Schema.Number),
@@ -122,7 +122,7 @@ export const startOf = (row: Pick<SessionRow, "process">): ProcessStart => {
     ...(process?.routing && { routing: process.routing }),
     runtime: process?.runtime ?? "",
     terminal: "",
-    ...(process?.conversation && { resume: process.conversation }),
+    ...(process?.harnessSessionId && { resume: process.harnessSessionId }),
   }
 }
 

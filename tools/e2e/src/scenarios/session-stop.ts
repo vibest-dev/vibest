@@ -28,7 +28,7 @@ const checks: ReadonlyArray<Check> = [
       const processes = (id: string) =>
         rows<Process>(
           w,
-          "SELECT pid, terminal, conversation, end_reason AS reason FROM process WHERE session_id = ? ORDER BY id",
+          "SELECT pid, terminal, harness_session_id AS conversation, end_reason AS reason FROM process WHERE session_id = ? ORDER BY id",
           id,
         )
 

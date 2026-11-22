@@ -379,7 +379,7 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
-      assert.isNull((yield* db.session.getSession(id))!.process?.conversation ?? null)
+      assert.isNull((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null)
       yield* writeEnd(id, "cursor", {
         hook_event_name: "afterAgentResponse",
         conversation_id: "c-123",
@@ -387,7 +387,7 @@ describe.concurrent("Session", () => {
       })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-123")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-123")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
       yield* until(db.session.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
@@ -399,10 +399,10 @@ describe.concurrent("Session", () => {
       yield* writeEnd(id, "cursor", { conversation_id: "c-other", text: "status: completed" }, 5000)
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-other")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-other")
       yield* herdr.updateAgent(id, (a) => ({ ...a, session: "h-9" }))
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "h-9")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "h-9")
     }),
   )
 
@@ -414,9 +414,9 @@ describe.concurrent("Session", () => {
       const current = (yield* db.session.currentProcessId(id))!
       const event = JSON.stringify({ hook_event_name: "beforeSubmitPrompt", conversation_id: "c-old", prompt: "x" })
       yield* integration.prompt({ id, entry: false, harness: "cursor", process: current - 1 }, event)
-      assert.isNull((yield* db.session.getSession(id))!.process?.conversation ?? null)
+      assert.isNull((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null)
       yield* integration.prompt({ id, entry: false, harness: "cursor", process: current }, event)
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "c-old")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-old")
     }),
   )
 

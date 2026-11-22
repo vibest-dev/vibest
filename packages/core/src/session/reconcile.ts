@@ -117,7 +117,7 @@ export const make = Effect.gen(function* () {
     if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && h.session !== undefined) {
       const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
 
-      if (sessionId !== null && sessionId !== (session.process?.conversation ?? null))
+      if (sessionId !== null && sessionId !== (session.process?.harnessSessionId ?? null))
         yield* db.session.noteConversation(id, sessionId)
     }
 

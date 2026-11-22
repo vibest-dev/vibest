@@ -396,14 +396,14 @@ describe("vibest.sock", () => {
         authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
 
       yield* as("pi", "pi-1").Send({ id: launch.sessionId, message: "one" })
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "pi-1")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
       yield* as("claude", "other").Send({ id: launch.sessionId, message: "two" })
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "pi-1")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
       yield* raw.ExecutionEnd(
         { sessionId: id, harness: "pi", event: "{}" },
         { headers: sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }) },
       )
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.conversation ?? null, "pi-2")
+      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "pi-2")
       const w = yield* asSession(yield* client, id)
       yield* w.Send({ id: launch.sessionId, message: "half way" })
       const sent = yield* db.inbox.latestInbox(launch.sessionId, "send")
@@ -463,7 +463,7 @@ describe("vibest.sock", () => {
         { headers: sessionHeaders({ sessionId: id, projectId: worker.projectId, pluginVersion: "1.2.3" }) },
       )
       assert.notStrictEqual(
-        (yield* db.session.getSession(id))!.process?.conversation ?? null,
+        (yield* db.session.getSession(id))!.process?.harnessSessionId ?? null,
         "worker-report",
         "a conversation reported by a session that is not its project's entry is ignored",
       )

@@ -363,7 +363,7 @@ describe("projectors", () => {
       const rows = yield* rowsOf<Readonly<Record<string, string | number | null>>>(
         sql,
         `SELECT id, harness, provider, model, routing, runtime, terminal, pid, integration_version,
-          integration_protocol, conversation, started_at, placed_at, ready_at, ended_at, end_reason
+          integration_protocol, harness_session_id, started_at, placed_at, ready_at, ended_at, end_reason
         FROM process ORDER BY started_at`,
       )
 
@@ -378,7 +378,7 @@ describe("projectors", () => {
         pid: 12,
         integrationVersion: "0.0.1",
         integrationProtocol: 8,
-        conversation: "conv-main",
+        harnessSessionId: "conv-main",
         startedAt: 220,
         placedAt: 225,
         readyAt: 235,
@@ -396,7 +396,7 @@ describe("projectors", () => {
         pid: 20,
         integrationVersion: null,
         integrationProtocol: null,
-        conversation: null,
+        harnessSessionId: null,
         startedAt: 302,
         placedAt: 302,
         readyAt: null,

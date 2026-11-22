@@ -37,7 +37,7 @@ const processStarts = (w: World) =>
 const latestProcess = (w: World) =>
   row<{ ready: number | null; conversation: string | null }>(
     w,
-    `SELECT p.ready_at AS ready, p.conversation FROM process p JOIN session s ON s.id = p.session_id
+    `SELECT p.ready_at AS ready, p.harness_session_id AS conversation FROM process p JOIN session s ON s.id = p.session_id
      WHERE s.agent = 'coordinator' ORDER BY p.started_at DESC, p.id DESC LIMIT 1`,
   )
 

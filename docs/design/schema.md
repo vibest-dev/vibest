@@ -142,7 +142,7 @@ CREATE TABLE process (                                -- id: the seq of its proc
   pid                  INTEGER,
   integration_version  TEXT,
   integration_protocol INTEGER,
-  conversation         TEXT,                          -- the conversation id: the one it resumes, then the one it reports
+  harness_session_id   TEXT,                          -- the harness session id: the one it resumes, then the one it reports
   started_at           INTEGER NOT NULL,
   placed_at            INTEGER,
   ready_at             INTEGER,

@@ -121,11 +121,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         EXISTS (
           SELECT 1 FROM execution t JOIN process p ON p.session_id = t.session_id AND p.id = t.process_id
           WHERE t.session_id = ${sessionId} AND (t.accepted_at IS NOT NULL OR t.outcome IS NOT NULL)
-            AND p.conversation = ${harnessSessionId}
+            AND p.harness_session_id = ${harnessSessionId}
         )
         OR (
           EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
-          AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND conversation = ${harnessSessionId})
+          AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND harness_session_id = ${harnessSessionId})
         )
       ) AS ok`.pipe(
         Effect.map((rows) => rows[0]?.ok === 1),

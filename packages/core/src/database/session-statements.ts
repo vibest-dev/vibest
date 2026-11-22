@@ -43,7 +43,7 @@ type ProcessColumns = {
   readonly runtime: string
   readonly terminal: string | null
   readonly pid: number | null
-  readonly conversation: string | null
+  readonly harnessSessionId: string | null
   readonly integrationVersion: string | null
   readonly integrationProtocol: number | null
   readonly readyAt: number | null
@@ -70,7 +70,7 @@ const currentOf = (row: ProcessColumns): Current => ({
   },
   ended: row.endedAt,
   terminal: row.terminal,
-  conversation: row.conversation,
+  conversation: row.harnessSessionId,
   integration:
     row.integrationVersion === null || row.integrationProtocol === null
       ? undefined
@@ -78,7 +78,7 @@ const currentOf = (row: ProcessColumns): Current => ({
   readyAt: row.readyAt,
 })
 
-const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, conversation,
+const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, harness_session_id,
   integration_version, integration_protocol, ready_at, ended_at`
 
 export const statements = Effect.gen(function* () {

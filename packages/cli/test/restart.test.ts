@@ -117,7 +117,7 @@ describe("restart in place", () => {
         `VIBEST_PROCESS=${yield* db.session.currentProcessId(id)}`,
         "a subagent restarted in its pane names its new process",
       )
-      assert.includeMembers([...run!.argv], ["--session-id", (down.process?.conversation ?? null)!])
+      assert.includeMembers([...run!.argv], ["--session-id", (down.process?.harnessSessionId ?? null)!])
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
       assert.strictEqual((yield* herdr.callsTo("open")).length, opened, "no new terminal")
