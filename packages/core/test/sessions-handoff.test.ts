@@ -239,6 +239,7 @@ test(
     yield* sessions.send(id, "bound batch")
     yield* held.reached
     yield* sessions.userPrompt(id, "an unrelated typed question")
+    yield* runtime.updateAgent(id, (agent) => ({ ...agent, status: "working", seq: agent.seq + 1 }))
     yield* held.release()
 
     for (let i = 0; i < 4; i++) yield* TestClock.adjust("9 seconds")

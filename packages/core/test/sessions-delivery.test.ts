@@ -327,12 +327,12 @@ describe.concurrent("Session", () => {
       assert.match(notices.at(-1)!, /^A message to .* was not delivered: .*send: failed/)
       assert.match(notices.at(-1)!, /\n\nfirst$/)
       assert.notMatch(notices.at(-1)!, /second/)
-      const rows = yield* until(all(id), (list) => list[1]?.status === "delivered")
+      const rows = yield* until(all(id), (list) => list[1]?.status === "delivering")
       assert.deepStrictEqual(
         rows.map((row) => [row.id, row.status]),
         [
           [first, "failed"],
-          [second, "delivered"],
+          [second, "delivering"],
         ],
       )
       assert.deepStrictEqual(
@@ -379,7 +379,7 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
       assert.deepStrictEqual(
         (yield* db.inbox.inboxWithStatus(id, "delivering")).map((r) => r.message),
-        ["first"],
+        ["first", "second"],
       )
       const later = yield* notices
       assert.strictEqual(later.length, 1)

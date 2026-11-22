@@ -122,7 +122,7 @@ export const make = Effect.gen(function* () {
       if (state === "working" || state === "blocked") {
         yield* pickedUp(session, execution, state)
 
-        return "handoff" as const
+        return "stop" as const
       }
 
       if (yield* db.session.executionAccepted(session.id)) return "stop" as const
@@ -145,13 +145,7 @@ export const make = Effect.gen(function* () {
       (event) =>
         event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
           ? Effect.succeed(Option.some("stop" as const))
-          : event.type === "terminal.state" &&
-              sameTerminal(event.terminal, terminal) &&
-              (event.state === "working" || event.state === "blocked")
-            ? pickupNow(h, session, terminal, execution).pipe(
-                Effect.map((picked) => (picked === "handoff" ? Option.some(picked) : Option.none())),
-              )
-            : Effect.succeed(Option.none()),
+          : Effect.succeed(Option.none()),
       CONFIRM_TIMEOUT,
       Effect.succeed("stop" as const),
     )
@@ -267,22 +261,19 @@ export const make = Effect.gen(function* () {
 
     if (already && delivered === false) return HANDOFF_UNPROVED
 
-    if (delivered) return undefined
+    if (delivered) return HANDOFF_UNPROVED
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
     const confirm = confirmed(h, session, terminal, execution, subscription)
-
     const watched = yield* confirm
+    const after = stateOf(yield* sessionState(h, terminal, Effect.succeed(state)))
 
-    if (watched === "handoff") return already ? HANDOFF_UNPROVED : undefined
-
-    if ((yield* settledElsewhere) || (yield* db.session.executionWasAccepted(session.id, execution)))
-      return HANDOFF_UNPROVED
-    yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
-    const watchedAgain = yield* confirm
-
-    if (watchedAgain === "handoff") return already ? HANDOFF_UNPROVED : undefined
-
-    if ((yield* settledElsewhere) || (yield* db.session.executionWasAccepted(session.id, execution)))
+    if (
+      watched === "stop" ||
+      (yield* settledElsewhere) ||
+      (yield* db.session.executionWasAccepted(session.id, execution)) ||
+      after === "working" ||
+      after === "blocked"
+    )
       return HANDOFF_UNPROVED
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed

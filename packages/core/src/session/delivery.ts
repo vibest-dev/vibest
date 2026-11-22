@@ -83,15 +83,7 @@ export const make = Effect.gen(function* () {
 
       if (notStarted === HANDOFF_UNPROVED) return
 
-      if (notStarted) {
-        yield* notice(session, notStarted)
-
-        return
-      }
-
-      const execution = yield* db.session.openExecution(session.id)
-
-      if (execution !== undefined) yield* db.inbox.confirmTask(session.id, execution)
+      if (notStarted) yield* notice(session, notStarted)
 
       return
     }
