@@ -1,6 +1,6 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
-import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, PubSub, Ref, Schedule } from "effect"
+import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
@@ -114,42 +114,6 @@ export const make = Effect.gen(function* () {
       return true
     })
 
-  const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
-    Effect.gen(function* () {
-      if ((yield* db.session.openExecution(session.id)) !== execution) return "stop" as const
-      const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
-
-      if (state === "working" || state === "blocked") {
-        yield* pickedUp(session, execution, state)
-
-        return "stop" as const
-      }
-
-      if (yield* db.session.executionAccepted(session.id)) return "stop" as const
-
-      return "wait" as const
-    })
-
-  const confirmed = (
-    h: Runtime,
-    session: SessionRow,
-    terminal: Terminal,
-    execution: number,
-    subscription: PubSub.Subscription<BusEvent>,
-  ) =>
-    awaitOn(
-      subscription,
-      pickupNow(h, session, terminal, execution).pipe(
-        Effect.map((picked) => (picked === "wait" ? Option.none() : Option.some(picked))),
-      ),
-      (event) =>
-        event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
-          ? Effect.succeed(Option.some("stop" as const))
-          : Effect.succeed(Option.none()),
-      CONFIRM_TIMEOUT,
-      Effect.succeed("stop" as const),
-    )
-
   const settleAfterInterrupt = Effect.fn("Executions.settleAfterInterrupt")((
     h: Runtime,
     session: SessionRow,
@@ -241,13 +205,10 @@ export const make = Effect.gen(function* () {
     )
 
     const missed = db.session.closeExecution(session.id, execution, "not_started")
-    const subscription = yield* bus.subscribe()
-
-    const delivered = yield* send.pipe(
-      Effect.as(false),
+    yield* send.pipe(
       Effect.catchTag("RuntimeError", (error) =>
         Effect.gen(function* () {
-          if (already) return false
+          if (already) return
 
           const after = yield* standing
 
@@ -259,26 +220,13 @@ export const make = Effect.gen(function* () {
       ),
     )
 
-    if (already && delivered === false) return HANDOFF_UNPROVED
-
-    if (delivered) return HANDOFF_UNPROVED
-    const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
-    const confirm = confirmed(h, session, terminal, execution, subscription)
-    const watched = yield* confirm
-    const after = stateOf(yield* sessionState(h, terminal, Effect.succeed(state)))
-
-    if (
-      watched === "stop" ||
-      (yield* settledElsewhere) ||
-      (yield* db.session.executionWasAccepted(session.id, execution)) ||
-      after === "working" ||
-      after === "blocked"
+    const seen = stateOf(
+      yield* sessionState(h, terminal, Effect.succeed(state)).pipe(Effect.orElseSucceed(() => state)),
     )
-      return HANDOFF_UNPROVED
-    yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
-    yield* missed
 
-    return `${sessionLabel(session)} did not start working on the message`
+    if (seen === "working" || seen === "blocked") yield* pickedUp(session, execution, seen)
+
+    return HANDOFF_UNPROVED
   }, Effect.scoped)
 
   const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {

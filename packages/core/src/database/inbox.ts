@@ -311,20 +311,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const waitingOn = (id: string) =>
       sql<{ id: number }>`SELECT id FROM inbox
         WHERE (recipient_session_id = ${id} OR sender_session_id = ${id} OR about_session_id = ${id})
-          AND (
-            status = 'pending'
-            OR (
-              status = 'delivering'
-              AND (
-                recipient_execution_id IS NULL
-                OR EXISTS (
-                  SELECT 1 FROM execution e
-                  WHERE e.session_id = inbox.recipient_session_id AND e.id = inbox.recipient_execution_id
-                    AND e.outcome IS NULL
-                )
-              )
-            )
-          )
+          AND status = 'pending'
         LIMIT 1`.pipe(Effect.map((rows) => rows.length > 0))
 
     return {
