@@ -17,7 +17,7 @@ const outboxCount = Effect.flatMap(SqlClient.SqlClient, (sql) =>
 
 const inboxCount = (recipient: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    sql`SELECT id FROM inbox WHERE session_id = ${recipient}`.pipe(Effect.map((r) => r.length)),
+    sql`SELECT id FROM inbox WHERE recipient_session_id = ${recipient}`.pipe(Effect.map((r) => r.length)),
   )
 
 describe("a Send retried with the same request across machines", () => {

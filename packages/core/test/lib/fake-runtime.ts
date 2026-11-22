@@ -108,7 +108,12 @@ export class FakeRuntime extends Context.Service<
       readonly release: (code?: string) => Effect.Effect<void>
     }>
     readonly reachable: Ref.Ref<boolean>
-    readonly onStarted: Ref.Ref<(session: string) => Effect.Effect<void>>
+    readonly onStarted: Ref.Ref<
+      (
+        session: string,
+        launch?: { readonly env: Readonly<Record<string, string>>; readonly working: boolean },
+      ) => Effect.Effect<void>
+    >
     readonly skipPromptUpdates: Ref.Ref<number>
     readonly events: PubSub.PubSub<RuntimeEvent>
   }
@@ -135,7 +140,14 @@ export class FakeRuntime extends Context.Service<
       const panes = yield* Ref.make(HashMap.empty<string, { readonly workspaceId: string; readonly cwd: string }>())
       const holds = yield* Ref.make(HashMap.empty<HoldMethod, Hold>())
       const events = yield* PubSub.unbounded<RuntimeEvent>()
-      const onStarted = yield* Ref.make<(session: string) => Effect.Effect<void>>(() => Effect.void)
+
+      const onStarted = yield* Ref.make<
+        (
+          session: string,
+          launch?: { readonly env: Readonly<Record<string, string>>; readonly working: boolean },
+        ) => Effect.Effect<void>
+      >(() => Effect.void)
+
       const marks = yield* Ref.make(HashMap.empty<string, R.Seen>())
 
       const markOf = (terminal: string) =>
@@ -343,7 +355,7 @@ export class FakeRuntime extends Context.Service<
             }))
             const session = record.value.vibestSession
 
-            if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
+            if (session !== undefined) yield* (yield* Ref.get(onStarted))(session, { env: launch.env, working })
           }),
         )
 
@@ -427,7 +439,7 @@ export class FakeRuntime extends Context.Service<
                 return next
               })
 
-              if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
+              if (session !== undefined) yield* (yield* Ref.get(onStarted))(session, { env: input.launch.env, working })
               const terminal: Terminal = { id: paneId }
 
               return terminal

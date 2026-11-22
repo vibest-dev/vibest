@@ -22,7 +22,11 @@ const orderedModel = (name: string) =>
 type Ordered = ReturnType<typeof orderedModel>
 
 const inboxFrom = (w: World, sender: string) =>
-  row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send'", sender)?.n ?? 0
+  row<{ n: number }>(
+    w,
+    "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
+    sender,
+  )?.n ?? 0
 
 const S67: Check = {
   id: "S67",
@@ -113,7 +117,7 @@ const S67: Check = {
       expect(
         (row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
+          "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
           a.id,
           b.id,
         )?.n ?? 0) === 1,

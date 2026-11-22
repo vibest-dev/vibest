@@ -10,7 +10,7 @@ import { SqlClient } from "effect/sql"
 import { KIND as RUNTIME } from "../../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./directory.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
-import { CLAUDE, PULLING_PI } from "./harnesses.ts"
+import { PULLING_PI } from "./harnesses.ts"
 import { settled, EXECUTIONS, until, writeEnd } from "./observe.ts"
 import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
@@ -63,13 +63,12 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
     } as const
   })
 
-export const claudeEnd = (reason: string) =>
-  CLAUDE.executionEnd!({
-    hook_event_name: "ExecutionComplete",
-    session_id: "c1",
-    reason,
-    last_assistant_message: "",
-  })!.end
+export const claudeEnd = (reason: string) => ({
+  hook_event_name: "ExecutionComplete",
+  session_id: "c1",
+  reason,
+  last_assistant_message: "",
+})
 
 export const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
@@ -95,7 +94,8 @@ export const idleSession = (repo: string) =>
     const herdr = yield* FakeRuntime
     const w = yield* spawnWorking(repo, "pi")
     yield* herdr.endExecution(w.id)
-    yield* writeEnd(w.id, "pi", { text: "status: completed" })
+    const open = yield* w.db.session.openExecution(w.id)
+    yield* writeEnd(w.id, "pi", { text: "status: completed", ...(open !== undefined && { execution: open }) })
     yield* w.sessions.check(w.id)
     yield* settled
 
@@ -153,7 +153,7 @@ export const sqlNotices = (sessionId: string) =>
 
     const rows = yield* sql<{
       message: string
-    }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.about_session_id = ${sessionId} ORDER BY m.id`.pipe(
+    }>`SELECT m.content AS message FROM inbox m WHERE m.sender_type = 'vibest' AND m.about_session_id = ${sessionId} ORDER BY m.id`.pipe(
       Effect.orDie,
     )
 

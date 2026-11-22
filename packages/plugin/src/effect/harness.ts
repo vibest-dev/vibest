@@ -51,7 +51,6 @@ export interface HarnessDefinition {
   readonly ownSessionId: boolean
   readonly systemPromptInPrompt: boolean
   readonly interruptKey: string
-  readonly replyField: "text" | "last_assistant_message"
   readonly delivery: "typed" | "pull"
   readonly ready: "integration" | "runtime"
   readonly clearKeys?: ReadonlyArray<string>
@@ -64,10 +63,22 @@ export interface HarnessDefinition {
   readonly subscription?: (home: string, binary: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => Schema.Json
   readonly guardCall?: (event: HarnessEvent) => HarnessEvent | undefined
-  readonly executionEnd?: (event: HarnessEvent) => { readonly end: Schema.JsonObject } | undefined
+  readonly executionEnd?: (event: HarnessEvent) =>
+    | {
+        readonly reply: string
+        readonly failure?: string
+        readonly interrupted?: boolean
+        readonly conversation?: string
+        readonly execution?: number
+      }
+    | undefined
   readonly userPrompt?: (
     event: HarnessEvent,
-  ) => { readonly text: string } | { readonly execution: number; readonly refused?: true } | undefined
+  ) =>
+    | { readonly text: string }
+    | { readonly execution: number; readonly refused?: true; readonly ids?: ReadonlyArray<number> }
+    | { readonly activity: true }
+    | undefined
   readonly conversationOf?: (event: HarnessEvent) => string | undefined
 }
 

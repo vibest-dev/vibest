@@ -1,6 +1,6 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
-import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, PubSub, Ref, Schedule } from "effect"
+import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule, Schema } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
@@ -15,6 +15,7 @@ import {
   type AgentState,
   paneTail,
   type Runtime,
+  RuntimeError,
   stateOf,
   type Terminal,
   type AgentSeen,
@@ -22,6 +23,12 @@ import {
 import { SessionLive } from "./live.ts"
 
 export * as Executions from "./executions.ts"
+
+export const HANDOFF_UNPROVED = "unproved"
+
+export class HandoffRejected extends Schema.TaggedError<HandoffRejected>()("HandoffRejected", {
+  message: Schema.String,
+}) {}
 
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
@@ -104,47 +111,6 @@ export const make = Effect.gen(function* () {
       }),
   )
 
-  const pickedUp = (session: SessionRow, execution: number, state: "working" | "blocked") =>
-    Effect.gen(function* () {
-      yield* db.session.acceptExecution(session.id, execution)
-      yield* db.session.setStatus(session.id, state)
-
-      return true
-    })
-
-  const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
-    Effect.gen(function* () {
-      const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
-
-      if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
-
-      return yield* db.session.executionAccepted(session.id)
-    })
-
-  const confirmed = (
-    h: Runtime,
-    session: SessionRow,
-    terminal: Terminal,
-    execution: number,
-    subscription: PubSub.Subscription<BusEvent>,
-  ) =>
-    awaitOn(
-      subscription,
-      pickupNow(h, session, terminal, execution).pipe(
-        Effect.map((picked) => (picked ? Option.some(true) : Option.none())),
-      ),
-      (event) =>
-        event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
-          ? Effect.succeed(Option.some(true))
-          : event.type === "terminal.state" &&
-              sameTerminal(event.terminal, terminal) &&
-              (event.state === "working" || event.state === "blocked")
-            ? Effect.map(pickedUp(session, execution, event.state), Option.some)
-            : Effect.succeed(Option.none()),
-      CONFIRM_TIMEOUT,
-      pickupNow(h, session, terminal, execution),
-    )
-
   const settleAfterInterrupt = Effect.fn("Executions.settleAfterInterrupt")((
     h: Runtime,
     session: SessionRow,
@@ -170,7 +136,10 @@ export const make = Effect.gen(function* () {
             sameTerminal(event.terminal, terminal) &&
             event.state !== "working" &&
             event.state !== "blocked") ||
-            (event.type === "execution.ended" && event.sessionId === session.id)
+            ((event.type === "execution.succeeded" ||
+              event.type === "execution.failed" ||
+              event.type === "execution.interrupted") &&
+              event.sessionId === session.id)
             ? Option.some(true)
             : Option.none(),
         ),
@@ -215,6 +184,7 @@ export const make = Effect.gen(function* () {
 
     if (!begun.opened) return undefined
     const execution = begun.execution
+    const already = yield* db.session.executionWasAccepted(session.id, execution)
 
     const standing = Effect.map(db.session.openExecution(session.id), (now) =>
       now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
@@ -226,26 +196,35 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(r.blockedNotified, false)
     yield* db.session.setStatus(session.id, state)
 
+    const missed = db.session.closeExecution(session.id, execution, "not_started")
+
+    const beforeText = (error: RuntimeError) =>
+      Effect.gen(function* () {
+        if (error.code === "unreachable") return yield* Effect.fail(error)
+
+        if (!(yield* db.session.executionTaken(session.id)) && (yield* standing) === "mine") yield* missed
+
+        return yield* new HandoffRejected({ message: error.message })
+      })
+
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(
-        adapter.clearKeys === undefined ? Effect.void : h.send(terminal, { keys: [...adapter.clearKeys] }),
+        adapter.clearKeys === undefined
+          ? Effect.void
+          : h.send(terminal, { keys: [...adapter.clearKeys] }).pipe(Effect.catchTag("RuntimeError", beforeText)),
       ),
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
 
-    const missed = db.session.closeExecution(session.id, execution, "not_started")
-    const subscription = yield* bus.subscribe()
-
-    const delivered = yield* send.pipe(
-      Effect.as(false),
+    yield* send.pipe(
       Effect.catchTag("RuntimeError", (error) =>
         Effect.gen(function* () {
+          if (already) return
+
           const after = yield* standing
 
-          if (after === "closed") return true
-
-          if (error.code === "unreachable" || after === "busy") return yield* Effect.fail(error)
+          if (after === "closed" || error.code === "unreachable" || after === "busy") return yield* Effect.fail(error)
           yield* missed
 
           return yield* error
@@ -253,27 +232,13 @@ export const make = Effect.gen(function* () {
       ),
     )
 
-    if (delivered) return undefined
-    const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
-    const confirm = confirmed(h, session, terminal, execution, subscription)
+    const seen = stateOf(
+      yield* sessionState(h, terminal, Effect.succeed(state)).pipe(Effect.orElseSucceed(() => state)),
+    )
 
-    if (yield* confirm) return undefined
+    if (seen === "working" || seen === "blocked") yield* db.session.setStatus(session.id, seen)
 
-    if (yield* settledElsewhere) return undefined
-    yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
-
-    if (yield* confirm) return undefined
-
-    if (yield* settledElsewhere) return undefined
-    yield* send.pipe(Effect.ignore)
-
-    if (yield* confirm) return undefined
-
-    if (yield* settledElsewhere) return undefined
-    yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
-    yield* missed
-
-    return `${sessionLabel(session)} did not start working on the message`
+    return HANDOFF_UNPROVED
   }, Effect.scoped)
 
   const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
@@ -302,11 +267,14 @@ export const make = Effect.gen(function* () {
 
     const taken = Effect.gen(function* () {
       if ((yield* db.session.openExecution(session.id)) !== execution) return true
+
+      if (yield* db.session.executionAccepted(session.id)) return true
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
 
-      if (state === "working") return yield* pickedUp(session, execution, state)
+      if (state !== "working" && state !== "blocked") return false
+      yield* db.session.setStatus(session.id, state)
 
-      return yield* db.session.executionAccepted(session.id)
+      return true
     })
 
     const process = (yield* db.session.getSession(session.id))?.process?.id

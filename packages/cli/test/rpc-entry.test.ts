@@ -69,7 +69,10 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
       const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.session.executionAccepted(id), (accepted) => accepted)
+      yield* until(
+        db.session.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
       yield* Ref.set(herdr.reachable, false)
       const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
       assert.strictEqual(failed._tag, "RuntimeUnreachable")

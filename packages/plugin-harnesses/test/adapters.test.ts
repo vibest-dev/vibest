@@ -82,9 +82,11 @@ describe("HarnessAdapter", () => {
 
   it("agy's execution ends at the Stop of a turn that does not continue, failed when agy names an error", () => {
     const stop = { hookEventName: "Stop", conversationId: "c1", continuationActive: false, error: "" }
-    assert.deepStrictEqual(agy.executionEnd!(stop), { end: { text: "", conversation_id: "c1" } })
+    assert.deepStrictEqual(agy.executionEnd!(stop), { reply: "", conversation: "c1" })
     assert.deepStrictEqual(agy.executionEnd!({ ...stop, error: "quota" }), {
-      end: { text: "", conversation_id: "c1", error: "quota" },
+      reply: "",
+      conversation: "c1",
+      failure: "quota",
     })
     assert.isUndefined(agy.executionEnd!({ ...stop, continuationActive: true }))
     assert.isUndefined(agy.executionEnd!({ hookEventName: "PreInvocation", conversationId: "c1" }))
@@ -140,7 +142,7 @@ describe("HarnessAdapter", () => {
   it("cursor reports its execution end at its response; its stop hook is not one", () => {
     const executionEnd = ADAPTERS.cursor.executionEnd!
     const reply = { hook_event_name: "afterAgentResponse", text: "done" }
-    assert.deepStrictEqual(executionEnd(reply), { end: reply })
+    assert.deepStrictEqual(executionEnd(reply), { reply: "done" })
 
     for (const status of ["completed", "aborted", "error"])
       assert.isUndefined(executionEnd({ hook_event_name: "stop", status }))
@@ -156,39 +158,23 @@ describe("HarnessAdapter", () => {
       last_assistant_message: "done",
     }
 
-    assert.deepStrictEqual(executionEnd(answer), { end: answer })
+    assert.deepStrictEqual(executionEnd(answer), { reply: "done" })
     const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
-    assert.deepStrictEqual(executionEnd(aborted), {
-      end: {
-        ...aborted,
-        aborted: true,
-        error: "interrupted",
-        error_details: "the execution was stopped in its terminal (Esc) before it ended",
-      },
-    })
+    assert.deepStrictEqual(executionEnd(aborted), { reply: "", interrupted: true })
     const error = { ...answer, reason: "error", last_assistant_message: "" }
     assert.deepStrictEqual(executionEnd(error), {
-      end: { ...error, error: "error", error_details: "the execution ended on an API error" },
+      reply: "",
+      failure: "error: the execution ended on an API error",
     })
     assert.deepStrictEqual(executionEnd({ ...error, last_assistant_message: " API Error: 500 " }), {
-      end: {
-        ...error,
-        last_assistant_message: " API Error: 500 ",
-        error: "error",
-        error_details: "the execution ended on an API error",
-      },
+      reply: " API Error: 500 ",
+      failure: "error: the execution ended on an API error",
     })
     const refusal = { ...answer, reason: "refusal", refusal: { category: "cyber", explanation: "not that" } }
-    assert.deepStrictEqual(executionEnd(refusal), {
-      end: { ...refusal, error: "refusal", error_details: "cyber: not that" },
-    })
+    assert.deepStrictEqual(executionEnd(refusal), { reply: "done", failure: "refusal: cyber: not that" })
     assert.deepStrictEqual(executionEnd({ ...refusal, refusal: { category: null, explanation: null } }), {
-      end: {
-        ...refusal,
-        refusal: { category: null, explanation: null },
-        error: "refusal",
-        error_details: "the model refused to answer",
-      },
+      reply: "done",
+      failure: "refusal: the model refused to answer",
     })
 
     for (const name of ["Stop", "StopFailure", "SubagentStop"])
@@ -226,7 +212,7 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }))
 
     for (const hook_event_name of ["afterAgentThought", "postToolUse"]) {
-      assert.deepStrictEqual(userPrompt({ hook_event_name }), { text: "" })
+      assert.deepStrictEqual(userPrompt({ hook_event_name }), { activity: true })
     }
   })
 

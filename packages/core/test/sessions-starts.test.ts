@@ -392,7 +392,7 @@ describe("a cap on live harness processes", () => {
       yield* until(waiting, (keys) => keys.length === 3)
 
       assert.match((yield* sessions.interrupt(b!)).message, /will not start/)
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(b!))!), "interrupted")
+      assert.strictEqual(executionStateOf((yield* db.session.getSession(b!))!), "not_started")
       yield* sessions.remove(c!)
       assert.deepStrictEqual(yield* waiting, [d])
 

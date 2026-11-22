@@ -95,7 +95,7 @@ const checks: ReadonlyArray<Check> = [
 
           const inbox = rows(
             w,
-            "SELECT id, kind, status, sender_session_id FROM inbox WHERE session_id = ? ORDER BY id",
+            "SELECT id, status, sender_session_id FROM inbox WHERE recipient_session_id = ? ORDER BY id",
             c!.entryId,
           )
 

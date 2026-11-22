@@ -16,7 +16,7 @@ it as its creator. `vibest run` in a terminal that is not a session is refused a
 
 `vibest result` has no `reply` before a session's first execution ends and then holds its reply as `reply` (the latest ended
 execution's status and reply text, kept in the execution row; an execution vibestd ended itself, lost or by an exit, has no text; a
-reply that arrives after vibestd gave up its execution as lost is an execution of its own, not attached back); `vibest status` says vibestd is
+reply that arrives after vibestd gave up its execution as lost is recorded on that same execution, not on a later one); `vibest status` says vibestd is
 running and which process it is; `vibest ls` lists the entry session and each session with its latest reply. When one session's worktree cannot be read,
 the list still has every session: that row's `git.unknown` is the error (`git cannot read it` when the folder is gone)
 and the other rows keep their git state. After
@@ -191,7 +191,7 @@ An unknown project or machine fails with its own message and prints no list.
 ## S66. Stopping a session
 
 `vibest stop <id>`, run by the session that started it, ends the session's harness process and closes its terminal; a
-working session is interrupted first, as `vibest archive` does, and that execution ends interrupted. The session, its
+working session is interrupted first, as `vibest archive` does. The execution ends interrupted only once that stop is confirmed (the harness leaves working, or it reports the interrupt). Closing the terminal without that confirmation leaves the result unknown (`lost` if it had started, `not_started` if it had not) and does not block the next send. The session, its
 worktree and branch, and its messages stay: `vibest ls --all` lists it as exited, and the next `vibest send` to it
 resumes the same conversation in a new terminal, where the message is answered. A message already waiting for it when
 it stops resumes it at once. If its terminal does not close, the stop fails and the session keeps running with its

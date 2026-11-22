@@ -1,4 +1,11 @@
-import { InboxMoved, InboxQueued, type InboxKind, type Sender } from "@vibest/schema/event"
+import {
+  InboxDelivered,
+  InboxDeliveryFailed,
+  InboxDeliveryStarted,
+  InboxDropped,
+  InboxEnqueued,
+  type Sender,
+} from "@vibest/schema/event"
 import { InboxStatus } from "@vibest/schema/session"
 import { Clock, Effect } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
@@ -22,18 +29,20 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const inbox = reads.inboxWhere
 
     const inboxIn = (recipient: string, ids: ReadonlyArray<number>) =>
-      inbox(sql`m.session_id = ${recipient} AND ${sql.in("m.id", ids)}`)
+      inbox(sql`m.recipient_session_id = ${recipient} AND ${sql.in("m.id", ids)}`)
 
     const keysIn = (keys: ReadonlyArray<InboxKey>) =>
-      sql.or(keys.map((k) => sql`(session_id = ${k.session} AND id = ${k.id})`))
+      sql.or(keys.map((k) => sql`(recipient_session_id = ${k.session} AND id = ${k.id})`))
+
+    const notDelegation = sql`NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`
 
     const findSend = (sessionId: string, status: InboxStatus) =>
-      inbox(sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${status}`)
+      inbox(sql`m.recipient_session_id = ${sessionId} AND m.status = ${status} AND ${notDelegation}`)
 
     const moveInbox = (
       where: Statement.Fragment,
-      to: "pending" | "delivering" | "delivered" | "failed" | "dropped",
-      into?: number,
+      to: "delivering" | "delivered" | "failed" | "dropped",
+      detail?: { readonly execution?: number; readonly reason?: string },
     ) =>
       tx(
         Effect.gen(function* () {
@@ -41,17 +50,42 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
             id: number
             status: string
             session: string
-          }>`SELECT id, status, session_id AS session FROM inbox WHERE ${where} ORDER BY session_id, id`
+          }>`SELECT id, status, recipient_session_id AS session FROM inbox WHERE ${where} ORDER BY recipient_session_id, id`
 
           const moved = rows.filter((r) => r.status !== to)
           const at = yield* now
 
           for (const r of moved) {
-            const execution = to === "delivered" ? (into ?? (yield* openExecution(r.session))) : undefined
-            yield* publish(InboxMoved, {
+            if (to === "delivering") {
+              yield* publish(InboxDeliveryStarted, {
+                sessionId: r.session,
+                at,
+                data: { messageId: r.id, ...(detail?.execution !== undefined && { execution: detail.execution }) },
+              })
+              continue
+            }
+
+            if (to === "delivered") {
+              const execution = detail?.execution ?? (yield* openExecution(r.session))
+
+              if (execution === undefined)
+                return yield* Effect.die(new Error(`inbox ${r.session} ${r.id} delivered without an execution`))
+              yield* publish(InboxDelivered, {
+                sessionId: r.session,
+                at,
+                data: { messageId: r.id, recipientExecutionId: execution },
+              })
+              continue
+            }
+
+            const reason = detail?.reason
+
+            if (reason === undefined)
+              return yield* Effect.die(new Error(`inbox ${r.session} ${r.id} ${to} without a reason`))
+            yield* publish(to === "failed" ? InboxDeliveryFailed : InboxDropped, {
               sessionId: r.session,
               at,
-              data: { inbox: r.id, to, ...(execution !== undefined && { execution }) },
+              data: { messageId: r.id, reason },
             })
           }
 
@@ -61,39 +95,39 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
     const queueInbox = (row: {
       readonly recipient: string
-      readonly kind: "task" | "send" | "notice"
       readonly sender: Sender
       readonly about?: string | undefined
       readonly content: string
-      readonly status: "pending" | "delivered" | "dropped"
       readonly request?: string | undefined
-      readonly peerItem?: string | undefined
-      readonly execution?: number | undefined
+      readonly transfer?: string | undefined
+      readonly senderExecution?: number | undefined
       readonly at?: number | undefined
     }) =>
-      publish(InboxQueued, {
+      publish(InboxEnqueued, {
         sessionId: row.recipient,
         ...(row.at !== undefined && { at: row.at }),
         data: {
-          kind: row.kind,
-          recipient: row.recipient,
           sender: row.sender,
-          ...(row.about !== undefined && { about: row.about }),
           content: row.content,
-          status: row.status,
-          ...(row.request !== undefined && { request: row.request }),
-          ...(row.peerItem !== undefined && { peerItem: row.peerItem }),
-          ...(row.execution !== undefined && { execution: row.execution }),
+          ...(row.about !== undefined && { aboutSessionId: row.about }),
+          ...(row.request !== undefined && { requestId: row.request }),
+          ...(row.transfer !== undefined && { transferId: row.transfer }),
+          ...(row.senderExecution !== undefined && { senderExecutionId: row.senderExecution }),
         },
       })
 
     const linkTask = (sessionId: string, execution: number, at: number) =>
       Effect.gen(function* () {
-        const [task] = yield* sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${sessionId}
-          AND kind = 'task' AND status = 'delivered' AND execution_id IS NULL`
+        const [task] = yield* sql<{ id: number }>`SELECT i.id FROM inbox i
+          JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id
+          WHERE i.recipient_session_id = ${sessionId} AND i.status = 'pending' AND i.recipient_execution_id IS NULL`
 
         if (task !== undefined)
-          yield* publish(InboxMoved, { sessionId, at, data: { inbox: task.id, to: "delivered", execution } })
+          yield* publish(InboxDeliveryStarted, {
+            sessionId,
+            at,
+            data: { messageId: task.id, execution },
+          })
       })
 
     const liveRecipient = (id: string) =>
@@ -124,8 +158,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const queuedFrom = (sender: Sender, request: string) =>
       recorded(sender).pipe(
         Effect.flatMap(
-          (as) => sql<{ session: string; id: number }>`SELECT session_id AS session, id FROM inbox
-            WHERE sender_key = ${senderKey(as)} AND request = ${request}`,
+          (as) => sql<{ session: string; id: number }>`SELECT recipient_session_id AS session, id FROM inbox
+            WHERE sender_key = ${senderKey(as)} AND request_id = ${request}`,
         ),
         Effect.map((rows) => rows[0]),
       )
@@ -139,12 +173,10 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const queueSend = (recipient: string, sender: Sender, message: string, request?: string) =>
       Effect.gen(function* () {
         const id = yield* queueInbox({
-          execution: yield* executionOf(sender),
+          senderExecution: yield* executionOf(sender),
           recipient,
-          kind: "send",
           sender: yield* recorded(sender),
           content: envelopeFrom(sender, message),
-          status: "pending",
           request,
         })
 
@@ -156,10 +188,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         if (!(yield* liveRecipient(recipient))) return false
         yield* queueInbox({
           recipient,
-          kind: "notice",
           sender: { type: "vibest" },
           content: noticeEnvelope(content),
-          status: "pending",
         })
 
         return true
@@ -171,19 +201,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
         if (heir === undefined) return undefined
 
-        const insert = (recipient: string, status: "pending" | "dropped") =>
-          queueInbox({
-            recipient,
-            kind: "notice",
-            sender: { type: "vibest" },
-            about: row.sessionId,
-            content: noticeEnvelope(row.message),
-            status,
-            at,
-          }).pipe(Effect.flatMap((id) => inboxIn(recipient, [id])))
-
         if ("peer" in heir) {
-          const [queued] = yield* insert(row.sessionId, "dropped")
           yield* remote.queueForPeer(heir.peer, heir.session, {
             sessionId: row.sessionId,
             content: row.message,
@@ -191,7 +209,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
             ...(at !== undefined && { at }),
           })
 
-          return queued!
+          return undefined
         }
 
         const [route] = yield* sql<{ project: string; entry: string | null }>`SELECT
@@ -199,9 +217,21 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${heir.local}`
 
         const present = route?.entry !== heir.local || placed(route.project, yield* currentProcess(heir.local))
-        const [queued] = yield* insert(heir.local, present ? "pending" : "dropped")
 
-        return queued!
+        const id = yield* queueInbox({
+          recipient: heir.local,
+          sender: { type: "vibest" },
+          about: row.sessionId,
+          content: noticeEnvelope(row.message),
+          at,
+        })
+
+        if (!present)
+          yield* moveInbox(sql`recipient_session_id = ${heir.local} AND id = ${id}`, "dropped", {
+            reason: "the entry session is not running",
+          })
+
+        return (yield* inboxIn(heir.local, [id]))[0]
       })
 
     const tellSender = (sender: string, content: string) =>
@@ -220,9 +250,10 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           sender: string
           recipient: string
           content: string
-        }>`SELECT sender_session_id AS sender, session_id AS recipient, content FROM inbox
-          WHERE (${keysIn(keys)}) AND kind = 'send' AND sender_session_id IS NOT NULL AND sender_machine IS NULL
-          ORDER BY session_id, id`
+        }>`SELECT sender_session_id AS sender, recipient_session_id AS recipient, content FROM inbox
+          WHERE (${keysIn(keys)}) AND sender_type = 'agent' AND sender_session_id IS NOT NULL AND sender_machine IS NULL
+            AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)
+          ORDER BY recipient_session_id, id`
 
         const groups = Map.groupBy(sends, (s) => `${s.sender}\n${s.recipient}`)
 
@@ -235,17 +266,55 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         }
       })
 
+    const confirm = (sessionId: string, execution: number) =>
+      moveInbox(
+        sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+          AND (id = (SELECT message_id FROM session WHERE id = ${sessionId})
+            OR EXISTS (SELECT 1 FROM execution e WHERE e.session_id = ${sessionId} AND e.id = ${execution}
+              AND e.outcome = 'completed' AND e.typed IS NULL))`,
+        "delivered",
+        { execution },
+      )
+
+    const confirmBatch = (sessionId: string, execution: number, ids: ReadonlyArray<number>) =>
+      ids.length === 0
+        ? Effect.void
+        : moveInbox(
+            sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+              AND ${sql.in("id", ids)}`,
+            "delivered",
+            { execution },
+          )
+
+    const confirmTask = (sessionId: string, execution: number) =>
+      moveInbox(
+        sql`recipient_session_id = ${sessionId} AND status = 'delivering' AND recipient_execution_id = ${execution}
+          AND id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
+        "delivered",
+        { execution },
+      )
+
+    const dropUnsent = (sessionId: string, reason: string) =>
+      moveInbox(
+        sql`recipient_session_id = ${sessionId} AND status IN ('pending', 'delivering')
+          AND id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
+        "dropped",
+        { reason },
+      )
+
     const dropWaiting = (entry: string) =>
       Effect.gen(function* () {
-        const dropped = yield* moveInbox(sql`status = 'pending' AND session_id = ${entry}`, "dropped")
+        const dropped = yield* moveInbox(sql`status = 'pending' AND recipient_session_id = ${entry}`, "dropped", {
+          reason: "the entry session is not running",
+        })
 
         yield* tellSendersOf(dropped, "the entry session is not running")
       })
 
     const waitingOn = (id: string) =>
       sql<{ id: number }>`SELECT id FROM inbox
-        WHERE ((session_id = ${id} OR sender_session_id = ${id} OR about_session_id = ${id}) AND status IN ('pending', 'delivering'))
-          OR (session_id = ${id} AND kind = 'task' AND execution_id IS NULL)
+        WHERE (recipient_session_id = ${id} OR sender_session_id = ${id} OR about_session_id = ${id})
+          AND status = 'pending'
         LIMIT 1`.pipe(Effect.map((rows) => rows.length > 0))
 
     return {
@@ -254,6 +323,10 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       findSend,
       moveInbox,
       queueInbox,
+      confirm,
+      confirmBatch,
+      confirmTask,
+      dropUnsent,
       linkTask,
       queueSend,
       queuedFrom,
@@ -272,13 +345,17 @@ export const make = (session: Session.Statements, inbox: Statements) =>
     const sql = yield* SqlClient.SqlClient
     const { transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, acceptedAt, observable, fromOldProcess, startExecution, creatorOf, labelOf } = session
+    const { reads, openExecution, startedAt, observable, fromOldProcess, allocateExecution, creatorOf } = session
 
     const {
       inbox: inboxWhere,
       inboxIn,
       findSend,
       moveInbox,
+      confirm,
+      confirmBatch,
+      confirmTask,
+      dropUnsent,
       queueSend,
       queuedFrom,
       liveRecipient,
@@ -310,7 +387,13 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       sentIn: Effect.fn("Db.inbox.sentIn")((sessionId: string, execution: number) =>
-        sql<{ sent: number }>`SELECT sent FROM execution WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(
+        sql<{ sent: number }>`SELECT
+            (SELECT count(*) FROM inbox m
+              WHERE m.sender_type = 'agent' AND m.sender_machine IS NULL
+                AND m.sender_session_id = ${sessionId} AND m.sender_execution_id = ${execution}
+                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id))
+            + (SELECT count(*) FROM outbox
+              WHERE session_id = ${sessionId} AND kind = 'send' AND execution_id = ${execution}) AS sent`.pipe(
           Effect.map((rows) => rows[0]?.sent ?? 0),
           Effect.orDie,
         ),
@@ -352,16 +435,16 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       waitingOn: Effect.fn("Db.inbox.waitingOn")((id: string) => waitingOn(id).pipe(Effect.orDie)),
 
       hasQueued: Effect.fn("Db.inbox.hasQueued")((id: string) =>
-        sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${id}
-            AND ((kind != 'task' AND status = 'pending') OR (kind = 'task' AND execution_id IS NULL))
-          LIMIT 1`.pipe(
+        sql<{
+          id: number
+        }>`SELECT id FROM inbox WHERE recipient_session_id = ${id} AND status = 'pending' LIMIT 1`.pipe(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
       ),
 
       pendingRecipients: Effect.fn("Db.inbox.pendingRecipients")(() =>
-        sql<{ id: string }>`SELECT DISTINCT session_id AS id FROM inbox WHERE status = 'pending'`.pipe(
+        sql<{ id: string }>`SELECT DISTINCT recipient_session_id AS id FROM inbox WHERE status = 'pending'`.pipe(
           Effect.map((rows) => rows.map((row) => row.id)),
           Effect.orDie,
         ),
@@ -375,82 +458,77 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         findSend(sessionId, status).pipe(Effect.orDie),
       ),
 
-      recoverDelivering: Effect.fn("Db.inbox.recoverDelivering")(
-        (notice: (label: string, messages: ReadonlyArray<string>) => string) =>
-          tx(
-            Effect.gen(function* () {
-              const cut = yield* sql<{
-                id: number
-                recipient: string
-                sender: string | null
-                content: string
-              }>`SELECT id, session_id AS recipient,
-                CASE WHEN kind = 'send' AND sender_machine IS NULL THEN sender_session_id END AS sender, content FROM inbox
-              WHERE status = 'delivering' ORDER BY session_id, id`
-
-              const bySenderAndSession = new Map<string, Array<(typeof cut)[number]>>()
-
-              for (const row of cut) {
-                const key = `${row.sender ?? ""}\n${row.recipient}`
-                bySenderAndSession.set(key, [...(bySenderAndSession.get(key) ?? []), row])
-              }
-
-              for (const rows of bySenderAndSession.values()) {
-                const { sender, recipient } = rows[0]!
-                yield* moveInbox(
-                  sql`session_id = ${recipient} AND ${sql.in(
-                    "id",
-                    rows.map((r) => r.id),
-                  )}`,
-                  "failed",
-                )
-
-                const message = notice(
-                  yield* labelOf(recipient),
-                  rows.map((r) => r.content),
-                )
-
-                if (sender !== null) yield* tellSender(sender, message)
-                else yield* insertInboxRow({ sessionId: recipient, message })
-              }
-            }),
-          ).pipe(Effect.orDie),
-      ),
-
       deliveringInbox: inboxWhere(sql`m.status = 'delivering'`).pipe(
-        Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.recipient ?? "", kind: r.kind }))),
+        Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.recipient ?? "" }))),
         Effect.orDie,
       ),
 
-      claim: Effect.fn("Db.inbox.claim")((sessionId: string, ids: ReadonlyArray<number>) =>
+      claim: Effect.fn("Db.inbox.claim")((sessionId: string, ids: ReadonlyArray<number>, execution?: number) =>
         Effect.gen(function* () {
           if (ids.length === 0) return []
 
           const claimed = yield* moveInbox(
-            sql`session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
+            sql`recipient_session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
             "delivering",
+            execution === undefined ? undefined : { execution },
           )
 
           return claimed.map((k) => k.id)
         }).pipe(Effect.orDie),
       ),
 
+      confirm: Effect.fn("Db.inbox.confirm")((sessionId: string, execution: number) =>
+        confirm(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      confirmBatch: Effect.fn("Db.inbox.confirmBatch")(
+        (sessionId: string, execution: number, ids: ReadonlyArray<number>) =>
+          confirmBatch(sessionId, execution, ids).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      confirmTask: Effect.fn("Db.inbox.confirmTask")((sessionId: string, execution: number) =>
+        confirmTask(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      dropUnsent: Effect.fn("Db.inbox.dropUnsent")((sessionId: string, reason: string) =>
+        dropUnsent(sessionId, reason).pipe(Effect.asVoid, Effect.orDie),
+      ),
+
+      unsentDelegation: Effect.fn("Db.inbox.unsentDelegation")((sessionId: string) =>
+        inboxWhere(
+          sql`m.recipient_session_id = ${sessionId} AND m.status IN ('pending', 'delivering')
+            AND m.id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
+        ).pipe(Effect.orDie),
+      ),
+
       unacceptedBatch: Effect.fn("Db.inbox.unacceptedBatch")((sessionId: string, execution: number) =>
         tx(
           Effect.gen(function* () {
-            if ((yield* openExecution(sessionId)) !== execution || (yield* acceptedAt(sessionId, execution)) !== null)
+            if ((yield* openExecution(sessionId)) !== execution || (yield* startedAt(sessionId, execution)) !== null)
               return undefined
 
             return yield* inboxWhere(
-              sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = 'delivered' AND m.execution_id = ${execution}`,
+              sql`m.recipient_session_id = ${sessionId} AND m.status = 'delivering' AND m.recipient_execution_id = ${execution}`,
             )
           }),
         ).pipe(Effect.orDie),
       ),
 
+      hasUnacceptedPulledBatch: Effect.fn("Db.inbox.hasUnacceptedPulledBatch")((sessionId: string, execution: number) =>
+        sql<{ ok: number }>`SELECT 1 AS ok FROM inbox m
+            WHERE m.recipient_session_id = ${sessionId} AND m.status = 'delivering'
+              AND m.recipient_execution_id = ${execution}
+              AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)
+            LIMIT 1`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
+      ),
+
       deliveredIn: Effect.fn("Db.inbox.deliveredIn")((sessionId: string, execution: number) =>
         inboxWhere(
-          sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = 'delivered' AND m.execution_id = ${execution}`,
+          sql`m.recipient_session_id = ${sessionId} AND m.status = 'delivered' AND m.recipient_execution_id = ${execution}
+            AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`,
         ).pipe(Effect.orDie),
       ),
 
@@ -464,14 +542,14 @@ export const make = (session: Session.Statements, inbox: Statements) =>
 
             if (pending.length === 0) return undefined
             const batch = nextBatch(pending)
-            const execution = yield* startExecution(sessionId, yield* now)
+            const execution = yield* allocateExecution(sessionId, yield* now)
             yield* moveInbox(
-              sql`session_id = ${sessionId} AND ${sql.in(
+              sql`recipient_session_id = ${sessionId} AND ${sql.in(
                 "id",
                 batch.map((r) => r.id),
               )}`,
-              "delivered",
-              execution,
+              "delivering",
+              { execution },
             )
 
             return { execution, rows: batch }
@@ -480,14 +558,21 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       setInboxStatus: Effect.fn("Db.inbox.setInboxStatus")(
-        (sessionId: string, ids: ReadonlyArray<number>, status: InboxStatus, from?: InboxStatus, into?: number) =>
+        (
+          sessionId: string,
+          ids: ReadonlyArray<number>,
+          status: "delivering" | "delivered" | "failed" | "dropped",
+          from?: InboxStatus,
+          into?: number,
+          reason?: string,
+        ) =>
           Effect.gen(function* () {
             if (ids.length === 0) return []
 
             const moved = yield* moveInbox(
-              sql`session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,
+              sql`recipient_session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,
               status,
-              into,
+              { ...(into !== undefined && { execution: into }), ...(reason !== undefined && { reason }) },
             )
 
             return moved.length === 0
@@ -499,10 +584,13 @@ export const make = (session: Session.Statements, inbox: Statements) =>
           }).pipe(Effect.orDie),
       ),
 
-      latestInbox: Effect.fn("Db.inbox.latestInbox")((sessionId: string, kind: InboxKind) =>
-        (kind === "send"
-          ? inboxWhere(sql`m.session_id = ${sessionId} AND m.kind = 'send'`, sql`m.id DESC LIMIT 1`)
-          : inboxWhere(sql`m.kind = ${kind} AND m.about_session_id = ${sessionId}`, sql`m.id DESC LIMIT 1`)
+      latestInbox: Effect.fn("Db.inbox.latestInbox")((sessionId: string, which: "send" | "notice") =>
+        (which === "send"
+          ? inboxWhere(
+              sql`m.recipient_session_id = ${sessionId} AND m.sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`,
+              sql`m.id DESC LIMIT 1`,
+            )
+          : inboxWhere(sql`m.sender_type = 'vibest' AND m.about_session_id = ${sessionId}`, sql`m.id DESC LIMIT 1`)
         ).pipe(
           Effect.map((rows) => rows[0]),
           Effect.orDie,

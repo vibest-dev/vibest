@@ -45,6 +45,7 @@ export const SessionCreated = fact("session.created", "session", {
   directory: Schema.String,
   parent: optional(Text),
   origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
+  message: optional(Seq),
   team: optional(Text),
 })
 
@@ -116,46 +117,115 @@ export const ProcessEnded = fact("process.ended", "session", {
   by: optional(Sender),
 })
 
-export const ExecutionStarted = fact("execution.started", "session", {
-  process: optional(Seq),
-  typed: optional(Text),
-})
-
-export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
 
 export type ExecutionOutcome = typeof ExecutionOutcome.Type
 
-export const ExecutionEnded = fact("execution.ended", "session", {
-  execution: Seq,
-  outcome: ExecutionOutcome,
-  failure: optional(
-    Schema.Struct({ message: Text, kind: optional(Schema.Literal("limit")), resetAt: optional(Schema.Number) }),
-  ),
-  conversation: optional(Text),
+export const ExecutionObservation = Schema.Literals(["lost", "not_started"])
+
+export type ExecutionObservation = typeof ExecutionObservation.Type
+
+export const ExecutionFailure = Schema.Struct({
+  message: Text,
+  kind: optional(Schema.Literal("limit")),
+  resetAt: optional(Schema.Number),
+})
+
+export type ExecutionFailure = typeof ExecutionFailure.Type
+
+export const ExecutionAllocated = fact("execution.allocated", "session", {
+  executionId: Seq,
+  processId: optional(Seq),
+  typed: optional(Text),
+})
+
+export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
+
+export const ExecutionStarted = fact("execution.started", "session", {
+  executionId: Seq,
+  processId: optional(Seq),
+})
+
+export const ExecutionSucceeded = fact("execution.succeeded", "session", {
+  executionId: Seq,
   reply: optional(Schema.String),
 })
 
-export const InboxKind = Schema.Literals(["task", "send", "notice"])
+export const ExecutionFailed = fact("execution.failed", "session", {
+  executionId: Seq,
+  failure: ExecutionFailure,
+  reply: optional(Schema.String),
+})
 
-export type InboxKind = typeof InboxKind.Type
+export const ExecutionInterrupted = fact("execution.interrupted", "session", {
+  executionId: Seq,
+  reason: optional(Text),
+  reply: optional(Schema.String),
+})
 
-export const InboxQueued = fact("inbox.queued", "session", {
-  kind: InboxKind,
-  recipient: optional(Text),
+export const ExecutionUnresolved = fact("execution.unresolved", "session", {
+  executionId: Seq,
+  observation: ExecutionObservation,
+  failure: optional(ExecutionFailure),
+  reply: optional(Schema.String),
+})
+
+export const ExecutionInput = fact("execution.input", "session", {
+  executionId: Seq,
+  typed: Text,
+})
+
+export const InboxHistory = Schema.Literals([
+  "route",
+  "delivered_without_execution",
+  "failed_unspecified",
+  "unconfirmed",
+  "released",
+])
+
+export type InboxHistory = typeof InboxHistory.Type
+
+export const UnrecordedDrop = "unrecorded"
+
+export const InboxEnqueued = fact("inbox.enqueued", "session", {
   sender: Sender,
-  about: optional(Text),
   content: Schema.String,
-  status: Schema.Literals(["pending", "delivered", "dropped"]),
-  request: optional(Text),
-  peerItem: optional(Text),
+  senderExecutionId: optional(Seq),
+  requestId: optional(Text),
+  transferId: optional(Text),
+  aboutSessionId: optional(Text),
+})
+
+export const InboxDeliveryStarted = fact("inbox.delivery_started", "session", {
+  messageId: Seq,
   execution: optional(Seq),
 })
 
-export const InboxMoved = fact("inbox.moved", "session", {
-  inbox: Seq,
-  to: Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"]),
+export const InboxDelivered = fact("inbox.delivered", "session", {
+  messageId: Seq,
+  recipientExecutionId: Seq,
+})
+
+export const InboxDeliveryFailed = fact("inbox.delivery_failed", "session", {
+  messageId: Seq,
+  reason: Text,
+})
+
+export const InboxDropped = fact("inbox.dropped", "session", {
+  messageId: Seq,
+  reason: Text,
+})
+
+export const InboxUnresolved = fact("inbox.unresolved", "session", {
+  history: InboxHistory,
+  messageId: optional(Seq),
   execution: optional(Seq),
+  sender: optional(Sender),
+  content: optional(Schema.String),
+  senderExecutionId: optional(Seq),
+  requestId: optional(Text),
+  transferId: optional(Text),
+  aboutSessionId: optional(Text),
 })
 
 export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, vibestd: Text })
@@ -192,11 +262,20 @@ export const Catalog = {
   [ProcessPid.type]: ProcessPid,
   [ProcessConversation.type]: ProcessConversation,
   [ProcessEnded.type]: ProcessEnded,
-  [ExecutionStarted.type]: ExecutionStarted,
+  [ExecutionAllocated.type]: ExecutionAllocated,
   [ExecutionAccepted.type]: ExecutionAccepted,
-  [ExecutionEnded.type]: ExecutionEnded,
-  [InboxQueued.type]: InboxQueued,
-  [InboxMoved.type]: InboxMoved,
+  [ExecutionStarted.type]: ExecutionStarted,
+  [ExecutionSucceeded.type]: ExecutionSucceeded,
+  [ExecutionFailed.type]: ExecutionFailed,
+  [ExecutionInterrupted.type]: ExecutionInterrupted,
+  [ExecutionUnresolved.type]: ExecutionUnresolved,
+  [ExecutionInput.type]: ExecutionInput,
+  [InboxEnqueued.type]: InboxEnqueued,
+  [InboxDeliveryStarted.type]: InboxDeliveryStarted,
+  [InboxDelivered.type]: InboxDelivered,
+  [InboxDeliveryFailed.type]: InboxDeliveryFailed,
+  [InboxDropped.type]: InboxDropped,
+  [InboxUnresolved.type]: InboxUnresolved,
   [MachineAdded.type]: MachineAdded,
   [MachineConnected.type]: MachineConnected,
   [MachineRemoved.type]: MachineRemoved,
@@ -211,7 +290,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 6
+export const CATALOG_VERSION = 11
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

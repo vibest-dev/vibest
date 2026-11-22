@@ -34,6 +34,9 @@ const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 export const withProcess = (launch: Launch, process: number | undefined): Launch =>
   process === undefined ? launch : { ...launch, env: { ...launch.env, VIBEST_PROCESS: String(process) } }
 
+export const withExecution = (launch: Launch, execution: number | undefined): Launch =>
+  execution === undefined ? launch : { ...launch, env: { ...launch.env, VIBEST_EXECUTION: String(execution) } }
+
 export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   readonly harness: HarnessId
   readonly agent: string
@@ -46,6 +49,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
       readonly harnessSessionId: string | null
       readonly projectId: string
       readonly process?: number | undefined
+      readonly execution?: number | undefined
       readonly runtime?: string | undefined
       readonly firstInput?: string | undefined
     },
@@ -96,6 +100,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     VIBEST_PROJECT_ID: saved.projectId,
     VIBEST_PROJECT_DIR: layout.project(saved.projectId),
     ...(saved.process !== undefined && { VIBEST_PROCESS: String(saved.process) }),
+    ...(saved.execution !== undefined && { VIBEST_EXECUTION: String(saved.execution) }),
     ...(saved.runtime !== undefined && { VIBEST_RUNTIME: saved.runtime }),
   }
 

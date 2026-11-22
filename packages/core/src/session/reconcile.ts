@@ -1,4 +1,4 @@
-import { ExecutionEnded, InboxMoved, ProcessEnded } from "@vibest/schema/event"
+import { ExecutionFailed, InboxDelivered, InboxEnqueued, ProcessEnded } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
@@ -93,9 +93,6 @@ export const make = Effect.gen(function* () {
 
     if (state !== undefined && session.status !== state) yield* db.session.setStatus(session.id, state)
 
-    if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(harnessIdOf(session)))
-      yield* db.session.acceptExecution(id, execution)
-
     const exited =
       state === undefined &&
       (yield* Effect.gen(function* () {
@@ -114,7 +111,9 @@ export const make = Effect.gen(function* () {
         yield* reactor.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
     } else yield* Ref.set(r.launchRechecked, false)
 
-    if (!(yield* harnesses.get(harnessIdOf(session))).ownSessionId && h.session !== undefined) {
+    const adapter = yield* harnesses.get(harnessIdOf(session))
+
+    if (!adapter.ownSessionId && h.session !== undefined) {
       const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
 
       if (sessionId !== null && sessionId !== (session.process?.conversation ?? null))
@@ -133,20 +132,24 @@ export const make = Effect.gen(function* () {
     const idle = s === "idle"
     const ended = idle && worked
     const now = yield* Clock.currentTimeMillis
-    const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - executionStartedAt(session))
-    const unstarted = !worked && (idle || inbox.pulls(harnessIdOf(session)))
+    const readyAt = session.process?.readyAt ?? null
+    const awaitingReady = adapter.ready === "integration" && readyAt === null
+    const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - Math.max(executionStartedAt(session), readyAt ?? 0))
+
+    const pulledUnaccepted =
+      !worked &&
+      execution !== undefined &&
+      inbox.pulls(harnessIdOf(session)) &&
+      (yield* db.inbox.hasUnacceptedPulledBatch(id, execution))
+
+    const unstarted = !worked && ((idle && !awaitingReady) || pulledUnaccepted)
 
     if (unstarted && unconfirmed <= 0) {
-      const reason = "its start was not confirmed; it may still run, but a late reply is not collected"
-
       const closed =
         execution !== undefined &&
         (yield* db.session.closeExecution(id, execution, "not_started", {
           notice: `${sessionLabel(session)} did not start the execution it was sent; it is idle and takes queued messages again (if it starts late, that reply is not collected)`,
         }))
-
-      if (closed && execution !== undefined)
-        yield* inbox.undelivered(session, yield* db.inbox.deliveredIn(id, execution), reason)
 
       if (closed) yield* deliverQueued(h, { ...session, openExecution: null }, terminal)
 
@@ -198,19 +201,11 @@ export const make = Effect.gen(function* () {
     merge: (pending, next) => (pending === undefined || next === undefined ? undefined : Math.max(pending, next)),
   })
 
-  const onTerminal = (processes: ReadonlyArray<BoundProcess>, working: boolean) =>
+  const onTerminal = (processes: ReadonlyArray<BoundProcess>, _working: boolean) =>
     Effect.forEach(
       processes,
       ({ sessionId, process }) =>
         Effect.gen(function* () {
-          const session = working ? yield* db.session.getSession(sessionId) : undefined
-
-          const execution =
-            session && session.process?.id === process && !inbox.pulls(harnessIdOf(session))
-              ? yield* db.session.openExecution(sessionId)
-              : undefined
-
-          if (execution !== undefined) yield* db.session.acceptExecution(sessionId, execution)
           yield* wakes.wake(sessionId, process)
         }),
       { discard: true },
@@ -248,13 +243,25 @@ export const make = Effect.gen(function* () {
   const checkFailed = (id: string) =>
     Effect.forkIn(locked(id, true)(check(id)).pipe(logged(`check ${id}`)), scope).pipe(Effect.asVoid)
 
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? checkFailed(event.sessionId!) : Effect.void,
+  yield* reactor.on([ExecutionFailed], (event) => checkFailed(event.sessionId!))
+  yield* reactor.on([InboxDelivered], (event) =>
+    reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!)),
   )
-  yield* reactor.on([InboxMoved], (event) =>
-    event.data.to === "delivered"
-      ? reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
-      : Effect.void,
+  yield* reactor.on([InboxEnqueued], (event) =>
+    Effect.gen(function* () {
+      const id = event.sessionId!
+
+      if (id === undefined) return
+      const session = yield* db.session.getSession(id)
+
+      if (session === undefined || executionStateOf(session) !== "open" || (yield* db.session.executionTaken(id)))
+        return
+
+      if ((yield* db.inbox.pendingInbox(id)).length === 0) return
+
+      const left = Duration.toMillis(CONFIRM_TIMEOUT) - ((yield* Clock.currentTimeMillis) - executionStartedAt(session))
+      yield* reactor.arm(`miss:${id}`, Duration.millis(Math.max(left, 0)), checkSession(id))
+    }),
   )
   yield* reactor.on([TerminalState], (event) => onTerminal(event.processes, event.state === "working"))
   yield* reactor.on([TerminalExited], (event) => onTerminal(event.processes, false))

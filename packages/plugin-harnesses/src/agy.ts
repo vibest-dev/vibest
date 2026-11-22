@@ -31,11 +31,9 @@ export const agyExecutionEnd = (event: Schema.JsonObject) => {
   const conversation = agyConversation(event)
 
   return {
-    end: {
-      text: "",
-      ...(conversation !== undefined && { conversation_id: conversation }),
-      ...(error !== "" && { error }),
-    },
+    reply: "",
+    ...(conversation !== undefined && { conversation }),
+    ...(error !== "" && { failure: error }),
   }
 }
 
@@ -104,7 +102,6 @@ export const agy: Harness.HarnessDefinition = {
   promptArgs: ["--prompt-interactive"],
   clearKeys: ["ctrl+e", ...Array.from({ length: LINE_KILLS }, () => "ctrl+u")],
   startup: agyStartup,
-  replyField: "text",
   ready: "runtime",
   checkProvider: noProvider("agy"),
   launchArgs: (i) => [
@@ -118,7 +115,7 @@ export const agy: Harness.HarnessDefinition = {
   ],
   models: { args: () => ["--output-format", "json", "models"], answer: agyModels },
   conversationOf: agyConversation,
-  userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { text: "" } : undefined),
+  userPrompt: (event) => (event.hookEventName === "PreInvocation" ? { activity: true } : undefined),
   executionEnd: agyExecutionEnd,
   guardCall: agyGuardCall,
   guardAnswer: (reason) => (reason ? { decision: "deny", reason } : { decision: "allow" }),

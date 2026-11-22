@@ -265,7 +265,7 @@ export const setup = async (
   const notices = (address: string, marker: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE kind = 'send' AND content LIKE ? AND content LIKE ?",
+      "SELECT count(*) AS n FROM inbox WHERE sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content LIKE ? AND content LIKE ?",
       `%<agent-id>${address}</agent-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
@@ -422,7 +422,7 @@ const checks: ReadonlyArray<Check> = [
 
         expect(
           started?.peer === a.id &&
-            /session\.created .*process\.started .*execution\.started .*execution\.ended .*session\.ended/.test(
+            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.ended/.test(
               started.facts,
             ),
           `B's session started for A: ${JSON.stringify(started)}`,

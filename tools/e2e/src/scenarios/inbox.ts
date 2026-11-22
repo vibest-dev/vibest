@@ -144,7 +144,7 @@ export const claudeEntry = async (
   const delivered = (from: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE session_id = ?1 AND ?2 IN (sender_session_id, about_session_id) AND status = 'delivered'",
+      "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ?1 AND ?2 IN (sender_session_id, about_session_id) AND status = 'delivered'",
       entryId,
       from,
     )?.n ?? 0
@@ -427,7 +427,7 @@ const checks: ReadonlyArray<Check> = [
         const results = () =>
           row<{ n: number }>(
             w,
-            "SELECT count(*) AS n FROM inbox WHERE session_id = ?1 AND ?2 IN (sender_session_id, about_session_id)",
+            "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ?1 AND ?2 IN (sender_session_id, about_session_id)",
             c!.entryId,
             a,
           )?.n ?? 0
@@ -462,8 +462,17 @@ const checks: ReadonlyArray<Check> = [
         stopped = [shell!, harness!]
 
         for (const pid of stopped) process.kill(pid, "SIGSTOP")
+
         const who = { entryId: c.entryId, projectId: c.projectId }
-        const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
+
+        const status = (id: number) =>
+          row<{ s: string }>(
+            w,
+            "SELECT status AS s FROM inbox WHERE recipient_session_id = ? AND id = ?",
+            c!.entryId,
+            id,
+          )?.s
+
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
 
         let taken: Taken = {
@@ -487,7 +496,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(taken.content.includes("done-cmcurl"), `the taken text: ${taken.content}`)
         const id = taken.ids[0]!
-        expect(status(id) === "delivered", `after the take the row is ${status(id)}`)
+        expect(status(id) === "delivering", `after the take the row is ${status(id)}`)
         const again = await curl(w, "/inbox/take", who)
         expect(again.status === 204, `a second take answered ${again.status}: ${JSON.stringify(again.body)}`)
         const other = await curl(w, "/inbox/take", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
@@ -501,11 +510,7 @@ const checks: ReadonlyArray<Check> = [
         for (const pid of stopped.reverse()) process.kill(pid, "SIGCONT")
         stopped = []
 
-        await until(
-          "the batch nobody accepted ends not_started and its row fails",
-          () => status(id) === "failed",
-          60_000,
-        )
+        await until("the batch nobody accepted stays reserved", () => status(id) === "delivering", 60_000)
         const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: c.repo, timeoutMs: 60_000 })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         const after = c.delivered(b)
@@ -577,7 +582,7 @@ const checks: ReadonlyArray<Check> = [
         const toEntry = () =>
           rows<{ status: string }>(
             w,
-            "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send' AND sender_session_id IS NOT NULL",
+            "SELECT status FROM inbox WHERE recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND sender_session_id IS NOT NULL",
             entryId,
           ).map((r) => r.status)
 
@@ -638,7 +643,7 @@ const checks: ReadonlyArray<Check> = [
         const sent = () =>
           rows<{ id: number; status: string }>(
             w,
-            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
+            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)",
             sub,
             entryId,
           )
@@ -655,10 +660,8 @@ const checks: ReadonlyArray<Check> = [
           )?.n
 
         expect(
-          fact("type = 'inbox.queued' AND seq = ?") === 1 &&
-            fact(
-              "type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
-            ) === 1,
+          fact("type = 'inbox.enqueued' AND seq = ?") === 1 &&
+            fact("type = 'inbox.delivered' AND json_extract(data, '$.messageId') = ?") === 1,
           `the send ${sent()[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
         )
         const line = `Message from @General · Send probe (${sub.slice(0, 8)})\nhello-claude`

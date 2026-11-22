@@ -161,7 +161,7 @@ describe("SQLite", () => {
 })
 
 describe("a vibestd restart", () => {
-  it.effect("rows cut off in delivery end failed", () =>
+  it.effect("a hand-over cut off by a restart stays unconfirmed, not failed", () =>
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
 
@@ -177,7 +177,7 @@ describe("a vibestd restart", () => {
 
         const [row] = yield* (yield* SqlClient.SqlClient)<{
           id: number
-        }>`SELECT id FROM inbox WHERE session_id = ${sessionId}`
+        }>`SELECT id FROM inbox WHERE recipient_session_id = ${sessionId}`
 
         assert.deepStrictEqual(yield* db.inbox.claim(sessionId, [row!.id]), [row!.id])
 
@@ -185,7 +185,6 @@ describe("a vibestd restart", () => {
       }).pipe(Effect.provide(database(file)))
 
       const statuses = yield* Effect.gen(function* () {
-        yield* (yield* Db.Service).inbox.recoverDelivering(() => "")
         const sql = yield* SqlClient.SqlClient
 
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox WHERE id = ${id}`
@@ -193,7 +192,7 @@ describe("a vibestd restart", () => {
 
       assert.deepStrictEqual(
         statuses.map((r) => r.status),
-        ["failed"],
+        ["delivering"],
       )
     }).pipe(Effect.provide(Platform.services)),
   )

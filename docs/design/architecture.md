@@ -96,7 +96,7 @@ manages it. Items marked planned are not built.
   any other harness (Cursor, agy) is typed into, whichever session it runs. When the harness definition gives
   `clearKeys` (Cursor: `ctrl+u`), they are sent right before each typed message, so whatever sits in the input box (a
   user's draft, a cancelled prompt the harness drew back) is cleared first. A row with no session to go to is dropped.
-- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, sessions it started, and the unfinished members of its team; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes only `execution.ended`, which carries the reply
+- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the session that started it, sessions it started, and the unfinished members of its team; when its creator has ended, a message goes to the nearest session above it that is still running, on this machine or another. An execution end writes `execution.succeeded` (or `execution.failed` / `execution.interrupted`), and the succeeded event carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its nearest living creator (its parent, else the parent's parent and so on; a creator on another machine through the
   outbox; none left, only the user reads it): its harness exited, its execution ended in an error, it never started, it waits on a permission. An
@@ -313,7 +313,7 @@ by `vibest interrupt`. Text the user types into a subagent's pane is recorded as
 opens no such Message; when that execution ends, the user's text and the subagent's reply go to the entry session as one
 `notice` (information, delivered with its next input, never a task it must act on).
 
-**Answers** come through the best channel (D11): the integration sends its execution-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) in the execution's `execution.ended`; the projection keeps it as `execution.reply`, read with `vibest result` and shown as the summary in `vibest ls`. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
+**Answers** come through the best channel (D11): the integration sends its execution-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) in `execution.succeeded`; the projection keeps it as `execution.reply`, read with `vibest result` and shown as the summary in `vibest ls`. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
 
 The subagent's rules ask for a message whose first line is one sentence the recipient can relay, then the details, and an
 optional `## Remember`. The recipient gets it as:
@@ -462,7 +462,7 @@ How these modules keep the rules:
 How an execution ends:
 
 - An execution end the harness reports (`db.session.endObserved`) is written as it arrives, without the session lock, in one
-  transaction: the `execution.ended` with the reply and the conversation, the session idle, and the error notice for a
+  transaction: the `execution.succeeded` with the reply, and a `process.conversation` when the conversation changed, the session idle, and the error notice for a
   failed end (for a usage limit, the limit and its reset time). It is ignored for the entry session, for a harness the session no longer
   runs, before the current process's ready report when its harness reports ready, and when it is interrupted with no
   execution open. A completed or failed end with no execution open is an execution of its own (an execution typed in the terminal whose
@@ -1046,7 +1046,7 @@ window with a reset time, its `resetAt` (the earliest one); the creator gets one
 reset time, and the harness process stays as it is, so the next send resumes the same session on the same harness. A
 limit at launch (the harness dies in its terminal on a usage-limit error) is a launch failure with the same failure
 kind. Whatever follows a limit is the creator agent's decision; a user who wants it automatic writes a plugin that
-reacts to `execution.ended` with failure kind `limit` (for example, waits for `resetAt` and sends the session a
+reacts to `execution.failed` with failure kind `limit` (for example, waits for `resetAt` and sends the session a
 message to continue).
 
 ## 10. Ports

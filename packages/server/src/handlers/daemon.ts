@@ -2,7 +2,6 @@ import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
 import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Plugins } from "@vibest/core/plugin"
@@ -34,7 +33,6 @@ export const shutdownNode = LayerNode.unbound(Shutdown)
 
 export const make = Effect.gen(function* () {
   const { cliOnly } = yield* CallerChecks.Service
-  const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const plugins = yield* Plugins.Service
   const concurrency = yield* Concurrency.Service
@@ -46,7 +44,7 @@ export const make = Effect.gen(function* () {
   const drain = yield* Drain.Service
   const bus = yield* Bus.Service
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.inbox.deliveringInbox, shutdown })
+  const stopOnce = stopDaemon({ drain, bus, shutdown })
 
   return {
     Ping: () =>

@@ -28,7 +28,7 @@ import { Git } from "../git.ts"
 import { cliEnv, Harness } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Inbox } from "../inbox.ts"
-import { definitionIn, withProcess, type Launch } from "../launch.ts"
+import { definitionIn, withExecution, withProcess, type Launch } from "../launch.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
@@ -194,13 +194,18 @@ export const make = Effect.gen(function* () {
     first?: FirstInput,
   ) {
     const base = yield* launchOf(session, resume, first?.text)
-    const launch = (process: number | undefined) => withProcess(base, process)
     const execution = yield* Ref.make<number | undefined>(undefined)
+    let openedId: number | undefined
+    const launch = (process: number | undefined) => withExecution(withProcess(base, process), openedId)
 
     const beforeStart =
       first === undefined
         ? Effect.void
-        : Effect.flatMap(openFirst(session.id, first.onHandover), (opened) => Ref.set(execution, opened))
+        : Effect.flatMap(openFirst(session.id, first.onHandover), (opened) =>
+            Effect.sync(() => {
+              openedId = opened
+            }).pipe(Effect.andThen(Ref.set(execution, opened))),
+          )
 
     const deliver = (h: Runtime, row: SessionRow, terminal: Terminal) =>
       Effect.flatMap(Ref.get(execution), (opened) =>
@@ -216,6 +221,7 @@ export const make = Effect.gen(function* () {
         yield* db.session.closeExecution(session.id, opened, failure === undefined ? "not_started" : "failed", {
           failure,
         })
+        yield* db.inbox.dropUnsent(session.id, failure?.message ?? "the session did not start")
       })
 
     const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError((cause) => abandoned(cause)))

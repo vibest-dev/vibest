@@ -488,5 +488,6 @@ export const selfCommand: ReadonlyArray<string> =
     : [process.execPath, process.argv[1]]
 
 export const exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => {
-  process.execve!(Bun.which(file) ?? file, [file, ...args], { ...process.env, ...env })
+  const { VIBEST_EXECUTION: _, ...inherited } = process.env
+  process.execve!(Bun.which(file) ?? file, [file, ...args], { ...inherited, ...env })
 }

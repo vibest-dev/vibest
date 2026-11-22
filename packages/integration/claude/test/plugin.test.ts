@@ -212,6 +212,91 @@ describe("Claude plugin requests", () => {
     await h.fire(2000)
     assert.lengthOf(h.requests, 2, "taken: no more tries")
   })
+
+  it("VIBEST_EXECUTION starts busy, accepts Turn 1, blocks mid-turn take, clears on settle or composer input, and lets inbox take bind Turn 2", async () => {
+    const h = host({ ...WORKER, VIBEST_EXECUTION: "7" })
+    const takes = [batch(12, [{ sender: { type: "vibest" }, message: "pulled" }], "pulled")]
+    h.state.answer = (r) => (r.url.endsWith("/take") ? (takes.shift() ?? { status: 204 }) : { status: 204 })
+    await h.start()
+    await h.tick()
+    assert.deepStrictEqual(
+      h.requests.filter((r) => r.url.endsWith("/take")),
+      [],
+      "never polls /inbox/take while Turn 1 is running",
+    )
+    assert.deepStrictEqual(
+      h.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt")).map((r) => r.body),
+      [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 7 }],
+    )
+    await h.executionComplete({ reason: "answer", answer: "first" })
+    await h.executionComplete({ reason: "answer", answer: "second" })
+    await h.tick()
+    await h.draw()
+    await h.prompt("Message from Vibest\npulled", ownSubmit)
+    await h.executionComplete({ reason: "answer", answer: "from pull" })
+    await settle()
+    const ends = h.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body)
+    assert.deepStrictEqual(ends, [
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "first",
+        execution: 7,
+      },
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "second",
+      },
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "from pull",
+        execution: 12,
+      },
+    ])
+
+    const launchArgv = host({ ...WORKER, VIBEST_EXECUTION: "9" })
+    await launchArgv.start()
+    await launchArgv.prompt("initial launch argv prompt", { kind: "composer" })
+    await launchArgv.executionComplete({ reason: "answer", answer: "turn 1 answer" })
+    await settle()
+    assert.deepStrictEqual(
+      launchArgv.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt")).map((r) => r.body),
+      [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 9 }],
+    )
+    assert.deepStrictEqual(
+      launchArgv.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body),
+      [
+        {
+          hook_event_name: "ExecutionComplete",
+          session_id: "c1",
+          reason: "answer",
+          last_assistant_message: "turn 1 answer",
+          execution: 9,
+        },
+      ],
+    )
+
+    const userPrompted = host({ ...WORKER, VIBEST_EXECUTION: "11" })
+    await userPrompted.start()
+    await userPrompted.prompt("initial launch argv prompt", { kind: "composer" })
+    await userPrompted.prompt("typed by user", { kind: "composer" })
+    await userPrompted.executionComplete({ reason: "answer", answer: "user reply" })
+    await settle()
+    const userEnds = userPrompted.requests.filter((r) => r.url.endsWith("/execution-end")).map((r) => r.body)
+    assert.deepStrictEqual(userEnds, [
+      {
+        hook_event_name: "ExecutionComplete",
+        session_id: "c1",
+        reason: "answer",
+        last_assistant_message: "user reply",
+      },
+    ])
+  })
 })
 
 describe("Claude plugin inbox", () => {
@@ -254,7 +339,12 @@ describe("Claude plugin inbox", () => {
     assert.deepStrictEqual(h.submitted, [first])
     const own = await h.prompt(first, ownSubmit)
     assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
-    assert.deepStrictEqual(h.requests.at(-1)!.body, { hook_event_name: "PromptSubmit", origin: "vibest", execution: 1 })
+    assert.deepStrictEqual(h.requests.at(-1)!.body, {
+      hook_event_name: "PromptSubmit",
+      origin: "vibest",
+      execution: 1,
+      ids: [1],
+    })
     await h.tick()
     assert.lengthOf(
       h.requests.filter((r) => r.url.endsWith("/take")),
@@ -262,6 +352,14 @@ describe("Claude plugin inbox", () => {
       "no take while the execution runs",
     )
     await h.executionComplete({ reason: "answer", answer: "done" })
+    await settle()
+    assert.deepStrictEqual(h.requests.filter((r) => r.url.endsWith("/execution-end")).at(-1)?.body, {
+      hook_event_name: "ExecutionComplete",
+      session_id: "c1",
+      reason: "answer",
+      last_assistant_message: "done",
+      execution: 1,
+    })
     await h.tick()
     await h.draw()
     assert.deepStrictEqual(h.submitted.at(-1), "Message from Vibest\nx")

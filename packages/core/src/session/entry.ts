@@ -440,7 +440,26 @@ const make = Effect.gen(function* () {
           Effect.mapError((e) => new LaunchFailed({ message: e.message })),
         )
 
-        const at = typed[0] === "env" ? 1 + typed.slice(1).findIndex((part) => !/^[A-Z_]+=/.test(part)) : 0
+        let at = 0
+
+        if (typed[0] === "env") {
+          at = 1
+
+          while (at < typed.length) {
+            if (typed[at] === "-u") {
+              at += 2
+              continue
+            }
+
+            if (/^[A-Z_]+=/.test(typed[at]!)) {
+              at += 1
+              continue
+            }
+
+            break
+          }
+        }
+
         const [file, ...args] = typed.slice(at)
 
         return {

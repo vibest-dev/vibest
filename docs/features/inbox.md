@@ -26,8 +26,19 @@ made while an execution runs waits until it ends and then opens the next executi
 
 ## S54. A first task is delivered once
 
-A session's first task is delivered once, as one execution that completes with its reply; no other message is delivered
-into that execution.
+A session's original message is the one recorded with the session when it is created. It belongs to one execution, and
+no other message is delivered into that execution. It is marked delivered only when a handoff report names its id. Launch
+arguments alone never do. A message that arrives while that execution is still open stays out of it.
+
+## Unconfirmed hand-over
+
+A row is delivered only when a handoff report names its id. A take, a claim, launch arguments, a start report, a working
+terminal, or another input on the same execution do not. What those leave behind stays `delivering`: not delivered again,
+and not a failure. Withdrawal before launch drops that original message. A handoff that failed for a recorded reason is a
+failure, and the two are different. An inbound transfer id is one receipt. An earlier outbound row with the same id is a
+different leg, so a forward that still has to be sent is its own unacked outbox row; a repeat of that inbound id does not
+enqueue another. `vibest result` and the task line follow the message recorded with the session, not `sent` and not the
+earliest inbox row.
 
 ## S11. Claude entry session inbox
 
@@ -95,7 +106,7 @@ notice that carries the failure, typed into the entry session once.
 ## S56. A first task arrives whole in the launch argv
 
 A subagent's first task is in its harness's launch arguments, multi-line and with shell characters as written: its
-execution starts before its process is placed, the model is asked it once, and it completes. A runtime plugin sees that
+execution is booked before its process is placed, the model is asked it once, and it completes. A runtime plugin sees that
 text as `launch.prompt` and the system prompt as `launch.system`, not as paths inside a shell wrapper.
 
 ## S55. A message says who it is from

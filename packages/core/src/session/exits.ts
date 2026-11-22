@@ -52,7 +52,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const failed = yield* lastScreen(h, session, execution)
       const queued = yield* db.inbox.pendingInbox(session.id)
-      const signed = queued.filter((r) => r.kind === "send" && localSessionOf(r.sender) !== undefined)
+      const signed = queued.filter((r) => localSessionOf(r.sender) !== undefined)
       const unsigned = queued.filter((r) => !signed.includes(r))
 
       if (signed.length > 0) yield* inbox.undelivered(session, signed, "it exited")
@@ -60,6 +60,9 @@ export const make = Effect.gen(function* () {
         session.id,
         unsigned.map((r) => r.id),
         "failed",
+        undefined,
+        undefined,
+        "it exited",
       )
       const lost = unsigned.map((r) => r.message).join("\n\n")
 
@@ -68,12 +71,15 @@ export const make = Effect.gen(function* () {
 
       if (
         execution !== undefined &&
+        (yield* db.session.executionAccepted(session.id)) &&
         (yield* db.session.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
           notice: text(" during an execution"),
         }))
       )
         return
+
+      if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "not_started")
       const last = yield* db.session.latestReply(session.id)
       yield* notice(
         session,
@@ -90,10 +96,11 @@ export const make = Effect.gen(function* () {
     const announce = !cutOff && (executionStateOf(session) === "open" || exitedAt(session) === null)
 
     if (announce && session.entry) {
-      if (execution !== undefined)
+      if (execution !== undefined && (yield* db.session.executionAccepted(session.id)))
         yield* db.session.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
         })
+      else if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "not_started")
     } else if (announce) yield* announceExit(h, session, execution)
 
     if (

@@ -165,13 +165,23 @@ const readyOnStart = LayerNode.make({
     Effect.gen(function* () {
       const fake = yield* FakeRuntime
       const db = yield* Db.Service
+      const harnesses = yield* Harnesses.Service
       let pid = 50_000
-      yield* Ref.set(fake.onStarted, (session) =>
-        Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.session.patchLive(session, { ready: at, pid: ++pid }))),
+      yield* Ref.set(fake.onStarted, (session, launch) =>
+        Effect.gen(function* () {
+          const at = yield* Clock.currentTimeMillis
+          yield* db.session.patchLive(session, { ready: at, pid: ++pid })
+          const raw = launch?.working ? launch.env.VIBEST_EXECUTION : undefined
+          const execution = raw !== undefined && /^[1-9]\d*$/.test(raw) ? Number(raw) : undefined
+          const harness = launch?.env.VIBEST_HARNESS
+
+          if (execution !== undefined && harness !== undefined && harnesses.find(harness)?.ready === "integration")
+            if (yield* db.session.acceptExecution(session, execution)) yield* db.session.setStatus(session, "working")
+        }),
       )
     }),
   ),
-  deps: [runtimeNode, Db.node],
+  deps: [runtimeNode, Db.node, Harnesses.node],
 })
 
 const noTransport: Machines.MachineTransport["Service"] = () =>

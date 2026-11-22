@@ -6,9 +6,13 @@ import { Effect, FileSystem, Path } from "effect"
 import { tempDirectory } from "./lib/directory.ts"
 import * as Platform from "./platform/bun.ts"
 
-const argvOf = (command: ReadonlyArray<string>) =>
+const argvOf = (command: ReadonlyArray<string>, env?: Record<string, string>) =>
   Effect.gen(function* () {
-    const child = Bun.spawn([...command], { stdout: "pipe", stderr: "pipe" })
+    const child = Bun.spawn([...command], {
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(env !== undefined && { env: { ...process.env, ...env } }),
+    })
 
     const [stdout, stderr, code] = yield* Effect.all(
       [
@@ -75,5 +79,40 @@ describe("launchLine", () => {
         assert.isBelow(new TextEncoder().encode(line).length, 1024)
         assert.deepStrictEqual(yield* argvOf(["sh", "-c", line]), launch.argv)
       }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("unsets VIBEST_EXECUTION when omitted so idle restarts do not inherit it from a parent shell", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* tempDirectory("vibest-launch-unset-")
+      const script = path.join(dir, "env.py")
+      yield* fs.writeFileString(
+        script,
+        '#!/usr/bin/env python3\nimport json, os\nprint(json.dumps({"exec": os.environ.get("VIBEST_EXECUTION"), "proc": os.environ.get("VIBEST_PROCESS")}))\n',
+      )
+      yield* fs.chmod(script, 0o755)
+
+      const omitted = yield* launchLine({
+        harness: "test",
+        argv: [script],
+        env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd", VIBEST_PROCESS: "12", VIBEST_HOME: dir },
+      })
+
+      assert.deepStrictEqual(yield* argvOf(omitted, { VIBEST_EXECUTION: "1" }), { exec: null, proc: "12" })
+
+      const explicit = yield* launchLine({
+        harness: "test",
+        argv: [script],
+        env: {
+          VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+          VIBEST_PROCESS: "12",
+          VIBEST_EXECUTION: "5",
+          VIBEST_HOME: dir,
+        },
+      })
+
+      assert.deepStrictEqual(yield* argvOf(explicit, { VIBEST_EXECUTION: "1" }), { exec: "5", proc: "12" })
+    }).pipe(Effect.provide(Platform.services)),
   )
 })

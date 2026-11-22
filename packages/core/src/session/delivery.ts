@@ -1,6 +1,6 @@
-import { ExecutionEnded, InboxQueued } from "@vibest/schema/event"
+import { ExecutionInterrupted, ExecutionSucceeded, ExecutionUnresolved, InboxEnqueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
 import { Bus } from "../bus.ts"
@@ -30,7 +30,7 @@ import {
   stateOf,
   type Terminal,
 } from "../runtimes.ts"
-import { busy, Executions, STOP_WAIT } from "./executions.ts"
+import { busy, Executions, HANDOFF_UNPROVED, STOP_WAIT } from "./executions.ts"
 import { Exits } from "./exits.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
@@ -78,8 +78,15 @@ export const make = Effect.gen(function* () {
     const task = yield* db.inbox.untakenTask(session.id)
 
     if (task !== undefined) {
-      const first = yield* taskInput(session, task)
-      const notStarted = yield* into(first.text, first.onHandover)
+      const first = yield* taskInput(session, task.content)
+
+      const notStarted = yield* into(first.text, first.onHandover).pipe(
+        Effect.catchTag("HandoffRejected", (e) =>
+          undelivered(session, [{ id: task.id, message: task.content }], e.message).pipe(Effect.as(undefined)),
+        ),
+      )
+
+      if (notStarted === HANDOFF_UNPROVED) return
 
       if (notStarted) yield* notice(session, notStarted)
 
@@ -97,7 +104,7 @@ export const make = Effect.gen(function* () {
     yield* into(
       batch.map((r) => r.message).join("\n\n"),
       Effect.flatMap(db.session.openExecution(session.id), (execution) =>
-        db.inbox.claim(session.id, ids).pipe(
+        db.inbox.claim(session.id, ids, execution).pipe(
           Effect.tap((got) =>
             Effect.sync(() => {
               claimed.push(...got)
@@ -110,38 +117,40 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((notStarted) => {
         const rows = batch.filter((r) => claimed.includes(r.id))
 
-        if (rows.length === 0) return Effect.void
+        if (rows.length === 0 || handedInto === undefined) return Effect.void
 
-        return notStarted
-          ? undelivered(session, rows, notStarted)
-          : db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
+        if (notStarted === HANDOFF_UNPROVED) return db.inbox.confirm(session.id, handedInto)
+
+        if (notStarted) return Effect.void
+
+        return db.inbox.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
       }),
-      Effect.onExit((exit) =>
-        Exit.isSuccess(exit) || claimed.length === 0
-          ? Effect.void
-          : db.inbox.setInboxStatus(session.id, claimed, "failed", "delivering"),
-      ),
       Effect.catchTags({
-        RuntimeError: (e) =>
-          claimed.length === 0
-            ? Effect.fail(e)
-            : e.code === "unreachable"
-              ? db.inbox.pendingInbox(session.id).pipe(
-                  Effect.flatMap((pending) =>
-                    pending.some((r) => claimed.includes(r.id))
-                      ? Effect.fail(e)
-                      : undelivered(
-                          session,
-                          batch.filter((r) => claimed.includes(r.id)),
-                          `the connection to ${runtimeOf(session)} broke after the message was handed over (${e.message}); it may have reached the session`,
-                        ),
-                  ),
-                )
-              : undelivered(
-                  session,
-                  batch.filter((r) => claimed.includes(r.id)),
-                  e.message,
+        HandoffRejected: (e) => {
+          const rows = batch.filter((r) => claimed.includes(r.id))
+
+          return rows.length === 0 ? Effect.fail(e) : undelivered(session, rows, e.message)
+        },
+        RuntimeError: (e) => {
+          const rows = batch.filter((r) => claimed.includes(r.id))
+
+          if (claimed.length === 0) return Effect.fail(e)
+
+          if (e.code === "unreachable")
+            return db.inbox
+              .pendingInbox(session.id)
+              .pipe(
+                Effect.flatMap((pending) =>
+                  pending.some((r) => claimed.includes(r.id)) ? Effect.fail(e) : Effect.void,
                 ),
+              )
+
+          if (handedInto === undefined) return undelivered(session, rows, e.message)
+
+          return db.session
+            .executionWasAccepted(session.id, handedInto)
+            .pipe(Effect.flatMap((accepted) => (accepted ? Effect.void : undelivered(session, rows, e.message))))
+        },
         NotReady: (e) => {
           const rows = batch.filter((r) => claimed.includes(r.id))
 
@@ -286,7 +295,7 @@ export const make = Effect.gen(function* () {
 
     if (yield* starts.remove(id)) {
       if (known.process === null) {
-        yield* db.session.endUnstarted(id, "interrupted")
+        yield* db.session.endUnstarted(id, "not_started")
 
         return { message: `${id} was waiting for a free slot; it will not start` }
       }
@@ -317,17 +326,19 @@ export const make = Effect.gen(function* () {
             id,
             message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
           })
-        const closed = yield* db.session.closeExecution(id, execution, "interrupted")
 
-        if (closed) yield* db.session.setStatus(id, "idle")
-        const last = closed ? undefined : yield* db.session.latestReply(id)
-
-        if (!closed && !(last?.execution === execution && last.status === "interrupted"))
+        if ((yield* db.session.openExecution(id)) === execution)
           return {
-            message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
+            message: `${id} is idle, but the interrupt was not confirmed; its execution is unchanged`,
           }
+        const last = yield* db.session.latestReply(id)
 
-        return { message: `${id} interrupted; its terminal, worktree and session are kept` }
+        if (last?.execution === execution && last.status === "interrupted")
+          return { message: `${id} interrupted; its terminal, worktree and session are kept` }
+
+        return {
+          message: `${id} finished its execution before the interrupt took effect; its reply is recorded`,
+        }
       }),
     ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) }))
   })
@@ -350,30 +361,20 @@ export const make = Effect.gen(function* () {
         const session = yield* db.session.getSession(id)
 
         if (session === undefined) return
-        const r = yield* sessionLive.track(id)
         const rows = yield* db.inbox.unacceptedBatch(id, execution)
 
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
         const h = yield* runtimes.route(runtimeOf(session))
-        yield* Ref.set(r.prompting, true).pipe(
-          Effect.andThen(h.send(terminalOf(session), { text: inboxContent(rows) })),
-          Effect.ensuring(Ref.set(r.prompting, false)),
-          Effect.ignore,
-        )
+        yield* h.send(terminalOf(session), { text: inboxContent(rows) }).pipe(Effect.ignore)
       }).pipe(Effect.catchTag("NoRuntime", () => Effect.void)),
     )
   })
 
-  yield* reactor.on([ExecutionEnded], (event) =>
-    event.data.outcome === "failed" ? Effect.void : wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
+  yield* reactor.on([ExecutionSucceeded, ExecutionInterrupted, ExecutionUnresolved], (event) =>
+    wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
   )
-  yield* reactor.on([InboxQueued], (event) =>
+  yield* reactor.on([InboxEnqueued], (event) =>
     wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),
-  )
-
-  yield* db.inbox.recoverDelivering(
-    (label, messages) =>
-      `A message to ${label} was not delivered: vibestd stopped while handing it over; it may or may not have arrived\n\n${messages.join("\n\n")}`,
   )
 
   for (const id of yield* db.session.unstartedRuns()) {

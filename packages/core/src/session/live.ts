@@ -159,12 +159,23 @@ export const make = Effect.gen(function* () {
     ),
   )
 
+  const isPrompting = (id: string) =>
+    SynchronizedRef.get(tracked).pipe(
+      Effect.flatMap((map) =>
+        Option.match(HashMap.get(map, id), {
+          onNone: () => Effect.succeed(false),
+          onSome: (r) => Ref.get(r.prompting),
+        }),
+      ),
+    )
+
   const size = Effect.gen(function* () {
     return { tracked: HashMap.size(yield* SynchronizedRef.get(tracked)), statuses: statuses.size }
   })
 
   return {
     track,
+    isPrompting,
     stop,
     forget,
     release,

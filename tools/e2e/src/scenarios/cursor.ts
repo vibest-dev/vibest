@@ -187,7 +187,8 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
     rows<Execution>(w, "SELECT id, outcome, reply, typed FROM execution WHERE session_id = ? ORDER BY id", id)
 
   const notices = (id: string) =>
-    row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND kind = 'notice'", id)?.n ?? 0
+    row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE about_session_id = ? AND sender_type = 'vibest'", id)
+      ?.n ?? 0
 
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
 
@@ -317,7 +318,7 @@ const reports = (runtime: Runtime): Check => ({
 
       const handed = rows<{ content: string }>(
         w,
-        "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+        "SELECT content FROM inbox WHERE recipient_session_id = ? AND recipient_execution_id = ?",
         id,
         fresh.id,
       ).map((r) => r.content)
@@ -337,7 +338,7 @@ const reports = (runtime: Runtime): Check => ({
 
       const timing = row<{ placed: number | null; started: number }>(
         w,
-        `SELECT p.placed_at AS placed, (SELECT min(started_at) FROM execution x WHERE x.session_id = p.session_id) AS started
+        `SELECT p.placed_at AS placed, (SELECT min(booked_at) FROM execution x WHERE x.session_id = p.session_id) AS started
           FROM process p WHERE p.session_id = ? ORDER BY p.id LIMIT 1`,
         id,
       )
@@ -396,7 +397,7 @@ const noApprovalDialog: Check = {
 
       const sent = row<{ n: number }>(
         w,
-        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'send' AND instr(content, 'i12-hello') > 0",
+        "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND instr(content, 'i12-hello') > 0",
         id,
       )?.n
 
@@ -457,7 +458,7 @@ const conversationAtStart: Check = {
         `the conversation was not recorded at the session start: ready ${JSON.stringify(ready)}, conversation ${JSON.stringify(noted)}`,
       )
       const conversation = (JSON.parse(noted[0]!.data) as { conversation: string }).conversation
-      await until("the first task taken", () => fact(id, "execution.accepted").length > 0, 60_000)
+      await until("the first task taken", () => fact(id, "execution.input").length > 0, 60_000)
       await closePane(id)
       expect(
         !c.executions(id).some((x) => x.outcome === "completed"),
@@ -538,7 +539,7 @@ const entryTakesMessages = (runtime: Runtime): Check => ({
 
       const handed = rows<{ content: string }>(
         w,
-        "SELECT content FROM inbox WHERE session_id = ? AND execution_id = ?",
+        "SELECT content FROM inbox WHERE recipient_session_id = ? AND recipient_execution_id = ?",
         entry,
         two.id,
       ).map((r) => r.content)

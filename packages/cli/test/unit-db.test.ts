@@ -130,7 +130,7 @@ describe("Db", () => {
 
           const [task] = yield* sql<{
             id: number
-          }>`SELECT id FROM inbox WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
+          }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
 
           const [opened] = yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.strictEqual(opened!.inboxId, task!.id)
@@ -208,7 +208,7 @@ describe("Db", () => {
             yield* sql<{
               session: string
               senderKey: string
-            }>`SELECT session_id AS session, sender_key FROM inbox ORDER BY session_id, id`,
+            }>`SELECT recipient_session_id AS session, sender_key FROM inbox ORDER BY recipient_session_id, id`,
             [
               { session: x, senderKey: "plugin:p" },
               { session: y, senderKey: "plugin:other" },
@@ -231,7 +231,7 @@ describe("Db", () => {
           yield* sql<{
             input: string
           }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
-          [{ input: "kept" }],
+          [{ input: "kept\ndropped" }],
         )
       }),
     ),
@@ -246,6 +246,7 @@ describe("Db", () => {
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
           yield* db.session.insertSession(session(id), yield* projectOf("r"))
           yield* db.session.startObserved(id, "typed", 1)
+          const execution = yield* db.session.openExecution(id)
 
           const end = {
             harness: "pi",
@@ -259,7 +260,10 @@ describe("Db", () => {
 
           assert.isUndefined(yield* db.session.endObserved(id, { ...end, needsReady: true }))
           const current = (yield* db.session.getSession(id))!.process!.id
-          assert.strictEqual(yield* db.session.endObserved(id, { ...end, needsReady: true }, current), "completed")
+          assert.strictEqual(
+            yield* db.session.endObserved(id, { ...end, execution, needsReady: true }, current),
+            "completed",
+          )
         }),
       ),
   )
@@ -276,12 +280,14 @@ describe("Db", () => {
           parentSessionId: parent.sessionId,
         })
         yield* db.session.startObserved(id, "typed", 1)
+        const execution = yield* db.session.openExecution(id)
         assert.strictEqual((yield* db.session.getSession(id))?.status, "working")
         yield* sql`CREATE TRIGGER no_notice BEFORE INSERT ON inbox BEGIN SELECT RAISE(ABORT, 'no notice'); END`
 
         const end = {
           harness: "pi",
           at: 2,
+          execution,
           status: "failed" as const,
           reply: "",
           failure: "boom",
@@ -326,8 +332,8 @@ describe("Db", () => {
           task: "do it",
         })
         assert.deepStrictEqual(
-          yield* sql`SELECT kind, content, status FROM inbox WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
-          [{ kind: "task", content: "do it", status: "delivered" }],
+          yield* sql`SELECT content, status FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
+          [{ content: "do it", status: "pending" }],
         )
         assert.deepStrictEqual(yield* db.inbox.pendingInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), [])
         assert.strictEqual(
@@ -341,7 +347,12 @@ describe("Db", () => {
           yield* db.session.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
           "task not handed over yet",
         )
-        assert.strictEqual(yield* db.inbox.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "do it")
+        assert.deepStrictEqual(yield* db.inbox.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
+          id: (yield* sql<{
+            id: number
+          }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0]!.id,
+          content: "do it",
+        })
         yield* db.inbox.linkTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         assert.isUndefined(yield* db.inbox.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         assert.isFalse(
@@ -364,7 +375,7 @@ describe("Db", () => {
         const working = (yield* db.session.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!
         assert.strictEqual(working.status, "working")
         assert.strictEqual(executionStateOf(working), "open")
-        assert.strictEqual(working.openExecution?.startedAt, 5)
+        assert.strictEqual(working.openExecution?.bookedAt, 5)
         yield* db.session.endExecution(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { outcome: "completed", failure: { message: "late" } },
@@ -409,7 +420,7 @@ describe("Db", () => {
           Effect.map(
             sql<{
               recipient: string
-            }>`SELECT session_id AS recipient FROM inbox WHERE kind = 'notice' AND instr(content, ${summary}) > 0`,
+            }>`SELECT recipient_session_id AS recipient FROM inbox WHERE sender_type = 'vibest' AND instr(content, ${summary}) > 0`,
             (rows) => rows.map((row) => row.recipient),
           )
 
@@ -431,7 +442,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a peer item for an ended session goes to its nearest living creator, once; with none only a dropped row stays",
+    "a peer item for an ended session goes to its nearest living creator, once; with none, nothing is written locally",
     () =>
       Effect.gen(function* () {
         const db = yield* Db.Service
@@ -456,17 +467,25 @@ describe("Db", () => {
           sql<{
             recipient: string
             status: string
-          }>`SELECT session_id AS recipient, status FROM inbox WHERE kind = 'notice'`
+          }>`SELECT recipient_session_id AS recipient, status FROM inbox WHERE sender_type = 'vibest'`
 
         assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
         assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "duplicate")
         assert.deepStrictEqual(yield* rows(), [{ recipient: creator, status: "pending" }])
         yield* db.session.archive(creator)
-        assert.strictEqual(yield* db.remote.receivePeerItem(item("8c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
-        assert.deepStrictEqual(yield* rows(), [
-          { recipient: creator, status: "pending" },
-          { recipient: ended, status: "dropped" },
-        ])
+        const disposed = "8c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f"
+        assert.strictEqual(yield* db.remote.receivePeerItem(item(disposed)), "queued")
+        assert.strictEqual(yield* db.remote.receivePeerItem(item(disposed)), "duplicate")
+        assert.deepStrictEqual(
+          yield* sql<{ status: string }>`SELECT status FROM inbox WHERE transfer_id = ${disposed}`,
+          [{ status: "dropped" }],
+        )
+        yield* db.session.startEntry(project, "pi", false, place, ENTRY)
+        assert.strictEqual(yield* db.remote.receivePeerItem(item(disposed)), "duplicate")
+        assert.deepStrictEqual(
+          yield* sql<{ status: string }>`SELECT status FROM inbox WHERE transfer_id = ${disposed}`,
+          [{ status: "dropped" }],
+        )
       }).pipe(Effect.provide(memoryDb())),
   )
 
@@ -476,13 +495,41 @@ describe("Db", () => {
 
       const execution = (id: string, at: number, end?: { at: number; outcome: string; reply?: string }) =>
         Effect.gen(function* () {
-          const start = yield* fact("execution.started", { sessionId: id, at, data: {} })
+          const [row] = yield* (yield* SqlClient.SqlClient)<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id
+            FROM execution WHERE session_id = ${id}`
+
+          const executionId = row?.id ?? 1
+          yield* fact("execution.allocated", { sessionId: id, at, data: { executionId } })
 
           if (end === undefined) return
-          yield* fact("execution.ended", {
+          const reply = end.reply === undefined ? {} : { reply: end.reply }
+
+          if (end.outcome === "completed") {
+            yield* fact("execution.succeeded", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+
+            return
+          }
+
+          if (end.outcome === "failed") {
+            yield* fact("execution.failed", {
+              sessionId: id,
+              at: end.at,
+              data: { executionId, failure: { message: "failed" }, ...reply },
+            })
+
+            return
+          }
+
+          if (end.outcome === "interrupted") {
+            yield* fact("execution.interrupted", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+
+            return
+          }
+
+          yield* fact("execution.unresolved", {
             sessionId: id,
             at: end.at,
-            data: { execution: start, outcome: end.outcome, ...(end.reply !== undefined && { reply: end.reply }) },
+            data: { executionId, observation: end.outcome, ...reply },
           })
         })
 
@@ -542,7 +589,7 @@ describe("Db", () => {
       })
       assert.deepStrictEqual(briefs.get("11111111-1111-4111-8111-111111111111"), {
         task: null,
-        latest: { status: "lost", summary: "hidden", endedAt: 8 },
+        latest: { status: "lost", summary: "hidden", endedAt: null },
       })
       assert.isUndefined(briefs.get("00000000-0000-4000-8000-000000000000"))
       assert.strictEqual((yield* db.session.sessionBriefs([])).size, 0)
@@ -559,7 +606,7 @@ describe("Db", () => {
           const noticeStatus = (content: string) =>
             Effect.map(
               sql<{ status: string }>`SELECT status FROM inbox
-              WHERE about_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND kind = 'notice' AND content = ${noticeEnvelope(content)}`,
+              WHERE about_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND sender_type = 'vibest' AND content = ${noticeEnvelope(content)}`,
               (rows) => rows.map((row) => row.status).join(),
             )
 
@@ -583,7 +630,8 @@ describe("Db", () => {
           assert.strictEqual(row!.status, "pending")
           assert.deepStrictEqual(yield* db.inbox.claim(row!.recipient!, [row!.id]), [row!.id])
           assert.deepStrictEqual(yield* db.inbox.claim(row!.recipient!, [row!.id]), [])
-          yield* db.inbox.setInboxStatus(row!.recipient!, [row!.id], "delivered", "delivering")
+          const execution = (yield* db.session.startExecution(row!.recipient!, 1)).execution
+          yield* db.inbox.setInboxStatus(row!.recipient!, [row!.id], "delivered", "delivering", execution)
           assert.strictEqual(yield* noticeStatus("hi"), "delivered")
           yield* db.inbox.insertInbox({
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -642,6 +690,46 @@ describe("Db", () => {
           )
         }),
       ),
+  )
+
+  it.effect("a reserved launch input on a finished execution is not work still waiting", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db.Service
+        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const project = yield* projectOf("r")
+        yield* db.session.insertSession(session(id), project, { cwd: "/w", task: "do it" })
+        yield* db.session.startExecution(id, 1)
+        yield* db.inbox.linkTask(id)
+        const execution = yield* db.session.openExecution(id)
+        yield* db.session.closeExecution(id, execution!, "completed", {})
+        assert.isFalse(yield* db.inbox.waitingOn(id))
+        yield* db.inbox.insertSend(id, "queued", { type: "user" })
+        assert.isTrue(yield* db.inbox.waitingOn(id))
+      }),
+    ),
+  )
+
+  it.effect("a session cancelled before it launches did not receive its first message", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db.Service
+        const sql = yield* SqlClient.SqlClient
+        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        yield* db.session.insertSession(session(id), yield* projectOf("r"), { cwd: "/w", task: "do it" })
+        yield* db.session.endUnstarted(id, "not_started", "did not start")
+        assert.deepStrictEqual(
+          yield* sql<{ status: string }>`SELECT status FROM inbox WHERE recipient_session_id = ${id}`,
+          [{ status: "dropped" }],
+        )
+        assert.deepStrictEqual(
+          yield* sql<{
+            n: number
+          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id} AND type = 'inbox.delivered'`,
+          [{ n: 0 }],
+        )
+      }),
+    ),
   )
 
   it.effect("moving a project whose path has a non-BMP character carries its child session directories along", () =>

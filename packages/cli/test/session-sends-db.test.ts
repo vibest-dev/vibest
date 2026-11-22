@@ -37,14 +37,81 @@ const setup = Effect.gen(function* () {
 })
 
 describe("sends from sessions", () => {
+  it.effect("an acked outbound id does not swallow a later forward of the same transfer", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, entryId } = yield* setup
+        const peer = "11111111-1111-4111-8111-111111111111"
+        const remote = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const middle = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        const ended = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+        const id = "22222222-2222-4222-8222-222222222222"
+        yield* db.remote.notePeer({ id: peer, name: "peer-b" })
+        yield* db.session.insertSession(session(B), project, { cwd: "/w", task: "child", parentSessionId: entryId })
+        yield* db.remote.sendToPeer(B, peer, remote, "orig", id)
+        yield* db.remote.ackOutbox(peer, [id])
+        yield* db.session.insertSession(session(middle), project, { origin: { peer, project: "p", reportTo: remote } })
+        yield* db.session.insertSession(session(ended), project, { parentSessionId: middle })
+        yield* db.session.archive(middle)
+        yield* db.session.archive(ended)
+
+        const back = {
+          id,
+          recipient: ended,
+          kind: "send" as const,
+          sender: "peer-b/dddddddd",
+          from: { session: remote, machine: "peer-b" },
+          content: "came back",
+        }
+
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "queued")
+        assert.lengthOf(yield* db.remote.outboxOf(peer), 1)
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "duplicate")
+        assert.lengthOf(yield* db.remote.outboxOf(peer), 1)
+      }),
+    ),
+  )
+
+  it.effect("an outbound transfer id is not proof that the same id was received", () =>
+    memory(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { db, project, entryId } = yield* setup
+        const peer = "11111111-1111-4111-8111-111111111111"
+        const remote = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const id = "11111111-1111-4111-8111-111111111112"
+
+        yield* db.remote.notePeer({ id: peer, name: "peer-b" })
+        yield* db.session.insertSession(session(B), project, { cwd: "/w", task: "child" })
+        yield* db.remote.sendToPeer(B, peer, remote, "orig", id)
+        yield* db.remote.ackOutbox(peer, [id])
+
+        const back = {
+          id,
+          recipient: entryId,
+          kind: "send" as const,
+          sender: "peer-b/dddddddd",
+          from: { session: remote, machine: "peer-b" },
+          content: "orig",
+        }
+
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "queued")
+        assert.deepStrictEqual(yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE transfer_id = ${id}`, [
+          { n: 1 },
+        ])
+        assert.strictEqual(yield* db.remote.receivePeerItem(back), "duplicate")
+      }),
+    ),
+  )
+
   it.effect("a send to the entry session waits as a pending row like a send to any session", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
         assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { type: "agent", session: A }))
         assert.deepStrictEqual(
-          (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
-          [["send", { type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
+          (yield* entryPending(db, project)).map((r) => [r.sender, r.recipient]),
+          [[{ type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
         )
       }),
     ),
@@ -275,12 +342,11 @@ describe("sends from sessions", () => {
 
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "queued")
         assert.strictEqual(yield* db.remote.receivePeerItem(item), "duplicate")
-        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE session_id = ${ended}`, [
-          { status: "dropped" },
-        ])
+        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE recipient_session_id = ${ended}`, [])
         const out = yield* db.remote.outboxOf(peer)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
+        assert.strictEqual(out[0]!.id, item.id, "the forward reuses the incoming transfer id")
         assert.deepInclude(
           out[0]!,
           { sessionId: ended, from: null },

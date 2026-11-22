@@ -1,4 +1,12 @@
-import { ExecutionAccepted, ExecutionEnded, InboxMoved, InboxQueued, type Sender } from "@vibest/schema/event"
+import {
+  ExecutionFailed,
+  ExecutionInterrupted,
+  ExecutionStarted,
+  ExecutionSucceeded,
+  ExecutionUnresolved,
+  InboxEnqueued,
+  type Sender,
+} from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
 import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
@@ -68,16 +76,14 @@ export const layer = Layer.effect(
         for (const signal of (id === undefined ? undefined : waiting.get(id)) ?? []) Queue.offerUnsafe(signal, null)
       })
 
-    yield* reactor.on([ExecutionEnded], (event) =>
-      Effect.sync(() => handedOver.delete(handedKey(event.sessionId, event.data.execution))).pipe(
-        Effect.andThen(wake(event.sessionId)),
-      ),
+    const forgetHandover = (sessionId: string | undefined, execution: number) =>
+      Effect.sync(() => handedOver.delete(handedKey(sessionId, execution)))
+
+    yield* reactor.on([ExecutionSucceeded, ExecutionFailed, ExecutionInterrupted, ExecutionUnresolved], (event) =>
+      forgetHandover(event.sessionId, event.data.executionId).pipe(Effect.andThen(wake(event.sessionId))),
     )
-    yield* reactor.on([ExecutionAccepted], (event) =>
-      Effect.sync(() => void handedOver.delete(handedKey(event.sessionId, event.data.execution))),
-    )
-    yield* reactor.on([InboxQueued], (event) => wake(event.sessionId))
-    yield* reactor.on([InboxMoved], (event) => (event.data.to === "pending" ? wake(event.sessionId) : Effect.void))
+    yield* reactor.on([ExecutionStarted], (event) => forgetHandover(event.sessionId, event.data.executionId))
+    yield* reactor.on([InboxEnqueued], (event) => wake(event.sessionId))
 
     const stream = (sessionId: string) =>
       Stream.unwrap(
@@ -123,15 +129,14 @@ export const layer = Layer.effect(
           session.id,
           rows.map((r) => r.id),
           "failed",
+          undefined,
+          undefined,
+          reason,
         )
         .pipe(
           Effect.andThen(
             Effect.forEach(
-              [
-                ...Map.groupBy(rows, (r) =>
-                  r.kind === "send" && r.sender !== undefined ? (localSessionOf(r.sender) ?? null) : null,
-                ),
-              ],
+              [...Map.groupBy(rows, (r) => (r.sender === undefined ? null : (localSessionOf(r.sender) ?? null)))],
               ([sender, group]) => {
                 const message = `A message to ${sessionLabel(session)} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
 
@@ -147,9 +152,22 @@ export const layer = Layer.effect(
     )
 
     const dropQueue = Effect.fn("Inbox.dropQueue")((session: SessionRow, reason: string) =>
-      db.inbox
-        .pendingInbox(session.id)
-        .pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason)))),
+      Effect.gen(function* () {
+        const pending = yield* db.inbox.pendingInbox(session.id)
+        const task = yield* db.inbox.unsentDelegation(session.id)
+
+        if (pending.length > 0) yield* undelivered(session, pending, reason)
+
+        if (task.length === 0) return
+        yield* db.inbox.dropUnsent(session.id, reason)
+
+        const message = `A message to ${sessionLabel(session)} was not delivered: ${reason}\n\n${task.map((row) => row.message).join("\n\n")}`
+        const sender = task[0]?.sender
+        const local = sender === undefined ? undefined : localSessionOf(sender)
+
+        if (local === undefined) yield* db.inbox.insertInbox({ sessionId: session.id, message })
+        else yield* db.inbox.insertNoticeTo(local, message)
+      }),
     )
 
     const claimRetype = Effect.fn("Inbox.claimRetype")((sessionId: string, execution: number) =>

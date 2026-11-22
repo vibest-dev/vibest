@@ -10,29 +10,19 @@ type Blocker = { readonly id: string; readonly reason: string }
 export interface StopDeps {
   readonly drain: Drain.Interface
   readonly bus: Bus.Interface
-  readonly deliveringInbox: Effect.Effect<
-    ReadonlyArray<{ readonly id: number; readonly kind: string; readonly sessionId: string }>
-  >
   readonly shutdown: Deferred.Deferred<void>
 }
 
 export const stopOnce =
-  ({ drain, bus, deliveringInbox, shutdown }: StopDeps) =>
+  ({ drain, bus, shutdown }: StopDeps) =>
   <E, R>(instance: string, method: string, takeOver: Effect.Effect<void, E, R>) =>
     Effect.gen(function* () {
       if (!(yield* drain.begin)) return yield* new DaemonStopping({ method })
       let last: Array<Blocker> = []
       const busy = (id: string) => ({ id, reason: "daemon operation still running" })
 
-      const blockers = Effect.gen(function* () {
-        last = (yield* drain.pending).map(busy)
-
-        if (last.length > 0) return last
-        last = [{ id: "inbox", reason: "checking unsettled delivery" }]
-        last = (yield* deliveringInbox).map((row) => ({
-          id: `inbox ${row.id}`,
-          reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
-        }))
+      const blockers = Effect.map(drain.pending, (pending) => {
+        last = pending.map(busy)
 
         return last
       })
@@ -53,10 +43,7 @@ export const stopOnce =
       return yield* Effect.gen(function* () {
         const accepted = yield* awaitEvent(
           acceptedOnceIdle,
-          (event) =>
-            event.type === "drain.released" || event.type === "inbox.moved"
-              ? acceptedOnceIdle
-              : Effect.succeed(Option.none()),
+          (event) => (event.type === "drain.released" ? acceptedOnceIdle : Effect.succeed(Option.none())),
           DRAIN_TIMEOUT,
           Effect.map(acceptedOnceIdle, Option.isSome),
         ).pipe(Effect.provideService(Bus.Service, bus))

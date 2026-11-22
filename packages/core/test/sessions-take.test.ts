@@ -2,7 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Session } from "@vibest/core/session"
-import { Effect } from "effect"
+import { Effect, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -44,7 +44,9 @@ const entryAsked = Effect.gen(function* () {
 
 const inboxStatuses = (sender: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    sql<{ status: string }>`SELECT status FROM inbox WHERE sender_session_id = ${sender} AND kind = 'send'`.pipe(
+    sql<{
+      status: string
+    }>`SELECT status FROM inbox WHERE sender_session_id = ${sender} AND sender_type = 'agent'`.pipe(
       Effect.orDie,
       Effect.map((rows) => rows.map((row) => row.status)),
     ),
@@ -54,7 +56,7 @@ const acceptedFacts = (session: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     sql<{
       n: number
-    }>`SELECT COUNT(*) AS n FROM event WHERE type = 'execution.accepted' AND aggregate LIKE ${`%${session}%`}`.pipe(
+    }>`SELECT COUNT(*) AS n FROM event WHERE type = 'execution.started' AND aggregate LIKE ${`%${session}%`}`.pipe(
       Effect.orDie,
       Effect.map((rows) => rows[0]!.n),
     ),
@@ -68,7 +70,19 @@ describe.concurrent("an idle session takes its next batch", () => {
       const taken = yield* inbox.take(entryId, undefined)
       assert.include(taken!.content, "a question")
       assert.deepStrictEqual(yield* db.session.openExecution(entryId), taken!.execution)
+
+      const statusOf = SqlClient.SqlClient.pipe(
+        Effect.flatMap(
+          (sql) => sql<{ status: string }>`SELECT status FROM inbox
+            WHERE recipient_session_id = ${entryId} AND instr(content, 'a question') > 0`,
+        ),
+        Effect.map((rows) => rows.map((row) => row.status)),
+      )
+
+      assert.deepStrictEqual(yield* statusOf, ["delivering"])
       assert.isUndefined(yield* inbox.take(entryId, undefined))
+      assert.isTrue(yield* db.session.acceptExecution(entryId, taken!.execution))
+      assert.deepStrictEqual(yield* statusOf, ["delivering"])
     }),
   )
 
@@ -87,14 +101,15 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a batch the harness never accepts ends not_started and fails its messages",
+    "a batch the harness never accepts ends not_started and is not recorded as failed",
     Effect.gen(function* () {
       const { db, sessions, inbox, entryId, sender } = yield* entryAsked
       const { execution } = (yield* inbox.take(entryId, undefined))!
-      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivered"])
+      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
       yield* TestClock.adjust("9 seconds")
       yield* sessions.check(entryId)
-      yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+      yield* until(db.session.getSession(entryId), (row) => row?.openExecution == null)
+      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
       assert.isUndefined(yield* db.session.openExecution(entryId))
       assert.isFalse(yield* db.session.acceptExecution(entryId, execution))
     }),
@@ -118,7 +133,7 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a batch an earlier vibestd took is never typed by the fallback, and ends not_started with its message failed",
+    "a batch an earlier vibestd took is never typed by the fallback, and ends not_started without a failure",
     Effect.gen(function* () {
       const { db, sessions, entryId, sender } = yield* entryAsked
       const herdr = yield* FakeRuntime
@@ -131,7 +146,8 @@ describe.concurrent("an idle session takes its next batch", () => {
       )
       yield* TestClock.adjust("9 seconds")
       yield* sessions.check(entryId)
-      yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+      yield* until(db.session.getSession(entryId), (row) => row?.openExecution == null)
+      assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
       assert.isUndefined(yield* db.session.openExecution(entryId))
     }),
   )
@@ -162,8 +178,10 @@ describe.concurrent("an idle session takes its next batch", () => {
       yield* sessions.typeTaken(entryId, execution)
       assert.isFalse(yield* db.session.executionAccepted(entryId))
       yield* sessions.userPrompt(entryId, "a question")
-      assert.isTrue(yield* db.session.executionAccepted(entryId))
+      assert.isFalse(yield* db.session.executionAccepted(entryId))
       assert.deepStrictEqual(yield* db.session.openExecution(entryId), execution)
+      yield* db.session.acceptExecution(entryId, execution)
+      assert.isTrue(yield* db.session.executionAccepted(entryId))
     }),
   )
 
@@ -179,7 +197,8 @@ describe.concurrent("an idle session takes its next batch", () => {
         assert.isFalse(yield* db.session.executionAccepted(entryId))
         yield* TestClock.adjust("9 seconds")
         yield* sessions.check(entryId)
-        yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+        yield* until(db.session.getSession(entryId), (row) => row?.openExecution == null)
+        assert.deepStrictEqual(yield* inboxStatuses(sender), ["delivering"])
         assert.isUndefined(yield* db.session.openExecution(entryId))
       }),
     )
@@ -248,6 +267,27 @@ describe.concurrent("an idle session takes its next batch", () => {
       ])
       assert.isTrue(taken?.content.includes("<vibest-agent-message>") === true)
       assert.isTrue(taken?.content.includes("report from afar") === true)
+    }),
+  )
+
+  test(
+    "a working launch-argv execution on a pulling harness is not closed as not_started when a follow-up message arrives",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db.Service
+      const sessions = yield* Session.Service
+      const repo = yield* makeRepository
+      yield* Ref.set(herdr.onStarted, (session) => db.session.patchLive(session, { ready: 1, pid: 60_000 }))
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo, "pulling-pi"))
+      yield* until(db.session.getSession(id), (row) => !!row && (row.process?.placedAt ?? null) !== null)
+      const first = yield* db.session.openExecution(id)
+      assert.isDefined(first)
+      assert.isFalse(yield* db.session.executionAccepted(id))
+      yield* sessions.send(id, "follow-up while Turn 1 works")
+      yield* TestClock.adjust("9 seconds")
+      yield* sessions.check(id)
+      assert.strictEqual(yield* db.session.openExecution(id), first)
+      assert.strictEqual((yield* db.session.getSession(id))?.status, "working")
     }),
   )
 })

@@ -463,11 +463,7 @@ describe("another machine's vibestd runs agents here", () => {
         Effect.forkScoped,
       )
       const result = yield* finish(b.db, session, "General Agent completed")
-      assert.strictEqual(result?.status, "dropped", "B's own delivery never sees it")
-      assert.strictEqual(
-        unwrapped((yield* b.db.inbox.latestInbox(session, "notice"))!.message),
-        "General Agent completed",
-      )
+      assert.isUndefined(result, "a forward writes no local delivery row")
       const item = yield* Queue.take(items)
       assert.deepStrictEqual(
         { session: item.session, recipient: item.recipient, kind: item.kind, content: item.content, cut: item.cut },
@@ -604,7 +600,10 @@ describe("another machine's vibestd runs agents here", () => {
         const sent = yield* b.run(
           Effect.flatMap(
             SqlClient.SqlClient,
-            (sql) => sql<{ content: string }>`SELECT content FROM inbox WHERE kind = 'send' ORDER BY id`,
+            (sql) =>
+              sql<{ content: string }>`SELECT content FROM inbox i WHERE i.sender_type != 'vibest'
+                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = i.recipient_session_id AND s.message_id = i.id)
+                ORDER BY i.id`,
           ),
         )
 
@@ -805,7 +804,7 @@ describe("vibest run --machine and remote sessions", () => {
         assert.strictEqual(b.spawns[0]!.commit, COMMIT)
         yield* finish(b.db, onB(spawned.id), "General Agent completed")
         const [notice] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
-        assert.strictEqual(notice!.kind, "notice")
+        assert.strictEqual(notice!.senderType, "vibest")
         assert.strictEqual(unwrapped(notice!.content), `${spawned.id.slice(0, 11)}: General Agent completed`)
         yield* until(b.run(outboxRows), (rows) => rows.length === 0)
         const address = spawned.id.slice(0, 11)
@@ -840,7 +839,7 @@ describe("vibest run --machine and remote sessions", () => {
       const spawned = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} }))
       assert.isTrue(yield* b.db.remote.sendToOrigin(onB(spawned.id), entryId.slice(0, 8), "which branch?"))
       const [sent] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
-      assert.strictEqual(sent!.kind, "send")
+      assert.notStrictEqual(sent!.senderType, "vibest")
       assert.include(sent!.content, `<agent-id>${spawned.id.slice(0, 11)}</agent-id>`)
       assert.include(sent!.content, "which branch?")
       const asker = (yield* b.db.session.getSession(onB(spawned.id)))!

@@ -181,6 +181,7 @@ const finishExecution = (
   })
 
 const executionOf = (message: SentMessage) => (message.details as { execution: number }).execution
+const idsOf = (message: SentMessage) => (message.details as { ids: ReadonlyArray<number> }).ids
 
 const executionEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
   mode,
@@ -262,12 +263,14 @@ describe("pi-vibest", () => {
           Effect.sync(() => s.messages.length),
           (n) => n === 1,
         )
+        assert.lengthOf(idsOf(s.messages[0]!.message), 1)
         assert.deepInclude(s.messages[0]?.message, {
           customType: "vibest",
           content: noticeEnvelope("survives the gap"),
           display: true,
           details: {
             execution: executionOf(s.messages[0]!.message),
+            ids: idsOf(s.messages[0]!.message),
             detail: [{ sender: { type: "vibest" }, message: "survives the gap" }],
           },
         })
@@ -564,7 +567,7 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
       yield* s.emit("input", { type: "input", text: "vibest handed this over", source: "extension" })
       yield* s.emit("input", { type: "input", text: "again", source: "interactive" })
-      assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
+      assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane\nagain", inbox: null }])
 
       const coordinator = yield* session({
         VIBEST_AGENT: "coordinator",
@@ -581,6 +584,130 @@ describe("pi-vibest", () => {
           Effect.orDie,
         ),
         [{ n: 1 }],
+      )
+    }),
+  )
+
+  test(
+    "VIBEST_EXECUTION binds the first turn once and is cleared after settle or replaced by inbox pull",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projectOf("r")
+      const id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      yield* db.session.insertSession({ id, ...idleRow("pi") }, project)
+      const first = (yield* db.session.startExecution(id, 1)).execution
+      const processId = (yield* db.session.currentProcessId(id))!
+      yield* db.session.patchLive(id, { ready: 1 })
+
+      const s = yield* session({
+        VIBEST_AGENT: "general",
+        VIBEST_SESSION_ID: id,
+        VIBEST_PROJECT_ID: project,
+        VIBEST_PROCESS: String(processId),
+        VIBEST_EXECUTION: String(first),
+        VIBEST_CLI: "vibest",
+      })
+
+      yield* s.emit("session_start", { reason: "startup" }, tuiStart)
+      yield* s.emit("input", { type: "input", text: "initial cli argv prompt", source: "interactive" }, tuiStart)
+      yield* until(
+        sql<{ started: number | null; typed: string | null }>`SELECT started_at AS started, typed FROM execution
+          WHERE session_id = ${id} AND id = ${first}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.started !== null,
+      )
+      assert.isNull(
+        (yield* sql<{
+          typed: string | null
+        }>`SELECT typed FROM execution WHERE session_id = ${id} AND id = ${first}`)[0]?.typed,
+      )
+      yield* s.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "first turn" }] }] },
+        tuiStart,
+      )
+      yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* until(
+        sql<{ outcome: string | null; reply: string | null }>`SELECT outcome, reply FROM execution
+          WHERE session_id = ${id} AND id = ${first}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.outcome === "completed",
+      )
+
+      yield* s.emit("input", { type: "input", text: "human follow-up", source: "interactive" }, tuiStart)
+      yield* until(
+        sql<{ typed: string | null }>`SELECT typed FROM execution WHERE session_id = ${id} AND id > ${first}`.pipe(
+          Effect.orDie,
+        ),
+        (rows) => rows[0]?.typed === "human follow-up",
+      )
+      yield* s.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "follow-up reply" }] }] },
+        tuiStart,
+      )
+      yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* until(
+        sql<{ outcome: string | null; reply: string | null }>`SELECT outcome, reply FROM execution
+          WHERE session_id = ${id} AND id > ${first}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.outcome === "completed" && rows[0]?.reply === "follow-up reply",
+      )
+
+      const lost = (yield* db.session.startExecution(id, 2)).execution
+      yield* db.session.closeExecution(id, lost, "lost", { failure: { message: "gone" } })
+      const second = (yield* db.session.startExecution(id, 3)).execution
+      yield* s.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "second turn" }] }] },
+        tuiStart,
+      )
+      yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* TestClock.withLive(Effect.sleep("100 millis"))
+      assert.strictEqual(
+        (yield* sql<{
+          outcome: string | null
+        }>`SELECT outcome FROM execution WHERE session_id = ${id} AND id = ${second}`)[0]?.outcome,
+        null,
+      )
+
+      const id2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+      yield* db.session.insertSession({ id: id2, ...idleRow("pi") }, project)
+      const initial = (yield* db.session.startExecution(id2, 1)).execution
+      yield* db.session.closeExecution(id2, initial, "lost", { failure: { message: "gone" } })
+      const pulled = (yield* db.session.startExecution(id2, 2)).execution
+      const process2 = (yield* db.session.currentProcessId(id2))!
+      yield* db.session.patchLive(id2, { ready: 1 })
+
+      const s2 = yield* session({
+        VIBEST_AGENT: "general",
+        VIBEST_SESSION_ID: id2,
+        VIBEST_PROJECT_ID: project,
+        VIBEST_PROCESS: String(process2),
+        VIBEST_EXECUTION: String(initial),
+        VIBEST_CLI: "vibest",
+      })
+
+      yield* s2.emit("session_start", { reason: "startup" }, tuiStart)
+      yield* s2.emit(
+        "message_start",
+        { message: { role: "custom", customType: "vibest", details: { execution: pulled } } },
+        tuiStart,
+      )
+      yield* s2.emit(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "pulled reply" }] }] },
+        tuiStart,
+      )
+      yield* s2.emit("agent_settled", { aborted: false }, tuiStart)
+      yield* until(
+        sql<{ outcome: string | null; reply: string | null }>`SELECT outcome, reply FROM execution
+          WHERE session_id = ${id2} AND id = ${pulled}`.pipe(Effect.orDie),
+        (rows) => rows[0]?.outcome === "completed",
+      )
+      assert.strictEqual(
+        (yield* sql<{
+          outcome: string | null
+        }>`SELECT outcome FROM execution WHERE session_id = ${id2} AND id = ${initial}`)[0]?.outcome,
+        "lost",
       )
     }),
   )

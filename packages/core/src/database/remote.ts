@@ -76,19 +76,20 @@ export const statements = Effect.gen(function* () {
       readonly from?: AgentFrom | undefined
       readonly at?: number
       readonly request?: string | undefined
+      readonly id?: string | undefined
     },
   ) =>
     Effect.gen(function* () {
       if (recipientSession === null) return false
 
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
-      const id = row.request ?? randomId()
+      const id = row.id ?? row.request ?? randomId()
 
       if ((yield* sql`SELECT 1 FROM outbox WHERE id = ${id}`).length > 0) return true
 
       const [open] =
         row.kind === "send"
-          ? yield* sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${row.sessionId} AND outcome IS NULL`
+          ? yield* sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${row.sessionId} AND owner = 1`
           : []
 
       yield* publish(OutboxQueued, {
@@ -196,6 +197,12 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               if (route === undefined) return "unknown" as const
 
               if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
+
+              const [forwarded] = yield* sql<{ session: string }>`SELECT session_id AS session FROM outbox
+                WHERE id = ${item.id}`
+
+              if (forwarded !== undefined && forwarded.session === item.recipient) return "duplicate" as const
+
               const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
 
               const content =
@@ -204,19 +211,35 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   : noticeEnvelope(`${item.sender}: ${item.content}`)
 
               if (heir !== undefined && "peer" in heir) {
-                yield* inbox.queueInbox({
-                  recipient: item.recipient,
-                  kind: item.kind,
-                  sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
-                  content,
-                  status: "dropped",
-                  peerItem: item.id,
-                })
-                yield* queueForPeer(heir.peer, heir.session, {
+                const [leg] = yield* sql<{
+                  session: string
+                }>`SELECT session_id AS session FROM outbox WHERE id = ${item.id}`
+
+                if (leg !== undefined && leg.session === item.recipient) return "duplicate" as const
+
+                const id = leg === undefined ? item.id : randomId()
+
+                const queued = yield* queueForPeer(heir.peer, heir.session, {
+                  id,
                   sessionId: item.recipient,
                   kind: item.kind,
                   content: `${item.sender}: ${item.content}`,
                 })
+
+                if (!queued) return "unknown" as const
+
+                if (id !== item.id) {
+                  const receipt = yield* inbox.queueInbox({
+                    recipient: item.recipient,
+                    sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
+                    content,
+                    transfer: item.id,
+                  })
+
+                  yield* inbox.moveInbox(sql`recipient_session_id = ${item.recipient} AND id = ${receipt}`, "dropped", {
+                    reason: "forwarded",
+                  })
+                }
 
                 return "queued" as const
               }
@@ -227,13 +250,26 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 target !== undefined &&
                 (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
 
+              if (target === undefined || !here) {
+                const queued = yield* inbox.queueInbox({
+                  recipient: item.recipient,
+                  sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
+                  content,
+                  transfer: item.id,
+                })
+
+                yield* inbox.moveInbox(sql`recipient_session_id = ${item.recipient} AND id = ${queued}`, "dropped", {
+                  reason: "the entry session is not running",
+                })
+
+                return "queued" as const
+              }
+
               yield* inbox.queueInbox({
-                recipient: target ?? item.recipient,
-                kind: item.kind,
+                recipient: target,
                 sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                 content,
-                status: here ? "pending" : "dropped",
-                peerItem: item.id,
+                transfer: item.id,
               })
 
               return "queued" as const
