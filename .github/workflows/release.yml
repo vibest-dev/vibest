@@ -19,8 +19,8 @@ name: Release
 # It never pushes to main. plan decides the commit and the version. The release gate is pnpm verify, whose stages run as
 # parallel jobs on that commit with the version set (no job changes the tree): build builds once and packs what ships
 # (the linux-x64 curl archive and every npm tarball), checks the tarballs and records the SHA-256 of every file;
-# typecheck and test run the unit gates; e2e-curl runs every E2E check of the gate on the curl install (the archive) of
-# build's exact bytes, in shards, and e2e-npm the install and launch checks on the npm install (the tarballs). darwin
+# typecheck and test run the unit gates; e2e runs every E2E check of the gate on the curl install (the archive) of
+# build's exact bytes, one job per functional suite of areas, and e2e-npm the install and launch checks on the npm install (the tarballs). darwin
 # (macos-latest) runs pnpm verify H4 on the same commit (keeping the darwin-arm64 curl archive it checked; its npm install takes build's exact tarballs) and checks
 # the same tarballs; it records the SHA-256 of the archive. publish waits for every job and for the owner's approval
 # (environment `release`), checks those hashes, tags that commit v<version> (GITHUB_TOKEN; no ruleset covers tags),
@@ -219,7 +219,7 @@ jobs:
 
   # The release gate is pnpm verify (tools/verify/src/verify.ts), whose stages run as parallel jobs on the same tree:
   # this job builds once (build, archive, pack) and keeps the bytes that ship; typecheck and test are jobs of their own;
-  # e2e-curl runs every check of the gate on the curl install of those exact bytes, split into shards; e2e-npm runs the
+  # e2e runs every check of the gate on the curl install of those exact bytes, one job per functional suite; e2e-npm runs the
   # install and launch checks on their npm install.
   # --no-cache everywhere, so every check runs. H4 is macOS-only: verify leaves it to the darwin job.
   build:
@@ -315,11 +315,10 @@ jobs:
       - uses: ./.github/actions/tree-unchanged
 
   # Every E2E check of the gate on the curl install of build's exact bytes (the archive through install.sh, the binary
-  # that ships), split by tools/e2e/src/runner/shard.ts into shards balanced by measured duration. Every shard of the
-  # matrix must stay in step with SHARDS (tools/e2e/test/shard.test.ts proves the shards partition the checks). Eight
-  # shards take about as long as e2e-npm, so neither waits on the other.
-  e2e-curl:
-    name: E2E · curl install · part ${{ matrix.shard }}/${{ strategy.job-total }}
+  # that ships), one job per suite: a group of E2E areas (e2e/src/main.ts) that test one part of vibest. Every area
+  # is in exactly one suite (e2e/test/suites.test.ts), so a new area goes into a suite here.
+  e2e:
+    name: e2e · ${{ matrix.suite.name }}
     needs: [plan, build]
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
@@ -329,9 +328,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    env:
-      SHARDS: 8
+        suite:
+          - { name: sessions, areas: start entry sessions }
+          - { name: delivery-inbox, areas: delivery inbox }
+          - { name: exits-hc, areas: exits hc terminal-status }
+          - { name: machines, areas: machines }
+          - { name: agents-plugins, areas: agents plugins }
+          - { name: harnesses, areas: harness integration routing agy }
+          - { name: update-restart, areas: update restart }
+          - { name: daemon-project, areas: daemon project }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -349,15 +354,16 @@ jobs:
       - uses: ./.github/actions/e2e-tools
       - run: >-
           pnpm run verify --no-cache --elsewhere H4 --stage e2e
-          --leg curl --shard ${{ matrix.shard }}/${{ env.SHARDS }} --jobs 1
+          --leg curl --jobs 1
           --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
+          ${{ matrix.suite.areas }}
       # On a failure: each check's evidence (redacted) and the vibestd log of every world E2E kept.
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-evidence-curl-${{ matrix.shard }}
+          name: e2e-evidence-${{ matrix.suite.name }}
           path: |
-            tools/e2e/evidence
+            e2e/evidence
             /tmp/vbe-*/vibest/vibestd.log
           if-no-files-found: ignore
           retention-days: 7
@@ -366,7 +372,7 @@ jobs:
   # The npm install of build's exact tarballs holds the same binary as the curl install, so it runs only the checks
   # whose behaviour depends on how vibest is installed and launched (NPM_CHECKS in tools/verify/src/verify.ts).
   e2e-npm:
-    name: E2E · npm install (install and launch checks)
+    name: e2e · npm
     needs: [plan, build]
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
@@ -397,7 +403,7 @@ jobs:
         with:
           name: e2e-evidence-npm
           path: |
-            tools/e2e/evidence
+            e2e/evidence
             /tmp/vbe-*/vibest/vibestd.log
           if-no-files-found: ignore
           retention-days: 7
@@ -448,7 +454,7 @@ jobs:
           retention-days: 90
 
   publish:
-    needs: [plan, build, darwin, typecheck, test, e2e-curl, e2e-npm]
+    needs: [plan, build, darwin, typecheck, test, e2e, e2e-npm]
     if: >-
       !inputs.dry_run &&
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&

@@ -30,5 +30,5 @@ name. To say a change works, an agent runs the `verify-features` skill
 verify`, use its results, verify the rest by hand in an isolated real environment, and report each capability with
 evidence. E2E gives every run a temp
 `VIBEST_HOME` and the user's real `HOME` (the harness logins live there), reads the user's harness config without
-writing it, and leaves evidence in `tools/e2e/evidence/<run>/`. Do not run a bare `vibest` against the user's own
+writing it, and leaves evidence in `e2e/evidence/<run>/`. Do not run a bare `vibest` against the user's own
 `~/.vibest` or herdr session to try a change; add or run an E2E check instead.

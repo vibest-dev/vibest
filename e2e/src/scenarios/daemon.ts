@@ -4,8 +4,8 @@ import path from "node:path"
 
 import { Predicate, type Schema } from "effect"
 
-import { LOG_KEEP_BYTES, LOG_MAX_BYTES } from "../../../../packages/platform-bun/src/log-file.ts"
-import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
+import { LOG_KEEP_BYTES, LOG_MAX_BYTES } from "../../../packages/platform-bun/src/log-file.ts"
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
 import { alive, binary, expect, expectReplied, factsOf, until, type World } from "../world.ts"

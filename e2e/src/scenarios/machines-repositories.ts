@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
 import { binary, expect, until, type World } from "../world.ts"

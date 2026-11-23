@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { note } from "../../../reap.ts"
+import { note } from "../../../tools/reap.ts"
 import type { Check } from "../check.ts"
 import {
   ask,

@@ -3,7 +3,7 @@ import path from "node:path"
 
 import { Predicate, type Schema } from "effect"
 
-import { commandOf, endOwned } from "../../../reap.ts"
+import { commandOf, endOwned } from "../../../tools/reap.ts"
 import {
   DAY_MS,
   herdrConfigSessions,
@@ -183,7 +183,7 @@ export const stopOwners = async (root: string) => {
   for (const pid of pids) {
     const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString()
 
-    if (!/(herdr|hc|vibest)/.test(command) || command.includes("tools/e2e")) continue
+    if (!/(herdr|hc|vibest)/.test(command) || command.includes("e2e/src/")) continue
     doomed.push(pid)
 
     try {

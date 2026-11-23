@@ -167,7 +167,7 @@
       }
     },
     {
-      "files": ["**/test/**", "**/*.test.ts", "tools/e2e/**"],
+      "files": ["**/test/**", "**/*.test.ts", "e2e/**"],
       "rules": {
         "typescript/consistent-type-assertions": "off"
       }
