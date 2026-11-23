@@ -1,13 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Queue, Stream } from "effect"
+import { Effect, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { type Connection, type Pushed, RexError } from "../src/client.ts"
-import { make } from "../src/terminal-runtime.ts"
+import { make, type RuntimeEvent } from "../src/terminal-runtime.ts"
 
 const terminal = { id: "session:s/block:b" }
 
-const processChanged = (name: string): Pushed => ({
+const processChanged = (name: string | null): Pushed => ({
   type: "event",
   payload: {
     type: "session_event",
@@ -15,7 +15,11 @@ const processChanged = (name: string): Pushed => ({
       session_id: "session:s",
       event: {
         type: "block_event",
-        payload: { block_id: "block:b", name: "process_changed", payload: { foreground: { name } } },
+        payload: {
+          block_id: "block:b",
+          name: "process_changed",
+          payload: { foreground: name === null ? null : { name } },
+        },
       },
     },
   },
@@ -86,5 +90,59 @@ describe("runtime-rex against a fake Rex connection", () => {
 
       assert.deepStrictEqual(yield* runtime.process(terminal), { running: false })
     }).pipe(Effect.scoped),
+  )
+
+  it.live(
+    "a new block's login wrapper is not a program, and the first real program's return to the shell is its exit",
+    () =>
+      Effect.gen(function* () {
+        const pushed = yield* Queue.unbounded<Pushed>()
+        let foreground: { name: string } | null = null
+
+        const connection: Connection = {
+          revision: 18,
+          pushed: Stream.fromQueue(pushed),
+          call: (method) => {
+            if (method === "session.attach_all") return Effect.succeed({ sessions: [] })
+
+            if (method === "block.method") return Effect.succeed({ last_exit: null, foreground })
+
+            return Effect.succeed({})
+          },
+        }
+
+        const runtime = yield* make({
+          connect: Effect.succeed(connection),
+          socket: "/fake/server.sock",
+          scope: yield* Effect.scope,
+          shell: "/bin/sh",
+        })
+
+        const seen = yield* Ref.make<ReadonlyArray<RuntimeEvent>>([])
+        yield* runtime.events.pipe(
+          Stream.runForEach((event) => Ref.update(seen, (events) => [...events, event])),
+          Effect.forkScoped,
+        )
+
+        const becomes = (name: string | null) =>
+          Effect.sync(() => {
+            foreground = name === null ? null : { name }
+          }).pipe(
+            Effect.andThen(Queue.offer(pushed, processChanged(name))),
+            Effect.andThen(Effect.sleep("50 millis")),
+            Effect.andThen(runtime.process(terminal)),
+          )
+
+        const exits = Ref.get(seen).pipe(Effect.map((events) => events.filter((e) => e.type === "exited").length))
+
+        assert.deepStrictEqual(yield* becomes(null), { running: true })
+        assert.deepStrictEqual(yield* becomes("/usr/bin/login"), { running: true })
+        assert.deepStrictEqual(yield* becomes("-zsh"), { running: false })
+        assert.strictEqual(yield* exits, 0)
+
+        assert.deepStrictEqual(yield* becomes("pi"), { running: true })
+        assert.deepStrictEqual(yield* becomes("-zsh"), { running: false })
+        assert.strictEqual(yield* exits, 1)
+      }).pipe(Effect.scoped),
   )
 })

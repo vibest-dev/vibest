@@ -53,7 +53,7 @@ export const rexServer = async (w: World, blockEnv: Record<string, string>) => {
   await fsPromises.mkdir(path.join(root, "state"))
   await fsPromises.mkdir(path.join(root, "run"))
   await fsPromises.writeFile(path.join(root, "init.lua"), "")
-  const env = { ...blockEnv, REX_SOCKET: socket }
+  const env = { ...blockEnv, REX_SOCKET: socket, REX_RUNTIME_DIR: path.join(root, "run") }
 
   const server = Bun.spawn(
     [
@@ -69,7 +69,7 @@ export const rexServer = async (w: World, blockEnv: Record<string, string>) => {
       path.join(root, "init.lua"),
     ],
     {
-      env: w.env({ ...env, REX_RUNTIME_DIR: path.join(root, "run") }),
+      env: w.env(env),
       stdin: "ignore",
       stdout: "ignore",
       stderr: Bun.file(path.join(w.root, "rex-server.log")),
@@ -228,7 +228,10 @@ export const realPi = async (w: World, fakeUrl?: string) => {
   await fsPromises.writeFile(path.join(dir, "settings.json"), JSON.stringify({ ...written, packages: providers }))
 
   for (const name of ["auth.json", "cliproxyapi.json"])
-    if (fs.existsSync(path.join(agent, name))) await fsPromises.symlink(path.join(agent, name), path.join(dir, name))
+    if (fs.existsSync(path.join(agent, name))) {
+      await fsPromises.copyFile(path.join(agent, name), path.join(dir, name))
+      await fsPromises.chmod(path.join(dir, name), 0o600)
+    }
 
   return { dir, flags: ["--provider", provider, "--model", model] }
 }
@@ -496,30 +499,6 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "RX4",
-    tier: "agent",
-    title:
-      "Rex with a real model (the user's default Pi provider and model): a session started with --runtime rex keeps a codeword over vibest stop and resume, and answers after vibest daemon restart",
-    run: async (w) => {
-      if (!Bun.which("pi")) throw new Skip("pi not on PATH")
-      const entry = recordingModel(() => reply("ok"))
-      const real = await realPi(w, entry.url)
-      const rex = await rexServer(w, { PI_CODING_AGENT_DIR: real.dir })
-
-      try {
-        await lifecycle(w, rex, {
-          entry: ["--provider", "fake", "--model", "m"],
-          worker: real.flags,
-          timeoutMs: 300_000,
-        })
-      } finally {
-        entry.stop()
-        await w.stopDaemon()
-        await rex.stop()
-      }
-    },
-  },
-  {
     id: "RX3",
     tier: "agent",
     title:
@@ -531,7 +510,7 @@ const checks: ReadonlyArray<Check> = [
 
       try {
         await w.daemon({ env: rex.env })
-        const repo = await project(w, "rexglm")
+        const repo = await project(w, "rexorch")
         const entry = await entryInRex(w, rex, repo, real.flags)
         const entryAt = runtimeOf(w, entry.id)
         expect(
@@ -544,7 +523,7 @@ const checks: ReadonlyArray<Check> = [
           120_000,
         )
 
-        const flags = real.flags.join(" ")
+        const flags = real.flags.map(shSingle).join(" ")
 
         const worker =
           "In your working directory create the file REX-NOTE.md holding the line rex ok, then git add it and git commit -m 'Add REX-NOTE'. " +
@@ -654,6 +633,30 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
       } finally {
+        await w.stopDaemon()
+        await rex.stop()
+      }
+    },
+  },
+  {
+    id: "RX4",
+    tier: "agent",
+    title:
+      "Rex with a real model (the user's default Pi provider and model): a session started with --runtime rex keeps a codeword over vibest stop and resume, and answers after vibest daemon restart",
+    run: async (w) => {
+      if (!Bun.which("pi")) throw new Skip("pi not on PATH")
+      const entry = recordingModel(() => reply("ok"))
+      const real = await realPi(w, entry.url)
+      const rex = await rexServer(w, { PI_CODING_AGENT_DIR: real.dir })
+
+      try {
+        await lifecycle(w, rex, {
+          entry: ["--provider", "fake", "--model", "m"],
+          worker: real.flags,
+          timeoutMs: 300_000,
+        })
+      } finally {
+        entry.stop()
         await w.stopDaemon()
         await rex.stop()
       }

@@ -73,7 +73,7 @@ export const atShell = (foreground: Foreground | null | undefined): boolean =>
   foreground !== null &&
   foreground !== undefined &&
   foreground.script === undefined &&
-  (INTERACTIVE_SHELLS.has(programName(foreground.name)) || LOGIN_WRAPPERS.has(programName(foreground.name)))
+  INTERACTIVE_SHELLS.has(programName(foreground.name))
 
 const beforeTheProgram = (foreground: Foreground | null | undefined) =>
   foreground === null || foreground === undefined || LOGIN_WRAPPERS.has(programName(foreground.name))
@@ -601,10 +601,11 @@ export const make = (deps: {
               Effect.map((now) => {
                 if (p.last_exit !== null) return { running: false, exitCode: p.last_exit.exit_code }
 
-                if (p.foreground === null || p.foreground === undefined) return { running: true }
+                if (beforeTheProgram(p.foreground)) return { running: true }
 
                 if (!atShell(p.foreground)) {
                   busy.add(terminal.id)
+                  known.add(terminal.id)
                   typedAt.delete(terminal.id)
 
                   return { running: true }
