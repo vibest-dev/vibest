@@ -1885,6 +1885,12 @@ textarea {
   }
 }
 
+[data-theme-switching] *,
+[data-theme-switching] *::before,
+[data-theme-switching] *::after {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

@@ -30,7 +30,12 @@ export function App() {
   const [showNewArtifact, setShowNewArtifact] = useState(false)
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme)
+    const root = document.documentElement
+    root.setAttribute("data-theme-switching", "")
+    root.setAttribute("data-theme", theme)
+    const settle = window.setTimeout(() => root.removeAttribute("data-theme-switching"), 50)
+
+    return () => window.clearTimeout(settle)
   }, [theme])
 
   const loadProjectsAndWorkspace = useCallback(async (preferredProjectId?: string) => {
