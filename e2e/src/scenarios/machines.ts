@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { commandOf } from "../../../reap.ts"
+import { commandOf } from "../../../tools/reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, type Message, piDir, sendOrReply, text, toolCall } from "../fake-model.ts"
 import { alive, binary, expect, fail, readDb, row, Skip, until, type World } from "../world.ts"

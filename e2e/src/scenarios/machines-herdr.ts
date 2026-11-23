@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { note } from "../../../reap.ts"
+import { note } from "../../../tools/reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { binary, expect, herdrPane, readDb, row, Skip, until, type World } from "../world.ts"

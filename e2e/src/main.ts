@@ -2,12 +2,11 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { endNoted, reapEndedRuns, startWatch, survivors } from "../../reap.ts"
+import { endNoted, reapEndedRuns, startWatch, survivors } from "../../tools/reap.ts"
 import type { Check } from "./check.ts"
 import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
-import { parseShard, shardOf } from "./runner/shard.ts"
 import agents from "./scenarios/agents.ts"
 import agy from "./scenarios/agy.ts"
 import cursor from "./scenarios/cursor.ts"
@@ -78,7 +77,7 @@ const userFileInvariantAfterEveryRun = [{ id: "I6", tier: "gate", covers: [] }]
 if (process.argv.includes("--list")) {
   console.log(
     JSON.stringify([
-      ...checks.map((c) => ({ id: c.id, tier: c.check.tier ?? "gate", covers: c.check.covers ?? [] })),
+      ...checks.map((c) => ({ id: c.id, area: c.area, tier: c.check.tier ?? "gate", covers: c.check.covers ?? [] })),
       ...userFileInvariantAfterEveryRun,
     ]),
   )
@@ -115,13 +114,6 @@ if (!["gate", "agent", "all"].includes(tier)) {
 }
 
 const elsewhere = (valueOf("--elsewhere") ?? "").split(",").filter(Boolean)
-const shardText = valueOf("--shard")
-const shard = shardText === undefined ? undefined : parseShard(shardText)
-
-if (shardText !== undefined && shard === undefined) {
-  console.error("--shard takes k/n, for example 2/6")
-  process.exit(1)
-}
 
 const only = args.filter((a) => a !== "--strict" && a !== "--no-cache")
 const groupOf = (a: string, c: (typeof checks)[number]) => c.id.startsWith(`${a}-`)
@@ -138,17 +130,13 @@ if (unknown.length) {
 
 const inTier = (c: (typeof checks)[number]) => tier === "all" || (c.check.tier ?? "gate") === tier
 
-const everySelected = checks.filter(
+const selected = checks.filter(
   (c) =>
     !elsewhere.includes(c.id) &&
     (only.length
       ? only.some((a) => named(a, c)) || ((only.includes(c.area) || only.some((a) => groupOf(a, c))) && inTier(c))
       : inTier(c)),
 )
-
-const selected = shard === undefined ? everySelected : shardOf(everySelected, shard)
-
-if (shard !== undefined) console.log(`SHARD ${shard.index}/${shard.count}: ${selected.map((c) => c.id).join(" ")}`)
 
 for (const id of elsewhere) console.log(`ELSEWHERE ${id}: not run here; another machine's run proves it`)
 
@@ -186,7 +174,7 @@ type Result = {
 }
 
 const run = `${new Date().toISOString().replace(/[:.]/g, "-")}-${method}`
-const evidence = path.join(checkout, "tools/e2e/evidence", run)
+const evidence = path.join(checkout, "e2e/evidence", run)
 
 await fs.mkdir(evidence, { recursive: true })
 

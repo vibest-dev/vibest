@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Schema } from "effect"
 
-import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
 import {

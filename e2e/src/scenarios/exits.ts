@@ -4,7 +4,7 @@ import path from "node:path"
 
 import type { Schema } from "effect"
 
-import { PROTOCOL } from "../../../../packages/schema/src/version.ts"
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
 import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"

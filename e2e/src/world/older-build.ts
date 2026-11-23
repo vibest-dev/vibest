@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-const repository = path.resolve(import.meta.dirname, "../../../..")
+const repository = path.resolve(import.meta.dirname, "../../..")
 
 const run = async (cwd: string, argv: ReadonlyArray<string>) => {
   const child = Bun.spawn([...argv], { cwd, stdout: "pipe", stderr: "pipe" })

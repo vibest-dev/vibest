@@ -28,7 +28,7 @@ run fails at the end naming each failed leg:
    - **curl**: this platform's release archive (`scripts/build-archive.ts`), installed by `install.sh` run as
      `curl … | sh`, from `file://` (`VIBEST_DOWNLOAD_URL`, `VIBEST_INSTALL`, `VIBEST_BIN`).
    - **npm**: `pnpm pack` of `@vibest/cli` and this platform's binary package, then `npm install` of both tarballs.
-2. Both installs at the same time, `tools/e2e --strict` with `VIBEST_E2E_METHOD` (`curl` or `npm`) and
+2. Both installs at the same time, `e2e --strict` with `VIBEST_E2E_METHOD` (`curl` or `npm`) and
    `VIBEST_E2E_INSTALL`: every check drives the installed `vibest` on `PATH` and the plugins it ships, with real herdr
    and real harnesses; a skipped check fails. The curl install runs the whole gate. The npm install holds the same
    binary bytes, so it runs only the checks whose behaviour depends on how vibest is installed and launched

@@ -225,6 +225,12 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.5)(@vitest/coverage-v8@5.0.3)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0))
 
+  e2e:
+    dependencies:
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
   packages/builtins:
     dependencies:
       '@vibest/plugin':
@@ -597,12 +603,6 @@ importers:
       '@vibest/core':
         specifier: workspace:*
         version: link:../../packages/core
-      effect:
-        specifier: 4.0.2
-        version: 4.0.2
-
-  tools/e2e:
-    dependencies:
       effect:
         specifier: 4.0.2
         version: 4.0.2
