@@ -321,4 +321,96 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
       ),
     60_000,
   )
+
+  it.live(
+    "near opens a new window in the same renamed Rex session even after the anchor block closes",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+
+          const created = rexCli(
+            "api",
+            "call",
+            "session.create",
+            JSON.stringify({
+              label: "renamed-by-user",
+              initial_windows: [
+                {
+                  window_label: "anchor",
+                  layout: {
+                    block: {
+                      flavor: "com.superlogical.terminal.shell",
+                      label: "anchor",
+                      options: { shell: "none", command: ["/bin/sh"], cwd, close_on_exit: false },
+                    },
+                  },
+                },
+              ],
+            }),
+          )
+
+          assert.strictEqual(created.status, 0, created.stderr)
+
+          const parsed = JSON.parse(created.stdout) as {
+            session_id: string
+            initial_windows: Array<{ block_ids: Array<string> }>
+          }
+
+          const sessionId = parsed.session_id
+          const anchor = { id: `${sessionId}/${parsed.initial_windows[0]!.block_ids[0]!}` }
+
+          const keeper = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "keeper",
+            near: anchor,
+          })
+
+          assert.strictEqual(parseTerminalId(keeper.id)?.sessionId, sessionId)
+
+          yield* runtime.close(anchor)
+
+          const afterClose = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "after-close",
+            near: anchor,
+          })
+
+          assert.strictEqual(parseTerminalId(afterClose.id)?.sessionId, sessionId)
+
+          yield* runtime.close(afterClose)
+          yield* runtime.close(keeper)
+        }),
+      ),
+    60_000,
+  )
+
+  it.live(
+    "open with a dead near session falls back cleanly to creating a new session",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+          const deadSession = "session:11111111-1111-4111-8111-111111111111"
+
+          const opened = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "fallback",
+            near: { id: `${deadSession}/block:22222222-2222-4222-8222-222222222222` },
+          })
+
+          const parsed = parseTerminalId(opened.id)
+          assert.isDefined(parsed)
+          assert.notStrictEqual(parsed?.sessionId, deadSession)
+          yield* runtime.close(opened)
+        }),
+      ),
+    60_000,
+  )
 })

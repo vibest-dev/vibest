@@ -716,6 +716,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         session.lastSessionAt(runtime, address).pipe(Effect.orDie),
       ),
 
+      lastProjectTerminal: Effect.fn("Db.session.lastProjectTerminal")((projectId: string, runtime: string) =>
+        session.lastProjectTerminal(projectId, runtime).pipe(Effect.orDie),
+      ),
+
       processesAt: Effect.fn("Db.session.processesAt")((runtime: string, address: RuntimeAddress) =>
         session.processesAt(runtime, address).pipe(Effect.orDie),
       ),

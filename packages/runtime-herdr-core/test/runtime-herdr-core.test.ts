@@ -290,4 +290,28 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
       ),
     90_000,
   )
+
+  it.live(
+    "open with near pointing to a closed terminal falls back cleanly without parent",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+          const first = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "first" })
+          yield* runtime.close(first)
+
+          const second = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "second",
+            near: first,
+          })
+
+          assert.notStrictEqual(second.id, first.id)
+          yield* runtime.close(second)
+        }),
+      ),
+    60_000,
+  )
 })

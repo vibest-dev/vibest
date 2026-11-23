@@ -92,4 +92,43 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
       assert.strictEqual((yield* Ref.get(blocked.counts))["hello"], 1)
     }).pipe(Effect.scoped),
   )
+
+  it.effect("open falls back to the home core with no_parent when near points to an unreachable socket", () =>
+    Effect.gen(function* () {
+      const seen: Array<{ readonly socket: string; readonly params: { readonly no_parent?: boolean } }> = []
+
+      const clientFor = (socketPath: string): HcClient => ({
+        socketPath,
+        hello: Effect.succeed(hello),
+        subscribe: () => Stream.fail(down("events.subscribe")),
+        call: ((method: string, params: { readonly no_parent?: boolean }) => {
+          seen.push({ socket: socketPath, params })
+
+          if (socketPath !== HOME) return Effect.fail(down(method))
+
+          return Effect.succeed({ address: "t2" })
+        }) as HcClient["call"],
+      })
+
+      const runtime = yield* make({
+        connect: (socket) => Effect.succeed(clientFor(socket)),
+        socket: HOME,
+        scope: yield* Effect.scope,
+      })
+
+      const opened = yield* runtime.open({
+        project: "/work/demo",
+        cwd: "/work/demo",
+        launch: { argv: [], env: {} },
+        label: "main",
+        near: { id: "t1@/run/dead.sock" },
+      })
+
+      assert.strictEqual(opened.id, `t2@${HOME}`)
+      assert.strictEqual(seen.length, 2)
+      assert.strictEqual(seen[0]?.socket, "/run/dead.sock")
+      assert.strictEqual(seen[1]?.socket, HOME)
+      assert.strictEqual(seen[1]?.params.no_parent, true)
+    }).pipe(Effect.scoped),
+  )
 })
