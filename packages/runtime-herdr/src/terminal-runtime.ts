@@ -742,12 +742,17 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       events: RuntimeApi.eventsFrom(events),
       present,
       doctor,
-      attach: (target) => {
+      attach: (target, terminal) => {
         const location = decodeTarget(target)
 
-        return location !== undefined && "session" in location
-          ? ["herdr", "session", "attach", location.session]
-          : ["herdr"]
+        const session =
+          location !== undefined && "session" in location
+            ? location.session
+            : terminal === undefined
+              ? undefined
+              : parseTerminal(terminal)?.session
+
+        return session === undefined ? ["herdr"] : ["herdr", "session", "attach", session]
       },
     } satisfies Runtime
   })

@@ -3,14 +3,21 @@ import { Effect } from "effect"
 
 export const DEFAULT_HARNESS = "claude"
 
-export const harnessDefaultPlugin = () =>
+export const harnessDefaultPlugin = (configured: Effect.Effect<string | undefined> = Effect.undefined) =>
   Plugin.define({
     id: "vibest.harness-default",
     effect: (context) =>
       context.agent.hook("start.before", (event) =>
-        Effect.sync(() => {
-          if (event.harness === undefined && event.harnesses.some((h) => h.harness === DEFAULT_HARNESS && h.available))
-            event.harness = DEFAULT_HARNESS
+        Effect.gen(function* () {
+          if (event.harness !== undefined) return
+
+          const available = (harness: string | undefined) =>
+            event.harnesses.some((h) => h.harness === harness && h.available)
+
+          const saved = yield* configured
+
+          if (available(saved)) event.harness = saved
+          else if (available(DEFAULT_HARNESS)) event.harness = DEFAULT_HARNESS
         }),
       ),
   })

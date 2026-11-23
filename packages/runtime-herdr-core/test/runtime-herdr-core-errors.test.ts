@@ -131,4 +131,25 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
       assert.strictEqual(seen[1]?.params.no_parent, true)
     }).pipe(Effect.scoped),
   )
+
+  it.effect("attach names the terminal's address and pins the core it is on with HC_SOCKET", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* runtimeWith(Effect.succeed(hello))
+      assert.deepStrictEqual(runtime.attach?.(undefined, { id: `t3@${HOME}` }), [
+        "env",
+        `HC_SOCKET=${HOME}`,
+        "hc",
+        "attach",
+        "t3",
+      ])
+      assert.deepStrictEqual(runtime.attach?.(undefined, { id: "t3@/other.sock" }), [
+        "env",
+        "HC_SOCKET=/other.sock",
+        "hc",
+        "attach",
+        "t3",
+      ])
+      assert.deepStrictEqual(runtime.attach?.(undefined), [])
+    }).pipe(Effect.scoped),
+  )
 })

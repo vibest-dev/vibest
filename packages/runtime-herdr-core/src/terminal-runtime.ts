@@ -1,7 +1,7 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
-import { launchLine, typedLine } from "@vibest/plugin/effect/launch"
+import { isShellHandoff, launchLine, typedLine } from "@vibest/plugin/effect/launch"
 import { Host } from "@vibest/plugin/host"
 import { ID } from "@vibest/schema/id"
 import {
@@ -208,7 +208,7 @@ export const make = (deps: {
     }
 
     const track = (core: Core, t: api.Terminal) => {
-      if (t.state === "live" && !atShell(t.foreground ?? { name: t.argv[0] ?? "", argv: t.argv }))
+      if (t.state === "live" && t.argv.length > 0 && !atShell(t.foreground ?? { name: t.argv[0]!, argv: t.argv }))
         core.busy.add(t.address)
     }
 
@@ -386,7 +386,7 @@ export const make = (deps: {
     const typed = (launch: VibestPlugin.Launch) => written(typedLine(launch))
 
     const argvOf = (launch: VibestPlugin.Launch) =>
-      launch.argv.length === 0
+      launch.argv.length === 0 || isShellHandoff(launch)
         ? Effect.succeed([])
         : written(launchLine(launch)).pipe(Effect.map((argv) => inLoginShell(shell, argv)))
 
@@ -583,6 +583,13 @@ export const make = (deps: {
       )
     }
 
+    const attach: NonNullable<Runtime["attach"]> = (_target, terminal) => {
+      if (terminal === undefined || terminal.id === "") return []
+      const { socket, address } = parseTerminalId(terminal.id, deps.socket)
+
+      return ["env", `HC_SOCKET=${socket}`, "hc", "attach", address]
+    }
+
     return {
       id: KIND,
       status,
@@ -595,6 +602,7 @@ export const make = (deps: {
       run,
       present,
       doctor,
+      attach,
       seen,
       see,
       events: RuntimeApi.eventsFrom(events),

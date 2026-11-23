@@ -106,6 +106,13 @@ export interface Launch {
   readonly env: Readonly<Record<string, string>>
 }
 
+export const SHELL_HANDOFF: ReadonlyArray<string> = ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"]
+
+export const isShellHandoff = (launch: Launch) =>
+  launch.prompt === undefined &&
+  launch.argv.length === SHELL_HANDOFF.length &&
+  launch.argv.every((arg, i) => arg === SHELL_HANDOFF[i])
+
 const IDENTITY_ENV = [
   "VIBEST_SESSION_ID",
   "VIBEST_PROCESS",

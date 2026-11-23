@@ -26,9 +26,14 @@ const event = (harness: string | undefined, claude: boolean) => ({
   ],
 })
 
-const chosen = (harness: string | undefined, claude: boolean) =>
+const chosen = (harness: string | undefined, claude: boolean, saved?: string) =>
   makePlugins([
-    { source: "builtin:vibest.harness-default", revision: "1", options: {}, plugin: harnessDefaultPlugin() },
+    {
+      source: "builtin:vibest.harness-default",
+      revision: "1",
+      options: {},
+      plugin: harnessDefaultPlugin(Effect.succeed(saved)),
+    },
   ]).pipe(
     Effect.flatMap((plugins) => plugins.start(event(harness, claude))),
     Effect.map((decision) => decision.harness),
@@ -47,6 +52,14 @@ describe("vibest.harness-default", () => {
       assert.strictEqual(yield* chosen(undefined, true), "claude")
       assert.strictEqual(yield* chosen("pi", true), "pi")
       assert.strictEqual(yield* chosen(undefined, false), undefined)
+    }),
+  )
+
+  it.effect("a saved defaultHarness comes before claude, and only when it is available", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* chosen(undefined, true, "pi"), "pi")
+      assert.strictEqual(yield* chosen(undefined, true, "cursor"), "claude")
+      assert.strictEqual(yield* chosen("claude", true, "pi"), "claude")
     }),
   )
 })

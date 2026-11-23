@@ -153,6 +153,8 @@ export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHa
   }
 }
 
+export const NO_RUNTIME_DETECTED = "no runtime was detected in this environment"
+
 export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("LaunchFailed", {
   message: Schema.String,
 }) {}

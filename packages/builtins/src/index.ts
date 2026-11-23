@@ -6,7 +6,7 @@ import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
 import { herdrCommands } from "@vibest/runtime-herdr/commands"
 import { plugin as runtimeHerdr } from "@vibest/runtime-herdr/plugin"
 import { plugin as runtimeRex } from "@vibest/runtime-rex/plugin"
-import { Effect, type Schema } from "effect"
+import { Effect, FileSystem, Path, Predicate, type Schema } from "effect"
 
 import { agentFilesPlugin } from "./agent-files.ts"
 import { agentPlugin } from "./agent.ts"
@@ -29,13 +29,31 @@ const builtin = (plugin: Plugin.Plugin): Builtin => ({
   plugin,
 })
 
-export const pre = (home: string) =>
+const savedHarness = (home: string, parseJsonc: (text: string) => Schema.Json) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const config = path.join(home, "vibest.json")
+
+    return fs.readFileString(config).pipe(
+      Effect.flatMap((text) => Effect.try(() => parseJsonc(text))),
+      Effect.map((raw) => {
+        const value = Predicate.hasProperty(raw, "defaultHarness") ? raw.defaultHarness : undefined
+
+        return Predicate.isString(value) && value !== "" ? value : undefined
+      }),
+      Effect.orElseSucceed(() => undefined),
+    )
+  })
+
+export const pre = (home: string, parseJsonc: (text: string) => Schema.Json) =>
   Effect.gen(function* () {
     const pi = yield* piPlugin
     const claude = yield* claudePlugin
     const cursor = yield* cursorPlugin
     const agy = yield* agyPlugin
     const agentFiles = yield* agentFilesPlugin(home)
+    const defaultHarness = yield* savedHarness(home, parseJsonc)
 
     return [
       builtin(agentPlugin),
@@ -47,7 +65,7 @@ export const pre = (home: string) =>
       builtin(runtimeHerdr),
       builtin(runtimeRex),
       builtin(runtimeChoicePlugin()),
-      builtin(harnessDefaultPlugin()),
+      builtin(harnessDefaultPlugin(defaultHarness)),
       { ...builtin(agentFiles.plugin), revise: agentFiles.revise },
       { ...builtin(reportReminder), optional: true },
       { ...builtin(idleStop), optional: true },

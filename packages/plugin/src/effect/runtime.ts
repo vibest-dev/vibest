@@ -109,7 +109,7 @@ export interface RuntimeDefinition {
   readonly focus?: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
   readonly present?: (terminal: Terminal, info: Readonly<Record<string, string>>) => Effect.Effect<void, RuntimeError>
   readonly doctor?: (harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
-  readonly attach?: (target: string | undefined) => ReadonlyArray<string>
+  readonly attach?: (target: string | undefined, terminal?: Terminal) => ReadonlyArray<string>
   readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>
   readonly locate?: (peer: Peer, sessions: ReadonlyMap<string, string>) => Effect.Effect<Located>
 }

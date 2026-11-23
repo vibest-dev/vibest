@@ -400,6 +400,11 @@ const integration = Spec.make("integration", {
   ],
 })
 
+const onboard = Spec.make("onboard", {
+  description:
+    "Set up where vibest runs agents and which coding agent it starts: pick a terminal runtime (offering to install herdr-core when none is found) and a harness, and save both as defaults in vibest.json. Works outside a git repository. Only the user runs this",
+})
+
 const doctor = Spec.make("doctor", {
   description:
     "Check that vibest can work here: the harnesses, vibestd, the runtimes agents run in, and plugins. Each problem says how to fix it. Starts vibestd when it is not running",
@@ -559,6 +564,7 @@ export const Commands = Spec.make("vibest", {
     plugins,
     subscriptions,
     integration,
+    onboard,
     doctor,
     update,
     connect,

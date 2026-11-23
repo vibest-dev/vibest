@@ -6,6 +6,7 @@ import { Effect } from "effect"
 
 import * as Platform from "#platform"
 
+import { TypedAhead } from "./ask.ts"
 import { userOnly } from "./caller.ts"
 import * as Cli from "./cli.ts"
 import { clients } from "./client.ts"
@@ -60,6 +61,7 @@ const Handlers = Runtime.handlers(Commands, {
     stop: () => import("./commands/handlers/integration/stop.ts"),
     ready: () => import("./commands/handlers/integration/ready.ts"),
   },
+  onboard: () => import("./commands/handlers/onboard.ts"),
   doctor: () => import("./commands/handlers/doctor.ts"),
   update: () => import("./commands/handlers/update.ts"),
   connect: () => import("./commands/handlers/connect.ts"),
@@ -81,7 +83,13 @@ Runtime.run(Commands, Handlers, {
   Effect.provide(Layout.layer),
   Effect.provide(Logging.layer),
   Effect.provideService(VibestCommand, Platform.selfCommand),
-  Effect.provideService(Host, { daemon: Platform.daemon, replacements, exec: Platform.exec }),
+  Effect.provideService(Host, {
+    daemon: Platform.daemon,
+    replacements,
+    exec: Platform.exec,
+    parseJsonc: Platform.parseJsonc,
+  }),
+  Effect.provide(TypedAhead.layer),
   Effect.provide(Platform.services),
   (program) => Platform.runMain(program, { disableErrorReporting: true, teardown: Cli.teardown }),
 )

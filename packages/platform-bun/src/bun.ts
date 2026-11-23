@@ -33,7 +33,7 @@ import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
-import { Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
+import { Cause, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -44,14 +44,37 @@ import { layer as hostSample } from "./host-sample.ts"
 import { trimLog } from "./log-file.ts"
 import { graph, pluginLoads, packageName, watch } from "./plugin-source.ts"
 
+const readOnDemand = (handle: fsPromises.FileHandle) =>
+  Effect.flatMap(
+    Effect.promise(() => handle.read(Buffer.alloc(4096)).catch(() => ({ bytesRead: 0, buffer: Buffer.alloc(0) }))),
+    ({ bytesRead, buffer }) =>
+      bytesRead === 0 ? Cause.done() : Effect.succeed([buffer.subarray(0, bytesRead)] as const),
+  )
+
+const terminalUntilGone = Stream.scoped(
+  Stream.fromPull(
+    Effect.map(
+      Effect.acquireRelease(
+        Effect.promise(() => fsPromises.open("/dev/stdin")),
+        (handle) => Effect.promise(() => handle.close()),
+      ),
+      readOnDemand,
+    ),
+  ),
+)
+
 const unrefStdio = Layer.effect(
   Stdio.Stdio,
   Effect.map(Stdio.Stdio, (bun) =>
     Stdio.make({
       ...bun,
-      stdin: Stream.ensuring(
-        bun.stdin,
-        Effect.sync(() => process.stdin.unref?.()),
+      stdin: Stream.suspend(() =>
+        process.stdin.isTTY
+          ? terminalUntilGone
+          : Stream.ensuring(
+              bun.stdin,
+              Effect.sync(() => process.stdin.unref?.()),
+            ),
       ),
     }),
   ),
@@ -165,6 +188,8 @@ const provided = new Map<string, ModuleExports>([
 
 const providedPackages: ReadonlySet<string> = new Set(provided.keys().map(packageName))
 
+export const parseJsonc = (text: string) => Schema.decodeUnknownSync(Schema.Json)(Bun.JSONC.parse(text))
+
 export const makePluginLoader = (): PluginLoader["Service"] => {
   const { keyLocalImports, load } = pluginLoads()
   let mapped = false
@@ -183,7 +208,7 @@ export const makePluginLoader = (): PluginLoader["Service"] => {
         },
       })
     }),
-    parseJsonc: (text) => Schema.decodeUnknownSync(Schema.Json)(Bun.JSONC.parse(text)),
+    parseJsonc,
     graph: (entry) => graph(entry, providedPackages),
     load,
     watch,
@@ -397,7 +422,7 @@ export const replacements: LayerNode.Replacements = [
       name: "vibest/Builtins",
       layer: Layer.effect(
         Builtins,
-        Effect.flatMap(Layout, (layout) => pre(layout.home)),
+        Effect.flatMap(Layout, (layout) => pre(layout.home, parseJsonc)),
       ),
       deps: [
         PlatformNode.fileSystem,
