@@ -75,8 +75,8 @@ export const atShell = (foreground: Foreground | null | undefined): boolean =>
   foreground.script === undefined &&
   (INTERACTIVE_SHELLS.has(programName(foreground.name)) || LOGIN_WRAPPERS.has(programName(foreground.name)))
 
-const isLoginWrapper = (foreground: Foreground | null | undefined) =>
-  foreground !== null && foreground !== undefined && LOGIN_WRAPPERS.has(programName(foreground.name))
+const beforeTheProgram = (foreground: Foreground | null | undefined) =>
+  foreground === null || foreground === undefined || LOGIN_WRAPPERS.has(programName(foreground.name))
 
 const POSIX_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
 
@@ -241,7 +241,7 @@ export const make = (deps: {
     }
 
     const foregroundChanged = (id: string, foreground: Foreground | null | undefined) => {
-      if (isLoginWrapper(foreground)) return Effect.void
+      if (beforeTheProgram(foreground)) return Effect.void
 
       if (!atShell(foreground)) {
         busy.add(id)
@@ -600,6 +600,8 @@ export const make = (deps: {
             Clock.currentTimeMillis.pipe(
               Effect.map((now) => {
                 if (p.last_exit !== null) return { running: false, exitCode: p.last_exit.exit_code }
+
+                if (p.foreground === null || p.foreground === undefined) return { running: true }
 
                 if (!atShell(p.foreground)) {
                   busy.add(terminal.id)

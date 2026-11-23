@@ -40,7 +40,7 @@ const serverEnv = () => {
   for (const [key, value] of Object.entries(process.env))
     if (value !== undefined && !key.startsWith("REX_") && !key.startsWith("VIBEST_")) env[key] = value
 
-  return { ...env, ZDOTDIR: zdotdir }
+  return { ...env, ZDOTDIR: zdotdir, REX_RUNTIME_DIR: path.join(root, "run") }
 }
 
 const rexCli = (...args: Array<string>) =>
@@ -109,6 +109,7 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
   beforeAll(async () => {
     fs.mkdirSync(path.join(root, "state"), { recursive: true })
     fs.mkdirSync(zdotdir, { recursive: true })
+    fs.mkdirSync(path.join(root, "run"), { recursive: true })
     fs.writeFileSync(path.join(root, "init.lua"), "")
 
     const server = childProcess.spawn(
@@ -157,7 +158,7 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
     "passes the shared runtime contract",
     () =>
       withRuntime((runtime) =>
-        runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "30 seconds" }).pipe(
+        runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "30 seconds", reportsProgramExit: false }).pipe(
           Effect.provide(NodeFileSystem.layer),
           Effect.provide(NodePath.layer),
           Effect.scoped,
