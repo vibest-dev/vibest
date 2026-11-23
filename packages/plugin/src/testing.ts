@@ -50,6 +50,7 @@ const until = <A, E, R>(
 interface ContractOptions {
   readonly cwd: string
   readonly timeout?: Duration.Input
+  readonly reportsProgramExit?: boolean
 }
 
 export const runtimeContract = (
@@ -75,6 +76,18 @@ export const runtimeContract = (
       Effect.catchCause(() => Effect.void),
     )
 
+    const exitedFor = (terminal: Runtime.Terminal, what: string) =>
+      until(
+        "events",
+        Ref.get(seen),
+        (events) => events.some((event) => event.type === "exited" && event.terminal.id === terminal.id),
+        `emitted no exited event for ${what} ${terminal.id}`,
+        timeout,
+      )
+
+    const [first] = yield* until("events", Ref.get(seen), (events) => events.length > 0, "emitted no event", timeout)
+    yield* that("events", first?.type === "reset", `began with ${JSON.stringify(first)} instead of a reset event`)
+
     const terminal = yield* runtime.open({
       project: options.cwd,
       cwd: options.cwd,
@@ -84,16 +97,27 @@ export const runtimeContract = (
 
     yield* that("open", Predicate.isString(terminal.id) && terminal.id !== "", "returned a terminal without an id")
 
-    yield* runtime.send(terminal, { text: ran("sent"), keys: ["enter"] })
+    yield* runtime.send(terminal, { text: ran("sent") })
     yield* until(
       "send",
       runtime.read(terminal, 40),
       (out) => out.includes(`vbt-${marker}-sent`),
-      "did not run the text typed with send",
+      "did not run and submit the text sent without keys",
       timeout,
     )
 
-    yield* runtime.send(terminal, { text: "sleep 60", keys: ["enter"] })
+    yield* runtime.send(terminal, {
+      text: `${ran("one")}\nprintf 'vbt-%s-%s\\n' "$VBT_CONTRACT" 'q"uo$te \\ end'`,
+    })
+    yield* until(
+      "send",
+      runtime.read(terminal, 40),
+      (out) => out.includes(`vbt-${marker}-one`) && out.includes(`vbt-${marker}-q"uo$te \\ end`),
+      "did not deliver multiline text with quotes, $ and \\ intact",
+      timeout,
+    )
+
+    yield* runtime.send(terminal, { text: "sleep 60" })
     yield* until(
       "process",
       runtime.process(terminal),
@@ -138,6 +162,16 @@ export const runtimeContract = (
       )
     }
 
+    yield* runtime.send(terminal, { keys: ["ctrl+c"] })
+    yield* runtime.send(terminal, { text: ran("free") })
+    yield* until(
+      "send",
+      runtime.read(terminal, 40),
+      (out) => out.includes(`vbt-${marker}-free`),
+      "did not stop the sleeping program with the key ctrl+c",
+      timeout,
+    )
+
     const ended = yield* runtime.open({
       project: options.cwd,
       cwd: options.cwd,
@@ -161,6 +195,8 @@ export const runtimeContract = (
       timeout,
     )
 
+    if (options.reportsProgramExit !== false) yield* exitedFor(ended, "the program that exited on its own in")
+
     if (Exit.isSuccess(gone) && gone.value.exitCode !== undefined)
       yield* that(
         "process",
@@ -182,13 +218,7 @@ export const runtimeContract = (
     if (Exit.isSuccess(gone)) yield* runtime.close(ended)
 
     yield* runtime.close(terminal)
-    yield* until(
-      "events",
-      Ref.get(seen),
-      (events) => events.some((event) => event.type === "exited" && event.terminal.id === terminal.id),
-      `emitted no exited event for the closed terminal ${terminal.id}`,
-      timeout,
-    )
+    yield* exitedFor(terminal, "the closed terminal")
 
     yield* until(
       "process",

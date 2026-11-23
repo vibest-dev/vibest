@@ -489,12 +489,10 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
           if (keys !== undefined && keys.length > 0)
             yield* failWith(h.call("agent.send_keys", { target: found.target, keys: [...keys] }))
-        } else {
-          if (text !== undefined) yield* failWith(h.call("pane.send_text", { pane_id: place.paneId, text }))
-
-          if (keys !== undefined && keys.length > 0)
-            yield* failWith(h.call("pane.send_keys", { pane_id: place.paneId, keys: [...keys] }))
-        }
+        } else if (text !== undefined)
+          yield* failWith(h.call("pane.send_input", { pane_id: place.paneId, text, keys: ["enter", ...(keys ?? [])] }))
+        else if (keys !== undefined && keys.length > 0)
+          yield* failWith(h.call("pane.send_keys", { pane_id: place.paneId, keys: [...keys] }))
       })
 
     const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
