@@ -371,20 +371,33 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           yield* Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(Effect.orDie),
         )
 
-        const location: RuntimeLocation =
+        const fallbackLocation: RuntimeLocation =
+          input.remote === true
+            ? { session: REMOTE_SESSION }
+            : (decodeTarget(input.target) ?? (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
+
+        const connectLocation = (location: RuntimeLocation) =>
+          pool.resolve(location).pipe(
+            Effect.mapError(failure),
+            Effect.flatMap((resolved) => client(resolved).pipe(Effect.map((h) => ({ session: resolved, h })))),
+          )
+
+        const sameAsFallback =
+          near !== undefined && "session" in fallbackLocation && fallbackLocation.session === near.session
+
+        const connected =
           near !== undefined
-            ? { session: near.session }
-            : input.remote === true
-              ? { session: REMOTE_SESSION }
-              : (decodeTarget(input.target) ??
-                (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
+            ? yield* connectLocation({ session: near.session }).pipe(
+                Effect.map((c) => ({ ...c, useNear: true })),
+                Effect.catchIf(
+                  (e) => !sameAsFallback && e.code === "unreachable",
+                  () => connectLocation(fallbackLocation).pipe(Effect.map((c) => ({ ...c, useNear: false }))),
+                ),
+              )
+            : yield* connectLocation(fallbackLocation).pipe(Effect.map((c) => ({ ...c, useNear: false })))
 
-        const session = yield* pool
-          .resolve(near !== undefined ? { session: near.session } : location)
-          .pipe(Effect.mapError(failure))
-
-        const h = yield* client(session)
-        const nearPane = near !== undefined ? yield* paneOf(h, near.paneId) : undefined
+        const { session, h, useNear } = connected
+        const nearPane = near !== undefined && useNear ? yield* paneOf(h, near.paneId) : undefined
 
         const workspaceId =
           nearPane !== undefined

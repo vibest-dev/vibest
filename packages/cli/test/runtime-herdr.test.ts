@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
+import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Cause, Deferred, Effect, Fiber, Logger, Queue, Stream } from "effect"
 import { HerdrError, type HerdrClient, type Method, type ParamsOf, type PushFrame } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
@@ -221,4 +222,100 @@ describe("herdr event stream", () => {
       Effect.scoped,
     )
   })
+})
+
+describe("open with stale near", () => {
+  it.effect("falls back to workspace.create when near paneId is closed", () =>
+    Effect.gen(function* () {
+      const { runtime, calls } = yield* scriptedRuntime((method, params) => {
+        if (method === "pane.get" && (params as { pane_id: string }).pane_id === "w1:dead")
+          return herdrError(method, "pane_not_found")
+
+        if (method === "pane.get")
+          return Effect.succeed({ pane: { pane_id: "w2:p1", tab_id: "t2", workspace_id: "w2" } })
+
+        if (method === "worktree.list") return Effect.succeed({ source: { source_workspace_id: null } })
+
+        if (method === "pane.list") return Effect.succeed({ panes: [] })
+
+        if (method === "workspace.create") return Effect.succeed({ workspace: { workspace_id: "w2" } })
+
+        if (method === "tab.create") return Effect.succeed({ root_pane: { pane_id: "w2:p1" } })
+
+        return Effect.succeed({})
+      })
+
+      const opened = yield* runtime.open({
+        project: "/work/demo",
+        cwd: "/work/demo",
+        launch: { argv: [], env: {} },
+        label: "fresh",
+        near: TerminalRuntime.terminalOf("s", "w1:dead"),
+      })
+
+      assert.deepStrictEqual(opened, TerminalRuntime.terminalOf("s", "w2:p1"))
+      assert.include(
+        calls.map((c) => c.method),
+        "workspace.create",
+      )
+    }).pipe(Effect.provide(Platform.services), Effect.scoped),
+  )
+
+  it.effect("falls back to the default session when near session is unreachable", () =>
+    Effect.gen(function* () {
+      const resolved: Array<unknown> = []
+
+      const client: HerdrClient = {
+        socketPath: "/nowhere",
+        subscribe: () => Stream.empty,
+        call: ((method: string) => {
+          if (method === "worktree.list") return Effect.succeed({ source: { source_workspace_id: null } })
+
+          if (method === "pane.list") return Effect.succeed({ panes: [] })
+
+          if (method === "workspace.create") return Effect.succeed({ workspace: { workspace_id: "w3" } })
+
+          if (method === "tab.create") return Effect.succeed({ root_pane: { pane_id: "w3:p1" } })
+
+          if (method === "pane.get")
+            return Effect.succeed({ pane: { pane_id: "w3:p1", tab_id: "t3", workspace_id: "w3" } })
+
+          return Effect.succeed({})
+        }) as HerdrClient["call"],
+      }
+
+      const pool = HerdrPool.of({
+        resolve: (location) => {
+          resolved.push(location)
+
+          if ("session" in location && location.session === "dead-session")
+            return Effect.fail(new RuntimeUnreachable({ session: "dead-session", message: "dead" }))
+
+          return Effect.succeed("vibest")
+        },
+        client: () => Effect.succeed(client),
+        events: Stream.empty,
+        restarts: Stream.empty,
+        sessions: Effect.succeed(["vibest"]),
+      })
+
+      const runtime = yield* fromPool({
+        pool,
+        spawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+        fs: undefined,
+        scope: yield* Effect.scope,
+      })
+
+      const opened = yield* runtime.open({
+        project: "/work/demo",
+        cwd: "/work/demo",
+        launch: { argv: [], env: {} },
+        label: "fresh",
+        near: TerminalRuntime.terminalOf("dead-session", "w1:p1"),
+      })
+
+      assert.deepStrictEqual(opened, TerminalRuntime.terminalOf("vibest", "w3:p1"))
+      assert.deepStrictEqual(resolved, [{ session: "dead-session" }, { session: "vibest" }])
+    }).pipe(Effect.provide(Platform.services), Effect.scoped),
+  )
 })

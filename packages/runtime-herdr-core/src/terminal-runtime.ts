@@ -398,41 +398,52 @@ export const make = (deps: {
     const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
-        const socket = near?.socket ?? deps.socket
-        const core = yield* coreAt(socket)
-        const hc = core.hc
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
         const argv = yield* argvOf(input.launch)
         const { VIBEST_EXECUTION: _, ...shellEnv } = input.launch.env
-        let attempt = 0
 
-        const started = yield* failWith(
-          Effect.suspend(() =>
-            hc.call("terminal.run", {
-              argv: [...argv],
-              name: terminalName(input, attempt++),
-              cwd: input.cwd,
-              env: shellEnv,
-              labels: {
-                [LABEL.runtime]: KIND,
-                [LABEL.seen]: "0",
-                ...(project !== undefined && { [LABEL.project]: project }),
-                ...(session !== undefined && { [LABEL.session]: session }),
-              },
-              keep: true,
-              no_notify: true,
-              ...(near !== undefined ? { parent: near.address, outlive_parent: true } : { no_parent: true }),
-            }),
-          ).pipe(
-            Effect.retry({
-              while: (e) => Predicate.isTagged(e, "HcError") && e.kind === "name_taken",
-              times: 8,
-            }),
+        const runOn = (socket: string, parent: string | undefined) =>
+          Effect.gen(function* () {
+            const core = yield* coreAt(socket)
+            let attempt = 0
+
+            const started = yield* failWith(
+              Effect.suspend(() =>
+                core.hc.call("terminal.run", {
+                  argv: [...argv],
+                  name: terminalName(input, attempt++),
+                  cwd: input.cwd,
+                  env: shellEnv,
+                  labels: {
+                    [LABEL.runtime]: KIND,
+                    [LABEL.seen]: "0",
+                    ...(project !== undefined && { [LABEL.project]: project }),
+                    ...(session !== undefined && { [LABEL.session]: session }),
+                  },
+                  keep: true,
+                  no_notify: true,
+                  ...(parent !== undefined ? { parent, outlive_parent: true } : { no_parent: true }),
+                }),
+              ).pipe(
+                Effect.retry({
+                  while: (e) => Predicate.isTagged(e, "HcError") && e.kind === "name_taken",
+                  times: 8,
+                }),
+              ),
+            )
+
+            return { id: terminalId(socket, started.address) } satisfies Terminal
+          })
+
+        if (near === undefined) return yield* runOn(deps.socket, undefined)
+
+        return yield* runOn(near.socket, near.address).pipe(
+          Effect.catchIf(
+            (e) => e.code === "not_found" || (near.socket !== deps.socket && e.code === "unreachable"),
+            (e) => runOn(e.code === "unreachable" ? deps.socket : near.socket, undefined),
           ),
         )
-
-        return { id: terminalId(socket, started.address) } satisfies Terminal
       })
 
     const send: Runtime["send"] = (terminal, { text, keys }) =>

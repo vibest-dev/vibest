@@ -325,8 +325,16 @@ export const make = Effect.gen(function* () {
       readonly beforeStart?: Effect.Effect<void>
     },
   ) {
-    const near = input.near !== undefined ? input.near : yield* nearCreator(session, h.id)
     const remote = yield* db.session.startedByPeer(session.id)
+
+    const near =
+      input.near !== undefined
+        ? input.near
+        : ((yield* nearCreator(session, h.id)) ??
+          (!remote && (target === undefined || target === "")
+            ? yield* db.session.lastProjectTerminal(session.projectId, h.id)
+            : undefined))
+
     yield* db.session.startProcess(session.id, startOf(session))
 
     if (input.beforeStart !== undefined) yield* input.beforeStart

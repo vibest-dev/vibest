@@ -255,11 +255,17 @@ const make = Effect.gen(function* () {
               const sessionId =
                 existing === undefined || fresh ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
 
+              const near =
+                at.target === undefined || at.target === ""
+                  ? yield* db.session.lastProjectTerminal(id, rt.id)
+                  : undefined
+
               const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
                 root,
                 label: "vibest",
                 home: layout.home,
                 focus: input.focus,
+                near,
               }).pipe(
                 Effect.tap((pane) =>
                   Effect.sync(() => {
