@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export const VERSION = "0.1.18" as const
+export const VERSION = "0.1.22" as const
 export const MIN_VERSION = "0.1.13" as const
 export const GENERATION = 1 as const
 
@@ -25,6 +25,9 @@ export const DocSetResult: Schema.Codec<DocSetResult> = Schema.Struct({ "version
 export type Edit = { readonly "new": string; readonly "old": string; }
 export const Edit: Schema.Codec<Edit> = Schema.Struct({ "new": Schema.String, "old": Schema.String })
 
+export type Empty = { readonly [key: string]: unknown }
+export const Empty: Schema.Codec<Empty> = Schema.Record(Schema.String, Schema.Unknown)
+
 export type ExecResult = { readonly "code"?: number | null | undefined; readonly "ms": number; readonly "signal"?: number | null | undefined; readonly "stderr": string; readonly "stdout": string; readonly "timed_out": boolean; readonly "truncated": boolean; }
 export const ExecResult: Schema.Codec<ExecResult> = Schema.Struct({ "code": Schema.optional(Schema.NullOr(Schema.Number)), "ms": Schema.Number, "signal": Schema.optional(Schema.NullOr(Schema.Number)), "stderr": Schema.String, "stdout": Schema.String, "timed_out": Schema.Boolean, "truncated": Schema.Boolean })
 
@@ -40,8 +43,8 @@ export const FirstMessage: Schema.Codec<FirstMessage> = Schema.Struct({ "reason"
 export type Foreground = { readonly "argv": ReadonlyArray<string>; readonly "cwd": string; readonly "name": string; readonly "pid": number; }
 export const Foreground: Schema.Codec<Foreground> = Schema.Struct({ "argv": Schema.Array(Schema.String), "cwd": Schema.String, "name": Schema.String, "pid": Schema.Number })
 
-export type HelloResult = { readonly "core": CoreInfo; readonly "features": ReadonlyArray<string>; readonly "framed": boolean; readonly "generation": number; readonly "methods": ReadonlyArray<string>; readonly "version": string; }
-export const HelloResult: Schema.Codec<HelloResult> = Schema.Struct({ "core": Schema.suspend((): Schema.Codec<CoreInfo> => CoreInfo), "features": Schema.Array(Schema.String), "framed": Schema.Boolean, "generation": Schema.Number, "methods": Schema.Array(Schema.String), "version": Schema.String })
+export type HelloResult = { readonly "core": CoreInfo; readonly "features": ReadonlyArray<string>; readonly "framed": boolean; readonly "generation": number; readonly "keeps_running_after_logout"?: boolean | null | undefined; readonly "login_session"?: LoginSession | null | undefined; readonly "logout_linger_user"?: string | null | undefined; readonly "methods": ReadonlyArray<string>; readonly "version": string; }
+export const HelloResult: Schema.Codec<HelloResult> = Schema.Struct({ "core": Schema.suspend((): Schema.Codec<CoreInfo> => CoreInfo), "features": Schema.Array(Schema.String), "framed": Schema.Boolean, "generation": Schema.Number, "keeps_running_after_logout": Schema.optional(Schema.NullOr(Schema.Boolean)), "login_session": Schema.optional(Schema.NullOr(Schema.suspend((): Schema.Codec<LoginSession> => LoginSession))), "logout_linger_user": Schema.optional(Schema.NullOr(Schema.String)), "methods": Schema.Array(Schema.String), "version": Schema.String })
 
 export type HolderInfo = { readonly "current": boolean; readonly "instance": string; readonly "pid": number; readonly "terminals": number; }
 export const HolderInfo: Schema.Codec<HolderInfo> = Schema.Struct({ "current": Schema.Boolean, "instance": Schema.String, "pid": Schema.Number, "terminals": Schema.Number })
@@ -61,14 +64,23 @@ export const KeysResult: Schema.Codec<KeysResult> = Schema.Struct({ "status": Sc
 export type ListResult = { readonly "hidden_finished": number; readonly "machines": ReadonlyArray<MachineView>; readonly "terminals": ReadonlyArray<Terminal>; }
 export const ListResult: Schema.Codec<ListResult> = Schema.Struct({ "hidden_finished": Schema.Number, "machines": Schema.Array(Schema.suspend((): Schema.Codec<MachineView> => MachineView)), "terminals": Schema.Array(Schema.suspend((): Schema.Codec<Terminal> => Terminal)) })
 
-export type Machine = { readonly "host": string; readonly "id": string; readonly "name": string; readonly "session"?: string | null | undefined; readonly "target": string; readonly "temporary"?: boolean | undefined; readonly "version": string; readonly "via"?: boolean | undefined; }
-export const Machine: Schema.Codec<Machine> = Schema.Struct({ "host": Schema.String, "id": Schema.String, "name": Schema.String, "session": Schema.optional(Schema.NullOr(Schema.String)), "target": Schema.String, "temporary": Schema.optional(Schema.Boolean), "version": Schema.String, "via": Schema.optional(Schema.Boolean) })
+export type LoginSession = { readonly "gui"?: boolean | null | undefined; readonly "id": number; readonly "user": number; }
+export const LoginSession: Schema.Codec<LoginSession> = Schema.Struct({ "gui": Schema.optional(Schema.NullOr(Schema.Boolean)), "id": Schema.Number, "user": Schema.Number })
+
+export type Machine = { readonly "host": string; readonly "id": string; readonly "keeps_running_after_logout"?: boolean | null | undefined; readonly "logout_linger_user"?: string | null | undefined; readonly "name": string; readonly "session"?: string | null | undefined; readonly "target": string; readonly "temporary"?: boolean | undefined; readonly "version": string; readonly "via"?: boolean | undefined; }
+export const Machine: Schema.Codec<Machine> = Schema.Struct({ "host": Schema.String, "id": Schema.String, "keeps_running_after_logout": Schema.optional(Schema.NullOr(Schema.Boolean)), "logout_linger_user": Schema.optional(Schema.NullOr(Schema.String)), "name": Schema.String, "session": Schema.optional(Schema.NullOr(Schema.String)), "target": Schema.String, "temporary": Schema.optional(Schema.Boolean), "version": Schema.String, "via": Schema.optional(Schema.Boolean) })
 
 export type MachineListResult = { readonly "machines": ReadonlyArray<MachineView>; }
 export const MachineListResult: Schema.Codec<MachineListResult> = Schema.Struct({ "machines": Schema.Array(Schema.suspend((): Schema.Codec<MachineView> => MachineView)) })
 
-export type MachineView = { readonly "host": string; readonly "id": string; readonly "name": string; readonly "session"?: string | null | undefined; readonly "since_ms"?: number | null | undefined; readonly "state": string; readonly "target": string; readonly "temporary"?: boolean | undefined; readonly "version": string; readonly "via"?: boolean | undefined; readonly "why"?: string | null | undefined; }
-export const MachineView: Schema.Codec<MachineView> = Schema.Struct({ "host": Schema.String, "id": Schema.String, "name": Schema.String, "session": Schema.optional(Schema.NullOr(Schema.String)), "since_ms": Schema.optional(Schema.NullOr(Schema.Number)), "state": Schema.String, "target": Schema.String, "temporary": Schema.optional(Schema.Boolean), "version": Schema.String, "via": Schema.optional(Schema.Boolean), "why": Schema.optional(Schema.NullOr(Schema.String)) })
+export type MachineView = { readonly "host": string; readonly "id": string; readonly "keeps_running_after_logout"?: boolean | null | undefined; readonly "logout_linger_user"?: string | null | undefined; readonly "name": string; readonly "session"?: string | null | undefined; readonly "since_ms"?: number | null | undefined; readonly "state": string; readonly "target": string; readonly "temporary"?: boolean | undefined; readonly "version": string; readonly "via"?: boolean | undefined; readonly "why"?: string | null | undefined; }
+export const MachineView: Schema.Codec<MachineView> = Schema.Struct({ "host": Schema.String, "id": Schema.String, "keeps_running_after_logout": Schema.optional(Schema.NullOr(Schema.Boolean)), "logout_linger_user": Schema.optional(Schema.NullOr(Schema.String)), "name": Schema.String, "session": Schema.optional(Schema.NullOr(Schema.String)), "since_ms": Schema.optional(Schema.NullOr(Schema.Number)), "state": Schema.String, "target": Schema.String, "temporary": Schema.optional(Schema.Boolean), "version": Schema.String, "via": Schema.optional(Schema.Boolean), "why": Schema.optional(Schema.NullOr(Schema.String)) })
+
+export type PutBeginResult = { readonly "transfer": string; }
+export const PutBeginResult: Schema.Codec<PutBeginResult> = Schema.Struct({ "transfer": Schema.String })
+
+export type PutPieceResult = { readonly "bytes": number; }
+export const PutPieceResult: Schema.Codec<PutPieceResult> = Schema.Struct({ "bytes": Schema.Number })
 
 export type PutResult = { readonly "bytes": number; readonly "path": string; }
 export const PutResult: Schema.Codec<PutResult> = Schema.Struct({ "bytes": Schema.Number, "path": Schema.String })
@@ -88,8 +100,8 @@ export const SendResult: Schema.Codec<SendResult> = Schema.Struct({ "started": S
 export type Status = { readonly "app"?: string | undefined; readonly "kind"?: string | null | undefined; readonly "msg"?: string | undefined; readonly "progress"?: number | null | undefined; readonly "state": string; readonly "title"?: string | undefined; }
 export const Status: Schema.Codec<Status> = Schema.Struct({ "app": Schema.optional(Schema.String), "kind": Schema.optional(Schema.NullOr(Schema.String)), "msg": Schema.optional(Schema.String), "progress": Schema.optional(Schema.NullOr(Schema.Number)), "state": Schema.String, "title": Schema.optional(Schema.String) })
 
-export type StatusResult = { readonly "core": CoreInfo; readonly "finished": number; readonly "holder"?: HolderInfo | null | undefined; readonly "holders": ReadonlyArray<HolderInfo>; readonly "installed_by"?: string | null | undefined; readonly "live": number; readonly "pid": number; readonly "uptime_ms": number; readonly "version": string; }
-export const StatusResult: Schema.Codec<StatusResult> = Schema.Struct({ "core": Schema.suspend((): Schema.Codec<CoreInfo> => CoreInfo), "finished": Schema.Number, "holder": Schema.optional(Schema.NullOr(Schema.suspend((): Schema.Codec<HolderInfo> => HolderInfo))), "holders": Schema.Array(Schema.suspend((): Schema.Codec<HolderInfo> => HolderInfo)), "installed_by": Schema.optional(Schema.NullOr(Schema.String)), "live": Schema.Number, "pid": Schema.Number, "uptime_ms": Schema.Number, "version": Schema.String })
+export type StatusResult = { readonly "core": CoreInfo; readonly "finished": number; readonly "holder"?: HolderInfo | null | undefined; readonly "holders": ReadonlyArray<HolderInfo>; readonly "installed_by"?: string | null | undefined; readonly "keeps_running_after_logout"?: boolean | null | undefined; readonly "live": number; readonly "logout_linger_user"?: string | null | undefined; readonly "pid": number; readonly "uptime_ms": number; readonly "version": string; }
+export const StatusResult: Schema.Codec<StatusResult> = Schema.Struct({ "core": Schema.suspend((): Schema.Codec<CoreInfo> => CoreInfo), "finished": Schema.Number, "holder": Schema.optional(Schema.NullOr(Schema.suspend((): Schema.Codec<HolderInfo> => HolderInfo))), "holders": Schema.Array(Schema.suspend((): Schema.Codec<HolderInfo> => HolderInfo)), "installed_by": Schema.optional(Schema.NullOr(Schema.String)), "keeps_running_after_logout": Schema.optional(Schema.NullOr(Schema.Boolean)), "live": Schema.Number, "logout_linger_user": Schema.optional(Schema.NullOr(Schema.String)), "pid": Schema.Number, "uptime_ms": Schema.Number, "version": Schema.String })
 
 export type StopResult = { readonly "stopped": boolean; }
 export const StopResult: Schema.Codec<StopResult> = Schema.Struct({ "stopped": Schema.Boolean })
@@ -118,8 +130,8 @@ export const ServerStatusParams: Schema.Codec<ServerStatusParams> = Schema.Struc
 export type ServerStopParams = {  }
 export const ServerStopParams: Schema.Codec<ServerStopParams> = Schema.Struct({  })
 
-export type ServerRestartParams = {  }
-export const ServerRestartParams: Schema.Codec<ServerRestartParams> = Schema.Struct({  })
+export type ServerRestartParams = { readonly "environment"?: { readonly [key: string]: string } | null | undefined; }
+export const ServerRestartParams: Schema.Codec<ServerRestartParams> = Schema.Struct({ "environment": Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.String))) })
 
 export type TerminalRunParams = { readonly "argv"?: ReadonlyArray<string> | undefined; readonly "caller"?: string | null | undefined; readonly "cwd"?: string | null | undefined; readonly "die_with_parent"?: boolean | undefined; readonly "display"?: Display | null | undefined; readonly "env"?: { readonly [key: string]: string } | undefined; readonly "keep"?: boolean | undefined; readonly "labels"?: { readonly [key: string]: string } | undefined; readonly "line"?: string | null | undefined; readonly "name"?: string | null | undefined; readonly "no_notify"?: boolean | undefined; readonly "no_parent"?: boolean | undefined; readonly "on"?: string | null | undefined; readonly "outlive_parent"?: boolean | undefined; readonly "parent"?: string | null | undefined; readonly "rm"?: boolean | undefined; readonly "size"?: InitialSize | null | undefined; readonly "timeout"?: number | null | undefined; readonly "wait"?: boolean | undefined; }
 export const TerminalRunParams: Schema.Codec<TerminalRunParams> = Schema.Struct({ "argv": Schema.optional(Schema.Array(Schema.String)), "caller": Schema.optional(Schema.NullOr(Schema.String)), "cwd": Schema.optional(Schema.NullOr(Schema.String)), "die_with_parent": Schema.optional(Schema.Boolean), "display": Schema.optional(Schema.NullOr(Schema.suspend((): Schema.Codec<Display> => Display))), "env": Schema.optional(Schema.Record(Schema.String, Schema.String)), "keep": Schema.optional(Schema.Boolean), "labels": Schema.optional(Schema.Record(Schema.String, Schema.String)), "line": Schema.optional(Schema.NullOr(Schema.String)), "name": Schema.optional(Schema.NullOr(Schema.String)), "no_notify": Schema.optional(Schema.Boolean), "no_parent": Schema.optional(Schema.Boolean), "on": Schema.optional(Schema.NullOr(Schema.String)), "outlive_parent": Schema.optional(Schema.Boolean), "parent": Schema.optional(Schema.NullOr(Schema.String)), "rm": Schema.optional(Schema.Boolean), "size": Schema.optional(Schema.NullOr(Schema.suspend((): Schema.Codec<InitialSize> => InitialSize))), "timeout": Schema.optional(Schema.NullOr(Schema.Number)), "wait": Schema.optional(Schema.Boolean) })
@@ -166,6 +178,18 @@ export const TerminalInterruptParams: Schema.Codec<TerminalInterruptParams> = Sc
 export type TerminalPutParams = { readonly "data": string; readonly "name": string; readonly "terminal": string; }
 export const TerminalPutParams: Schema.Codec<TerminalPutParams> = Schema.Struct({ "data": Schema.String, "name": Schema.String, "terminal": Schema.String })
 
+export type TerminalPutBeginParams = { readonly "bytes": number; readonly "name": string; readonly "terminal": string; readonly "transfer": string; }
+export const TerminalPutBeginParams: Schema.Codec<TerminalPutBeginParams> = Schema.Struct({ "bytes": Schema.Number, "name": Schema.String, "terminal": Schema.String, "transfer": Schema.String })
+
+export type TerminalPutChunkParams = { readonly "data": string; readonly "offset": number; readonly "transfer": string; }
+export const TerminalPutChunkParams: Schema.Codec<TerminalPutChunkParams> = Schema.Struct({ "data": Schema.String, "offset": Schema.Number, "transfer": Schema.String })
+
+export type TerminalPutFinishParams = { readonly "transfer": string; }
+export const TerminalPutFinishParams: Schema.Codec<TerminalPutFinishParams> = Schema.Struct({ "transfer": Schema.String })
+
+export type TerminalPutAbortParams = { readonly "transfer": string; }
+export const TerminalPutAbortParams: Schema.Codec<TerminalPutAbortParams> = Schema.Struct({ "transfer": Schema.String })
+
 export type MachineExecParams = { readonly "argv"?: ReadonlyArray<string> | undefined; readonly "cwd"?: string | null | undefined; readonly "env"?: { readonly [key: string]: string } | undefined; readonly "input"?: string | null | undefined; readonly "line"?: string | null | undefined; readonly "on"?: string | null | undefined; readonly "timeout"?: number | null | undefined; }
 export const MachineExecParams: Schema.Codec<MachineExecParams> = Schema.Struct({ "argv": Schema.optional(Schema.Array(Schema.String)), "cwd": Schema.optional(Schema.NullOr(Schema.String)), "env": Schema.optional(Schema.Record(Schema.String, Schema.String)), "input": Schema.optional(Schema.NullOr(Schema.String)), "line": Schema.optional(Schema.NullOr(Schema.String)), "on": Schema.optional(Schema.NullOr(Schema.String)), "timeout": Schema.optional(Schema.NullOr(Schema.Number)) })
 
@@ -184,8 +208,8 @@ export const DocGetParams: Schema.Codec<DocGetParams> = Schema.Struct({ "name": 
 export type DocSetParams = { readonly "name": string; readonly "on"?: string | null | undefined; readonly "value": unknown; readonly "version": number; }
 export const DocSetParams: Schema.Codec<DocSetParams> = Schema.Struct({ "name": Schema.String, "on": Schema.optional(Schema.NullOr(Schema.String)), "value": Schema.Unknown, "version": Schema.Number })
 
-export type EventsSubscribeParams = { readonly "children_of"?: string | null | undefined; readonly "labels"?: { readonly [key: string]: string } | undefined; readonly "terminal"?: string | null | undefined; }
-export const EventsSubscribeParams: Schema.Codec<EventsSubscribeParams> = Schema.Struct({ "children_of": Schema.optional(Schema.NullOr(Schema.String)), "labels": Schema.optional(Schema.Record(Schema.String, Schema.String)), "terminal": Schema.optional(Schema.NullOr(Schema.String)) })
+export type EventsSubscribeParams = { readonly "children_of"?: string | null | undefined; readonly "docs"?: ReadonlyArray<string> | undefined; readonly "labels"?: { readonly [key: string]: string } | undefined; readonly "terminal"?: string | null | undefined; }
+export const EventsSubscribeParams: Schema.Codec<EventsSubscribeParams> = Schema.Struct({ "children_of": Schema.optional(Schema.NullOr(Schema.String)), "docs": Schema.optional(Schema.Array(Schema.String)), "labels": Schema.optional(Schema.Record(Schema.String, Schema.String)), "terminal": Schema.optional(Schema.NullOr(Schema.String)) })
 
 export type MachineAddParams = { readonly "name"?: string | null | undefined; readonly "session"?: string | null | undefined; readonly "target"?: string | null | undefined; readonly "temporary"?: boolean | undefined; readonly "via"?: string | null | undefined; }
 export const MachineAddParams: Schema.Codec<MachineAddParams> = Schema.Struct({ "name": Schema.optional(Schema.NullOr(Schema.String)), "session": Schema.optional(Schema.NullOr(Schema.String)), "target": Schema.optional(Schema.NullOr(Schema.String)), "temporary": Schema.optional(Schema.Boolean), "via": Schema.optional(Schema.NullOr(Schema.String)) })
@@ -212,22 +236,26 @@ export const METHODS = {
   "hello": { params: HelloParams, result: HelloResult, errors: ["unsupported_generation"] },
   "server.status": { params: ServerStatusParams, result: StatusResult, errors: [] },
   "server.stop": { params: ServerStopParams, result: StopResult, errors: [] },
-  "server.restart": { params: ServerRestartParams, result: StopResult, errors: [] },
+  "server.restart": { params: ServerRestartParams, result: StopResult, errors: ["invalid_params"] },
   "terminal.run": { params: TerminalRunParams, result: RunResult, errors: ["invalid_params", "name_taken", "spawn_failed", "unavailable", "invalid_template", "not_found", "machine_unknown", "config"] },
   "templates.list": { params: TemplatesListParams, result: TemplatesResult, errors: [] },
   "terminal.list": { params: TerminalListParams, result: ListResult, errors: [] },
   "terminal.get": { params: TerminalGetParams, result: Terminal, errors: ["not_found", "machine_unknown"] },
-  "terminal.kill": { params: TerminalKillParams, result: Terminal, errors: ["not_found", "machine_unknown"] },
-  "terminal.rm": { params: TerminalRmParams, result: RemoveResult, errors: ["not_found", "machine_unknown", "live"] },
-  "terminal.keep": { params: TerminalKeepParams, result: Terminal, errors: ["not_found", "invalid_params"] },
-  "terminal.label": { params: TerminalLabelParams, result: Terminal, errors: ["not_found", "machine_unknown", "invalid_params"] },
+  "terminal.kill": { params: TerminalKillParams, result: Terminal, errors: ["not_found", "machine_unknown", "unavailable"] },
+  "terminal.rm": { params: TerminalRmParams, result: RemoveResult, errors: ["not_found", "machine_unknown", "live", "unavailable"] },
+  "terminal.keep": { params: TerminalKeepParams, result: Terminal, errors: ["not_found", "invalid_params", "unavailable"] },
+  "terminal.label": { params: TerminalLabelParams, result: Terminal, errors: ["not_found", "machine_unknown", "invalid_params", "unavailable"] },
   "terminal.read": { params: TerminalReadParams, result: ReadResult, errors: ["not_found", "machine_unknown"] },
   "terminal.attach": { params: TerminalAttachParams, result: AttachResult, errors: ["not_found", "machine_unknown", "finished", "unavailable", "needs_framed"] },
-  "terminal.send": { params: TerminalSendParams, result: SendResult, errors: ["not_found", "machine_unknown", "finished", "unavailable", "blocked", "status_mismatch", "invalid_params", "config"] },
-  "terminal.wait": { params: TerminalWaitParams, result: WaitResult, errors: ["not_found", "machine_unknown", "invalid_params", "needs_target", "config"] },
+  "terminal.send": { params: TerminalSendParams, result: SendResult, errors: ["not_found", "machine_unknown", "finished", "unavailable", "blocked", "status_mismatch", "invalid_params", "config", "cancelled"] },
+  "terminal.wait": { params: TerminalWaitParams, result: WaitResult, errors: ["not_found", "machine_unknown", "invalid_params", "needs_target", "config", "unavailable"] },
   "terminal.keys": { params: TerminalKeysParams, result: KeysResult, errors: ["not_found", "machine_unknown", "finished", "unavailable", "invalid_params"] },
   "terminal.interrupt": { params: TerminalInterruptParams, result: InterruptResult, errors: ["not_found", "machine_unknown", "finished", "unavailable", "invalid_params"] },
-  "terminal.put": { params: TerminalPutParams, result: PutResult, errors: ["not_found", "machine_unknown", "finished", "invalid_params"] },
+  "terminal.put": { params: TerminalPutParams, result: PutResult, errors: ["not_found", "machine_unknown", "finished", "invalid_params", "unavailable", "internal"] },
+  "terminal.put_begin": { params: TerminalPutBeginParams, result: PutBeginResult, errors: ["not_found", "finished", "invalid_params", "unavailable", "internal", "needs_framed"] },
+  "terminal.put_chunk": { params: TerminalPutChunkParams, result: PutPieceResult, errors: ["not_found", "finished", "invalid_params", "internal", "needs_framed"] },
+  "terminal.put_finish": { params: TerminalPutFinishParams, result: PutResult, errors: ["not_found", "finished", "invalid_params", "internal", "needs_framed"] },
+  "terminal.put_abort": { params: TerminalPutAbortParams, result: Empty, errors: ["invalid_params", "unavailable", "needs_framed"] },
   "machine.exec": { params: MachineExecParams, result: ExecResult, errors: ["invalid_params", "spawn_failed", "machine_unknown", "unavailable", "needs_update"] },
   "file.read": { params: FileReadParams, result: FileReadResult, errors: ["invalid_params", "not_found", "not_text", "io", "machine_unknown", "unavailable", "needs_update"] },
   "file.write": { params: FileWriteParams, result: FileResult, errors: ["invalid_params", "io", "machine_unknown", "unavailable", "needs_update"] },

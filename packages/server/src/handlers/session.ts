@@ -133,7 +133,7 @@ export const make = Effect.gen(function* () {
 
         return yield* sessions
           .spawn({
-            machine: yield* machineFromCaller(input),
+            machine: yield* machineFromCaller("Spawn", input),
             root: project.directory,
             projectId: project.id,
             name: input.name ?? defaultSessionName(input.prompt),

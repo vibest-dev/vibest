@@ -1,8 +1,8 @@
-import * as VibestPlugin from "@vibest/plugin/effect"
+import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
-export const choicePlugin = (): VibestPlugin.Plugin.Plugin =>
-  VibestPlugin.Plugin.define({
+export const runtimeChoicePlugin = () =>
+  Plugin.define({
     id: "vibest.runtime-choice",
     effect: (context) =>
       context.agent.hook("start.before", (event) =>

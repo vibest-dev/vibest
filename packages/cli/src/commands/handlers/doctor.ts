@@ -1,4 +1,5 @@
 import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
+import type { RuntimeDoctor } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import type { AgentListing } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
@@ -28,6 +29,30 @@ export const doctorVerdict = (findings: ReadonlyArray<Finding>) => {
   const word = `${problems.length} problem${problems.length === 1 ? "" : "s"}`
 
   return problems.some((f) => f.fix) ? `${word}; run the fix lines above.` : `${word}.`
+}
+
+const healthy = (r: typeof RuntimeDoctor.Type) => r.status === "online" && r.checks.every((c) => c.ok)
+
+export const runtimeSections = (rows: ReadonlyArray<typeof RuntimeDoctor.Type>, width: number) => {
+  const anyHealthy = rows.some(healthy)
+
+  return rows.map((r) => {
+    const failing = r.status === "online" || !anyHealthy ? ("problem" as const) : ("note" as const)
+
+    const findings: Array<Finding> =
+      r.status === "online" ? [] : [{ mark: failing, text: `${r.status}: ${r.reason ?? "unknown"}` }]
+
+    for (const c of r.checks)
+      findings.push({
+        mark: c.ok ? "ok" : failing,
+        text: c.subject ? `${c.subject.padEnd(width)}  ${c.text}` : c.text,
+        ...(c.fix && { fix: c.fix }),
+      })
+
+    if (findings.length === 0) findings.push({ mark: "ok", text: "online" })
+
+    return { title: `Runtime: ${r.name} (where agents run)`, findings }
+  })
 }
 
 export const agentDefinitionFindings = <E, R>(
@@ -157,20 +182,12 @@ export default Runtime.handler(Commands.commands.doctor, () =>
           ],
         })
 
-      for (const r of Option.getOrElse(runtimes, () => [])) {
-        const findings: Array<Finding> =
-          r.status === "online" ? [] : [{ mark: "problem", text: `${r.status}: ${r.reason ?? "unknown"}` }]
-
-        for (const c of r.checks)
-          findings.push({
-            mark: c.ok ? "ok" : "problem",
-            text: c.subject ? `${c.subject.padEnd(width)}  ${c.text}` : c.text,
-            ...(c.fix && { fix: c.fix }),
-          })
-
-        if (findings.length === 0) findings.push({ mark: "ok", text: "online" })
-        sections.push({ title: `Runtime: ${r.name} (where agents run)`, findings })
-      }
+      sections.push(
+        ...runtimeSections(
+          Option.getOrElse(runtimes, () => []),
+          width,
+        ),
+      )
 
       const concurrency = yield* ask((c) => c.Concurrency())
 

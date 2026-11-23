@@ -76,7 +76,10 @@ export const make = Effect.gen(function* () {
     "Runtimes.Doctor": ({ harnesses }) =>
       Effect.flatMap(runtimes.statuses, (rows) =>
         Effect.forEach(rows, ({ runtime, status }) =>
-          (runtime.doctor ? runtime.doctor(harnesses) : Effect.succeed({ name: runtime.id, checks: [] })).pipe(
+          (runtime.doctor
+            ? runtime.doctor(harnesses)
+            : Effect.succeed({ name: runtime.name ?? runtime.id, checks: [] })
+          ).pipe(
             Effect.map((report) => ({
               kind: runtime.id,
               status: status.status,

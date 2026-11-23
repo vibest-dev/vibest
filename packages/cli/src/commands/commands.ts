@@ -14,7 +14,7 @@ const id = Argument.String("id").pipe(
 
 const sessionFlag = Flag.String("session").pipe(
   Flag.withDescription(
-    "The runtime's session to use, instead of the one this terminal is in. Bare vibest refuses it inside herdr",
+    "The runtime's session to use, instead of the one this terminal is in. Bare vibest refuses it inside a runtime's terminal",
   ),
   Flag.optional,
 )
@@ -60,7 +60,7 @@ export const entryFlags = {
   ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
-    Flag.withDescription("Do not attach to the session when it opens outside herdr"),
+    Flag.withDescription("Do not attach to the session when it opens outside a runtime's terminal"),
     Flag.withDefault(false),
   ),
   runtime: Flag.String("runtime").pipe(

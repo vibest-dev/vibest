@@ -16,7 +16,7 @@ export const make = Effect.gen(function* () {
     Launch: ({ argv, agent, agentNamed, focus, runtime, callerEnv, runtimeSession }) =>
       Effect.gen(function* () {
         const { id, directory } = yield* cliOnly("Launch").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
-        const at = yield* machineFromCaller({ callerEnv, runtimeSession })
+        const at = yield* machineFromCaller("Launch", { callerEnv, runtime, runtimeSession })
 
         return yield* entrySession.launch({
           projectId: id,

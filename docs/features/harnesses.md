@@ -18,7 +18,10 @@ harness that is not installed is left out.
 ## H3. Doctor
 
 `vibest doctor` groups what it checks (coding agents, herdr, vibestd, plugins), puts a line saying how to fix each
-problem under it, and ends with a verdict: one line per harness, and a herdr line for each harness that can run.
+problem under it, and ends with a verdict: one line per harness, and a herdr line for each harness that can run. Each
+runtime shows its name and version (`herdr 0.9.5`, `herdr-core 0.1.22`). When one runtime is online with nothing failing,
+a runtime that is not installed or not started is a note, not a problem, so a machine with only one of them is
+`Ready.`; with none online, each is a problem.
 
 ## H4. Cursor probes on a home without a login keychain
 

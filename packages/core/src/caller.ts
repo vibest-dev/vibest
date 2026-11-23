@@ -18,6 +18,7 @@ export type EntryPlace =
 export const entryPlace = (o: {
   readonly runtime: string | undefined
   readonly hits: ReadonlyArray<CallerHit>
+  readonly loaded?: ReadonlyArray<string>
 }): EntryPlace => {
   const named = (id: string) => o.hits.find((hit) => hit.id === id)
 
@@ -34,7 +35,10 @@ export const entryPlace = (o: {
   const chosen = o.hits[0]
 
   if (chosen === undefined)
-    return { in: "refused", message: "no runtime was detected in this environment; pass --runtime" }
+    return {
+      in: "refused",
+      message: `no runtime was detected in this environment; pass --runtime${o.loaded === undefined || o.loaded.length === 0 ? "" : ` (${o.loaded.join(", ")})`}`,
+    }
 
   return chosen.terminal === undefined
     ? {
@@ -92,17 +96,29 @@ const declared = (keys: ReadonlyArray<string>, env: Readonly<Record<string, stri
   return out
 }
 
-export const callerTarget = (
-  specs: ReadonlyArray<Pick<Caller, "env" | "target">>,
-  env: Readonly<Record<string, string | undefined>>,
-  named?: string,
-): string | undefined => {
-  for (const spec of specs) {
-    if (!Predicate.isFunction(spec.target)) continue
-    const target = spec.target(declared(spec.env, env), named)
+export type CallerTarget = { readonly target?: string } | { readonly refused: string }
 
-    if (target !== undefined) return target
+export const callerTarget = (
+  specs: ReadonlyArray<Pick<Caller, "id" | "env" | "target">>,
+  env: Readonly<Record<string, string | undefined>>,
+  runtime: string | undefined,
+  named?: string,
+): CallerTarget => {
+  const id = runtime ?? callerKind(specs, env)
+  const spec = specs.find((item) => item.id === id)
+
+  if (spec === undefined || !Predicate.isFunction(spec.target)) {
+    if (named === undefined) return {}
+
+    return {
+      refused:
+        id === undefined
+          ? `--session names a runtime's session; pass --runtime (${specs.map((item) => item.id).join(", ")})`
+          : `--runtime ${id} does not take --session`,
+    }
   }
 
-  return undefined
+  const target = spec.target(declared(spec.env, env), named)
+
+  return target === undefined ? {} : { target }
 }
