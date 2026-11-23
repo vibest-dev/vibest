@@ -1,6 +1,6 @@
 # Runtime plugins and machines: user stories
 
-Stories for `runtime-port.md`. Each becomes an e2e check (tools/e2e) or a contract-suite case. "You" is the user;
+Stories for `runtime-port.md`. Each becomes an e2e check (e2e) or a contract-suite case. "You" is the user;
 "author" writes a plugin.
 
 ## Using a runtime

@@ -211,7 +211,7 @@ const statusCore = async (
       permissions: { defaultMode: "default", disableAutoMode: "disable", ask: ["Bash"] },
     }),
   )
-  await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-pty.py"), path.join(w.root, "status-pty.py"))
+  await fs.copyFile(path.join(checkout, "e2e/src/fixtures/status-pty.py"), path.join(w.root, "status-pty.py"))
   const plugin = path.join(w.vibestHome, "plugins/status-runtime.ts")
 
   const hc = async (...args: Array<string>) => {
@@ -267,7 +267,7 @@ const statusCore = async (
       hc: { run: (...args) => w.run(w.root, ["hc", ...args], { env }) },
     })
     await fs.mkdir(path.dirname(plugin), { recursive: true })
-    await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-runtime.ts"), plugin)
+    await fs.copyFile(path.join(checkout, "e2e/src/fixtures/status-runtime.ts"), plugin)
     await until(
       "the status-fixture plugin active",
       async () =>

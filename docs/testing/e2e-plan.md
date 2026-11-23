@@ -87,7 +87,7 @@ and `integration stop` ends cleanly. Pi only: the entry session TUI (tool groups
 
 ## 3. Runner
 
-`tools/e2e` (Bun, private package): `pnpm e2e [area | id …] [--tier gate|agent|all] [--jobs N] [--no-cache]
+`e2e` (Bun, private package): `pnpm e2e [area | id …] [--tier gate|agent|all] [--jobs N] [--no-cache]
 [--strict]`. Each check runs in a World of its own, so a check passes alone or not at all.
 
 - **Pool.** Checks run in parallel in a pool shared by every worktree and every `pnpm e2e` on the machine: its slots are
@@ -104,18 +104,18 @@ and `integration stop` ends cleanly. Pi only: the entry session TUI (tool groups
 - **Result cache.** A check that passed is not run again while its key is unchanged; it prints `CACHED`. The key hashes
   the vibest binary that runs (for npm and curl the installed launcher and the compiled binary it starts), the harness
   plugins tree but for the files Claude writes into it when it loads the plugin (`claude/tsconfig.json`,
-  `claude/.claude-plugin/types/`), the runner's own source (all of `tools/e2e/src` but the checks), the check's area file
+  `claude/.claude-plugin/types/`), the runner's own source (all of `e2e/src` but the checks), the check's area file
   and every file it imports by a relative path, recursively, the herdr, hc, claude, pi, cursor-agent, bun and node version numbers, the
   install method, the hashes of the user settings the shadows read, and the login `PATH`. Passes are kept under
   `<git-common-dir>/vibest-e2e/cache`, shared by every worktree. Agent-tier checks are never cached; `--no-cache` runs
-  everything; `pnpm verify --no-cache` passes it to both legs, the run before a release. Turborepo's `e2e` task (`turbo run e2e`) skips the whole suite when neither the build nor `tools/e2e`
+  everything; `pnpm verify --no-cache` passes it to both legs, the run before a release. Turborepo's `e2e` task (`turbo run e2e`) skips the whole suite when neither the build nor `e2e`
   changed, but it cannot see tool versions or the user's settings, so `pnpm verify` runs the runner and its cache.
 - **Invariants.** After each check: no terminal outside its herdr sessions, no herdr session left. After the run: the
   user files the shadows read are unchanged, no line of the user's shell history files (`~/.zsh_history`, `~/.bash_history`,
   fish's) names one of this run's worlds (the user's own terminals and other runs keep writing there, so the file
   itself may change), and no evidence file holds a user model, provider or account value.
 
-The run writes evidence to `tools/e2e/evidence/<run>/`: per check the commands, exit codes and output (`<id>.json`,
+The run writes evidence to `e2e/evidence/<run>/`: per check the commands, exit codes and output (`<id>.json`,
 `<id>.alone.json` for a rerun), files a check saves, and `report.json` with every check's tier, outcome, start time and
 duration, the wall time, the user files' hashes and the invariants. It signals and closes only the PIDs and panes it
 recorded. A skipped check is reported as skipped, never as passed. A failed check keeps its World for inspection; a
@@ -124,7 +124,7 @@ whose config directory is in the world rather than ~/.config/herdr/sessions. The
 than a day, and that world's herdr sessions with it. The world's own vibestd is stopped first, only when its pid file
 names a vibest daemon whose socket is inside that world. A herdr session that is still running keeps its world.
 
-Checks that run an execution use a fake model (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server for Claude
+Checks that run an execution use a fake model (`e2e/src/fake-model.ts`): a local Anthropic Messages server for Claude
 (the shadow `CLAUDE_CONFIG_DIR`, `ANTHROPIC_BASE_URL` and the fake `ANTHROPIC_API_KEY` passed as vibest's own `--env`)
 and OpenAI-compatible servers for Pi (the shadow `PI_CODING_AGENT_DIR`, whose `models.json` names them). The fake answers
 from the request, so what the agent asks and does is scripted, and an execution can be held open until the check releases it.
@@ -231,10 +231,10 @@ The capabilities are specified in [docs/features](../features/), one file per ar
 and says when it counts as working. Those files are for the agent that leads a verification (the `verify-features`
 skill, `.agents/skills/verify-features/SKILL.md`); no script reads them. Each E2E check carries the id of the capability
 it is about in its name (`S10-launch` and `S10-pi` are about `S10`) and lists in `covers` the other ids it also proves;
-`bun tools/e2e/src/main.ts --list` prints every check's id, tier and covers as JSON. I6 is the runner's own check after
+`bun e2e/src/main.ts --list` prints every check's id, area, tier and covers as JSON. I6 is the runner's own check after
 every run.
 
-Every check that runs an execution runs it on a fake model server (`tools/e2e/src/fake-model.ts`: Anthropic Messages for
+Every check that runs an execution runs it on a fake model server (`e2e/src/fake-model.ts`: Anthropic Messages for
 Claude, OpenAI-compatible for Pi) with shadow harness config, so its prompts and answers are scripted; no gate check runs
 a real model. No script can prove these, so the verifying agent does them by hand:
 

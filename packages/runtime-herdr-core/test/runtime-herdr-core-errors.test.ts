@@ -1,0 +1,95 @@
+import { assert, describe, it } from "@effect/vitest"
+import { Effect, Ref, Stream } from "effect"
+import { type HcClient, HcCoreTooOld, HcError, HcTransportError, type api } from "effect-herdr-core-sdk"
+import { TestClock } from "effect/testing"
+
+import { FOLLOW_ATTEMPTS, failure, make } from "../src/terminal-runtime.ts"
+
+const HOME = "/run/home.sock"
+
+const hello: api.HelloResult = {
+  core: { id: "core-1", name: "home" },
+  features: [],
+  framed: false,
+  generation: 1,
+  methods: [],
+  version: "0.1.22",
+}
+
+const down = (method: string) => new HcTransportError({ method, message: "no answer" })
+
+const fakeClient = (
+  socketPath: string,
+  greeting: HcClient["hello"],
+  subscriptions: Ref.Ref<Record<string, number>>,
+): HcClient => ({
+  socketPath,
+  call: (method) => Effect.fail(down(method)),
+  hello: Ref.update(subscriptions, (all) => ({ ...all, hello: (all["hello"] ?? 0) + 1 })).pipe(
+    Effect.andThen(greeting),
+  ),
+  subscribe: () =>
+    Stream.unwrap(
+      Ref.update(subscriptions, (all) => ({ ...all, [socketPath]: (all[socketPath] ?? 0) + 1 })).pipe(
+        Effect.as(Stream.fail(down("events.subscribe"))),
+      ),
+    ),
+})
+
+const runtimeWith = (greeting: HcClient["hello"]) =>
+  Effect.gen(function* () {
+    const counts = yield* Ref.make<Record<string, number>>({})
+
+    const runtime = yield* make({
+      connect: (socket) => Effect.succeed(fakeClient(socket, greeting, counts)),
+      socket: HOME,
+      scope: yield* Effect.scope,
+    })
+
+    return { runtime, counts }
+  })
+
+describe("runtime-herdr-core errors, reconnects and doctor", () => {
+  it("a send the core holds back is busy, a machine it cannot reach is unreachable", () => {
+    const of = (kind: string) => failure(new HcError({ method: "terminal.send", kind, message: kind })).code
+
+    assert.strictEqual(of("cancelled"), "busy")
+    assert.strictEqual(of("blocked"), "busy")
+    assert.strictEqual(of("unavailable"), "unreachable")
+    assert.strictEqual(of("finished"), "not_found")
+    assert.strictEqual(of("invalid_params"), "failed")
+  })
+
+  it.effect("vibestd's own core is followed past FOLLOW_ATTEMPTS failures; another core stops at FOLLOW_ATTEMPTS", () =>
+    Effect.gen(function* () {
+      const { runtime, counts } = yield* runtimeWith(Effect.succeed(hello))
+      yield* runtime.process({ id: `t1@${HOME}` }).pipe(Effect.ignore)
+      yield* runtime.process({ id: "t1@/run/other.sock" }).pipe(Effect.ignore)
+
+      for (let i = 0; i < 3 * FOLLOW_ATTEMPTS; i++) yield* TestClock.adjust("30 seconds")
+
+      const seen = yield* Ref.get(counts)
+      assert.isAbove(seen[HOME] ?? 0, FOLLOW_ATTEMPTS)
+      assert.strictEqual(seen["/run/other.sock"], FOLLOW_ATTEMPTS)
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect("doctor names the core's version, and asks it once whether it answers or not", () =>
+    Effect.gen(function* () {
+      const online = yield* runtimeWith(Effect.succeed({ ...hello, version: "hc 0.1.22" }))
+      assert.deepStrictEqual(yield* online.runtime.doctor!([]), { name: "herdr-core 0.1.22", checks: [] })
+
+      const offline = yield* runtimeWith(Effect.fail(down("hello")))
+      assert.deepStrictEqual(yield* offline.runtime.doctor!([]), {
+        name: "herdr-core",
+        checks: [{ ok: false, text: "herdr-core is not running", fix: "hc server start" }],
+      })
+      assert.strictEqual((yield* Ref.get(offline.counts))["hello"], 1)
+
+      const old = new HcCoreTooOld({ socketPath: HOME, version: "0.1.9", minimum: "0.1.13", message: "update hc" })
+      const blocked = yield* runtimeWith(Effect.fail(old))
+      assert.deepStrictEqual(yield* blocked.runtime.doctor!([]), { name: "herdr-core", checks: [] })
+      assert.strictEqual((yield* Ref.get(blocked.counts))["hello"], 1)
+    }).pipe(Effect.scoped),
+  )
+})

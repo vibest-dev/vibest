@@ -73,14 +73,6 @@ export default Runtime.handler(Commands, (o) =>
     const fs = yield* FileSystem.FileSystem
     const here = yield* fs.realPath(path.resolve("."))
 
-    const foreignSession = Option.match(o.session, {
-      onNone: () => undefined,
-      onSome: (name) =>
-        new LaunchFailed({
-          message: `--session ${name} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
-        }),
-    })
-
     const entered = yield* withVibest(claim, (client, ping) =>
       Effect.gen(function* () {
         yield* noticeFrom(Effect.succeed(Option.some(ping)))
@@ -113,7 +105,10 @@ export default Runtime.handler(Commands, (o) =>
           return { launched: opened } as const
         }
 
-        if (foreignSession !== undefined) return yield* foreignSession
+        if (Option.isSome(o.session))
+          return yield* new LaunchFailed({
+            message: `--session ${o.session.value} names a runtime's session; inside this ${placed.place.runtime} terminal its own session is used. Run vibest outside it, or drop --session`,
+          })
 
         if (here !== placed.directory) yield* Effect.sync(() => process.chdir(placed.directory))
         const terminal = placed.place.terminal

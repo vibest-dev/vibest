@@ -3,7 +3,6 @@ import idleStop from "@vibest/plugin-idle-stop"
 import reportReminder from "@vibest/plugin-report-reminder"
 import type { Plugin } from "@vibest/plugin/effect"
 import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
-import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { herdrCommands } from "@vibest/runtime-herdr/commands"
 import { plugin as runtimeHerdr } from "@vibest/runtime-herdr/plugin"
 import { plugin as runtimeRex } from "@vibest/runtime-rex/plugin"
@@ -12,6 +11,7 @@ import { Effect, type Schema } from "effect"
 import { agentFilesPlugin } from "./agent-files.ts"
 import { agentPlugin } from "./agent.ts"
 import { harnessDefaultPlugin } from "./harness-default.ts"
+import { runtimeChoicePlugin } from "./runtime-choice.ts"
 
 export interface Builtin {
   readonly source: string
@@ -46,7 +46,7 @@ export const pre = (home: string) =>
       builtin(runtimeHerdrCore),
       builtin(runtimeHerdr),
       builtin(runtimeRex),
-      builtin(choicePlugin()),
+      builtin(runtimeChoicePlugin()),
       builtin(harnessDefaultPlugin()),
       { ...builtin(agentFiles.plugin), revise: agentFiles.revise },
       { ...builtin(reportReminder), optional: true },

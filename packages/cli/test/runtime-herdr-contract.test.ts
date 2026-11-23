@@ -19,7 +19,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
         withRuntime((runtime) =>
           Effect.gen(function* () {
             const cwd = fs.realpathSync(os.tmpdir())
-            yield* runtimeContract(runtime, { cwd, timeout: "20 seconds" }).pipe(
+            yield* runtimeContract(runtime, { cwd, timeout: "20 seconds", reportsProgramExit: false }).pipe(
               Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HERDR_SOCKET_PATH: socketPath }))),
             )
           }),
@@ -50,7 +50,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             assert.isDefined(seen)
             assert.strictEqual(seen!.session, name)
             yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_TYPED"), "the typed argv ran")
-            yield* runtime.send(opened, { text: "printf 'VBT_%s\\n' OPENED", keys: ["enter"] })
+            yield* runtime.send(opened, { text: "printf 'VBT_%s\\n' OPENED" })
             const text = yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_OPENED"), "pane text")
             assert.include(text, "VBT_OPENED")
 
@@ -62,7 +62,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               )
             }
 
-            yield* runtime.send(opened, { text: "sleep 2", keys: ["enter"] })
+            yield* runtime.send(opened, { text: "sleep 2" })
             yield* waitFor(runtime.process(opened), (p) => p.running, "foreground program")
             yield* runtime.send(opened, { keys: ["enter"] })
             yield* waitFor(runtime.process(opened), (p) => !p.running, "shell again")

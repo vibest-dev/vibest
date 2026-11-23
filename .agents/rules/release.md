@@ -23,10 +23,10 @@
    the release gate on that tree: the whole of `pnpm verify --no-cache`,
    the single entry for all verification, whose stages run as parallel jobs on GitHub-hosted runners. `build` packs once
    (`--stage build,archive,pack`): the linux-x64 curl archive and every npm tarball, checks the tarballs, records the
-   SHA-256 of every file and keeps them. `typecheck` and `test` are jobs of their own. `e2e-curl` runs every E2E check on
-   the curl install of that archive (`--stage e2e --leg curl --shard k/n`), split into shards balanced by the measured
-   durations in `tools/e2e/src/runner/shard-weights.ts` (`tools/e2e/test/shard.test.ts` proves the shards cover every
-   check exactly once; refresh the weights when checks are added or change a lot), with `--elsewhere H4`; `e2e-npm`
+   SHA-256 of every file and keeps them. `typecheck` and `test` are jobs of their own. `e2e` runs every E2E check on
+   the curl install of that archive (`--stage e2e --leg curl <areas>`), one job per functional suite of E2E areas
+   (`e2e/test/suites.test.ts` proves the suites name every area of `e2e/src/main.ts` exactly once; a new area goes
+   into a suite), with `--elsewhere H4`; `e2e-npm`
    runs the install and launch checks (`NPM_CHECKS` in `tools/verify/src/verify.ts`) on the npm install of those
    tarballs (`--stage e2e --leg npm`). `ubuntu-latest` runs both, and `macos-latest` runs
    `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version, installing build's tarballs.
@@ -69,10 +69,10 @@
    run is skipped. A run that is not a dry run must be on `main`.
 8. The workflow's `VERSIONED` list names every workspace package.json that carries the version, the files bumpp writes;
    a new package goes into it, and every file in it holds `0.0.2-dev` on `main`. bumpp gets the files, not `-r`: `-r`
-   would also rewrite the unreleased `tools/bench` and `tools/e2e`.
-9. The gate is `pnpm verify` as it is: the workflow runs its stages (`--stage`, `--leg`, `--shard`) in parallel jobs and
-   replaces no part of it with other commands. Every stage, every leg and every shard must run: a new shard goes into
-   the matrix and `SHARDS`. A part the runner cannot run fails the run; fix the runner or verify, never narrow the gate.
+   would also rewrite the unreleased `tools/bench` and `e2e`.
+9. The gate is `pnpm verify` as it is: the workflow runs its stages (`--stage`, `--leg`, areas) in parallel jobs and
+   replaces no part of it with other commands. Every stage, every leg and every area must run: a new area goes into
+   a suite of the matrix. A part the runner cannot run fails the run; fix the runner or verify, never narrow the gate.
 
 ## Owner checklist
 

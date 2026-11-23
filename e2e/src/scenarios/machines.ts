@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { commandOf } from "../../../reap.ts"
+import { commandOf } from "../../../tools/reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, type Message, piDir, sendOrReply, text, toolCall } from "../fake-model.ts"
 import { alive, binary, expect, fail, readDb, row, Skip, until, type World } from "../world.ts"
@@ -266,7 +266,7 @@ export const setup = async (
     row<{ n: number }>(
       w,
       "SELECT count(*) AS n FROM inbox WHERE sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content LIKE ? AND content LIKE ?",
-      `%<agent-id>${address}</agent-id>%`,
+      `%<session-id>${address}</session-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
 

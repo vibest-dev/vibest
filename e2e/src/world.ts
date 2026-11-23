@@ -6,7 +6,7 @@ import path from "node:path"
 
 import { Predicate, type Schema } from "effect"
 
-import { commandOf, note } from "../../reap.ts"
+import { commandOf, note } from "../../tools/reap.ts"
 import { entryModel, entryRunMessage, nextEntryRun } from "./fake-model.ts"
 import {
   herdrConfigSessions,
@@ -20,7 +20,7 @@ import { copyEvidence, privateValues, redactor } from "./world/redact.ts"
 import { claudeShadow, cursorShadow, piShadow, type Profile } from "./world/shadow.ts"
 import { endHerdrSocket, stopOwners, stopRecordedDaemon, stopSocketsUnder } from "./world/teardown.ts"
 
-export const checkout = path.resolve(import.meta.dirname, "../../..")
+export const checkout = path.resolve(import.meta.dirname, "../..")
 
 export const method = (process.env.VIBEST_E2E_METHOD ?? "build") as "build" | "npm" | "curl"
 const install = process.env.VIBEST_E2E_INSTALL ?? ""
@@ -269,7 +269,9 @@ export class World {
       args.length === 0 ||
       (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help")
 
-    if (!launch) return args
+    const runtimeAt = args.indexOf("--runtime")
+
+    if (!launch || (runtimeAt >= 0 && args[runtimeAt + 1] !== "herdr")) return args
 
     const sessioned = args.includes("--session")
       ? args

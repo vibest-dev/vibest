@@ -10,7 +10,7 @@ packages/cli/.cache/
 packages/integration/claude/.cache/
 packages/integration/claude/hooks/register.mjs
 packages/integration/claude/.claude-plugin/
-tools/e2e/evidence/
+e2e/evidence/
 packages/integration/cursor/.cursor-plugin/
 packages/integration/cursor/hooks/
 packages/integration/agy/.agents/
