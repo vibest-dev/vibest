@@ -47,7 +47,7 @@ export const make = Effect.gen(function* () {
         const specs = yield* runtimes.callers
         const env = filterCallerEnv(specs, callerEnv)
         const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
-        const place = entryPlace({ runtime, hits })
+        const place = entryPlace({ runtime, hits, loaded: specs.map((spec) => spec.id) })
 
         if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
 

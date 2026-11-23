@@ -269,7 +269,9 @@ export class World {
       args.length === 0 ||
       (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help")
 
-    if (!launch) return args
+    const runtimeAt = args.indexOf("--runtime")
+
+    if (!launch || (runtimeAt >= 0 && args[runtimeAt + 1] !== "herdr")) return args
 
     const sessioned = args.includes("--session")
       ? args
