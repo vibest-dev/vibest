@@ -6,6 +6,7 @@ import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { herdrCommands } from "@vibest/runtime-herdr/commands"
 import { plugin as runtimeHerdr } from "@vibest/runtime-herdr/plugin"
+import { plugin as runtimeRex } from "@vibest/runtime-rex/plugin"
 import { Effect, type Schema } from "effect"
 
 import { agentFilesPlugin } from "./agent-files.ts"
@@ -44,6 +45,7 @@ export const pre = (home: string) =>
       builtin(agy),
       builtin(runtimeHerdrCore),
       builtin(runtimeHerdr),
+      builtin(runtimeRex),
       builtin(choicePlugin()),
       builtin(harnessDefaultPlugin()),
       { ...builtin(agentFiles.plugin), revise: agentFiles.revise },

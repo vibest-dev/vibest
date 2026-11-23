@@ -12,6 +12,7 @@ export default defineConfig({
       "packages/effect-herdr-sdk/test/**/*.test.ts",
       "packages/effect-herdr-core-sdk/test/**/*.test.ts",
       "packages/runtime-herdr-core/test/**/*.test.ts",
+      "packages/runtime-rex/test/**/*.test.ts",
       "packages/integration/pi/test/**/*.test.ts",
       "packages/integration/cursor/test/**/*.test.ts",
       "packages/integration/agy/test/**/*.test.ts",
