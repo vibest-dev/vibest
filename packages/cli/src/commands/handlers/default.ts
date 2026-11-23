@@ -2,7 +2,6 @@ import { type VibestClient } from "@vibest/client/client"
 import { VibestCommand } from "@vibest/schema/layout"
 import { describeSpawn, LaunchFailed, NO_RUNTIME_DETECTED } from "@vibest/schema/session"
 import { Console, Effect, FileSystem, Option, Path } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { askYesNo, interactive } from "../../ask.ts"
 import { callerEnvOf, caller, userOnly } from "../../caller.ts"
@@ -197,8 +196,8 @@ export default Runtime.handler(Commands, (o) =>
     yield* Console.log(`the entry session is starting in ${opened.place}`)
 
     if (o.headless || !opened.attach) return
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const [file, ...args] = yield* attachCommand(opened.attach)
-    yield* spawner.exitCode(ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }))
+
+    return yield* Effect.sync(() => exec(file!, args, {}))
   }),
 )

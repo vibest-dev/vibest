@@ -279,4 +279,79 @@ describe("onboarding in a plain terminal", () => {
       assert.deepStrictEqual(argv, ["env", "HC_SOCKET=/s.sock", path.join(w.bin, "hc"), "attach", "t1"])
     }),
   )
+
+  it.live(
+    "after the prompts in a real terminal, every keystroke reaches the program it hands the terminal to",
+    () =>
+      Effect.promise(async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-ask-tty-"))
+        const script = path.join(dir, "prompts-then-handoff.ts")
+        const handoff = 'stty -icanon; printf "GOT:%s." "$(head -c 30)"'
+        fs.writeFileSync(
+          script,
+          [
+            `import { Effect, Layer } from "effect"`,
+            `import { ChildProcess, ChildProcessSpawner } from "effect/process"`,
+            `import * as Platform from ${JSON.stringify(path.resolve(import.meta.dirname, "../../platform-bun/src/bun.ts"))}`,
+            `import { askChoice, askYesNo, TypedAhead } from ${JSON.stringify(path.resolve(import.meta.dirname, "../src/ask.ts"))}`,
+            `await Effect.runPromise(Effect.gen(function* () {`,
+            `  yield* askChoice("Runtime?", ["herdr", "hc"])`,
+            `  yield* askYesNo("Install? [y/N]: ")`,
+            `  console.log("HANDOFF")`,
+            `  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner`,
+            `  yield* spawner.exitCode(ChildProcess.make("sh", ["-c", ${JSON.stringify(handoff)}], { stdin: "inherit", stdout: "inherit", stderr: "inherit" }))`,
+            `}).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(TypedAhead.layer, Platform.services))))`,
+            `process.exit(0)`,
+          ].join("\n"),
+        )
+
+        let screen = ""
+
+        const shown = (pattern: RegExp) =>
+          new Promise<void>((resolve, reject) => {
+            const deadline = Date.now() + 10_000
+
+            const poll = () =>
+              pattern.test(screen)
+                ? resolve()
+                : Date.now() > deadline
+                  ? reject(new Error(`no ${pattern} on screen:\n${screen}`))
+                  : setTimeout(poll, 25)
+
+            poll()
+          })
+
+        const child = Bun.spawn(["bun", script], {
+          cwd: dir,
+          terminal: {
+            cols: 100,
+            rows: 30,
+            data: (_terminal, bytes) => void (screen += new TextDecoder().decode(bytes)),
+          },
+        })
+
+        try {
+          await shown(/Choose \[1\]: /)
+          child.terminal!.write("2\r")
+
+          await shown(/Install\? \[y\/N\]: /)
+          child.terminal!.write("y\r")
+
+          await shown(/HANDOFF/)
+          await Bun.sleep(300)
+
+          for (const key of "Say hello to the acme-api team") {
+            child.terminal!.write(key)
+
+            await Bun.sleep(10)
+          }
+
+          await shown(/GOT:Say hello to the acme-api team\./)
+        } finally {
+          child.kill()
+          fs.rmSync(dir, { recursive: true, force: true })
+        }
+      }),
+    30_000,
+  )
 })
