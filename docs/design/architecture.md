@@ -320,7 +320,7 @@ optional `## Remember`. The recipient gets it as:
 
 ```
 <vibest-agent-message>
-<agent-id>agt_…</agent-id>
+<session-id>{id}</session-id>
 <message>what the agent sent</message>
 </vibest-agent-message>
 ```

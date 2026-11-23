@@ -266,7 +266,7 @@ export const setup = async (
     row<{ n: number }>(
       w,
       "SELECT count(*) AS n FROM inbox WHERE sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id) AND content LIKE ? AND content LIKE ?",
-      `%<agent-id>${address}</agent-id>%`,
+      `%<session-id>${address}</session-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
 

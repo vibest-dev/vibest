@@ -47,7 +47,7 @@ export const envelope = (
   ].join("\n")
 
 export const sessionEnvelope = (id: string, message: string) =>
-  envelope("vibest-agent-message", [["agent-id", id]], ["message", message])
+  envelope("vibest-agent-message", [["session-id", id]], ["message", message])
 
 export const noticeEnvelope = (message: string) => envelope("vibest-message", [], ["message", message])
 

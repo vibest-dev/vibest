@@ -195,7 +195,8 @@ const sendChecks: ReadonlyArray<Check> = [
         )
         await until("the entry session's model saw the send", () => seen(entryModel).includes("hello-main"), 60_000)
         expect(
-          seen(entryModel).includes("<vibest-agent-message>") && seen(entryModel).includes(id),
+          seen(entryModel).includes("<vibest-agent-message>") &&
+            seen(entryModel).includes(`<session-id>${id}</session-id>`),
           `the entry session's model saw ${seen(entryModel)}`,
         )
       } finally {

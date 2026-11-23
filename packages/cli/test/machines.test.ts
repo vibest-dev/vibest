@@ -607,7 +607,7 @@ describe("another machine's vibestd runs agents here", () => {
           ),
         )
 
-        assert.include(sent[0]!.content, `<agent-id>${A_ENTRY}</agent-id>`)
+        assert.include(sent[0]!.content, `<session-id>${A_ENTRY}</session-id>`)
         assert.strictEqual(sent[1]!.content, "from the user")
         assert.deepStrictEqual(yield* b.run(sendersTo(session)), [
           { type: "agent", ...from, machine: "my-workstation" },
@@ -840,7 +840,7 @@ describe("vibest run --machine and remote sessions", () => {
       assert.isTrue(yield* b.db.remote.sendToOrigin(onB(spawned.id), entryId.slice(0, 8), "which branch?"))
       const [sent] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
       assert.notStrictEqual(sent!.senderType, "vibest")
-      assert.include(sent!.content, `<agent-id>${spawned.id.slice(0, 11)}</agent-id>`)
+      assert.include(sent!.content, `<session-id>${spawned.id.slice(0, 11)}</session-id>`)
       assert.include(sent!.content, "which branch?")
       const asker = (yield* b.db.session.getSession(onB(spawned.id)))!
       assert.deepStrictEqual(yield* a.run(sendersTo(entryId)), [
