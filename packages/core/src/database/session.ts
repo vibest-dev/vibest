@@ -9,6 +9,7 @@ import {
   SessionEnded,
   type Sender,
 } from "@vibest/schema/event"
+import { entryLabel } from "@vibest/schema/id"
 import type { Routing } from "@vibest/schema/plugin"
 import {
   type AgentStatus,
@@ -472,7 +473,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     data: {
                       project,
                       agent: start.agent,
-                      name: "entry",
+                      name: entryLabel(start.projectDirectory ?? ""),
                       directory: start.projectDirectory ?? "",
                       ...(message !== undefined && { message }),
                     },

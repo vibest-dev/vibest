@@ -9,6 +9,15 @@ export const shortId = (id: string) => id.slice(0, 8)
 export const sessionLabel = (session: { readonly id: string; readonly name: string }) =>
   session.name === "" ? shortId(session.id) : `${shortId(session.id)} (${session.name})`
 
+export const entryLabel = (directory: string) => {
+  const name = directory
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .at(-1)
+
+  return name ? `Vibest/${name}` : "Vibest"
+}
+
 declare const crypto: { readonly randomUUID: () => string }
 
 export const randomId = (): string => crypto.randomUUID()
