@@ -251,6 +251,9 @@ importers:
       '@vibest/runtime-herdr-core':
         specifier: workspace:*
         version: link:../runtime-herdr-core
+      '@vibest/runtime-rex':
+        specifier: workspace:*
+        version: link:../runtime-rex
       effect:
         specifier: 4.0.2
         version: 4.0.2
@@ -563,6 +566,22 @@ importers:
       effect-herdr-core-sdk:
         specifier: workspace:*
         version: link:../effect-herdr-core-sdk
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
+
+  packages/runtime-rex:
+    dependencies:
+      '@effect/platform-node-shared':
+        specifier: 4.0.2
+        version: 4.0.2(effect@4.0.2)
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
     devDependencies:
       '@effect/platform-bun':
         specifier: 'catalog:'

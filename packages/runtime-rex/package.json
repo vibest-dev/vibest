@@ -1,0 +1,22 @@
+{
+  "name": "@vibest/runtime-rex",
+  "version": "0.0.2-dev",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/runtime-rex"
+  },
+  "dependencies": {
+    "@effect/platform-node-shared": "catalog:",
+    "@vibest/plugin": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:"
+  }
+}

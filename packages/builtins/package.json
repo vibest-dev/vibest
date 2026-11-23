@@ -17,6 +17,7 @@
     "@vibest/plugin-report-reminder": "workspace:*",
     "@vibest/runtime-herdr": "workspace:*",
     "@vibest/runtime-herdr-core": "workspace:*",
+    "@vibest/runtime-rex": "workspace:*",
     "effect": "catalog:"
   }
 }
