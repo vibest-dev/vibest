@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>vibest acceptance demo</title>
+    <link rel="stylesheet" href="/node_modules/@wterm/dom/src/terminal.css" />
+    <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "@wterm/dom": "/node_modules/@wterm/dom/dist/index.js",
+          "@wterm/core": "/node_modules/@wterm/core/dist/index.js",
+          "@xterm/xterm": "/node_modules/@xterm/xterm/lib/xterm.mjs",
+          "@xterm/addon-unicode11": "/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs"
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --mono: "SF Mono", Menlo, "PingFang SC", "Apple Color Emoji", monospace;
+        --sans: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+        --bg: #0d1117;
+        --panel: #161b22;
+        --line: #30363d;
+        --fg: #e6edf3;
+        --muted: #8b949e;
+        --accent: #2f81f7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--sans);
+        display: grid;
+        grid-template-rows: 88px 1fr 56px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 0 40px;
+        border-bottom: 1px solid var(--line);
+      }
+      #badge {
+        font: 600 20px var(--mono);
+        background: var(--accent);
+        color: #fff;
+        padding: 8px 16px;
+        border-radius: 8px;
+      }
+      #caption {
+        font-size: 28px;
+        font-weight: 600;
+      }
+      #title {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 18px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: 1240px 1fr;
+        gap: 24px;
+        padding: 24px 40px;
+        min-height: 0;
+      }
+      .pane {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        min-height: 0;
+      }
+      .terminal-pane {
+        background: #0b0f14;
+      }
+      #terminal {
+        height: 100%;
+        --term-font-family: var(--mono);
+        --term-font-size: 15px;
+        --term-row-height: 20px;
+        --term-bg: #0b0f14;
+        padding: 16px;
+        background: #0b0f14;
+      }
+      #inspector {
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        overflow: hidden;
+      }
+      #inspector h2 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      #inspector pre {
+        margin: 0;
+        font: 14px/1.45 var(--mono);
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      footer {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 0 40px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 16px;
+      }
+      #track {
+        flex: 1;
+        height: 8px;
+        background: var(--line);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      #bar {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <header><span id="badge">●</span><span id="caption"></span><span id="title"></span></header>
+    <main>
+      <div class="pane terminal-pane"><div id="terminal"></div></div>
+      <div class="pane" id="inspector"></div>
+    </main>
+    <footer>
+      <span id="scene"></span>
+      <div id="track"><div id="bar"></div></div>
+      <span id="clock"></span>
+    </footer>
+    <script type="module">
+      const MAX_GAP_MS = 1500
+      const tape = await (await fetch("/tape.json")).json()
+      const renderer = new URLSearchParams(location.search).get("renderer") ?? "wterm"
+      const host = document.getElementById("terminal")
+      document.getElementById("title").textContent = tape.title ?? ""
+
+      async function openTerminal() {
+        if (renderer === "xterm") {
+          const { Terminal } = await import("@xterm/xterm")
+          const { Unicode11Addon } = await import("@xterm/addon-unicode11")
+          const term = new Terminal({
+            cols: tape.cols,
+            rows: tape.rows,
+            fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
+            fontSize: 15,
+            allowProposedApi: true,
+            theme: { background: "#0b0f14" },
+          })
+          term.loadAddon(new Unicode11Addon())
+          term.unicode.activeVersion = "11"
+          term.open(host)
+          return term
+        }
+        const { WTerm } = await import("@wterm/dom")
+        const term = new WTerm(host, { cols: tape.cols, rows: tape.rows, autoResize: false, cursorBlink: false })
+        await term.init()
+        return term
+      }
+
+      const term = await openTerminal()
+      const panels = new Map()
+      const playbackTimes = tape.events.map((event, index) =>
+        index === 0 ? 0 : Math.min(event.at - tape.events[index - 1].at, MAX_GAP_MS),
+      )
+      const total = playbackTimes.reduce((sum, gap) => sum + gap, 0) || 1
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+      function renderInspector() {
+        const inspector = document.getElementById("inspector")
+        inspector.replaceChildren(
+          ...[...panels].map(([title, body]) => {
+            const section = document.createElement("section")
+            const heading = document.createElement("h2")
+            const pre = document.createElement("pre")
+            heading.textContent = title
+            pre.textContent = body
+            section.append(heading, pre)
+            return section
+          }),
+        )
+      }
+
+      const handlers = {
+        out: (event) => term.write(event.data),
+        step: (event) => {
+          document.getElementById("badge").textContent = event.scene
+          document.getElementById("caption").textContent = event.caption
+          document.getElementById("scene").textContent = `Scene ${event.scene}`
+        },
+        state: (event) => {
+          panels.set(event.title, event.body)
+          renderInspector()
+        },
+        keyframe: async (event) => {
+          await sleep(400)
+          await window.studioKeyframe(event.name)
+        },
+      }
+
+      await sleep(800)
+      let played = 0
+      for (const [index, event] of tape.events.entries()) {
+        await sleep(playbackTimes[index])
+        played += playbackTimes[index]
+        document.getElementById("bar").style.width = `${(100 * played) / total}%`
+        document.getElementById("clock").textContent = `${(event.at / 1000).toFixed(1)} s`
+        await handlers[event.kind](event)
+      }
+      await sleep(1500)
+      await window.studioDone()
+    </script>
+  </body>
+</html>
