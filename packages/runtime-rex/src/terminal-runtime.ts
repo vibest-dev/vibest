@@ -18,7 +18,7 @@ import {
   Stream,
 } from "effect"
 
-import type { Connection, Pushed, RexError } from "./client.ts"
+import { API_REVISION, type Connection, type Pushed, type RexError } from "./client.ts"
 import { keyEvents } from "./keys.ts"
 
 export type Terminal = VibestPlugin.Runtime.Terminal
@@ -31,15 +31,13 @@ export type AgentState = VibestPlugin.Runtime.AgentState
 
 export const KIND = "rex"
 
-export const MIN_API_REVISION = 18
+export const MIN_API_REVISION = API_REVISION
 
 export const FLAVOR = "com.superlogical.terminal.shell"
 
 export const MAX_FORMAT_BYTES = 983_040
 
 export const TYPED_LAUNCH_MS = 120_000
-
-export const FOLLOW_ATTEMPTS = 8
 
 const LABEL_LIMIT = 128
 
@@ -336,10 +334,9 @@ export const make = (deps: {
       }).pipe(Effect.scoped, Effect.ignore)
 
     const follow = Effect.gen(function* () {
-      let failures = 0
       let step = yield* Schedule.toStep(FOLLOW_BACKOFF)
 
-      while (failures < FOLLOW_ATTEMPTS) {
+      for (;;) {
         let subscribed = false
         yield* subscribeOnce(() => {
           subscribed = true
@@ -350,7 +347,6 @@ export const make = (deps: {
           step = yield* Schedule.toStep(FOLLOW_BACKOFF)
         }
 
-        failures = subscribed ? 1 : failures + 1
         const [, delay] = yield* Effect.orDie(step(yield* Clock.currentTimeMillis, undefined))
         yield* Effect.sleep(delay)
       }
@@ -400,11 +396,18 @@ export const make = (deps: {
             ? { status: "blocked", reason: tooOld(connection.revision) }
             : { status: "online" },
         ),
-        Effect.catch(() =>
-          Effect.succeed({
-            status: "offline" as const,
-            reason: `no Rex server answers at ${deps.socket} (open Rex, or run rex server start)`,
-          }),
+        Effect.catch((e): Effect.Effect<VibestPlugin.Runtime.RuntimeStatus> =>
+          Effect.succeed(
+            e.code === "incompatible"
+              ? {
+                  status: "blocked",
+                  reason: `${e.message}: restart Rex Server (quit Rex and open it again) or update Rex`,
+                }
+              : {
+                  status: "offline",
+                  reason: `no Rex server answers at ${deps.socket} (open Rex, or run rex server start)`,
+                },
+          ),
         ),
       )
 
@@ -544,7 +547,7 @@ export const make = (deps: {
 
     const typeText = (connection: Connection, terminal: Terminal, text: string, keys: ReadonlyArray<string>) =>
       event(connection, terminal, "paste", { text }).pipe(
-        Effect.andThen(pressKeys(connection, terminal, keys.length === 0 ? ["enter"] : keys)),
+        Effect.andThen(pressKeys(connection, terminal, ["enter", ...keys])),
       )
 
     const send: Runtime["send"] = (terminal, { text, keys }) =>
@@ -566,21 +569,24 @@ export const make = (deps: {
           const id = first.id
 
           if (id === undefined || first.eof === true) return lastLines(first.content, lines)
-          let text = first.content
+          const encoder = new TextEncoder()
+          const parts = [first.content]
+          let offset = encoder.encode(first.content).length
           let more = true
 
           while (more) {
             const blob = yield* blockMethod(connection, terminal, "blob_read", {
               id,
-              offset: new TextEncoder().encode(text).length,
+              offset,
               max_bytes: MAX_FORMAT_BYTES,
             }).pipe(decoded(Blob))
 
-            text += blob.data
+            parts.push(blob.data)
+            offset += encoder.encode(blob.data).length
             more = !blob.eof && blob.data !== ""
           }
 
-          return lastLines(text, lines)
+          return lastLines(parts.join(""), lines)
         }),
       )
 
@@ -670,8 +676,11 @@ export const make = (deps: {
       withConnection((connection) =>
         Effect.gen(function* () {
           yield* backToShell(connection, terminal)
-          yield* typeText(connection, terminal, yield* written(typedLine(launch)), [])
+          const line = yield* written(typedLine(launch))
           typedAt.set(terminal.id, yield* Clock.currentTimeMillis)
+          yield* typeText(connection, terminal, line, []).pipe(
+            Effect.tapError(() => Effect.sync(() => typedAt.delete(terminal.id))),
+          )
         }),
       )
 

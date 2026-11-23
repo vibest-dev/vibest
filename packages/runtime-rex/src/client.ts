@@ -42,6 +42,8 @@ const Incoming = Schema.Struct({
 
 const decodeIncoming = Schema.decodeUnknownEffect(Schema.fromJsonString(Incoming))
 
+export const API_REVISION = 18
+
 const OPEN_TIMEOUT = Duration.seconds(5)
 const CALL_TIMEOUT = Duration.seconds(30)
 
@@ -102,11 +104,27 @@ export const connect = (connector: Connector, socketPath: string): Effect.Effect
     const welcome = yield* Deferred.make<number, RexError>()
     const read = messageReader()
     let nextId = 0
+    let closed: RexError | undefined
+    let welcomed = false
 
     const route = (text: string) =>
       decodeIncoming(text).pipe(
         Effect.flatMap((m) => {
-          if (m.type === "welcome") return Deferred.succeed(welcome, m.api_server_revision ?? 0)
+          if (m.type === "welcome") {
+            welcomed = true
+
+            return Deferred.succeed(welcome, m.api_server_revision ?? 0)
+          }
+
+          if (m.type === "error" && !welcomed)
+            return Deferred.fail(
+              welcome,
+              new RexError({
+                method: "hello",
+                code: "incompatible",
+                message: `${socketPath}: ${m.error?.message ?? "the server refused the hello"}`,
+              }),
+            )
 
           if (m.type === "response" && m.id !== undefined) {
             const waiter = pending.get(m.id)
@@ -139,6 +157,8 @@ export const connect = (connector: Connector, socketPath: string): Effect.Effect
 
     const lost = (error: RexError) =>
       Effect.gen(function* () {
+        closed = error
+
         for (const waiter of pending.values()) yield* Deferred.fail(waiter, error)
         yield* Deferred.fail(welcome, error)
         yield* Queue.fail(pushed, error)
@@ -158,7 +178,11 @@ export const connect = (connector: Connector, socketPath: string): Effect.Effect
 
     yield* write(
       encodeText(
-        JSON.stringify({ type: "hello", client: { kind: "cli", name: "vibest", version: "0", platform: PLATFORM } }),
+        JSON.stringify({
+          type: "hello",
+          api_revision: API_REVISION,
+          client: { kind: "cli", name: "vibest", version: "0", platform: PLATFORM },
+        }),
       ),
     )
 
@@ -178,6 +202,7 @@ export const connect = (connector: Connector, socketPath: string): Effect.Effect
 
     const request = (id: string, method: string, payload: Schema.JsonObject) =>
       Effect.gen(function* () {
+        if (closed !== undefined) return yield* new RexError({ method, code: closed.code, message: closed.message })
         const waiter = yield* Deferred.make<unknown, RexError>()
         pending.set(id, waiter)
         yield* write(encodeText(JSON.stringify({ type: "request", id, method, payload })))

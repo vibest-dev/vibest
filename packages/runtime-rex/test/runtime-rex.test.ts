@@ -270,4 +270,54 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
       ),
     60_000,
   )
+
+  it.live(
+    "read pages a scrollback larger than one 1 MiB reply and returns its last lines",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+
+          const terminal = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: {
+              argv: [
+                "/bin/sh",
+                "-c",
+                "i=0; while [ $i -lt 15000 ]; do printf 'vbt-big-%075d\\n' $i; i=$((i+1)); done; echo vbt-big-done",
+              ],
+              env: {},
+            },
+            label: "big",
+          })
+
+          const all = yield* until(
+            runtime.read(terminal, 100_000).pipe(Effect.orElseSucceed(() => "")),
+            (text) => text.includes("vbt-big-done"),
+            "the scrollback was not read to its end",
+          )
+
+          assert.isAbove(all.length, 1_100_000)
+          assert.include(yield* runtime.read(terminal, 3), "vbt-big-done")
+          yield* runtime.close(terminal)
+        }),
+      ),
+    90_000,
+  )
+
+  it.live(
+    "send with text and keys submits the text, then presses the keys",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+          const terminal = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "both" })
+          yield* runtime.send(terminal, { text: "echo vbt-both-$((6*7))", keys: ["esc"] })
+          yield* until(runtime.read(terminal, 20), (text) => text.includes("vbt-both-42"), "the text was not submitted")
+          yield* runtime.close(terminal)
+        }),
+      ),
+    60_000,
+  )
 })

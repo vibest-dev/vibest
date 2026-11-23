@@ -81,39 +81,51 @@ describe("rex.control.v1 framing", () => {
   })
 })
 
-const oldServer = (revision: number) =>
+const fakeServer = (revision: number, closeAfterWelcome = false) =>
   Effect.acquireRelease(
-    Effect.callback<{ readonly socket: string; readonly server: net.Server }>((resume) => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vbrex-"))
-      const socket = path.join(dir, "s.sock")
+    Effect.callback<{ readonly socket: string; readonly server: net.Server; readonly hellos: Array<string> }>(
+      (resume) => {
+        const hellos: Array<string> = []
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vbrex-"))
+        const socket = path.join(dir, "s.sock")
 
-      const server = net.createServer((conn) => {
-        let upgraded = false
-        conn.on("data", (data) => {
-          if (upgraded) {
-            conn.write(
-              serverFrame(
-                OPCODE.text,
-                Buffer.from(
-                  JSON.stringify({ type: "welcome", protocol: "rex.control.v1", api_server_revision: revision }),
+        const server = net.createServer((conn) => {
+          let upgraded = false
+          const read = messageReader()
+          conn.on("data", (data) => {
+            if (upgraded) {
+              for (const message of read(Buffer.from(data))) hellos.push(Buffer.from(message.data).toString())
+              conn.write(
+                serverFrame(
+                  OPCODE.text,
+                  Buffer.from(
+                    JSON.stringify({ type: "welcome", protocol: "rex.control.v1", api_server_revision: revision }),
+                  ),
                 ),
-              ),
+              )
+
+              if (closeAfterWelcome) conn.write(serverFrame(OPCODE.close, Buffer.alloc(0)))
+
+              return
+            }
+
+            const key = /Sec-WebSocket-Key: (\S+)/.exec(data.toString())?.[1] ?? ""
+
+            const accept = crypto
+              .createHash("sha1")
+              .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+              .digest("base64")
+
+            upgraded = true
+            conn.write(
+              `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
             )
-
-            return
-          }
-
-          const key = /Sec-WebSocket-Key: (\S+)/.exec(data.toString())?.[1] ?? ""
-          const accept = crypto.createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64")
-          upgraded = true
-          conn.write(
-            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
-          )
+          })
         })
-      })
 
-      server.listen(socket, () => resume(Effect.succeed({ socket, server })))
-    }),
+        server.listen(socket, () => resume(Effect.succeed({ socket, server, hellos })))
+      },
+    ),
     ({ socket, server }) =>
       Effect.sync(() => {
         server.close()
@@ -124,7 +136,7 @@ const oldServer = (revision: number) =>
 describe("runtime-rex against a Rex server older than API revision 18", () => {
   it.live("reports blocked with a restart hint and refuses to open", () =>
     Effect.gen(function* () {
-      const { socket } = yield* oldServer(11)
+      const { socket } = yield* fakeServer(11)
 
       const runtime = yield* make({
         connect: connect((endpoint) => NodeSocket.makeNet({ path: endpoint }), socket),
@@ -143,6 +155,28 @@ describe("runtime-rex against a Rex server older than API revision 18", () => {
         .pipe(Effect.flip)
 
       assert.strictEqual(opened.code, "incompatible")
+    }).pipe(Effect.scoped),
+  )
+})
+
+describe("a rex.control.v1 connection", () => {
+  it.live("asks for API revision 18 in its hello, so Rex pages large replies", () =>
+    Effect.gen(function* () {
+      const { socket, hellos } = yield* fakeServer(18)
+      yield* connect((endpoint) => NodeSocket.makeNet({ path: endpoint }), socket)
+      assert.strictEqual(JSON.parse(hellos[0] ?? "{}").api_revision, 18)
+    }).pipe(Effect.scoped),
+  )
+
+  it.live("fails a call at once with unreachable after the server closed the connection", () =>
+    Effect.gen(function* () {
+      const { socket } = yield* fakeServer(18, true)
+      const connection = yield* connect((endpoint) => NodeSocket.makeNet({ path: endpoint }), socket)
+      yield* Effect.sleep("200 millis")
+
+      const failed = yield* connection.call("server.version", {}).pipe(Effect.flip, Effect.timeout("2 seconds"))
+
+      assert.strictEqual(failed.code, "unreachable")
     }).pipe(Effect.scoped),
   )
 })
