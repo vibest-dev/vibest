@@ -492,8 +492,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         } else {
           if (text !== undefined) yield* failWith(h.call("pane.send_text", { pane_id: place.paneId, text }))
 
-          if (keys !== undefined && keys.length > 0)
-            yield* failWith(h.call("pane.send_keys", { pane_id: place.paneId, keys: [...keys] }))
+          const pressed = [...(text === undefined ? [] : ["enter"]), ...(keys ?? [])]
+
+          if (pressed.length > 0) yield* failWith(h.call("pane.send_keys", { pane_id: place.paneId, keys: pressed }))
         }
       })
 
