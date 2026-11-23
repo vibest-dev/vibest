@@ -4,14 +4,11 @@
     <meta charset="utf-8" />
     <title>vibest acceptance demo</title>
     <link rel="stylesheet" href="/node_modules/@wterm/dom/src/terminal.css" />
-    <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css" />
     <script type="importmap">
       {
         "imports": {
           "@wterm/dom": "/node_modules/@wterm/dom/dist/index.js",
-          "@wterm/core": "/node_modules/@wterm/core/dist/index.js",
-          "@xterm/xterm": "/node_modules/@xterm/xterm/lib/xterm.mjs",
-          "@xterm/addon-unicode11": "/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs"
+          "@wterm/core": "/node_modules/@wterm/core/dist/index.js"
         }
       }
     </script>
@@ -146,34 +143,12 @@
     <script type="module">
       const MAX_GAP_MS = 1500
       const tape = await (await fetch("/tape.json")).json()
-      const renderer = new URLSearchParams(location.search).get("renderer") ?? "wterm"
       const host = document.getElementById("terminal")
       document.getElementById("title").textContent = tape.title ?? ""
 
-      async function openTerminal() {
-        if (renderer === "xterm") {
-          const { Terminal } = await import("@xterm/xterm")
-          const { Unicode11Addon } = await import("@xterm/addon-unicode11")
-          const term = new Terminal({
-            cols: tape.cols,
-            rows: tape.rows,
-            fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
-            fontSize: 15,
-            allowProposedApi: true,
-            theme: { background: "#0b0f14" },
-          })
-          term.loadAddon(new Unicode11Addon())
-          term.unicode.activeVersion = "11"
-          term.open(host)
-          return term
-        }
-        const { WTerm } = await import("@wterm/dom")
-        const term = new WTerm(host, { cols: tape.cols, rows: tape.rows, autoResize: false, cursorBlink: false })
-        await term.init()
-        return term
-      }
-
-      const term = await openTerminal()
+      const { WTerm } = await import("@wterm/dom")
+      const term = new WTerm(host, { cols: tape.cols, rows: tape.rows, autoResize: false, cursorBlink: false })
+      await term.init()
       const panels = new Map()
       const playbackTimes = tape.events.map((event, index) =>
         index === 0 ? 0 : Math.min(event.at - tape.events[index - 1].at, MAX_GAP_MS),

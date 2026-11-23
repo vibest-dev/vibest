@@ -5,7 +5,7 @@ description: Record an end-to-end acceptance demo of vibest from a real PTY into
 
 # Record an acceptance demo
 
-The deliverable is a pair under `$VIBEST_PROJECT_DIR/artifacts/<slug>/`: `<slug>-demo.mp4` (1920x1080 H.264) with its
+The deliverable is a pair under `$VIBEST_PROJECT_DIR/artifacts/<slug>/` (`/tmp/vbaccept-<slug>-out/` outside a vibest session): `<slug>-demo.mp4` (1920x1080 H.264) with its
 keyframe PNGs, and `<slug>-report.md`. The video shows what a user would see; the report holds what a reviewer needs to
 trust it. Two scripts in `scripts/` do the mechanics:
 
@@ -39,10 +39,8 @@ state inspector on the right (one panel per `tape.state(title, body)`, latest bo
 bottom. Put the evidence a viewer needs beside the terminal: `vibest.json`, `vibest ls`, the runtime session or window
 tree. Fill the inspector from real commands run in the same isolated environment, never typed by hand.
 
-The default renderer is `@wterm/dom` (vercel-labs/wterm, DOM text, crisp vector glyphs). Pass `xterm` as the fourth
-argument of `studio.mjs` to use `@xterm/xterm` with `@xterm/addon-unicode11` when a TUI uses a sequence wterm renders
-wrongly; compare both on one tape before reporting a rendering bug as a vibest bug. Both were checked on 24-bit colour,
-CJK with emoji (`🚀 核心服务重构`) and a full-screen alternate-screen TUI (vim) entering and leaving.
+The terminal is rendered by `@wterm/dom` (vercel-labs/wterm, DOM text, crisp vector glyphs). It was checked on 24-bit
+colour, CJK with emoji (`🚀 核心服务重构`) and a full-screen alternate-screen TUI (vim) entering and leaving.
 
 Idle gaps longer than 1.5 s are shortened in playback, so waiting on a model or a daemon does not stall the video; the
 tape keeps the real timings.
@@ -50,9 +48,10 @@ tape keeps the real timings.
 ## Rule 4: fail-fast offscreen recording
 
 `studio.mjs` serves the page over `Bun.serve({ port: 0, hostname: "127.0.0.1" })` (never `file://`), fails on any
-`pageerror` or console error, and gives up after the tape length plus 120 s (`STUDIO_TIMEOUT_MS`). The renderer
-packages and Playwright are installed into `/tmp/vbstudio-work` (`STUDIO_WORK`) on first use, never into the repository;
-it needs `npm`, `npx` and `ffmpeg` on `PATH`. It writes `<slug>-demo.mp4` (`libx264`, `yuv420p`, `-preset slow
+`pageerror` or console error, and gives up after the tape length plus 120 s (`STUDIO_TIMEOUT_MS`). `@wterm/dom`,
+Playwright and its headless Chromium are installed into `/tmp/vbstudio-work` (`STUDIO_WORK`, browsers under
+`ms-playwright/` unless `PLAYWRIGHT_BROWSERS_PATH` is set) on first use and again when the pinned versions change,
+never into the repository or the user's caches; it needs `npm`, `npx` and `ffmpeg` on `PATH`. It writes `<slug>-demo.mp4` (`libx264`, `yuv420p`, `-preset slow
 -crf 20`, `+faststart`) and `<slug>-<n>-<keyframe>.png` into the output folder and prints their paths.
 
 Open every PNG with `Read` before reporting: check that the text is legible, nothing is cut off, wide characters line
@@ -68,14 +67,27 @@ leftover check output from Rule 2. The report says what was demonstrated, not th
 ## Writing a demo
 
 Write the demo as one Bun script in `/tmp/vbaccept-<slug>-*/demo.mjs` (it is a throwaway, not repository code).
-`<root>` is that folder, with `home/` and `vibest/` made in it; the last lines of `finally` stop whatever still holds
+`<root>` is that folder (keep it short, for the socket paths), with `home/`, `vibest/`, `xdg/` and `r/` made in it; the last lines of `finally` stop whatever still holds
 a file under it, by PID:
 
 ```js
 import { openTape } from "<repo>/.agents/skills/record-acceptance-demo/scripts/pty-tape.mjs"
 
 const root = "<root>"
-const env = { HOME: `${root}/home`, VIBEST_HOME: `${root}/vibest`, TERM: "xterm-256color", LANG: "en_US.UTF-8" }
+const env = {
+  HOME: `${root}/home`,
+  VIBEST_HOME: `${root}/vibest`,
+  XDG_CONFIG_HOME: `${root}/xdg/config`,
+  XDG_DATA_HOME: `${root}/xdg/data`,
+  XDG_STATE_HOME: `${root}/xdg/state`,
+  XDG_CACHE_HOME: `${root}/xdg/cache`,
+  XDG_RUNTIME_DIR: `${root}/r`,
+  HC_SOCKET: `${root}/r/hc.sock`,
+  REX_SOCKET: `${root}/r/rex.sock`,
+  REX_RUNTIME_DIR: `${root}/r/rex`,
+  TERM: "xterm-256color",
+  LANG: "en_US.UTF-8",
+}
 const shell = {
   ...env,
   PATH: "<repo>/packages/cli/dist:/usr/bin:/bin",
@@ -109,5 +121,6 @@ input is echoed, so wait for what the program prints, not for what you typed. `t
 Then render:
 
 ```sh
-bun .agents/skills/record-acceptance-demo/scripts/studio.mjs /tmp/vbaccept-<slug>-*/demo.json "$VIBEST_PROJECT_DIR/artifacts/<slug>" <slug>
+out="${VIBEST_PROJECT_DIR:+$VIBEST_PROJECT_DIR/artifacts/<slug>}"
+bun .agents/skills/record-acceptance-demo/scripts/studio.mjs /tmp/vbaccept-<slug>-*/demo.json "${out:-/tmp/vbaccept-<slug>-out}" <slug>
 ```
